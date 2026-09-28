@@ -75,6 +75,27 @@ def test_the_tick_sweeps_only_the_stale_records_a_few_at_a_time(tmp_path):
     assert horizon.sweep([dirs[1]], runner=runner) == []
 
 
+def test_a_refused_record_is_not_retried_until_its_plan_moves(tmp_path):
+    d = tmp_path / "p"
+    _record(d, 3)
+    import threading
+    done = threading.Event()
+    ran = []
+
+    def refusing(x):
+        ran.append(x)
+        done.set()
+        return {"ok": False, "error": "no_horizon", "reason": "2 steps are active"}
+    assert horizon.sweep([str(d)], runner=refusing) == [str(d)]
+    assert done.wait(5)
+    assert horizon.stale(str(d)) is False, "refused at seq 3: no retry on the next tick"
+    assert horizon.sweep([str(d)], runner=refusing) == []
+    _record(d, 4)
+    assert horizon.stale(str(d)) is True, "the plan moved: try once more"
+    horizon._note_refusal(str(d), {"ok": True})
+    assert horizon.stale(str(d)) is True and horizon._REFUSED.get(horizon.os.path.normcase(horizon.os.path.normpath(str(d)))) is None
+
+
 def test_record_dirs_lists_the_root_and_its_efforts(tmp_path):
     root = tmp_path / "proj"
     _record(root, 1)

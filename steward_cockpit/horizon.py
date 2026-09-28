@@ -8,11 +8,18 @@ produced (a run's handback), answered (a decision), refined (the feedback turn: 
 on a close. ``sweep(dirs)`` is the server tick's half: with no seat awake, every record whose roadmap moved past its
 stamp is refreshed once (``reason="tick"``). Best-effort, background, stdlib only; never a step, never a status."""
 import json
+import os
 import subprocess
 import threading
 from pathlib import Path
 
 import paths as _paths
+
+
+#: A record the engine REFUSED (no focus: several active steps, none, or a current_step_id naming no step) is not
+#: retried on every tick — only when its roadmap moves again. {record_dir: the last seq it refused at}
+_REFUSED = {}
+_REFUSED_LOCK = threading.Lock()
 
 
 def _run(record_dir, reason, timeout=25.0):
@@ -28,9 +35,25 @@ def _run(record_dir, reason, timeout=25.0):
         completed = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                    errors="replace", timeout=timeout, creationflags=getattr(_paths, "NO_WINDOW", 0))
         out = (completed.stdout or "").strip()
-        return json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": "no_output", "message": (completed.stderr or "")[:300]}
+        res = json.loads(out.splitlines()[-1]) if out else {"ok": False, "error": "no_output", "message": (completed.stderr or "")[:300]}
     except Exception as exc:
-        return {"ok": False, "error": "horizon_failed", "message": str(exc)[:300]}
+        res = {"ok": False, "error": "horizon_failed", "message": str(exc)[:300]}
+    _note_refusal(record_dir, res)
+    return res
+
+
+def _note_refusal(record_dir, res):
+    """Remember a refusal at the roadmap's current seq so the tick does not spawn the engine for it again until the
+    plan moves; a success clears it."""
+    try:
+        key = os.path.normcase(os.path.normpath(str(record_dir)))
+        with _REFUSED_LOCK:
+            if isinstance(res, dict) and res.get("ok") is False:
+                _REFUSED[key] = _last_seq(record_dir)
+            else:
+                _REFUSED.pop(key, None)
+    except Exception:
+        pass
 
 
 def refresh(record_dir, reason="", background=True):
@@ -64,10 +87,14 @@ def _stamped_seq(record_dir):
 
 
 def stale(record_dir):
-    """True when the roadmap has moved past the line's stamp (or the line was never derived) and a strip exists."""
+    """True when the roadmap has moved past the line's stamp (or the line was never derived), a strip exists, and
+    the engine did not already refuse this record at this very seq."""
     last = _last_seq(record_dir)
     if last is None or not (Path(str(record_dir)) / "strip.json").is_file():
         return False
+    with _REFUSED_LOCK:
+        if _REFUSED.get(os.path.normcase(os.path.normpath(str(record_dir)))) == last:
+            return False
     stamped = _stamped_seq(record_dir)
     return stamped is None or last > stamped
 
@@ -84,7 +111,9 @@ def sweep(dirs, runner=None, limit=8):
     def work():
         for d in todo:
             try:
-                run(d)
+                res = run(d)
+                if runner is not None:
+                    _note_refusal(d, res)     # an injected runner's refusal counts too
             except Exception:
                 pass
     threading.Thread(target=work, name="horizon-sweep", daemon=True).start()
