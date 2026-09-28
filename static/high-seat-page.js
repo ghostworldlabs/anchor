@@ -166,9 +166,10 @@
         receipt((j && j.receipt) || 'That did not go through.', !(j && j.ok));
         if (!(j && j.ok)) { $$('.t-repair', card || document).forEach(function (x) { x.disabled = false; }); return; }
         if (card) {
-          if (!j.open) { var pl = $('.t-line.prop', card); if (pl) pl.remove(); }
+          if (j.open === 0) { var pl = $('.t-line.prop', card); if (pl) pl.remove(); }   // exactly none open; an omitted count keeps the chip (Grok W4)
           var tb = $('.t-body', card);
-          if (tb) fetchPart(pid, 'status', dir).then(function (html) { tb.innerHTML = html; }).catch(function () {});
+          if (tb) fetchPart(pid, 'status', dir).then(function (html) { tb.innerHTML = html; })
+            .catch(function () { tb.innerHTML = '<div class="cp-quiet">The record changed, but this card did not refresh &mdash; reload the page.</div>'; });
         }
       })
       .catch(function () { receipt('That did not go through.', true); $$('.t-repair', card || document).forEach(function (x) { x.disabled = false; }); });

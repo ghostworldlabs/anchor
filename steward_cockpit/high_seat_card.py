@@ -111,7 +111,7 @@ def _kind_in_words(c, names):
     if kind == "clear_wait":
         what = "clear its wait" + (' ("%s")' % esc(str(was)[:80]) if was else "")
     elif kind == "second_look":
-        what = "mark it for a second look"
+        what = esc(str(c.get("note") or "needs a second look — its foundation changed"))   # shown, never written (Grok W4)
     else:
         fields = c.get("fields") if isinstance(c.get("fields"), dict) else {}
         what = "set " + ", ".join("%s = %s" % (esc(k), esc(str(v))) for k, v in fields.items()) if fields else esc(kind or "a correction")

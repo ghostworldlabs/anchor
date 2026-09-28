@@ -17,7 +17,7 @@ PROPOSAL = {"seq": 4, "kind": "repair_proposal", "at": "2026-09-28", "proposal_i
             "after": {"step_id": "lec3", "presentation_id": "p2", "seq": 3}, "count": 2, "requires_confirm": True,
             "corrections": [{"step_id": "lec4", "kind": "clear_wait", "fields": {"waiting_on": None}, "was": {"waiting_on": "Lecture 3 accepted"},
                              "why": "waited on Lecture 3 AI supplement, now accepted"},
-                            {"step_id": "lec5", "kind": "second_look", "fields": {"waiting_on": "a second look after Lecture 3 AI supplement"},
+                            {"step_id": "lec5", "kind": "second_look", "note": "needs a second look — its foundation changed",
                              "was": {"waiting_on": None}, "why": "its foundation Lecture 3 AI supplement changed"}]}
 
 
@@ -71,7 +71,7 @@ def test_the_status_part_shows_the_set_in_words_with_accept_and_dismiss(tmp_path
     assert 'class="cp-repair" data-proposal="repair-0123456789abcdef"' in html
     assert "Proposed after Lecture 3 AI supplement (p2): 2 corrections" in html and "nothing changes until your word" in html
     assert '<b>Lecture 4 AI supplement</b>: clear its wait ("Lecture 3 accepted")' in html
-    assert "<b>Lecture 5 AI supplement</b>: mark it for a second look" in html
+    assert "<b>Lecture 5 AI supplement</b>: needs a second look" in html
     assert 'data-disposition="accepted" data-proposal="repair-0123456789abcdef" data-pid="%s" data-dir="mba"' % PID in html
     assert 'data-disposition="dismissed"' in html
     # the map and the facts carry the same open set, so the tile's line and the part agree
@@ -106,12 +106,18 @@ def test_the_accept_route_proposes_the_set_after_the_acceptance_is_recorded(tmp_
     calls = []
     monkeypatch.setattr(refinement_client, "update", lambda cdir, body: calls.append(("update", body["action"], body["step_id"])) or {"ok": True})
     monkeypatch.setattr(horizon, "refresh", lambda cdir, reason="", background=True: calls.append(("horizon", reason)))
-    monkeypatch.setattr(repair, "propose", lambda cdir, sid, pres=None, background=True: calls.append(("propose", str(cdir), sid, pres)) or {"ok": True, "queued": True})
+    monkeypatch.setattr(repair, "propose", lambda cdir, sid, pres=None, background=True: calls.append(("propose", str(cdir), sid, pres, background)) or {"ok": True, "appended": True, "proposal_id": "repair-1", "count": 2})
     from steward_cockpit import steward_routes
     body = {"step_id": "lec3", "presentation_id": "p2", "product_id": "lec3-doc", "revision_id": "r2", "hash": h}
     out, code = steward_routes.handle_post(str(d), "refinement-accept", body)
     assert code == 200 and out["ok"]
-    assert calls == [("update", "accept", "lec3"), ("horizon", "accepted"), ("propose", str(d), "lec3", "p2")], "the acceptance first, the line, then the proposal"
+    assert calls == [("update", "accept", "lec3"), ("propose", str(d), "lec3", "p2", False), ("horizon", "accepted")], "the acceptance, the proposal in the foreground, then the line (Grok W4)"
+    assert out["repair_proposed"] == {"proposal_id": "repair-1", "count": 2}
+    # a failed composition rides on the acceptance's answer; the acceptance stays a 200
+    calls.clear()
+    monkeypatch.setattr(repair, "propose", lambda cdir, sid, pres=None, background=True: {"ok": False, "error": "refinement_fold_failed", "message": "could not fold"})
+    out, code = steward_routes.handle_post(str(d), "refinement-accept", body)
+    assert code == 200 and out["ok"] and out["repair_error"] == "refinement_fold_failed" and "repair_proposed" not in out
     # a refused acceptance proposes nothing
     calls.clear()
     monkeypatch.setattr(refinement_client, "update", lambda cdir, body: {"ok": False, "error": "stale"})
@@ -145,13 +151,21 @@ def test_his_word_goes_through_one_route_to_the_engine(tmp_path, monkeypatch):
     assert payload["applied"] == ["lec4"] and payload["skipped"][0]["reason"] == "changed_since"
     assert payload["open"] == 1, "the record still lists the set until the engine's resolve is on disk (it is faked here)"
     assert seen == [(str(d), "repair-0123456789abcdef", "accepted", "john")]
+    # a roadmap that cannot be read says nothing about what is open: the count is omitted, never 0 (Grok W4)
+    from steward_cockpit import steward_campaign as _sc
+    _orig_read = _sc._read_json
+    monkeypatch.setattr(_sc, "_read_json", lambda p: (None, "unreadable (OSError)"))
+    anchor_gui.handle_high_seat_repair(h, "/api/high-seat/repair", {"pid": PID, "dir": "mba", "proposal_id": "repair-0123456789abcdef", "disposition": "accepted"})
+    payload, code = h.sent[-1]
+    assert code == 200 and "open" not in payload
+    monkeypatch.setattr(_sc, "_read_json", _orig_read)
     # the effort is resolved only through the cockpit's discovery: a path, a dot-name, an unknown project — refused
     for bad in ({"pid": PID, "dir": "..", "proposal_id": "x", "disposition": "accepted"},
                 {"pid": PID, "dir": "mba/../mba", "proposal_id": "x", "disposition": "accepted"},
                 {"pid": "nope", "dir": "mba", "proposal_id": "x", "disposition": "accepted"}):
         anchor_gui.handle_high_seat_repair(h, "/api/high-seat/repair", bad)
         assert h.sent[-1][1] == 404, bad
-    assert len(seen) == 1
+    assert len(seen) == 2, "two words reached the engine (the second with the roadmap unreadable); the refused ones none"
     # the engine's refusal is his answer, not a 200
     monkeypatch.setattr(repair, "resolve", lambda *a, **k: {"ok": False, "error": "proposal_resolved", "message": "Proposal x already has his word."})
     anchor_gui.handle_high_seat_repair(h, "/api/high-seat/repair", {"pid": PID, "dir": "mba", "proposal_id": "x", "disposition": "dismissed"})

@@ -1375,10 +1375,17 @@ def handle_post(cdir, verb, body):
         if result.get('committed') is True and not result.get('ok'):
             result={**result,'ok':True,'warning':'Approval saved; the derived collection needs repair.'}
         if result.get("ok"):
+            # W4 (2026-09-28): the correction set is PROPOSED in the foreground, never applied (his Q2); a failed
+            # composition rides on the acceptance's answer as repair_error so the card can say no set was proposed;
+            # the horizon follows, so its stamp covers the proposal event too (Grok W4)
+            from steward_cockpit import repair as _repair
+            rp = _repair.propose(cdir, body["step_id"], presentation["id"], background=False)
+            if not (isinstance(rp, dict) and rp.get("ok")):
+                result = {**result, "repair_error": str((rp or {}).get("error") or "repair_failed"), "repair_message": str((rp or {}).get("message") or "")[:200]}
+            elif rp.get("appended"):
+                result = {**result, "repair_proposed": {"proposal_id": rp.get("proposal_id"), "count": rp.get("count")}}
             from steward_cockpit import horizon as _horizon
             _horizon.refresh(cdir, "accepted")      # W3 (2026-09-28): the line follows the acceptance, at once
-            from steward_cockpit import repair as _repair
-            _repair.propose(cdir, body["step_id"], presentation["id"])   # W4: the correction set is PROPOSED, never applied (his Q2)
         return result, 200 if result.get("ok") else 409
     if verb == "refinement-close":
         from steward_cockpit.refinement_client import update

@@ -7961,15 +7961,17 @@ def handle_high_seat_repair(handler, path, body):
     disposition = str(b.get("disposition") or "").strip()
     out = _repair.resolve(cdir, str(b.get("proposal_id") or "").strip(), disposition, who="john")
     ok = bool(out.get("ok"))
+    answer = {"ok": ok, "receipt": str(out.get("message") or out.get("error") or ("done" if ok else "that did not go through")),
+              "disposition": disposition, "applied": out.get("applied") or [], "skipped": out.get("skipped") or [],
+              "noted": out.get("noted") or [], "error": out.get("error")}
     try:
         from steward_cockpit import steward_campaign as _sc
-        _rm, _ = _sc._read_json(Path(cdir) / "roadmap.json")
-        still_open = len(_repair.open_proposals((_rm or {}).get("roadmap_events")))
+        _rm, _err = _sc._read_json(Path(cdir) / "roadmap.json")
+        if isinstance(_rm, dict):
+            answer["open"] = len(_repair.open_proposals(_rm.get("roadmap_events")))
     except Exception:
-        still_open = 0
-    receipt = str(out.get("message") or out.get("error") or ("done" if ok else "that did not go through"))
-    handler._send_json({"ok": ok, "receipt": receipt, "disposition": disposition, "applied": out.get("applied") or [],
-                        "skipped": out.get("skipped") or [], "open": still_open, "error": out.get("error")}, 200 if ok else 409)
+        pass      # a read error says nothing about what is open: `open` is omitted, the page keeps the chip (Grok W4)
+    handler._send_json(answer, 200 if ok else 409)
 
 
 def render_high_seat_page() -> str:
