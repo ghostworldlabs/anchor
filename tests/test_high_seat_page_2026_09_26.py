@@ -98,10 +98,10 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert "<b>Tier 1:</b> MBA Teaching, Fall 2026" in html and 'href="/project/df56"' in html
     assert "broken reference: no step &#x27;lecture-99&#x27; in MBA Teaching AI" in html
     assert "Tier 2</b> &middot; 1" in html
-    # the shelves: the waiting project on Needs you, the next one on Continuing, the record-less one on its own shelf (until his word — R6/R8 hold)
+    # the shelves: the waiting project on Needs you, the next one on Continuing; the record-less one is a line on the Projects tile (his word, 2026-09-27 17:05)
     assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
-    quiet = html[html.index('id="shQuiet"'):html.index('id="shPark"')]
-    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' in quiet and "no steward record yet" in quiet
+    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
+    assert "3 projects in 3 folders &middot; <b>1</b> with no steward record yet" in html
     # the ruler and the panel
     assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
     assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html

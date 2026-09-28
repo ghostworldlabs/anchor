@@ -360,15 +360,17 @@ def _projects_tile(ctx):
     renderer in `anchor_gui`; the head counts the projects and the folders."""
     groups = ctx.get("groups") or {}
     n = sum(len(v) for v in groups.values())
+    quiet_n = int(ctx.get("quiet_n") or 0)
     return (
         '<section class="ptile" id="ptile"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
-        '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
+        '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s%s</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
         '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4><div class="addrow">'
         '<input id="apName" type="text" placeholder="Project name" autocomplete="off">'
         '<a class="mk" id="apCreate" href="/dashboard" target="_blank" rel="noopener">Create on the dashboard</a></div>'
         '<div class="addhint" id="apHint">A new project is still made and confirmed on the old dashboard; this page shows it on the next look.</div></div>'
         '<div id="folders">%s</div></div></section>'
     ) % (n, "" if n == 1 else "s", len(groups), "" if len(groups) == 1 else "s",
+         (" &middot; <b>%d</b> with no steward record yet" % quiet_n) if quiet_n else "",
          ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
 
 
@@ -591,7 +593,8 @@ def render_high_seat_html(ctx) -> str:
             and (facts.get(e.get("id")) or {}).get("has_record")]           # a record with nothing open still has its card here ("Next: not stated")
     cont = dated + rest
     quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
-    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | {e.get("id") for e in quiet} | parked_ids   # the quiet shelf stays until his word (R6 hold)
+    ctx["quiet_n"] = len(quiet)          # his word (2026-09-27 17:05): the record-less projects are one line on the Projects tile, no shelf
+    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | parked_ids
     board = (
         '<div class="board">' + _campaign_tile(ctx) + _projects_tile(ctx)
         + _shelf("shNeeds", "Needs you", "%d project%s" % (len(needs), "" if len(needs) == 1 else "s"),
@@ -602,8 +605,6 @@ def render_high_seat_html(ctx) -> str:
                  "Dated soonest first, then the rest. Moving shelves never makes a second card.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in cont) or '<div class="ptile-note">No project carries a next step yet.</div>',
                  "")
-        + _shelf("shQuiet", "No record yet", "%d project%s" % (len(quiet), "" if len(quiet) == 1 else "s"), "On the registry with no steward record; open the cockpit to stand one up.",
-                 "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in quiet) or '<div class="ptile-note">Every project on the registry has a record.</div>')
         + _shelf("shPark", "Parked", "%d project%s" % (len(parked), "" if len(parked) == 1 else "s"), "Off the shelves, still one card each.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, " parked") for e in parked) or '<div class="ptile-note">Nothing is parked.</div>')
         + _workbench(ctx) + '</div>')
