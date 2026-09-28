@@ -152,6 +152,27 @@
     card.removeAttribute('data-open');
     openPart(card, pid, h.getAttribute('data-part') || 'status', h);
   });
+  // W4 (2026-09-28): his word on a proposed correction set — accept applies it, dismiss closes it; the part is read
+  // again and the card's "proposed" line goes when no set is left open
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.t-repair'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var card = b.closest('.tile'), pid = b.getAttribute('data-pid') || '', dir = b.getAttribute('data-dir') || '';
+    var body = { pid: pid, dir: dir, proposal_id: b.getAttribute('data-proposal') || '', disposition: b.getAttribute('data-disposition') || '' };
+    $$('.t-repair', card || document).forEach(function (x) { x.disabled = true; });
+    fetch('/api/high-seat/repair', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
+      .then(function (r) { if (r.status === 401 || r.status === 403) { return { ok: false, receipt: NOT_LOGGED_IN }; } return r.json(); })
+      .then(function (j) {
+        receipt((j && j.receipt) || 'That did not go through.', !(j && j.ok));
+        if (!(j && j.ok)) { $$('.t-repair', card || document).forEach(function (x) { x.disabled = false; }); return; }
+        if (card) {
+          if (!j.open) { var pl = $('.t-line.prop', card); if (pl) pl.remove(); }
+          var tb = $('.t-body', card);
+          if (tb) fetchPart(pid, 'status', dir).then(function (html) { tb.innerHTML = html; }).catch(function () {});
+        }
+      })
+      .catch(function () { receipt('That did not go through.', true); $$('.t-repair', card || document).forEach(function (x) { x.disabled = false; }); });
+  });
   // "paste the token" on a card or a balloon that answered 401: ask again, then read that part again
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-login]'); if (!b) return;

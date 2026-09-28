@@ -1377,6 +1377,8 @@ def handle_post(cdir, verb, body):
         if result.get("ok"):
             from steward_cockpit import horizon as _horizon
             _horizon.refresh(cdir, "accepted")      # W3 (2026-09-28): the line follows the acceptance, at once
+            from steward_cockpit import repair as _repair
+            _repair.propose(cdir, body["step_id"], presentation["id"])   # W4: the correction set is PROPOSED, never applied (his Q2)
         return result, 200 if result.get("ok") else 409
     if verb == "refinement-close":
         from steward_cockpit.refinement_client import update

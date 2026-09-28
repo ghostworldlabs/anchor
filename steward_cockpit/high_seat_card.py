@@ -102,7 +102,56 @@ def _done(s):
     return s.get("status") == "done"
 
 
-def status_html(cdir, pid):
+def _kind_in_words(c, names):
+    """One correction as a sentence he can judge: the step, what changes, why."""
+    sid = str(c.get("step_id") or "")
+    name = names.get(sid) or sid
+    was = ((c.get("was") or {}).get("waiting_on") if isinstance(c.get("was"), dict) else None) or ""
+    kind = str(c.get("kind") or "")
+    if kind == "clear_wait":
+        what = "clear its wait" + (' ("%s")' % esc(str(was)[:80]) if was else "")
+    elif kind == "second_look":
+        what = "mark it for a second look"
+    else:
+        fields = c.get("fields") if isinstance(c.get("fields"), dict) else {}
+        what = "set " + ", ".join("%s = %s" % (esc(k), esc(str(v))) for k, v in fields.items()) if fields else esc(kind or "a correction")
+    why = str(c.get("why") or "")
+    return '<li><b>%s</b>: %s%s</li>' % (esc(name), what, (" &mdash; " + esc(why)) if why else "")
+
+
+def repairs_html(cdir, pid, rel=""):
+    """W4 (2026-09-28): the correction sets PROPOSED on this record and still waiting on his word — each set in
+    words with accept and dismiss. Nothing inside approved work changes before he accepts the set (his Q2). Empty
+    when none is open."""
+    try:
+        from steward_cockpit.repair import open_proposals as _open
+        rm, _ = campaign._read_json(Path(cdir) / "roadmap.json")
+        props = _open((rm or {}).get("roadmap_events"))
+    except Exception:
+        return ""
+    if not props:
+        return ""
+    names = {str(st.get("id")): str(st.get("name") or st.get("id")) for st in ((rm or {}).get("roadmap_projection") or []) if isinstance(st, dict)}
+    out = []
+    for e in props:
+        pid_ = str(e.get("proposal_id") or "")
+        after = e.get("after") if isinstance(e.get("after"), dict) else {}
+        corrections = [c for c in (e.get("corrections") or []) if isinstance(c, dict)]
+        n = len(corrections)
+        after_name = names.get(str(after.get("step_id") or ""), str(after.get("step_id") or "the acceptance"))
+        pres = str(after.get("presentation_id") or "")
+        out.append(
+            '<div class="cp-repair" data-proposal="%s"><div class="cp-lead">&#9881; Proposed after %s%s: %d correction%s &mdash; nothing changes until your word</div>'
+            '<ul class="cp-repair-list">%s</ul>'
+            '<div class="cp-act"><button class="mini t-repair" data-disposition="accepted" data-proposal="%s" data-pid="%s" data-dir="%s">accept the set</button>'
+            '<button class="mini t-repair" data-disposition="dismissed" data-proposal="%s" data-pid="%s" data-dir="%s">dismiss</button></div></div>'
+            % (esc(pid_), esc(after_name), (" (%s)" % esc(pres)) if pres else "", n, "" if n == 1 else "s",
+               "".join(_kind_in_words(c, names) for c in corrections) or "<li>an empty set</li>",
+               esc(pid_), esc(pid), esc(rel), esc(pid_), esc(pid), esc(rel)))
+    return "".join(out)
+
+
+def status_html(cdir, pid, rel=""):
     eng = _live_engine(cdir)
     if eng is not None:
         data = campaign.compose_status(cdir, eng.state())
@@ -115,9 +164,10 @@ def status_html(cdir, pid):
     at = str(data.get("at") or "")
     stale = " &middot; the record, not a live run" if data.get("stale") else (" &middot; live" if eng is not None else "")
     return ('<div class="cp-status"><div class="cp-lead">%s</div><div class="cp-when">last update %s%s</div>'
-            '<table class="cp-facts">%s</table>'
+            '<table class="cp-facts">%s</table>%s'
             '<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></div>'
-            % (esc(lead), esc(at[-16:]) if at else "unknown", stale, rows or '<tr><td>No status recorded yet.</td></tr>', esc(pid)))
+            % (esc(lead), esc(at[-16:]) if at else "unknown", stale, rows or '<tr><td>No status recorded yet.</td></tr>',
+               repairs_html(cdir, pid, rel), esc(pid)))
 
 
 def _item_link(it, pid):
@@ -302,7 +352,7 @@ def card_part(pid, part, folder, name="", rel=""):
         return {"ok": True, "pid": pid, "part": part, "html": _no_record(pid, name or pid[:8])}
     try:
         fn = {"status": status_html, "next": next_html, "deliverables": deliverables_html, "plan": plan_html}[part]
-        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid)}
+        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part == "status" else fn(cdir, pid)}
     except Exception as e:  # never a blank on the page
         return {"ok": True, "pid": pid, "part": part,
                 "html": '<div class="cp-quiet">This part could not be read: %s</div>' % esc("%s: %s" % (type(e).__name__, e))}

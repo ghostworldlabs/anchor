@@ -7942,6 +7942,36 @@ def handle_high_seat_campaign(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 400)
 
 
+def handle_high_seat_repair(handler, path, body):
+    """POST /api/high-seat/repair — his word on a PROPOSED correction set (W4 of the steward revision,
+    2026-09-28; his Q2 "propose the tidying too"): ``accepted`` applies the set through the engine's closed verb as
+    receipted step events naming the proposal; ``dismissed`` closes it and nothing changes. Token-gated by the
+    middleware; the effort is resolved only through the cockpit's own discovery (never a path from the caller); the
+    answer is a receipt sentence and the count of sets still open on that record."""
+    b = body or {}
+    pid = str(b.get("pid") or "").strip()
+    entry = _rnd.get_project(pid) if pid and not _unsafe_path_seg(pid) else None
+    if not entry:
+        handler._send_json({"ok": False, "receipt": "no such project"}, 404); return
+    from steward_cockpit.high_seat_card import _effort_dir as _card_effort_dir
+    cdir = _card_effort_dir(entry.get("folder_path") or "", str(b.get("dir") or ""))
+    if cdir is None:
+        handler._send_json({"ok": False, "receipt": "no steward record there"}, 404); return
+    from steward_cockpit import repair as _repair
+    disposition = str(b.get("disposition") or "").strip()
+    out = _repair.resolve(cdir, str(b.get("proposal_id") or "").strip(), disposition, who="john")
+    ok = bool(out.get("ok"))
+    try:
+        from steward_cockpit import steward_campaign as _sc
+        _rm, _ = _sc._read_json(Path(cdir) / "roadmap.json")
+        still_open = len(_repair.open_proposals((_rm or {}).get("roadmap_events")))
+    except Exception:
+        still_open = 0
+    receipt = str(out.get("message") or out.get("error") or ("done" if ok else "that did not go through"))
+    handler._send_json({"ok": ok, "receipt": receipt, "disposition": disposition, "applied": out.get("applied") or [],
+                        "skipped": out.get("skipped") or [], "open": still_open, "error": out.get("error")}, 200 if ok else 409)
+
+
 def render_high_seat_page() -> str:
     """GET /high-seat — the steward's portfolio surface (W1b); an honest error page, never a blank."""
     try:
@@ -20949,6 +20979,7 @@ def handle_foundry_sleep_rollback(handler, path, body):
 # here. A migrated row whose name is absent falls through to legacy (defensive).
 _MIGRATED_HANDLERS = {
     "handle_high_seat_campaign": handle_high_seat_campaign,
+    "handle_high_seat_repair": handle_high_seat_repair,
     "handle_version": handle_version,
     "handle_status": handle_status,
     "handle_routes": handle_routes,

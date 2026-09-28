@@ -357,6 +357,9 @@ ROUTES = [
     # W3c (High Seat, 2026-09-26): one act on the Campaign's own record, from the Campaign page
     _r("POST", "/api/high-seat/campaign", AUTH_TOKEN,
        handler="handle_high_seat_campaign", migrated=True),
+    # W4 (steward revision, 2026-09-28): his word on a proposed correction set (accept applies it; dismiss closes it)
+    _r("POST", "/api/high-seat/repair", AUTH_TOKEN,
+       handler="handle_high_seat_repair", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so
