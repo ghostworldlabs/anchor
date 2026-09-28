@@ -7764,12 +7764,16 @@ def _high_seat_context():
     except Exception:
         last_open = None
     try:
-        since = datetime.fromtimestamp(last_open).date() if last_open else None
+        # closures after the real INSTANT of his previous page open, one per project and step (Grok W2)
         overnight = [x for f in facts_list for x in (f.get("closed_recent") or ())
-                     if since is not None and _hr._iso(x.get("when")) is not None and _hr._iso(x.get("when")) >= since]
+                     if last_open is not None and isinstance(x.get("at"), (int, float)) and x["at"] > float(last_open)]
         head = _ha.head_act(initiatives, facts_list, today=today)
         if head and not head.get("pid") and campaign:
             head["pid"] = str(campaign.get("pid") or "")   # a native Campaign task opens the Campaign's own card
+        if head and head.get("pid") and head.get("kind") != "oldest-wait":
+            f = facts.get(head["pid"]) if isinstance(facts, dict) else None
+            if f and f.get("effort"):
+                head["effort"] = str(f["effort"])          # the effort the card reads, named in the sentence
         bullets = [_ha.head_sentence(head, overnight=overnight)] + [b for b in bullets if not b.startswith("Nothing is waiting")][:4]
     except Exception:
         head = None
@@ -7783,7 +7787,7 @@ def _high_seat_context():
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
-        "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head,
+        "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head, "overnight": overnight,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": _working_pids(entries, sessions),

@@ -412,9 +412,11 @@ def _card(e, f, cls):
     other_waits = [x for x in (f.get("other_waits") or []) if isinstance(x, dict)]
 
     def _eff_line(x):
-        return ('<div class="t-line wait"><span class="mk">&#9873; %s:</span>%s '
+        a = x.get("age_days")
+        a_s = (' <span class="t-age">&middot; %d day%s</span>' % (int(a), "" if int(a) == 1 else "s")) if isinstance(a, (int, float)) and a >= 1 else ""
+        return ('<div class="t-line wait"><span class="mk">&#9873; %s:</span>%s%s '
                 '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">open</button></div>') % (
-            esc(x.get("name")), esc(" ".join(str(x.get("needs_you") or "").split())[:160]), pid, esc(x.get("rel")))
+            esc(x.get("name")), esc(" ".join(str(x.get("needs_you") or "").split())[:160]), a_s, pid, esc(x.get("rel")))
     lead_x = next((x for x in other_waits if str(x.get("rel") or "") == promoted), None) if (wait and promoted) else None
     if lead_x is not None:
         line = _eff_line(lead_x)
@@ -543,17 +545,20 @@ def _seed_panel(ctx):
 
 
 def _head_li(ctx):
-    """W2 (2026-09-28): the head — ONE act as the lead: the sentence, then the act that opens its record (the Status
-    part on that project's effort), marked when it is the exception; the rest of the brief folds under it."""
-    bl = list(ctx.get("bullets") or [])
+    """W2 (2026-09-28): the head — ONE act as the lead, rendered from the head itself (so the sentence can never
+    diverge from its button): the sentence, then the act that opens its record (the Status part on that project's
+    card — on the card's own effort unless the act names one), marked when it is the exception. Under it, only the
+    week's dates, folded and named for what they hold (Grok W2: the old count brief is gone)."""
+    import home_attention as _ha
     head = ctx.get("head") if isinstance(ctx.get("head"), dict) else None
-    lead = esc(bl[0]) if bl else "Nothing is waiting on you."
+    lead = esc(_ha.head_sentence(head, overnight=ctx.get("overnight") or ()))
     cls = "lead exc" if head and head.get("kind") == "exception" else "lead"
     act = ""
     if head and head.get("pid"):
-        act = ' <button class="h-open" data-part="status" data-pid="%s" data-dir="%s">open</button>' % (esc(head["pid"]), esc(head.get("dir") or ""))
-    rest = "".join('<li>%s</li>' % esc(b) for b in bl[1:])
-    more = ('<details class="brief-more"><summary>more</summary><ul>%s</ul></details>' % rest) if rest else ""
+        dir_attr = (' data-dir="%s"' % esc(head["dir"])) if head.get("dir") else ""   # only an act that names its effort
+        act = ' <button class="h-open" data-part="status" data-pid="%s"%s>open</button>' % (esc(head["pid"]), dir_attr)
+    week = [b for b in (ctx.get("bullets") or [])[1:] if str(b).startswith(("This week", "Nothing is due this week", "Nothing carries a date"))]
+    more = ('<details class="brief-more"><summary>this week</summary><ul>%s</ul></details>' % "".join('<li>%s</li>' % esc(b) for b in week)) if week else ""
     return '<li class="%s">%s%s</li>%s' % (cls, lead, act, ('<li class="fold">%s</li>' % more) if more else "")
 
 

@@ -95,38 +95,60 @@ def project_facts(entry, today=None):
         dated.sort(key=lambda x: (x["due"], x["name"]))
         out["dated"] = dated
         out["nearest_due"] = dated[0]["due"] if dated else ""
-        # W2 (2026-09-28): what closed lately — status flips to done in the last three days, by the receipt's own
-        # date (the head's "since you last opened", gated on his last page open)
+        # W2 (2026-09-28): what closed — every status flip to done with its INSTANT (the event's `at`, else the
+        # receipt's date at midnight), one per step (the latest), so the head's "since you last opened" can compare
+        # against the real instant of his last page open (Grok W2: the date alone cannot see a second open)
         names_by_id = {str(s.get("id")): str(s.get("name") or s.get("id") or "") for s in rm.get("roadmap_projection") or [] if isinstance(s, dict)}
-        recent = []
+        closed = {}
         for ev in rm.get("roadmap_events") or []:
             if not isinstance(ev, dict) or ev.get("kind") != "status_flip" or str(ev.get("to") or "") != "done":
                 continue
-            when = _iso(str(((ev.get("receipt") or {}) if isinstance(ev.get("receipt"), dict) else {}).get("when") or ev.get("at") or "")[:10])
-            if when is None or (today - when).days > 3:
+            rc = ev.get("receipt") if isinstance(ev.get("receipt"), dict) else {}
+            instant = _instant(ev.get("at")) or _instant(rc.get("when"))
+            if instant is None:
                 continue
-            recent.append({"step_id": str(ev.get("step_id") or ""), "name": names_by_id.get(str(ev.get("step_id")), str(ev.get("step_id") or "")),
-                           "when": when.isoformat(), "project_name": name})
-        out["closed_recent"] = recent
+            sid = str(ev.get("step_id") or "")
+            closed[sid] = {"step_id": sid, "name": names_by_id.get(sid, sid), "at": instant, "project_name": name, "project_id": pid}
+        out["closed_recent"] = sorted(closed.values(), key=lambda x: x["at"])
     # W2 (2026-09-28): the age of the wait — from the record, never the strip's last touch: the earliest instrument
     # that set the current wait, else the status summary's own time when it carries it; None when unknown
     out["wait_age_days"] = _wait_age_days(root, out["needs_you"], strip, summ, sfile, today) if out["needs_you"] else None
     # W1 of the steward revision (2026-09-28): EVERY effort's wait, not only the effort touched last — Grok's live
     # replay (2026-09-27) showed alternating touches hiding the second MBA effort's review from the home. The card
     # keeps the shown effort for its line; the other efforts' waits ride beside it, each opening its own record.
-    out["efforts"], out["efforts_gap"] = _effort_waits(folder, rel)
+    out["efforts"], out["efforts_gap"] = _effort_waits(folder, rel, today)
     out["other_waits"] = [x for x in out["efforts"] if x["needs_you"] and x["rel"] != rel]
     if not out["needs_you"] and out["other_waits"]:
         first = out["other_waits"][0]
         out["needs_you"] = "%s: %s" % (first["name"], first["needs_you"])
         out["needs_you_effort"] = first["rel"]
+        out["wait_age_days"] = first.get("age_days")     # the promoted wait's own age (Grok W2)
     return out
+
+
+def _instant(v):
+    """An event's instant as epoch seconds: an ISO datetime, or a date (midnight, local); None when neither."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        if len(s) <= 10:
+            return _dt.combine(date.fromisoformat(s[:10]), _dt.min.time()).timestamp()
+        s2 = s.replace("Z", "+00:00")
+        d = _dt.fromisoformat(s2)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_tz.utc)
+        return d.timestamp()
+    except Exception:
+        return None
 
 
 def _wait_age_days(root, wait, strip, summ, sfile, today):
     """Days the current wait has stood, from the record: the ``as_of`` of the earliest instrument in the latest run
-    that carries this wait text; else the status summary's ``at`` when its plan carries it; else None (no number
-    without a reader — never a guess from the strip's last touch)."""
+    that carries this wait text; else the status summary's ``waiting_since`` (the composer's stamp from the managed
+    request's own time) when its plan carries the same wait; else None — no number without a reader, and never the
+    strip's or the summary's own last touch."""
     try:
         w = " ".join(str(wait or "").split()).lower()
         since = None
@@ -152,12 +174,13 @@ def _wait_age_days(root, wait, strip, summ, sfile, today):
         return None
 
 
-def _effort_waits(folder, shown_rel=""):
+def _effort_waits(folder, shown_rel="", today=None):
     """Every steward effort of a project (the cockpit's own discovery: the root with a Face, plus one level of
     subfolders with their own) with its wait — the strip's human wait, else the last status's "waiting on you" —
-    as ``([{rel, name, needs_you, shown}], gap)`` in the cockpit's order. Read-only; never raises. A failure is
-    never a silent empty list (Grok W1: that would recreate the hidden second effort): the gap names it and the
-    card shows it."""
+    and the wait's age from that effort's record, as ``([{rel, name, needs_you, age_days, shown}], gap)`` in the
+    cockpit's order. Read-only; never raises. A failure is never a silent empty list (Grok W1: that would recreate
+    the hidden second effort): the gap names it and the card shows it."""
+    today = today or date.today()
     try:
         from steward_cockpit.steward_campaign import discover_efforts
         efforts = discover_efforts(str(folder)) or []
@@ -172,11 +195,13 @@ def _effort_waits(folder, shown_rel=""):
             strip = _read_json(root / "strip.json")
             if isinstance(strip, dict):
                 wait = _real_wait(strip.get("human_wait"))
+            sfile = root / ".ecgberht" / "status-summary.json"
+            summ = _read_json(sfile)
             if not wait:
-                summ = _read_json(root / ".ecgberht" / "status-summary.json")
                 plan = summ.get("plan") if isinstance(summ, dict) and isinstance(summ.get("plan"), dict) else {}
                 wait = _real_wait(plan.get("waiting_on_you"))
             out.append({"rel": rel, "name": str((e or {}).get("name") or rel or "root"), "needs_you": wait,
+                        "age_days": _wait_age_days(root, wait, strip, summ, sfile, today) if wait else None,
                         "shown": rel == str(shown_rel or "")})
         except Exception as ex:
             gap = "%s could not be read: %s" % (str((e or {}).get("name") or "an effort"), type(ex).__name__)
