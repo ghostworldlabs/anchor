@@ -120,6 +120,9 @@ def project_facts(entry, today=None):
     # W2 (2026-09-28): the age of the wait — from the record, never the strip's last touch: the earliest instrument
     # that set the current wait, else the status summary's own time when it carries it; None when unknown
     out["wait_age_days"] = _wait_age_days(root, out["needs_you"], strip, summ, sfile, today) if out["needs_you"] else None
+    # W5 (2026-09-28): where he left — the strip's last leave receipt (W0's, written on the switch he made), re-read
+    # against the roadmap as it stands now (how many events since); None when he never left this record
+    out["resume"] = _resume(strip, rm if isinstance(rm, dict) else None, rel)
     # W1 of the steward revision (2026-09-28): EVERY effort's wait, not only the effort touched last — Grok's live
     # replay (2026-09-27) showed alternating touches hiding the second MBA effort's review from the home. The card
     # keeps the shown effort for its line; the other efforts' waits ride beside it, each opening its own record.
@@ -131,6 +134,45 @@ def project_facts(entry, today=None):
         out["needs_you_effort"] = first["rel"]
         out["wait_age_days"] = first.get("age_days")     # the promoted wait's own age (Grok W2)
     return out
+
+
+def _ago(epoch, now=None):
+    """An instant as words: "just now", "12 min ago", "3 h ago", "2 days ago"; "" when unknown."""
+    if epoch is None:
+        return ""
+    s = max(0, int((now if now is not None else time.time()) - epoch))
+    if s < 90:
+        return "just now"
+    if s < 3600:
+        return "%d min ago" % (s // 60)
+    if s < 86400:
+        return "%d h ago" % (s // 3600)
+    d = s // 86400
+    return "1 day ago" if d == 1 else "%d days ago" % d
+
+
+def _resume(strip, rm, rel=""):
+    """The last `leave` receipt on the strip as the Resume act's fact: the step he was on (named from the roadmap
+    when it can be), when, the effort, and how many roadmap events landed since — so Resume re-reads the state
+    rather than replaying the receipt. None without a receipt."""
+    if not isinstance(strip, dict):
+        return None
+    leaves = [r for r in (strip.get("receipts") or []) if isinstance(r, dict) and r.get("kind") == "leave"]
+    if not leaves:
+        return None
+    last = leaves[-1]
+    steps = {str(st.get("id")): st for st in ((rm or {}).get("roadmap_projection") or []) if isinstance(st, dict)}
+    sid = str(last.get("current_step_id") or last.get("last_event_step_id") or "")
+    st = steps.get(sid) or {}
+    events = [e for e in ((rm or {}).get("roadmap_events") or []) if isinstance(e, dict)]
+    last_seq = max([int(e.get("seq") or 0) for e in events] or [0])
+    seen = last.get("last_event_seq")
+    since = max(0, last_seq - int(seen)) if isinstance(seen, int) else None
+    at = _instant(last.get("at"))
+    return {"at": str(last.get("at") or ""), "epoch": at, "ago": _ago(at), "step_id": sid,
+            "step": str(st.get("name") or sid or last.get("active_effort") or "where you were"),
+            "step_status": str(st.get("status") or ""), "effort": rel, "events_since": since,
+            "presentation_id": last.get("presentation_id"), "wait_ref": last.get("wait_ref")}
 
 
 def _instant(v):

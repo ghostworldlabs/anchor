@@ -7,6 +7,8 @@
 const Proto = (() => {
   const PARAMS = new URLSearchParams(location.search);
   const DIR = PARAMS.get("dir") || "";
+  const STEP = PARAMS.get("step") || "";   // W5 (2026-09-28): Resume from the High Seat lands on this step
+  let _stepShown = false;
   const GENERAL = PARAMS.get("general") === "1";
   const TERM = PARAMS.get("term") || "";
   const EMBED = PARAMS.get("embed") === "1";
@@ -1090,6 +1092,16 @@ const Proto = (() => {
       prior.forEach(n=>list.appendChild(n));restoreNavFocus(focusKey);
     }
     list.appendChild(notDoneList(map, stepRows));
+    if (STEP && !_stepShown) {
+      const row = list.querySelector('li[data-step-id="' + STEP.replace(/"/g, '') + '"]');
+      if (row) {
+        _stepShown = true;
+        row.scrollIntoView({block: "center"});
+        const was = row.style.boxShadow;
+        row.style.boxShadow = "0 0 0 2px var(--accent, #6c9cfc)";
+        setTimeout(() => { row.style.boxShadow = was; }, 2400);
+      }
+    }
   }
   function sayAbout(text) {
     const ta = $("[data-say]");

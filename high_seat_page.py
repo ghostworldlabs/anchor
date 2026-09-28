@@ -386,6 +386,19 @@ def _projects_tile(ctx):
 _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))
 
 
+def _resume_act(pid, rel, r):
+    """W5 (2026-09-28): Resume — where he left this record (W0's leave receipt), opened in the cockpit AT that step
+    (`?step=` scrolls the plan to it); the act's title says the step, when, and how many events landed since, so
+    the cockpit he lands in is read as it stands now. No receipt, no act."""
+    if not isinstance(r, dict) or not r.get("at"):
+        return ""
+    since = r.get("events_since")
+    moved = (" &middot; %d event%s since" % (since, "" if since == 1 else "s")) if isinstance(since, int) and since > 0 else (" &middot; nothing moved since" if since == 0 else "")
+    href = "/project/%s?dir=%s%s" % (pid, esc(rel), ("&amp;step=%s" % esc(r.get("step_id"))) if r.get("step_id") else "")
+    return ('<a class="t-resume" href="%s" target="_blank" rel="noopener" title="you left at %s (%s)%s">&#8617; Resume <span class="t-age">%s</span></a>'
+            % (href, esc(r.get("step") or "where you were"), esc(r.get("ago") or r.get("at")), moved, esc(r.get("ago") or "")))
+
+
 def _card(e, f, cls):
     """A project's one card, compact (John, 2026-09-27: "the tiles still seem larger than needed"): the name with the
     effort it reads as a small suffix, ONE line — the Needs-you sentence when there is one, else the next step —
@@ -445,6 +458,7 @@ def _card(e, f, cls):
         line += ('<div class="t-line prop"><span class="mk">&#9881; proposed:</span>%d correction%s '
                  '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">see</button></div>') % (n, "" if n == 1 else "s", pid, rel)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
+    acts += _resume_act(pid, rel, f.get("resume"))
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
         '<a class="t-go" href="/project/%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a></div>'
@@ -465,7 +479,6 @@ def _desk_line(ctx):
     return (
         '<section class="deskline" id="deskline"><div class="dl-row"><span class="dl-k">Desk</span><span class="dl-d">&middot; admin, no project</span>'
         '<button class="dchip" id="chipTasks" data-desk="tasks">Tasks &middot; <span id="taskTotal">%d</span></button>'
-        '<button class="dchip muted" data-desk="cal">Calendar</button><button class="dchip muted" data-desk="mail">Email</button>'
         '<span class="dl-sp"></span>%s</div>'
         '<div class="dl-body" id="deskBody"><p class="ptile-note">%s</p></div></section>'
     ) % (int(ctx.get("tasks_open") or 0),
@@ -522,6 +535,10 @@ def _workbench(ctx):
     sys_html = "".join('<a class="bench-row %s" href="%s"%s>%s <span class="dim">&middot; %s</span></a>' % (
         esc(r.get("severity")), esc(r.get("href")), ' target="_blank" rel="noopener"' if str(r.get("href", "")).startswith("/") else "",
         esc(r.get("text")), esc(r.get("why"))) for r in sys_rows[:4])
+    if not live and not sys_rows:
+        # W5 (2026-09-28): nothing running and nothing failed — one line, not a box saying so (fit contract 7)
+        return ('<section class="shelf" id="shBench"><div class="shelf-h"><h3>Workbench</h3><span class="c">nothing running</span><span class="rule"></span>'
+                '<a class="dbtn cockpit" href="/project/__dashboard__?classic=1" target="_blank" rel="noopener">Open cockpit</a></div></section>')
     return (
         '<section class="shelf" id="shBench"><div class="shelf-h"><h3>Workbench</h3><span class="c">%d running</span><span class="rule"></span></div>'
         '<div class="bench" id="bench">%s<span class="dim">Terminals, runs and registers stay in the cockpit. This board does not repeat them.</span>'

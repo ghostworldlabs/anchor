@@ -605,6 +605,9 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile .t-acts button{font:inherit;font-size:10px;color:var(--text-dim);background:transparent;border:0;border-bottom:1px solid transparent;border-radius:0;padding:0;cursor:pointer;flex:none;line-height:1.5}
 .tile .t-acts button:hover{color:var(--text);border-bottom-color:var(--border)}
 .tile .t-acts button.on{color:var(--accent-t);border-bottom-color:var(--accent)}
+.tile .t-acts .t-resume{margin-left:auto;font-size:10px;color:var(--text-dim);text-decoration:none;flex:none;line-height:1.5;border-bottom:1px solid transparent}
+.tile .t-acts .t-resume:hover{color:var(--text);border-bottom-color:var(--border)}
+.tile .t-acts .t-resume .t-age{margin-left:3px}
 .tile.open{grid-column:1 / -1}
 .tile .t-body .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:10.5px;color:var(--accent-t);cursor:pointer;margin-left:4px}
 .tile .t-body{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;line-height:1.5}
