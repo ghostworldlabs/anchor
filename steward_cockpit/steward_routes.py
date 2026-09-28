@@ -1472,6 +1472,7 @@ def handle_post(cdir, verb, body):
                 if spoken is not None:
                     return spoken, (200 if spoken.get("ok") else 400)
         context = body.get("refinement_context")
+        _refined_turn = False
         if isinstance(context, dict):
             from steward_cockpit.refinement_client import update
             import uuid
@@ -1487,13 +1488,19 @@ def handle_post(cdir, verb, body):
             if not result.get("ok"):
                 return result, 409
             from steward_cockpit import horizon as _horizon
-            _horizon.refresh(cdir, "refined")       # W3 (2026-09-28): DURING a refinement the line says what follows this draft
+            _horizon.refresh(cdir, "refined")       # W3 (2026-09-28): the line moves when the feedback is recorded
+            _refined_turn = True
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)
         if eng is None:
             return {"ok": False, "error": "no such session / cap hit"}, 404
         result = (eng.say(body.get("text", ""), question_id=body["question_id"]) if body.get("question_id")
                   else eng.say(body.get("text", "")))
+        if _refined_turn:
+            # W3 (Grok's hold): the turn's reply may have written the line — derive it again so the turn's own
+            # sentence never stands over the stamped derivation
+            from steward_cockpit import horizon as _horizon2
+            _horizon2.refresh(cdir, "refined")
         return result, 200 if result.get("ok") else 409
     if verb == "engine":
         eng = get_engine(cdir, bool(body.get("general")),

@@ -437,6 +437,13 @@ def _card(e, f, cls):
         line += _eff_line(x).replace('class="t-line wait"', 'class="t-line wait other"', 1)
     if f.get("efforts_gap"):
         line += '<div class="t-line dim">&#9888; %s</div>' % esc(f["efforts_gap"])   # never a silent empty list (Grok W1)
+    # W4 (2026-09-28): a repair PROPOSED after an acceptance waits on his word — "proposed: N corrections"; the Status
+    # part shows the set with accept and dismiss; nothing inside approved work changes before (his Q2)
+    props = [p for p in (f.get("repair_proposals") or []) if isinstance(p, dict)]
+    if props:
+        n = sum(int(p.get("count") or 0) for p in props)
+        line += ('<div class="t-line prop"><span class="mk">&#9881; proposed:</span>%d correction%s '
+                 '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">see</button></div>') % (n, "" if n == 1 else "s", pid, rel)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'

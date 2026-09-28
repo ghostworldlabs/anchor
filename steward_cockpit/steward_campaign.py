@@ -597,6 +597,16 @@ def read_map(campaign_dir: str):
     # W1 (2026-09-28): the next-in-the-plan horizon, computed ONCE here for every reader of the map — the
     # cockpit's Next steps renders this list; the card on the High Seat computes the same call on the same map
     m["next_in_plan"] = [dict(s) for s in next_in_plan(m, 3)[0]]
+    # W4 (2026-09-28): the repairs PROPOSED and not yet resolved on his word — the tile says "proposed: N corrections"
+    try:
+        from .repair import open_proposals as _open_proposals
+        m["repair_proposals"] = [{"proposal_id": str(e.get("proposal_id") or ""), "count": int(e.get("count") or 0),
+                                  "after": e.get("after") if isinstance(e.get("after"), dict) else {},
+                                  "corrections": [c for c in (e.get("corrections") or []) if isinstance(c, dict)],
+                                  "at": e.get("at") or ""}
+                                 for e in _open_proposals((roadmap or {}).get("roadmap_events"))]
+    except Exception:
+        m["repair_proposals"] = []
     return m
 
 
@@ -1118,8 +1128,9 @@ def next_in_plan(m, n=3):
     renders the copy ``read_map`` puts on the map (``m["next_in_plan"]``). The declared focus first
     (``_focused_step``: ``current_step_id``, else the one pinned step, else the one active step — never a guess
     among several), then the open steps that FOLLOW it in the plan's order, done/parked/cancelled/dropped skipped;
-    at most ``n``. Prerequisite-open steps are NOT skipped: the map's step carries no dependency field (a slice's
-    ``depends_on`` lives on the refinement, not here) — W3 owns that exclusion. With no focus: ``([], why)`` — the
+    at most ``n``. Prerequisite-open steps are NOT skipped, by disposition (Grok, W1 and W3): the map's step carries
+    no dependency field, and a second read of a slice's ``depends_on`` here is forbidden; the horizon is order, not
+    dependency, until a field exists on the plan. With no focus: ``([], why)`` — the
     horizon stays empty on his surfaces; the reason is the steward's, read on the status it composes."""
     steps = [s for s in (m.get("steps") or []) if isinstance(s, dict)]
     focus, why = _focused_step(m)

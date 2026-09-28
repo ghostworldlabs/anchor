@@ -110,6 +110,13 @@ def project_facts(entry, today=None):
             sid = str(ev.get("step_id") or "")
             closed[sid] = {"step_id": sid, "name": names_by_id.get(sid, sid), "at": instant, "project_name": name, "project_id": pid}
         out["closed_recent"] = sorted(closed.values(), key=lambda x: x["at"])
+        # W4 (2026-09-28): the repairs proposed and not yet resolved on his word (the card says "proposed: N corrections")
+        try:
+            from steward_cockpit.repair import open_proposals as _open_proposals
+            props = _open_proposals(rm.get("roadmap_events"))
+            out["repair_proposals"] = [{"proposal_id": str(p.get("proposal_id") or ""), "count": int(p.get("count") or 0)} for p in props]
+        except Exception:
+            out["repair_proposals"] = []
     # W2 (2026-09-28): the age of the wait — from the record, never the strip's last touch: the earliest instrument
     # that set the current wait, else the status summary's own time when it carries it; None when unknown
     out["wait_age_days"] = _wait_age_days(root, out["needs_you"], strip, summ, sfile, today) if out["needs_you"] else None

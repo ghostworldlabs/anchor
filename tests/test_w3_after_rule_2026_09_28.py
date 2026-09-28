@@ -94,6 +94,32 @@ def test_a_refused_record_is_not_retried_until_its_plan_moves(tmp_path):
     assert horizon.stale(str(d)) is True, "the plan moved: try once more"
     horizon._note_refusal(str(d), {"ok": True})
     assert horizon.stale(str(d)) is True and horizon._REFUSED.get(horizon.os.path.normcase(horizon.os.path.normpath(str(d)))) is None
+    # a failed SPAWN is not a refusal: the record stays stale and is retried (Grok W3)
+    horizon._note_refusal(str(d), {"ok": False, "error": "horizon_failed", "message": "node missing"})
+    assert horizon.stale(str(d)) is True
+
+
+def test_one_sweep_at_a_time(tmp_path):
+    d = tmp_path / "p"
+    _record(d, 3)
+    import threading
+    gate = threading.Event()
+    started = threading.Event()
+
+    def slow(x):
+        started.set()
+        gate.wait(5)
+        return {"ok": True}
+    assert horizon.sweep([str(d)], runner=slow) == [str(d)]
+    assert started.wait(5)
+    assert horizon.sweep([str(d)], runner=slow) == [], "a sweep still inside its spawn: the tick starts none"
+    gate.set()
+    import time as _time
+    for _ in range(50):
+        if not horizon._SWEEP_RUNNING["on"]:
+            break
+        _time.sleep(0.05)
+    assert horizon._SWEEP_RUNNING["on"] is False
 
 
 def test_record_dirs_lists_the_root_and_its_efforts(tmp_path):

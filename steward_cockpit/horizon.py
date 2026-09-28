@@ -2,11 +2,13 @@
 steward revision, 2026-09-28; the synthesis R3; his answer Q1: the line may be rewritten unattended, that line only).
 
 ``refresh(record_dir, reason)`` asks the engine to derive and write the horizon (``ecgberht update --horizon
---horizon-reason <reason>``): the focus, then what follows it, stamped with the roadmap's last seq and the focus it was
-read from; unchanged since the stamp → the engine writes nothing. The cockpit calls it on the four events — accepted,
-produced (a run's handback), answered (a decision), refined (the feedback turn: "after this draft: X, then Y") — and
-on a close. ``sweep(dirs)`` is the server tick's half: with no seat awake, every record whose roadmap moved past its
-stamp is refreshed once (``reason="tick"``). Best-effort, background, stdlib only; never a step, never a status."""
+--horizon-reason <reason>``): the step in hand, then what follows it — ONE shape at every moment, whatever the
+trigger — stamped with the roadmap's last seq and the focus it was read from; unchanged since the stamp → the engine
+writes nothing. The cockpit calls it on the events — accepted, produced (a run's handback), answered (a decision),
+refined (the feedback turn, and again after the turn's reply so the turn's own sentence cannot stand over the
+derivation). A close appends a roadmap event and is taken up by the tick. ``sweep(dirs)`` is the server tick's
+half: with no seat awake, every record whose roadmap moved past its stamp is refreshed once (``reason="tick"``);
+one sweep at a time. Best-effort, background, stdlib only; never a step, never a status."""
 import json
 import os
 import subprocess
@@ -43,14 +45,15 @@ def _run(record_dir, reason, timeout=25.0):
 
 
 def _note_refusal(record_dir, res):
-    """Remember a refusal at the roadmap's current seq so the tick does not spawn the engine for it again until the
-    plan moves; a success clears it."""
+    """Remember the engine's REFUSAL (``no_horizon``: no focus) at the roadmap's current seq so the tick does not
+    spawn the engine for it again until the plan moves; a success clears it. A failed spawn (``horizon_failed``,
+    ``no_output``) is not a refusal: the record stays stale and is retried (Grok W3)."""
     try:
         key = os.path.normcase(os.path.normpath(str(record_dir)))
         with _REFUSED_LOCK:
-            if isinstance(res, dict) and res.get("ok") is False:
+            if isinstance(res, dict) and res.get("ok") is False and res.get("error") == "no_horizon":
                 _REFUSED[key] = _last_seq(record_dir)
-            else:
+            elif isinstance(res, dict) and res.get("ok") is not False:
                 _REFUSED.pop(key, None)
     except Exception:
         pass
@@ -99,23 +102,36 @@ def stale(record_dir):
     return stamped is None or last > stamped
 
 
+_SWEEP_LOCK = threading.Lock()
+_SWEEP_RUNNING = {"on": False}
+
+
 def sweep(dirs, runner=None, limit=8):
     """The tick's half (his Q1): refresh every stale record among ``dirs`` — at most ``limit`` per tick, oldest
-    first in the given order — in ONE background thread. Returns the dirs it will refresh. ``runner`` is injected
-    by the tests."""
-    todo = [str(d) for d in dirs or () if stale(d)][: max(0, int(limit or 0))]
-    if not todo:
-        return []
+    first in the given order — in ONE background thread; while a sweep is still running (a spawn can take up to its
+    timeout) the tick starts none (Grok W3: the bound holds). Returns the dirs it will refresh. ``runner`` is
+    injected by the tests."""
+    with _SWEEP_LOCK:
+        if _SWEEP_RUNNING["on"]:
+            return []
+        todo = [str(d) for d in dirs or () if stale(d)][: max(0, int(limit or 0))]
+        if not todo:
+            return []
+        _SWEEP_RUNNING["on"] = True
     run = runner or (lambda d: _run(d, "tick"))
 
     def work():
-        for d in todo:
-            try:
-                res = run(d)
-                if runner is not None:
-                    _note_refusal(d, res)     # an injected runner's refusal counts too
-            except Exception:
-                pass
+        try:
+            for d in todo:
+                try:
+                    res = run(d)
+                    if runner is not None:
+                        _note_refusal(d, res)     # an injected runner's refusal counts too
+                except Exception:
+                    pass
+        finally:
+            with _SWEEP_LOCK:
+                _SWEEP_RUNNING["on"] = False
     threading.Thread(target=work, name="horizon-sweep", daemon=True).start()
     return todo
 
