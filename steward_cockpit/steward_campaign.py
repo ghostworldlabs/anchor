@@ -518,6 +518,15 @@ def read_map(campaign_dir: str):
             heartbeat["pending_request"] = pending
             human_wait_face = pending.get("purpose", "") if pending else ""
             heartbeat["human_wait"] = human_wait_face
+            # W0 (2026-09-28; Grok's hold on W0): on a managed campaign the wait names its subject AT READ, from the
+            # ids the pending request already carries — the decision he owes, its step, its presentation, and when
+            # it was asked (the presentation's own time: the wait's age, never the strip's last touch)
+            if pending:
+                heartbeat["wait_ref"] = "decision:%s" % pending.get("id")
+                heartbeat["wait_step_id"] = pending.get("step_id")
+                heartbeat["wait_presentation_id"] = pending.get("presentation_id")
+                heartbeat["wait_asked_at"] = next((r.get("asked_at") for r in attention["pending_requests"]
+                                                   if r.get("id") == pending.get("id")), None)
             for step in steps:
                 if step["id"] in state["slices"]:
                     step["refinement"] = dict(state["slices"][step["id"]])
@@ -585,6 +594,9 @@ def read_map(campaign_dir: str):
     }
     focused, _focus_warning = _focused_step(m)
     m["now_step_id"] = (focused or {}).get("id")
+    # W1 (2026-09-28): the next-in-the-plan horizon, computed ONCE here for every reader of the map — the
+    # cockpit's Next steps renders this list; the card on the High Seat computes the same call on the same map
+    m["next_in_plan"] = [dict(s) for s in next_in_plan(m, 3)[0]]
     return m
 
 
@@ -1101,12 +1113,14 @@ _CLOSED_STATUSES = ("done", "parked", "cancelled", "dropped")
 
 
 def next_in_plan(m, n=3):
-    """THE next-in-the-plan rule (W1 of the steward revision, 2026-09-28) — one rule for the card on the High Seat,
-    the cockpit's Next steps (shared.js mirrors it) and the status composer: the declared focus first
+    """THE next-in-the-plan horizon (W1 of the steward revision, 2026-09-28), computed once here and read by its
+    two callers: the card on the High Seat (``high_seat_card.next_html``) and the cockpit's Next steps, which
+    renders the copy ``read_map`` puts on the map (``m["next_in_plan"]``). The declared focus first
     (``_focused_step``: ``current_step_id``, else the one pinned step, else the one active step — never a guess
-    among several), then the open steps that FOLLOW it in the plan's order, parked/cancelled/dropped skipped; at
-    most ``n``. With no focus: ``([], why)`` — the array-order guess ("from the first active") is gone, so two
-    surfaces can no longer recommend different work (ChatGPT's review, 2026-09-27, §2)."""
+    among several), then the open steps that FOLLOW it in the plan's order, done/parked/cancelled/dropped skipped;
+    at most ``n``. Prerequisite-open steps are NOT skipped: the map's step carries no dependency field (a slice's
+    ``depends_on`` lives on the refinement, not here) — W3 owns that exclusion. With no focus: ``([], why)`` — the
+    horizon stays empty on his surfaces; the reason is the steward's, read on the status it composes."""
     steps = [s for s in (m.get("steps") or []) if isinstance(s, dict)]
     focus, why = _focused_step(m)
     if focus is None:
@@ -1463,6 +1477,9 @@ def compose_status(campaign_dir: str, engine_state=None):
         "steps_done": m["steps_done"],
         "steps_total": m["steps_total"],
         "waiting_on_you": waiting,
+        # W2 (2026-09-28): when the wait is the managed pending request, WHEN it was asked (the presentation's own
+        # time) — the home's age of a wait reads this, never the summary's ten-minute clock
+        "waiting_since": (m["heartbeat"].get("wait_asked_at") or None) if waiting else None,
         "next": next_text,
         "why": why_text,
         "attention": m["attention"]["state"],

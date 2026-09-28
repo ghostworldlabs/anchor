@@ -7745,10 +7745,6 @@ def _high_seat_context():
             resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=True)   # a project part's lead line feeds the initiative's Status
             initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
             campaign = {"pid": entry.get("id"), "name": entry.get("name")}
-            top = next((i for i in initiatives if i.get("tier") == 1), None)
-            if top is not None:
-                reason = top.get("done_when") or ((top.get("next") or {}).get("text") if top.get("next") else "")
-                bullets = (["Your Campaign puts %s first%s." % (top["name"], (" — " + str(reason)[:140]) if reason else "")] + bullets)[:5]
             try:
                 from steward_cockpit.campaign_seeds import read_seeds as _read_seeds
                 seed_rows = list(_read_seeds(camp_dir) or [])
@@ -7757,6 +7753,24 @@ def _high_seat_context():
                 seeds = 0
     except Exception:
         campaign, initiatives, seeds, seed_rows = None, [], 0, []
+    # W2 of the steward revision (2026-09-28): THE HEAD is one act — his tiers order the day (the first Tier-1 part
+    # that needs him), else the oldest wait with its age; a lower-tier part due today leads only as the marked
+    # exception (his answer Q3); what closed since he last opened the page rides in the same sentence, gated on
+    # change (the page open is the `page_open` boundary, noted in presence). The rest of the brief folds under it.
+    head, overnight, last_open = None, [], None
+    try:
+        from steward_cockpit import presence as _pres
+        last_open = _pres.note_page_open()
+    except Exception:
+        last_open = None
+    try:
+        since = datetime.fromtimestamp(last_open).date() if last_open else None
+        overnight = [x for f in facts_list for x in (f.get("closed_recent") or ())
+                     if since is not None and _hr._iso(x.get("when")) is not None and _hr._iso(x.get("when")) >= since]
+        head = _ha.head_act(initiatives, facts_list, today=today)
+        bullets = [_ha.head_sentence(head, overnight=overnight)] + [b for b in bullets if not b.startswith("Nothing is waiting")][:4]
+    except Exception:
+        head = None
     try:
         prefs_html = render_model_prefs_controls(render_steward_control())
     except Exception:
@@ -7767,7 +7781,7 @@ def _high_seat_context():
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
-        "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
+        "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": _working_pids(entries, sessions),
@@ -12241,12 +12255,13 @@ def _presence_record_dir(pid):
         return folder
 
 
-def _presence_leave(prev_pid, left_at_iso):
+def _presence_leave(prev_pid, left_at_iso, prev_record_dir=""):
     """The leave receipt for the project he just left (W0 of the steward revision, 2026-09-28): his own act,
-    recorded on that project's strip through the engine's update verb. Best-effort; never raises."""
+    recorded on the record he HAD open (stored at his open; Grok W0: never a recompute at leave time) through
+    the engine's update verb. Best-effort; never raises."""
     try:
         from steward_cockpit import presence as _pres
-        d = _presence_record_dir(prev_pid)
+        d = prev_record_dir or _presence_record_dir(prev_pid)
         if d:
             _pres.run_leave(d, left_at_iso)
     except Exception:
@@ -12254,12 +12269,12 @@ def _presence_leave(prev_pid, left_at_iso):
 
 
 def _presence_on_open(pid):
-    """He opened a project (a cockpit page or a card on the High Seat): note it; on a switch, record the
-    leave on the previous project's record in the background. Never raises, never blocks the page."""
+    """He opened a project (the cockpit page, or a card's body on the High Seat): note it with the RECORD directory
+    he is on (the effort the card reads); on a switch, record the leave on the previous record in the background.
+    Never raises, never blocks the page."""
     try:
         from steward_cockpit import presence as _pres
-        folder, _err, _status = _ecgberht_project_folder(pid)
-        _pres.on_open(pid, _presence_leave, folder=folder or "")
+        _pres.on_open(pid, _presence_leave, folder=_presence_record_dir(pid) or "")
     except Exception:
         pass
 
@@ -22005,7 +22020,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if not _entry:
                     self._send_json({"ok": False, "error": "no such project"}, code=404); return
                 from steward_cockpit.high_seat_card import card_part as _card_part
-                _presence_on_open(_pid)     # W0 (2026-09-28): a card opened = he is on this project now
+                if (_q.get("open", [""])[0] or "") == "1":
+                    _presence_on_open(_pid)     # W0 (2026-09-28): a card's BODY opened = he is on this project now (a balloon's glance is not)
                 _out = _card_part(_pid, _part, _entry.get("folder_path") or "", _entry.get("name") or "", (_q.get("dir", [""])[0] or "").strip())
                 self._send_json(_out, code=200 if _out.get("ok") else 400)
                 return

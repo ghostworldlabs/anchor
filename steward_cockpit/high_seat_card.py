@@ -146,9 +146,10 @@ def next_html(cdir, pid):
     current = campaign.current_review_items(m, items)
     acts = campaign.review_acts(m, current)
     by_what = {str(it.get("what") or "").strip().lower(): it for it in items}
-    # W1 (2026-09-28): the ONE next-in-the-plan rule, shared with the cockpit and the status composer — the declared
-    # focus, then what follows it; never a guess from the first active step
-    plan, plan_why = campaign.next_in_plan(m, 3)
+    # W1 (2026-09-28): the ONE next-in-the-plan horizon (the cockpit renders the same list from the map) — the
+    # declared focus, then what follows it; never a guess from the first active step; with no focus, empty (the
+    # steward's reason is not his line — Grok W1)
+    plan, _plan_why = campaign.next_in_plan(m, 3)
     out = ['<div class="cp-next">']
     if question:
         out.append('<div class="cp-q"><span class="k">Decide</span>%s%s</div>' % (
@@ -167,8 +168,6 @@ def next_html(cdir, pid):
         out.append('<div class="cp-plan"><span class="k">Next in the plan</span>%s</div>' % "".join(
             '<div class="cp-step">%s%s</div>' % (esc(_step_label(s)), (' <span class="dim">&middot; due %s</span>' % esc(s.get("due"))) if s.get("due") else "")
             for s in plan))
-    elif plan_why:
-        out.append('<div class="cp-plan"><span class="k">Next in the plan</span><div class="cp-step dim">%s</div></div>' % esc(plan_why))
     out.append('<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></div>' % esc(pid))
     return "".join(out)
 

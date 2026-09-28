@@ -33,11 +33,13 @@ def _needs(n, noun="part"):
 
 
 def _part_state(p):
+    # W1 (2026-09-28): a referenced part's done/closed comes from the RESOLVED target too (campaign_initiatives'
+    # `done` / `closed` flags), never the wrapper's status alone
     if p["broken"]:
         return "broken reference"
-    if p["status"] == "done":
+    if p.get("done", p["status"] == "done"):
         return "done"
-    if p["status"] == "parked":
+    if p["status"] == "parked" or p.get("target_status") == "parked":
         return "parked"
     if p["needs_you"]:
         return "needs you"
@@ -48,7 +50,7 @@ def _part_state(p):
 
 def _part_row(i, p, today, tick_allowed):
     pid = esc(p["id"])
-    done = p["status"] == "done"
+    done = bool(p.get("done", p["status"] == "done"))
     ref = p["kind"] != "task"
     date_chip = (('<button class="mchip dated" data-act="date" data-part="%s">%s</button>' % (pid, esc(_short(p["date"])))) if p["date"] else
                  ('<button class="mchip" data-act="date" data-part="%s">no date</button>' % pid)) if not ref else (
@@ -186,11 +188,13 @@ def _calendar(ctx):
         esc(_hr.short_date((weeks[-1]["end"] + timedelta(days=1)).isoformat())), ("%d dated" % counts[6]) if counts[6] else "nothing dated"))
 
     def chip(i, p, past):
-        late = past and p["status"] != "done" and not p["broken"]
-        cls = " need" if p["needs_you"] else (" done" if p["status"] == "done" else (" over" if late else ""))
+        pdone = bool(p.get("done", p["status"] == "done"))
+        pclosed = bool(p.get("closed", p["status"] in ("done", "parked")))
+        late = past and not pclosed and not p["broken"]
+        cls = " need" if p["needs_you"] else (" done" if pdone else (" over" if late else ""))
         tail = ('<span class="pc-f">&#9873; needs you</span>' if p["needs_you"] else
-                ('<span class="pc-s ok">&#10003; done</span>' if p["status"] == "done" else
-                 ('<span class="pc-f">overdue</span>' if late else ('<span class="pc-c">parked</span>' if p["status"] == "parked" else ""))))
+                ('<span class="pc-s ok">&#10003; done</span>' if pdone else
+                 ('<span class="pc-f">overdue</span>' if late else ('<span class="pc-c">parked</span>' if (pclosed and not pdone) else ""))))
         return ('<button class="pc%s" data-act="chip" data-lane="%s" data-part="%s"><span class="pc-top"><span class="pc-d">%s</span><span class="pc-k">%s</span></span>'
                 '<span class="pc-n">%s</span>%s</button>' % (cls, esc(i["id"]), esc(p["id"]), esc(_short(p["date"])) if p["date"] else "no date", esc(p["kind"]), esc(p["text"]), tail))
 

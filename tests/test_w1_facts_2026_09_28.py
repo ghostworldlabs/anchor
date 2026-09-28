@@ -69,6 +69,12 @@ def test_a_done_target_is_never_the_next_part_and_counts_as_done():
     i = inits[0]
     assert i["next"]["id"] == "p3", "the done and the parked targets are closed although their wrappers say planned"
     assert i["done_count"] == 1
+    # every reader of a part reads the flags, not the wrapper's status (Grok W1): the light, the row, the board
+    import campaign_page as cp
+    p1, p2, p3 = i["parts"]
+    assert p1["done"] and p1["closed"] and p2["closed"] and not p2["done"] and not p3["closed"]
+    assert cp._part_state(p1) == "done" and cp._part_state(p2) == "parked"
+    assert hsp.initiative_light(dict(i, parts=[p1, p2])) == "idle", "a done and a parked target leave nothing open"
     # an unavailable target is broken: named, never next
     resolved["p3"] = {"kind": "step", "name": "MBA Teaching AI", "what": "", "state": "", "target_status": "", "href": "", "broken": True, "gap": "no step"}
     assert hsp.campaign_initiatives(steps, resolved)[0]["next"] is None
@@ -106,14 +112,18 @@ def test_the_cards_next_in_the_plan_reads_the_one_rule(tmp_path):
     names = re.findall(r'<div class="cp-step">([^<]*)', block.group(0))
     assert names[0].startswith("Lecture 4") and names[1].startswith("Lecture 6") and len(names) == 2, names
     assert "Lecture 3" not in block.group(0) and "Lecture 5" not in block.group(0), "before the focus and parked: not in the horizon"
-    # no focus and several actives: the reason, never a guess
+    # the cockpit renders the SAME list from the map (one horizon, computed once — Grok W1)
+    m = campaign.read_map(str(d))
+    assert [s["id"] for s in m["next_in_plan"]] == ["lec4", "lec6"]
+    # no focus and several actives: an empty horizon on his surfaces — never a guess, never the steward's reason
     _record(d, "approve", [{"id": "a", "name": "A", "status": "active"}, {"id": "b", "name": "B", "status": "active"}])
     html = card.next_html(str(d), PID)
-    assert "2 steps are active" in html and 'class="cp-step">' not in html
+    assert 'class="cp-step">' not in html and "cp-plan" not in html and "must pin" not in html
+    assert campaign.read_map(str(d))["next_in_plan"] == []
 
 
-def test_the_javascript_mirror_carries_the_same_rule():
+def test_the_cockpit_reads_the_maps_horizon_and_computes_none_of_its_own():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
-    assert "function nextInPlan(" in src and "_lastMap.heartbeat" in src
+    assert "_lastMap.next_in_plan" in src
+    assert "function nextInPlan(" not in src, "one selector, on the server"
     assert 'open.findIndex(st => st.status === "active")' not in src, "the array-order guess is gone from the cockpit"
-    assert '"done", "parked", "cancelled", "dropped"' in src

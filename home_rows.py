@@ -95,10 +95,26 @@ def project_facts(entry, today=None):
         dated.sort(key=lambda x: (x["due"], x["name"]))
         out["dated"] = dated
         out["nearest_due"] = dated[0]["due"] if dated else ""
+        # W2 (2026-09-28): what closed lately — status flips to done in the last three days, by the receipt's own
+        # date (the head's "since you last opened", gated on his last page open)
+        names_by_id = {str(s.get("id")): str(s.get("name") or s.get("id") or "") for s in rm.get("roadmap_projection") or [] if isinstance(s, dict)}
+        recent = []
+        for ev in rm.get("roadmap_events") or []:
+            if not isinstance(ev, dict) or ev.get("kind") != "status_flip" or str(ev.get("to") or "") != "done":
+                continue
+            when = _iso(str(((ev.get("receipt") or {}) if isinstance(ev.get("receipt"), dict) else {}).get("when") or ev.get("at") or "")[:10])
+            if when is None or (today - when).days > 3:
+                continue
+            recent.append({"step_id": str(ev.get("step_id") or ""), "name": names_by_id.get(str(ev.get("step_id")), str(ev.get("step_id") or "")),
+                           "when": when.isoformat(), "project_name": name})
+        out["closed_recent"] = recent
+    # W2 (2026-09-28): the age of the wait — from the record, never the strip's last touch: the earliest instrument
+    # that set the current wait, else the status summary's own time when it carries it; None when unknown
+    out["wait_age_days"] = _wait_age_days(root, out["needs_you"], strip, summ, sfile, today) if out["needs_you"] else None
     # W1 of the steward revision (2026-09-28): EVERY effort's wait, not only the effort touched last — Grok's live
     # replay (2026-09-27) showed alternating touches hiding the second MBA effort's review from the home. The card
     # keeps the shown effort for its line; the other efforts' waits ride beside it, each opening its own record.
-    out["efforts"] = _effort_waits(folder, rel)
+    out["efforts"], out["efforts_gap"] = _effort_waits(folder, rel)
     out["other_waits"] = [x for x in out["efforts"] if x["needs_you"] and x["rel"] != rel]
     if not out["needs_you"] and out["other_waits"]:
         first = out["other_waits"][0]
@@ -107,30 +123,64 @@ def project_facts(entry, today=None):
     return out
 
 
+def _wait_age_days(root, wait, strip, summ, sfile, today):
+    """Days the current wait has stood, from the record: the ``as_of`` of the earliest instrument in the latest run
+    that carries this wait text; else the status summary's ``at`` when its plan carries it; else None (no number
+    without a reader — never a guess from the strip's last touch)."""
+    try:
+        w = " ".join(str(wait or "").split()).lower()
+        since = None
+        ins = strip.get("instruments") if isinstance(strip, dict) else None
+        if isinstance(ins, list):
+            for i in reversed(ins):
+                if not isinstance(i, dict) or "human_wait" not in i:
+                    continue
+                if " ".join(str(i.get("human_wait") or "").split()).lower() == w:
+                    since = _iso(i.get("as_of")) or since
+                    continue
+                break
+        if since is None and isinstance(summ, dict):
+            # the status summary is rewritten every ten minutes, so its own `at` is the strip's last touch in
+            # another form — only a `waiting_since` the composer stamps from the decision's time counts
+            plan = summ.get("plan") if isinstance(summ.get("plan"), dict) else {}
+            if " ".join(str(plan.get("waiting_on_you") or "").split()).lower() == w and plan.get("waiting_since"):
+                since = _iso(str(plan.get("waiting_since") or "")[:10])
+        if since is None:
+            return None
+        return max(0, (today - since).days)
+    except Exception:
+        return None
+
+
 def _effort_waits(folder, shown_rel=""):
     """Every steward effort of a project (the cockpit's own discovery: the root with a Face, plus one level of
     subfolders with their own) with its wait — the strip's human wait, else the last status's "waiting on you" —
-    as ``[{rel, name, needs_you, shown}]`` in the cockpit's order. Read-only; never raises; ``[]`` without a record."""
+    as ``([{rel, name, needs_you, shown}], gap)`` in the cockpit's order. Read-only; never raises. A failure is
+    never a silent empty list (Grok W1: that would recreate the hidden second effort): the gap names it and the
+    card shows it."""
     try:
         from steward_cockpit.steward_campaign import discover_efforts
         efforts = discover_efforts(str(folder)) or []
-    except Exception:
-        return []
-    out = []
+    except Exception as e:
+        return [], "the project's efforts could not be listed: %s" % (type(e).__name__)
+    out, gap = [], ""
     for e in efforts:
-        rel = str((e or {}).get("rel") or "")
-        root = Path(folder) / rel if rel else Path(folder)
-        wait = ""
-        strip = _read_json(root / "strip.json")
-        if isinstance(strip, dict):
-            wait = _real_wait(strip.get("human_wait"))
-        if not wait:
-            summ = _read_json(root / ".ecgberht" / "status-summary.json")
-            plan = summ.get("plan") if isinstance(summ, dict) and isinstance(summ.get("plan"), dict) else {}
-            wait = _real_wait(plan.get("waiting_on_you"))
-        out.append({"rel": rel, "name": str((e or {}).get("name") or rel or "root"), "needs_you": wait,
-                    "shown": rel == str(shown_rel or "")})
-    return out
+        try:
+            rel = str((e or {}).get("rel") or "")
+            root = Path(folder) / rel if rel else Path(folder)
+            wait = ""
+            strip = _read_json(root / "strip.json")
+            if isinstance(strip, dict):
+                wait = _real_wait(strip.get("human_wait"))
+            if not wait:
+                summ = _read_json(root / ".ecgberht" / "status-summary.json")
+                plan = summ.get("plan") if isinstance(summ, dict) and isinstance(summ.get("plan"), dict) else {}
+                wait = _real_wait(plan.get("waiting_on_you"))
+            out.append({"rel": rel, "name": str((e or {}).get("name") or rel or "root"), "needs_you": wait,
+                        "shown": rel == str(shown_rel or "")})
+        except Exception as ex:
+            gap = "%s could not be read: %s" % (str((e or {}).get("name") or "an effort"), type(ex).__name__)
+    return out, gap
 
 
 def _real_wait(text):

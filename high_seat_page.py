@@ -75,10 +75,13 @@ def campaign_initiatives(steps, resolved=None):
                 })
         # W1 (2026-09-28): a referenced part is closed when its RESOLVED target is — done, cancelled, dropped or
         # parked — not only when the wrapper's own status says so (Grok's live replay, 2026-09-27: a done target
-        # stayed the open "next" part while its wrapper was planned). An unavailable target is broken: named, never next.
-        def _closed(p):
-            return p["status"] in ("done", "parked") or p["target_status"] in ("done", "cancelled", "dropped", "parked")
-        open_parts = [p for p in parts if not _closed(p) and not p["broken"]]
+        # stayed the open "next" part while its wrapper was planned). An unavailable target is broken: named, never
+        # next. Every reader of a part (the light, the rows, the board's chips and ticks) reads these two flags,
+        # never the wrapper's status alone (Grok W1).
+        for p in parts:
+            p["done"] = p["status"] == "done" or p["target_status"] == "done"
+            p["closed"] = p["status"] in ("done", "parked") or p["target_status"] in ("done", "cancelled", "dropped", "parked")
+        open_parts = [p for p in parts if not p["closed"] and not p["broken"]]
         dates = sorted(p["date"] for p in open_parts if p["date"])
         out.append({
             "id": sid, "name": s.get("name") or sid, "tier": int(s["tier"]) if s.get("tier") in (1, 2, 3) else None,
@@ -86,7 +89,7 @@ def campaign_initiatives(steps, resolved=None):
             "done_when": s.get("done_when") or "", "status": s.get("status") or "",
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
-            "done_count": sum(1 for p in parts if p["status"] == "done" or p["target_status"] == "done"),
+            "done_count": sum(1 for p in parts if p["done"]),
         })
     out.sort(key=lambda i: (i["tier"] or 9, i["order"], i["name"]))   # an untiered initiative sorts last, its tier shown as missing
     for n, i in enumerate(out, 1):
@@ -106,7 +109,7 @@ def initiative_light(i, working=None):
     working = working or set()
     if i.get("needs"):
         return "needs"
-    open_parts = [p for p in i.get("parts") or () if p.get("status") not in ("done", "parked") and not p.get("broken")]
+    open_parts = [p for p in i.get("parts") or () if not p.get("closed", p.get("status") in ("done", "parked")) and not p.get("broken")]
     if any(p.get("pid") and p["pid"] in working for p in open_parts):
         return "working"
     if any(str(p.get("state") or "").startswith("waiting") or p.get("status") == "waiting" for p in open_parts):
@@ -322,7 +325,7 @@ def _campaign_tile(ctx):
             return (
                 '<div class="ptr%s"><span class="pt-kind %s">%s</span><span class="pt-what">%s%s</span>'
                 '<span class="pt-state%s">%s</span><span class="pt-date%s">%s</span>%s</div>' % (
-                    " pdone" if p["status"] == "done" else "", esc(p["kind"]), esc(p["kind"]), esc(p["text"]),
+                    " pdone" if p.get("done", p["status"] == "done") else "", esc(p["kind"]), esc(p["kind"]), esc(p["text"]),
                     (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p["target"] and p["kind"] != "task" else "",
                     crit, esc(state), " none" if not p["date"] else (" soon" if date.startswith(("due today", "overdue")) else ""), esc(date),
                     (' <a class="pt-open" href="%s" target="_blank" rel="noopener">open the cockpit</a>' % esc(p["href"])) if p["href"] else ""))
@@ -415,9 +418,13 @@ def _card(e, f, cls):
     lead_x = next((x for x in other_waits if str(x.get("rel") or "") == promoted), None) if (wait and promoted) else None
     if lead_x is not None:
         line = _eff_line(lead_x)
-        more_next = '<div class="t-next"><span class="k">Next</span>%s</div>' % nxt
+        # the Next line is the SHOWN effort's, named, so a promoted wait never reads as that effort's next (Grok W1)
+        more_next = '<div class="t-next"><span class="k">Next &middot; %s</span>%s</div>' % (rel or "root", nxt)
     elif wait:
-        line = '<div class="t-line wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(wait)
+        # W2 (2026-09-28): the age of the wait, from the record (home_rows._wait_age_days) — nothing when unknown
+        age = f.get("wait_age_days")
+        age_s = (' <span class="t-age">&middot; %d day%s</span>' % (int(age), "" if int(age) == 1 else "s")) if isinstance(age, (int, float)) and age >= 1 else ""
+        line = '<div class="t-line wait"><span class="mk">&#9873; Needs you:</span>%s%s</div>' % (esc(wait), age_s)
         more_next = '<div class="t-next"><span class="k">Next</span>%s</div>' % nxt
     else:
         line = '<div class="t-line"><span class="k">Next</span>%s</div>' % nxt
@@ -426,6 +433,8 @@ def _card(e, f, cls):
         if x is lead_x:
             continue
         line += _eff_line(x).replace('class="t-line wait"', 'class="t-line wait other"', 1)
+    if f.get("efforts_gap"):
+        line += '<div class="t-line dim">&#9888; %s</div>' % esc(f["efforts_gap"])   # never a silent empty list (Grok W1)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
@@ -533,9 +542,24 @@ def _seed_panel(ctx):
     return '<section class="seedpanel" id="seedPanel"><h4>Seeds &middot; %d</h4>%s%s</section>' % (len(rows), body, foot)
 
 
+def _head_li(ctx):
+    """W2 (2026-09-28): the head — ONE act as the lead: the sentence, then the act that opens its record (the Status
+    part on that project's effort), marked when it is the exception; the rest of the brief folds under it."""
+    bl = list(ctx.get("bullets") or [])
+    head = ctx.get("head") if isinstance(ctx.get("head"), dict) else None
+    lead = esc(bl[0]) if bl else "Nothing is waiting on you."
+    cls = "lead exc" if head and head.get("kind") == "exception" else "lead"
+    act = ""
+    if head and head.get("pid"):
+        act = ' <button class="h-open" data-part="status" data-pid="%s" data-dir="%s">open</button>' % (esc(head["pid"]), esc(head.get("dir") or ""))
+    rest = "".join('<li>%s</li>' % esc(b) for b in bl[1:])
+    more = ('<details class="brief-more"><summary>more</summary><ul>%s</ul></details>' % rest) if rest else ""
+    return '<li class="%s">%s%s</li>%s' % (cls, lead, act, ('<li class="fold">%s</li>' % more) if more else "")
+
+
 def _panel(ctx):
     st = ctx["steward"]
-    bullets = "".join('<li%s>%s</li>' % (' class="lead"' if k == 0 else "", esc(b)) for k, b in enumerate(ctx.get("bullets") or []))
+    bullets = _head_li(ctx)
     rows = ctx.get("rows") or []
     facts = ctx["facts"]
 

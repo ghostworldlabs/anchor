@@ -40,26 +40,48 @@ def note_open(project_id, now=None, folder=""):
     Atomic write under the shared lock; never raises."""
     pid = str(project_id or "").strip()
     if not pid:
-        return (None, None)
+        return (None, None, "")
     now = float(now if now is not None else time.time())
     try:
         with _paths.WRITE_LOCK:
             prev = read_presence()
-            p = _presence_path()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(p.name + ".tmp")
-            tmp.write_text(json.dumps({"project_id": pid, "at": now, "folder": str(folder or "")}), encoding="utf-8")
-            os.replace(str(tmp), str(p))
+            cur = dict(prev)                     # the page-open time and anything else recorded stay
+            cur.update({"project_id": pid, "at": now, "folder": str(folder or "")})
+            _write(cur)
     except Exception:
-        return (None, None)
+        return (None, None, "")
     prev_pid = str(prev.get("project_id") or "").strip()
     if prev_pid and prev_pid != pid:
         try:
             prev_at = float(prev.get("at"))
         except (TypeError, ValueError):
             prev_at = now
-        return (prev_pid, prev_at)
-    return (None, None)
+        return (prev_pid, prev_at, str(prev.get("folder") or ""))
+    return (None, None, "")
+
+
+def _write(cur: dict) -> None:
+    """Atomic write of the presence file — the caller holds the lock."""
+    p = _presence_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(cur), encoding="utf-8")
+    os.replace(str(tmp), str(p))
+
+
+def note_page_open(now=None):
+    """He opened the High Seat (the ``page_open`` boundary). Records ``high_seat_at`` beside the project presence and
+    returns the PREVIOUS page-open time (epoch) or None — the reader of "since you last opened". Never raises."""
+    now = float(now if now is not None else time.time())
+    try:
+        with _paths.WRITE_LOCK:
+            cur = read_presence()
+            prev = cur.get("high_seat_at")
+            cur["high_seat_at"] = now
+            _write(cur)
+        return float(prev) if prev is not None else None
+    except Exception:
+        return None
 
 
 def iso(ts: float) -> str:
@@ -69,14 +91,15 @@ def iso(ts: float) -> str:
 def on_open(project_id, leave_fn, now=None, background=True, folder=""):
     """The one call the routes make: note the open; on a switch, run ``leave_fn(previous_pid, left_at_iso)`` —
     in a daemon thread by default so a page never waits on the engine. Returns the previous pid or None."""
-    prev, prev_at = note_open(project_id, now=now, folder=folder)
+    prev, prev_at, prev_folder = note_open(project_id, now=now, folder=folder)
     if not prev or leave_fn is None:
         return prev
     left_at = iso(now if now is not None else time.time())
 
     def run():
         try:
-            leave_fn(prev, left_at)
+            # the record he HAD open (stored at his open), never a recompute at leave time (Grok W0)
+            leave_fn(prev, left_at, prev_folder)
         except Exception:
             pass
     if background:
@@ -93,17 +116,30 @@ def _same_folder(a, b) -> bool:
         return False
 
 
-def leave_if_still_here(folder, leave_fn, now=None):
-    """The FALLBACK (the cockpit engine going quiet): when presence still says he is on this project's folder —
-    he never switched — record the leave now. Returns True when a leave was recorded. Never raises."""
+def leave_if_still_here(record_dir, leave_fn, now=None):
+    """The FALLBACK (the cockpit engine going quiet): when presence still says he is on THIS record — the stored
+    record directory equals the engine's, he never switched — record ONE leave now, and clear the stored directory
+    when the engine says ok so a second quiet spell cannot repeat it (Grok W0). Returns True when a leave was
+    recorded. Never raises."""
     cur = read_presence()
-    if not cur or not _same_folder(cur.get("folder"), folder):
+    if not cur or not _same_folder(cur.get("folder"), record_dir):
         return False
     try:
-        leave_fn(str(cur.get("project_id") or ""), iso(now if now is not None else time.time()))
-        return True
+        res = leave_fn(str(cur.get("project_id") or ""), iso(now if now is not None else time.time()))
     except Exception:
         return False
+    if isinstance(res, dict) and res.get("ok") is False:
+        return False
+    try:
+        with _paths.WRITE_LOCK:
+            cur = read_presence()
+            if _same_folder(cur.get("folder"), record_dir):
+                cur["folder"] = ""
+                cur["left_at"] = iso(now if now is not None else time.time())
+                _write(cur)
+    except Exception:
+        pass
+    return True
 
 
 def run_leave(record_dir, left_at_iso, timeout=20.0):

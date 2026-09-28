@@ -105,8 +105,9 @@
     return t ? login(t).then(function () { return true; }) : Promise.resolve(false);
   }
   function notLoggedIn() { return '<div class="cp-quiet cp-auth">' + NOT_LOGGED_IN + ' <button class="mini" data-login>paste the token</button></div>'; }
-  function fetchPart(pid, part, dir, retried) {
-    return fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(dir || ''), { headers: headers() })
+  function fetchPart(pid, part, dir, retried, open) {
+    // W0 (2026-09-28): `open=1` only when a card's BODY opens — the presence writer's signal; a balloon's glance sends none
+    return fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(dir || '') + (open ? '&open=1' : ''), { headers: headers() })
       .then(function (r) {
         if (r.status === 401 || r.status === 403) {
           if (retried || askedOnce) return notLoggedIn();
@@ -118,13 +119,17 @@
   }
   function openPart(card, pid, part, btn) {
     var body = $('.t-body', card);
-    var same = card.getAttribute('data-open') === part;
-    $$('.t-acts button', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
+    // W1/W2 (2026-09-28): a button may name ITS effort (another effort's wait; the head's pick) — its data-dir wins,
+    // and the open state is keyed by part AND effort so the same part on another effort opens rather than closes
+    var dir = (btn && btn.getAttribute && btn.getAttribute('data-dir') !== null) ? btn.getAttribute('data-dir') : (card.getAttribute('data-dir') || '');
+    var key = part + '|' + dir;
+    var same = card.getAttribute('data-open') === key;
+    $$('.t-acts button, .t-eff-open', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
     if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
-    card.setAttribute('data-open', part); card.classList.add('open');
+    card.setAttribute('data-open', key); card.classList.add('open');
     body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
-    fetchPart(pid, part, card.getAttribute('data-dir') || '')
-      .then(function (html) { if (card.getAttribute('data-open') === part) body.innerHTML = html; })
+    fetchPart(pid, part, dir, false, true)
+      .then(function (html) { if (card.getAttribute('data-open') === key) body.innerHTML = html; })
       .catch(function () { body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
   }
   $$('.tile[data-tile]').forEach(function (card) {
@@ -134,8 +139,18 @@
     });
     card.addEventListener('click', function (e) {
       if (e.target.closest('a, button, .t-body')) return;
-      openPart(card, pid, 'status', $('[data-part="status"]', card));
+      openPart(card, pid, 'status', $('.t-acts [data-part="status"]', card));   // the acts' Status, never an effort's open (Grok W1)
     });
+  });
+  // W2 (2026-09-28): the head's one act — "open" on the brief's lead opens THAT project's card on THAT effort
+  document.addEventListener('click', function (e) {
+    var h = e.target.closest('.h-open'); if (!h) return;
+    e.preventDefault(); e.stopPropagation();
+    var pid = h.getAttribute('data-pid') || '', card = document.getElementById('card-' + pid);
+    if (!card) { window.open('/project/' + encodeURIComponent(pid), '_blank', 'noopener'); return; }
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    card.removeAttribute('data-open');
+    openPart(card, pid, h.getAttribute('data-part') || 'status', h);
   });
   // "paste the token" on a card or a balloon that answered 401: ask again, then read that part again
   document.addEventListener('click', function (e) {
@@ -151,10 +166,12 @@
           .catch(function () { bb.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
         return;
       }
-      var card = b.closest('.tile'), part = card && card.getAttribute('data-open');
-      if (!card || !part) return;
+      var card = b.closest('.tile'), key = card && card.getAttribute('data-open');
+      if (!card || !key) return;
+      var part = key.split('|')[0], odir = key.indexOf('|') >= 0 ? key.slice(key.indexOf('|') + 1) : null;
       card.removeAttribute('data-open');
-      openPart(card, card.getAttribute('data-tile'), part, $('[data-part="' + part + '"]', card));
+      var again = odir !== null ? $('[data-part="' + part + '"][data-dir="' + odir.replace(/"/g, '') + '"]', card) : null;
+      openPart(card, card.getAttribute('data-tile'), part, again || $('.t-acts [data-part="' + part + '"]', card));
     });
   });
 
