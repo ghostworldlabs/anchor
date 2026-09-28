@@ -370,17 +370,24 @@ def _projects_tile(ctx):
     groups = ctx.get("groups") or {}
     n = sum(len(v) for v in groups.values())
     quiet_n = int(ctx.get("quiet_n") or 0)
+    # R11 (2026-09-28, John: "I do not want to go to the old Anchor Dashboard … just the button that links to the
+    # folder creation GUI … with an option to place it in a folder"): ONE control on the tile's own line opens the
+    # old dashboard's dialog ALONE in a small window; the folders here feed the composer's confirm card
+    named = [g for g in groups.keys() if g and g != "Ungrouped"]
+    group_opts = "".join('<option value="%s">%s</option>' % (esc(g), esc(g)) for g in named) + '<option value="">Ungrouped</option>'
     return (
         '<section class="ptile" id="ptile"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
-        '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s%s</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
-        '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4><div class="addrow">'
-        '<input id="apName" type="text" placeholder="Project name" autocomplete="off">'
-        '<a class="mk" id="apCreate" href="/dashboard" target="_blank" rel="noopener">Create on the dashboard</a></div>'
-        '<div class="addhint" id="apHint">A new project is still made and confirmed on the old dashboard; this page shows it on the next look.</div></div>'
+        '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s%s</span><span class="sp"></span>'
+        '<span class="tog np" id="apNew" role="button" title="the folder-creation dialog, in a small window">&#65291; New project</span>'
+        '<span class="tog" id="ptileTog">Show all</span></button>'
+        '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4>'
+        '<div class="addhint" id="apHint">Say it to the steward above (&ldquo;start a new project called &lt;name&gt; at &lt;folder&gt;&rdquo;) and confirm the card, '
+        'or press New project: the dialog opens in a small window and puts it in a folder of your choosing.</div>'
+        '<select id="apGroups" hidden>%s</select></div>'
         '<div id="folders">%s</div></div></section>'
     ) % (n, "" if n == 1 else "s", len(groups), "" if len(groups) == 1 else "s",
          (" &middot; <b>%d</b> with no steward record yet" % quiet_n) if quiet_n else "",
-         ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
+         group_opts, ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
 
 
 _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))

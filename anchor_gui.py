@@ -7985,6 +7985,38 @@ def render_high_seat_page() -> str:
                 % html_lib.escape("%s: %s" % (type(e).__name__, e)))
 
 
+def _np_group_options() -> str:
+    """The dashboard's folders (groups) as the new-project dialog's Folder choices (R11, John 2026-09-28: a project
+    is placed in a folder at creation, never only in Ungrouped): the named folders first, then Ungrouped, then
+    "New folder…" which the dialog prompts for."""
+    try:
+        names = [g for g in _rnd.group_by_group().keys() if g and g != _rnd.UNGROUPED_LABEL]
+    except Exception:
+        names = []
+    opts = "".join('<option value="%s">%s</option>' % (html_lib.escape(g, quote=True), html_lib.escape(g)) for g in names)
+    return opts + '<option value="">Ungrouped</option><option value="__new__">&#65291; New folder&hellip;</option>'
+
+
+def _np_place(res, group):
+    """After a creation: put the new project in the folder he chose (``set_group``); the entry says so."""
+    group = str(group or "").strip()
+    if not group or not isinstance(res, dict):
+        return res
+    entry = res.get("entry") if isinstance(res.get("entry"), dict) else None
+    if not entry or not entry.get("id"):
+        return res
+    try:
+        placed = _rnd.set_group(str(entry["id"]), group)
+        if isinstance(placed, dict):
+            res["entry"] = placed
+        else:
+            entry["group"] = group
+        res["group"] = group
+    except Exception:
+        res["group_error"] = "the project was made but could not be placed in %s" % group
+    return res
+
+
 # ANCHOR[rearch]: GENERATE_HTML — structural anchor (W1); keep UNIQUE, keep
 # directly above the def. The anchor-freshness gate (tools/anchors.py)
 # re-locates this before every extraction wave — no line numbers anywhere.
@@ -8009,6 +8041,8 @@ def generate_html(projects, tasks, inbox):
     # W2 contract shim: the versioned window.ANCHOR_BOOT bootstrap (build id +
     # auth flag) — a JSON literal, never the token value itself.
     anchor_boot_js = json.dumps(anchor_boot())
+    # R11 (2026-09-28): the new-project dialog's Folder choices
+    np_group_options = _np_group_options()
 
     # ── Health banner (W9 / SC7) ──
     # Clickable → Doctor with 1:1 issue seed (issueId, message, component,
@@ -9111,6 +9145,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     z-index: 200; align-items: center; justify-content: center;
 }}
 .modal-overlay.open {{ display: flex; }}
+/* R11 (2026-09-28): opened from the High Seat as a small window — the dialog alone, nothing else of this page */
+body.only-new-project > *:not(#newProjectModal) {{ display: none !important; }}
+body.only-new-project #newProjectModal {{ background: var(--bg); align-items: flex-start; padding: 8px; }}
+body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; max-height: none; }}
 .modal {{
     background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
     padding: 24px; width: 500px; max-width: 90vw; max-height: 85vh; overflow-y: auto;
@@ -9736,6 +9774,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <option value="2" selected>P2 — Important</option>
       <option value="3">P3 — Normal</option>
     </select>
+    <label>Folder on the dashboard</label>
+    <select id="npGroup" onchange="npGroupChanged()">{np_group_options}</select>
     <!-- Create-new-folder mode -->
     <div id="npNewFolderFields">
       <label>Parent path</label>
@@ -10729,15 +10769,53 @@ async function createNewProject() {{
         const parent = document.getElementById('npParentPath').value.trim();
         if (!parent) {{ showToast('Parent path required'); return; }}
         body = {{mode: 'new_folder', name, priority, parent_path: parent,
-                 git_init: document.getElementById('npGitInit').checked}};
+                 git_init: document.getElementById('npGitInit').checked, group: npGroupValue()}};
     }} else {{
         const folder = document.getElementById('npFolderPath').value.trim();
         if (!folder) {{ showToast('No folder selected — browse to a folder and click “Select this folder”'); return; }}
-        body = {{mode: 'existing', name, priority, folder_path: folder}};
+        body = {{mode: 'existing', name, priority, folder_path: folder, group: npGroupValue()}};
     }}
+    if (_npPopup) {{ _npCreateInPopup(body); return; }}
     closeModal('newProjectModal');
     apiCall('/api/rnd/new_project', body);
 }}
+
+// R11 (2026-09-28, John: "an option to place it in a folder, not just Ungrouped"): the Folder choice — an existing
+// dashboard folder, Ungrouped, or a new folder named here
+let _npPopup = false;
+function npGroupValue() {{ const s = document.getElementById('npGroup'); return s ? (s.value === '__new__' ? '' : s.value) : ''; }}
+function npGroupChanged() {{
+    const s = document.getElementById('npGroup'); if (!s || s.value !== '__new__') return;
+    const name = (window.prompt('New folder name:', '') || '').trim();
+    if (!name) {{ s.value = ''; return; }}
+    const o = document.createElement('option'); o.value = name; o.textContent = name;
+    s.insertBefore(o, s.firstChild); s.value = name;
+}}
+// R11: opened from the High Seat as a small window — create, tell the opener, close; no reload of this page
+async function _npCreateInPopup(body) {{
+    const headers = {{'Content-Type': 'application/json'}};
+    const tok = _anchorToken(); if (tok) headers['X-Anchor-Token'] = tok;
+    const bid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || ''; if (bid) headers['X-Anchor-Build'] = bid;
+    let data = null;
+    try {{ const r = await fetch('/api/rnd/new_project', {{ method: 'POST', headers: headers, body: JSON.stringify(body) }}); data = await r.json(); }}
+    catch (e) {{ showToast('Connection error: ' + e.message); return; }}
+    if (!data || !data.ok) {{ showToast('Error: ' + ((data && (data.error || data.message)) || 'unknown')); return; }}
+    try {{ if (window.opener) window.opener.postMessage({{ anchor: 'project-created', entry: data.entry || null, message: data.message || '' }}, location.origin); }} catch (e) {{}}
+    showToast(data.message || 'Created.');
+    setTimeout(function () {{ window.close(); }}, 400);
+}}
+// R11: ?new=1 opens the dialog at once; with &only=1 (or an opener) this page shows the dialog and nothing else
+window.addEventListener('DOMContentLoaded', function () {{
+    const q = new URLSearchParams(location.search);
+    const m = /new-project=([^&]*)/.exec(location.hash || '');
+    if (!q.has('new') && !m) return;
+    _npPopup = q.get('only') === '1' || !!window.opener;
+    const modal = document.getElementById('newProjectModal');
+    if (_npPopup && modal) {{ document.body.appendChild(modal); document.body.classList.add('only-new-project'); }}
+    openNewProject();
+    const nm = q.get('name') || (m ? decodeURIComponent(m[1]) : '');
+    if (nm) {{ document.getElementById('npName').value = nm; npNameEdited(); npUpdatePreview(); }}
+}});
 
 // 2026-05-12: stopServer() removed. The dashboard no longer kills its own
 // server; that responsibility now belongs to the NSSM "anchor" service
@@ -11852,6 +11930,7 @@ def handle_new_project(handler, path, body):
     mode = body.get("mode", "existing")
     name = body.get("name", "")
     priority = body.get("priority", 2)
+    group = str(body.get("group") or "").strip()     # R11 (2026-09-28): the dashboard folder to place it in
     # Same name + same folder, already registered → hand back the EXISTING
     # project instead of minting a twin (2026-08-26: a slow first registration
     # left the page unreloaded, so a second click produced a duplicate that
@@ -11885,11 +11964,11 @@ def handle_new_project(handler, path, body):
         if folder.exists():
             res = select_existing_project(name or folder.name, str(folder),
                                           priority=priority)
-            handler._send_json({"ok": True, "path_existed": True, **res})
+            handler._send_json({"ok": True, "path_existed": True, **_np_place(res, group)})
         else:
             res = create_new_folder_project(
                 name or folder.name, str(folder.parent), priority=priority)
-            handler._send_json({"ok": True, "path_existed": False, **res})
+            handler._send_json({"ok": True, "path_existed": False, **_np_place(res, group)})
         return
     if mode == "new_folder":
         res = create_new_folder_project(
@@ -11901,7 +11980,7 @@ def handle_new_project(handler, path, body):
         res = select_existing_project(
             name, body.get("folder_path", ""), priority=priority,
         )
-    handler._send_json({"ok": True, **res})
+    handler._send_json({"ok": True, **_np_place(res, group)})
 
 
 def handle_open_project(handler, path, body):

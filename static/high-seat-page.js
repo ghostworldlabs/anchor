@@ -259,13 +259,49 @@
     });
   });
 
-  // Add a project: nothing is written from this page — the old dashboard makes and confirms a project
-  var apCreate = $('#apCreate');
-  if (apCreate) apCreate.addEventListener('click', function (e) {
-    e.preventDefault();
-    var name = ($('#apName').value || '').trim();
-    openWin('/dashboard' + (name ? ('#new-project=' + encodeURIComponent(name)) : ''));
+  // R11 (2026-09-28): New project — the old dashboard's folder-creation dialog ALONE, in a small window; it reports
+  // back here when the project is made and this page reloads to show it in its folder
+  var apNew = $('#apNew');
+  if (apNew) apNew.addEventListener('click', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    var w = null;
+    try { w = window.open('/dashboard?new=1&only=1', 'anchor-new-project', 'width=640,height=800,resizable=yes,scrollbars=yes'); } catch (err) { w = null; }
+    if (!w) receipt('The browser blocked the small window — allow popups and try again.', true);
   });
+  window.addEventListener('message', function (ev) {
+    if (ev.origin !== location.origin || !ev.data || ev.data.anchor !== 'project-created') return;
+    var en = ev.data.entry || {};
+    var text = 'Project \u201c' + (en.name || '?') + '\u201d created' + (en.group ? ' in the folder ' + en.group : '') + '.';
+    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null })); } catch (e) {}
+    location.reload();
+  });
+  // R11: the steward's "start a new project" comes back as a project_create act — a confirm card under the
+  // composer with the folder to put it in; nothing is created until Create it
+  function projectCard(pc, sayText) {
+    var old = $('#pcCard'); if (old) old.remove();
+    var folder = String(pc.folder || ''), name = pc.name || folder.replace(/[\\\/]+$/, '').split(/[\\\/]/).pop();
+    var groups = $('#apGroups'); var opts = groups ? groups.innerHTML : '<option value="">Ungrouped</option>';
+    var card = document.createElement('div'); card.className = 'pc-card'; card.id = 'pcCard';
+    card.innerHTML = '<div class="pc-q">Create <b></b> at <code></code>?</div>'
+      + '<div class="pc-row"><label>Folder <select class="pc-group">' + opts + '</select></label>'
+      + '<button class="mini pc-go">Create it</button><button class="mini pc-no">not now</button></div>';
+    card.querySelector('b').textContent = name; card.querySelector('code').textContent = folder;
+    var sel = card.querySelector('.pc-group'); if (pc.group) { sel.value = pc.group; }
+    var row = $('.comp-row'); if (row && row.parentNode) row.parentNode.insertBefore(card, row.nextSibling); else document.body.appendChild(card);
+    card.querySelector('.pc-no').addEventListener('click', function () { card.remove(); });
+    card.querySelector('.pc-go').addEventListener('click', function () {
+      var go = card.querySelector('.pc-go'); go.disabled = true; go.textContent = 'Creating\u2026';
+      fetch('/api/rnd/new_project', { method: 'POST', headers: headers(), body: JSON.stringify({ mode: 'auto', name: name, folder_path: folder, group: sel.value || '' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) { receipt('Not created: ' + ((d && (d.error || d.message)) || 'unknown'), true); go.disabled = false; go.textContent = 'Create it'; return; }
+          var text = d.message || ('Project \u201c' + name + '\u201d created' + (sel.value ? ' in the folder ' + sel.value : '') + '.');
+          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null })); } catch (e) {}
+          location.reload();
+        })
+        .catch(function () { receipt('That did not go through \u2014 nothing was created.', true); go.disabled = false; go.textContent = 'Create it'; });
+    });
+  }
 
   // the composer: the steward's say route (the same one the old home used)
   var say = $('#say'), send = $('#sendBtn');
@@ -295,7 +331,7 @@
           try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
           setTimeout(function () { location.reload(); }, 900); return;
         }
-        if (j.project_create && j.project_create.folder) receipt((j.say ? j.say + ' ' : '') + 'A project card is ready: ' + j.project_create.folder + ' — confirm it on the old dashboard.');
+        if (j.project_create && j.project_create.folder) projectCard(j.project_create, j.say);   // R11: the card is here, not on the old dashboard
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
   }
