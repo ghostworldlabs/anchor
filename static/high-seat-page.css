@@ -185,7 +185,10 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .addbox{border:1px solid var(--border);border-radius:8px;background:#11141c;padding:10px 11px;margin:9px 0 12px}
 .addbox h4{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-t);font-weight:700;margin-bottom:7px}
 .addrow{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
-.ptile-h .tog.np{margin-right:10px;color:var(--accent-t)}
+.ptile-line{display:flex;align-items:baseline}
+.ptile-line .ptile-h{flex:1;width:auto;min-width:0}
+.ptile-line .np{flex:none;margin-right:13px;font:inherit;font-size:11.5px;color:var(--accent-t);background:transparent;border:1px solid var(--border);border-radius:6px;padding:2px 9px;cursor:pointer}
+.ptile-line .np:hover{border-color:var(--accent)}
 .pc-card{margin-top:8px;border:1px solid var(--border);border-left:2px solid var(--accent);border-radius:6px;padding:8px 10px;background:var(--surface2);font-size:12px;color:var(--text-warm)}
 .pc-card .pc-row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
 .pc-card select{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:2px 6px;font:inherit;font-size:11.5px;margin-left:4px}

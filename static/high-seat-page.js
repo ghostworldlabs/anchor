@@ -33,7 +33,7 @@
     lastUndo = undo || null; var u = $('#undoBtn'); if (u) u.hidden = !undo;
     t.textContent = text; r.hidden = false; r.classList.toggle('bad', !!bad);
   }
-  try { var keptLine = sessionStorage.getItem('highseat_receipt'); if (keptLine) { var kl = JSON.parse(keptLine); receipt(kl.text, false, kl.undo); sessionStorage.removeItem('highseat_receipt'); } } catch (e) {}
+  try { var keptLine = sessionStorage.getItem('highseat_receipt'); if (keptLine) { var kl = JSON.parse(keptLine); receipt(kl.text, !!kl.bad, kl.undo); sessionStorage.removeItem('highseat_receipt'); } } catch (e) {}
   var undoBtn = $('#undoBtn');
   if (undoBtn) undoBtn.addEventListener('click', function () {
     if (!lastUndo) return;
@@ -271,13 +271,13 @@
   window.addEventListener('message', function (ev) {
     if (ev.origin !== location.origin || !ev.data || ev.data.anchor !== 'project-created') return;
     var en = ev.data.entry || {};
-    var text = 'Project \u201c' + (en.name || '?') + '\u201d created' + (en.group ? ' in the folder ' + en.group : '') + '.';
-    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null })); } catch (e) {}
+    var text = ev.data.message || ('Project \u201c' + (en.name || '?') + '\u201d created' + (en.group ? ' in the folder ' + en.group : '') + '.');
+    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null, bad: !!ev.data.group_error })); } catch (e) {}
     location.reload();
   });
   // R11: the steward's "start a new project" comes back as a project_create act — a confirm card under the
   // composer with the folder to put it in; nothing is created until Create it
-  function projectCard(pc, sayText) {
+  function projectCard(pc) {
     var old = $('#pcCard'); if (old) old.remove();
     var folder = String(pc.folder || ''), name = pc.name || folder.replace(/[\\\/]+$/, '').split(/[\\\/]/).pop();
     var groups = $('#apGroups'); var opts = groups ? groups.innerHTML : '<option value="">Ungrouped</option>';
@@ -286,7 +286,8 @@
       + '<div class="pc-row"><label>Folder <select class="pc-group">' + opts + '</select></label>'
       + '<button class="mini pc-go">Create it</button><button class="mini pc-no">not now</button></div>';
     card.querySelector('b').textContent = name; card.querySelector('code').textContent = folder;
-    var sel = card.querySelector('.pc-group'); if (pc.group) { sel.value = pc.group; }
+    var sel = card.querySelector('.pc-group');   // Ungrouped stays selected unless the act names a folder that exists
+    if (pc.group && Array.prototype.some.call(sel.options, function (o) { return o.value === pc.group; })) sel.value = pc.group;
     var row = $('.comp-row'); if (row && row.parentNode) row.parentNode.insertBefore(card, row.nextSibling); else document.body.appendChild(card);
     card.querySelector('.pc-no').addEventListener('click', function () { card.remove(); });
     card.querySelector('.pc-go').addEventListener('click', function () {
@@ -296,7 +297,7 @@
         .then(function (d) {
           if (!d || !d.ok) { receipt('Not created: ' + ((d && (d.error || d.message)) || 'unknown'), true); go.disabled = false; go.textContent = 'Create it'; return; }
           var text = d.message || ('Project \u201c' + name + '\u201d created' + (sel.value ? ' in the folder ' + sel.value : '') + '.');
-          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null })); } catch (e) {}
+          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null, bad: !!d.group_error })); } catch (e) {}
           location.reload();
         })
         .catch(function () { receipt('That did not go through \u2014 nothing was created.', true); go.disabled = false; go.textContent = 'Create it'; });
@@ -331,7 +332,7 @@
           try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
           setTimeout(function () { location.reload(); }, 900); return;
         }
-        if (j.project_create && j.project_create.folder) projectCard(j.project_create, j.say);   // R11: the card is here, not on the old dashboard
+        if (j.project_create && j.project_create.folder) projectCard(j.project_create);   // R11: the card is here, not on the old dashboard
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
   }

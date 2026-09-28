@@ -374,12 +374,12 @@ def _projects_tile(ctx):
     # folder creation GUI … with an option to place it in a folder"): ONE control on the tile's own line opens the
     # old dashboard's dialog ALONE in a small window; the folders here feed the composer's confirm card
     named = [g for g in groups.keys() if g and g != "Ungrouped"]
-    group_opts = "".join('<option value="%s">%s</option>' % (esc(g), esc(g)) for g in named) + '<option value="">Ungrouped</option>'
+    group_opts = "".join('<option value="%s">%s</option>' % (esc(g), esc(g)) for g in named) + '<option value="" selected>Ungrouped</option>'
     return (
-        '<section class="ptile" id="ptile"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
+        '<section class="ptile" id="ptile"><div class="ptile-line"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
         '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s%s</span><span class="sp"></span>'
-        '<span class="tog np" id="apNew" role="button" title="the folder-creation dialog, in a small window">&#65291; New project</span>'
         '<span class="tog" id="ptileTog">Show all</span></button>'
+        '<button type="button" class="tog np" id="apNew" title="the folder-creation dialog, in a small window">&#65291; New project</button></div>'
         '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4>'
         '<div class="addhint" id="apHint">Say it to the steward above (&ldquo;start a new project called &lt;name&gt; at &lt;folder&gt;&rdquo;) and confirm the card, '
         'or press New project: the dialog opens in a small window and puts it in a folder of your choosing.</div>'

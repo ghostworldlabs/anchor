@@ -7994,7 +7994,9 @@ def _np_group_options() -> str:
     except Exception:
         names = []
     opts = "".join('<option value="%s">%s</option>' % (html_lib.escape(g, quote=True), html_lib.escape(g)) for g in names)
-    return opts + '<option value="">Ungrouped</option><option value="__new__">&#65291; New folder&hellip;</option>'
+    # Ungrouped is SELECTED until he picks (Grok R11: an untouched Create must not file the project in whichever
+    # folder sorts first); the named folders stay listed first
+    return opts + '<option value="" selected>Ungrouped</option><option value="__new__">&#65291; New folder&hellip;</option>'
 
 
 def _np_place(res, group):
@@ -8005,6 +8007,7 @@ def _np_place(res, group):
     entry = res.get("entry") if isinstance(res.get("entry"), dict) else None
     if not entry or not entry.get("id"):
         return res
+    name = str(entry.get("name") or "the project")
     try:
         placed = _rnd.set_group(str(entry["id"]), group)
         if isinstance(placed, dict):
@@ -8012,8 +8015,11 @@ def _np_place(res, group):
         else:
             entry["group"] = group
         res["group"] = group
-    except Exception:
+        res["message"] = "Project \u201c%s\u201d created in the folder %s." % (name, group)
+    except Exception as exc:
+        # the creation stands; the failed placement is SAID in the sentence both surfaces show (Grok R11)
         res["group_error"] = "the project was made but could not be placed in %s" % group
+        res["message"] = "Project \u201c%s\u201d created, but it could not be placed in the folder %s (%s) \u2014 it sits in Ungrouped." % (name, group, type(exc).__name__)
     return res
 
 
@@ -9776,6 +9782,7 @@ body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; m
     </select>
     <label>Folder on the dashboard</label>
     <select id="npGroup" onchange="npGroupChanged()">{np_group_options}</select>
+    <input type="text" id="npNewGroup" placeholder="Name the new folder" style="display:none;margin-top:6px" />
     <!-- Create-new-folder mode -->
     <div id="npNewFolderFields">
       <label>Parent path</label>
@@ -9794,8 +9801,9 @@ body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; m
       <button type="button" class="btn btn-sm rnd-use-btn" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Use this folder</button>
       <div class="rnd-picker-selected empty" id="npSelected">No folder selected yet</div>
     </div>
+    <div id="npResult" style="display:none;margin-top:12px;font-size:12.5px;line-height:1.4"></div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeModal('newProjectModal')">Cancel</button>
+      <button class="btn btn-outline" onclick="npCancel()">Cancel</button>
       <button class="btn" onclick="createNewProject()">Create</button>
     </div>
   </div>
@@ -10775,6 +10783,9 @@ async function createNewProject() {{
         if (!folder) {{ showToast('No folder selected — browse to a folder and click “Select this folder”'); return; }}
         body = {{mode: 'existing', name, priority, folder_path: folder, group: npGroupValue()}};
     }}
+    if (document.getElementById('npGroup') && document.getElementById('npGroup').value === '__new__' && !body.group) {{
+        npSay('Name the new folder, or choose one.', true); return;
+    }}
     if (_npPopup) {{ _npCreateInPopup(body); return; }}
     closeModal('newProjectModal');
     apiCall('/api/rnd/new_project', body);
@@ -10783,33 +10794,46 @@ async function createNewProject() {{
 // R11 (2026-09-28, John: "an option to place it in a folder, not just Ungrouped"): the Folder choice — an existing
 // dashboard folder, Ungrouped, or a new folder named here
 let _npPopup = false;
-function npGroupValue() {{ const s = document.getElementById('npGroup'); return s ? (s.value === '__new__' ? '' : s.value) : ''; }}
-function npGroupChanged() {{
-    const s = document.getElementById('npGroup'); if (!s || s.value !== '__new__') return;
-    const name = (window.prompt('New folder name:', '') || '').trim();
-    if (!name) {{ s.value = ''; return; }}
-    const o = document.createElement('option'); o.value = name; o.textContent = name;
-    s.insertBefore(o, s.firstChild); s.value = name;
+function npGroupValue() {{
+    const s = document.getElementById('npGroup'); if (!s) return '';
+    if (s.value !== '__new__') return s.value;
+    const f = document.getElementById('npNewGroup'); return f ? f.value.trim() : '';
 }}
+// "New folder…" reveals a name field in this dialog (no second dialog on top of the select — Grok R11)
+function npGroupChanged() {{
+    const s = document.getElementById('npGroup'), f = document.getElementById('npNewGroup'); if (!s || !f) return;
+    f.style.display = (s.value === '__new__') ? 'block' : 'none';
+    if (s.value === '__new__') f.focus();
+}}
+function npSay(text, bad) {{
+    const r = document.getElementById('npResult'); if (!r) return;
+    r.textContent = text; r.style.display = 'block'; r.style.color = bad ? 'var(--red, #e07070)' : 'var(--text)';
+}}
+function npCancel() {{ if (_npPopup) {{ window.close(); return; }} closeModal('newProjectModal'); }}
 // R11: opened from the High Seat as a small window — create, tell the opener, close; no reload of this page
 async function _npCreateInPopup(body) {{
     const headers = {{'Content-Type': 'application/json'}};
     const tok = _anchorToken(); if (tok) headers['X-Anchor-Token'] = tok;
     const bid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || ''; if (bid) headers['X-Anchor-Build'] = bid;
     let data = null;
+    npSay('Creating\u2026', false);
     try {{ const r = await fetch('/api/rnd/new_project', {{ method: 'POST', headers: headers, body: JSON.stringify(body) }}); data = await r.json(); }}
-    catch (e) {{ showToast('Connection error: ' + e.message); return; }}
-    if (!data || !data.ok) {{ showToast('Error: ' + ((data && (data.error || data.message)) || 'unknown')); return; }}
-    try {{ if (window.opener) window.opener.postMessage({{ anchor: 'project-created', entry: data.entry || null, message: data.message || '' }}, location.origin); }} catch (e) {{}}
-    showToast(data.message || 'Created.');
-    setTimeout(function () {{ window.close(); }}, 400);
+    catch (e) {{ npSay('That did not go through \u2014 nothing was created (' + e.message + ').', true); return; }}
+    // the result is SAID inside this dialog (the page's toast is hidden with the rest of the page — Grok R11)
+    if (!data || !data.ok) {{ npSay('Not created: ' + ((data && (data.error || data.message)) || 'unknown'), true); return; }}
+    const nm = (data.entry && data.entry.name) || body.name || 'the project';
+    const sentence = data.message || ('Project \u201c' + nm + '\u201d created.');
+    try {{ if (window.opener) window.opener.postMessage({{ anchor: 'project-created', entry: data.entry || null, message: sentence, group_error: data.group_error || '' }}, location.origin); }} catch (e) {{}}
+    npSay(sentence, !!data.group_error);
+    if (data.group_error) return;     // made, not placed: the window stays open on that sentence
+    setTimeout(function () {{ window.close(); }}, 900);
 }}
 // R11: ?new=1 opens the dialog at once; with &only=1 (or an opener) this page shows the dialog and nothing else
 window.addEventListener('DOMContentLoaded', function () {{
     const q = new URLSearchParams(location.search);
     const m = /new-project=([^&]*)/.exec(location.hash || '');
     if (!q.has('new') && !m) return;
-    _npPopup = q.get('only') === '1' || !!window.opener;
+    _npPopup = q.get('only') === '1';       // the cloak only when asked for (not on any opener — Grok R11)
     const modal = document.getElementById('newProjectModal');
     if (_npPopup && modal) {{ document.body.appendChild(modal); document.body.classList.add('only-new-project'); }}
     openNewProject();
@@ -11930,7 +11954,7 @@ def handle_new_project(handler, path, body):
     mode = body.get("mode", "existing")
     name = body.get("name", "")
     priority = body.get("priority", 2)
-    group = str(body.get("group") or "").strip()     # R11 (2026-09-28): the dashboard folder to place it in
+    group = str(body.get("group") or "").strip()     # R11 (2026-09-28): the dashboard folder to place it in (read first: the duplicate check places too)
     # Same name + same folder, already registered → hand back the EXISTING
     # project instead of minting a twin (2026-08-26: a slow first registration
     # left the page unreloaded, so a second click produced a duplicate that
@@ -11947,12 +11971,13 @@ def handle_new_project(handler, path, body):
                 if _rnd._effective_state(_e) != _rnd.STATE_ACTIVE:
                     continue
                 if (_e.get("name") or "").strip().lower() == name.strip().lower():
-                    handler._send_json({
+                    # R11: a retry with a folder chosen still places the existing project there (Grok R11)
+                    handler._send_json(_np_place({
                         "ok": True, "entry": _e, "already_registered": True,
                         "message": f"'{name}' is already registered for that "
                                    f"folder — it is on your dashboard "
                                    f"already, not created twice.",
-                    })
+                    }, group))
                     return
         except Exception:
             pass   # never block a registration on the duplicate check
