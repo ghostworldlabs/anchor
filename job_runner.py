@@ -994,8 +994,12 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # hunter's classify needs. Done here, at the single spawn site, so EVERY job
     # (direct launch() or launch_guarded()) participates. Cleared on exit by
     # _finalize/cancel via _mirror_session_status (the finally-reset).
+    # W0 of the steward revision (2026-09-28): the record also names the project and the
+    # STEP this run performs (from the captured dispatch context) — a session bound to
+    # its step, so the home can say "a run is on this step" from the record alone.
     _register_swarm_session(job_id, proc.pid, proc_create_time, crypt_token,
-                            cwd=cwd, backend=backend)
+                            cwd=cwd, backend=backend, project_id=project_id or "",
+                            step_id=_dispatch_step_id(refinement_context))
 
     rec = {
         "job_id": job_id,
@@ -1258,8 +1262,21 @@ def _cost_from_envelope(env: dict) -> dict:
 # it out of RUNNING when the job exits (the gandalf finally-reset analog) so a
 # finished OR crashed swarm child is never left looking orphaned.
 
+def _dispatch_step_id(refinement_context):
+    """The step a dispatched run performs, from the captured dispatch context
+    (``capture_dispatch``: ``{"step_id": ...}``), else ``None``. Never raises."""
+    try:
+        if isinstance(refinement_context, dict) and refinement_context.get("ok") is not False:
+            sid = refinement_context.get("step_id")
+            return str(sid) if sid else None
+    except Exception:
+        pass
+    return None
+
+
 def _register_swarm_session(job_id, pid, proc_create_time, crypt_token,
-                            cwd=None, backend=DEFAULT_BACKEND) -> None:
+                            cwd=None, backend=DEFAULT_BACKEND,
+                            project_id="", step_id=None) -> None:
     """Register a spawned swarm job in ``session_registry`` (hunter-sweepable).
 
     Stamps the EXACT identity ``zombie_hunter.classify`` requires — ``pid``,
@@ -1267,11 +1284,15 @@ def _register_swarm_session(job_id, pid, proc_create_time, crypt_token,
     spawn), and the per-job ``crypt_token`` — keyed by the ``job_id`` as the
     session id. Best-effort: a registry failure must NEVER block a launch (so the
     job still runs; the hunter simply ABSTAINS on the un-stamped record).
+
+    W0 of the steward revision (2026-09-28): ``project_id`` and ``step_id`` bind
+    the record to the project and the step the run performs (a session bound to
+    its step); both empty for a run with no dispatch context.
     """
     try:
         import session_registry as _sr
         _sr.register_session(
-            project_id="",
+            project_id=project_id or "",
             lane=SWARM_LANE,
             backend=backend,
             status=_sr.STATUS_RUNNING,
@@ -1280,6 +1301,7 @@ def _register_swarm_session(job_id, pid, proc_create_time, crypt_token,
             pid=pid,
             proc_create_time=proc_create_time,
             crypt_token=crypt_token or "",
+            step_id=step_id,
         )
     except Exception:  # pragma: no cover - registry is best-effort
         pass

@@ -446,6 +446,9 @@ def _normalize(record: dict) -> dict:
     # requested Doctor mode/posture.
     doctor_mode = str(record.get("doctor_mode", "") or "")
     doctor_posture = str(record.get("doctor_posture", "") or "")
+    # W0 of the steward revision (2026-09-28): the step this session performs
+    # (a session bound to its step). Every pre-W0 record normalizes to "".
+    step_id = str(record.get("step_id", "") or "")
     # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
     # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
     # ids — the reference-counted ownership the teardown path (``kill`` /
@@ -529,6 +532,7 @@ def _normalize(record: dict) -> dict:
         "failure_reason": failure_reason,
         "doctor_mode": doctor_mode,
         "doctor_posture": doctor_posture,
+        "step_id": step_id,
         "model_policy": (dict(record["model_policy"])
                          if isinstance(record.get("model_policy"), dict) else None),
         # ── telemetry-resume W6: eviction + paste-fallback + orientation ─────
@@ -642,8 +646,12 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      effort_id=None, effort_managed=False,
                      pid=None, proc_create_time=None, crypt_token="",
                       engine_session_uuid="", doctor_mode="",
-                      doctor_posture="") -> dict:
+                      doctor_posture="", step_id=None) -> dict:
     """Register a managed terminal session. Returns the stored record.
+
+    W0 of the steward revision (2026-09-28): ``step_id`` binds the session to
+    the roadmap step it performs (a commissioned run's dispatch context names
+    it); ``""`` when unknown. A pre-W0 record normalizes to ``""``.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
     id is accepted (e.g. so a caller can mint the id, create the worktree under
@@ -689,6 +697,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             # Doctor session reuse requires an exact mode/backend/posture tuple.
             "doctor_mode": doctor_mode or "",
             "doctor_posture": doctor_posture or "",
+            # W0 (2026-09-28): the step this session performs ("" = unknown).
+            "step_id": str(step_id) if step_id else "",
         })
         reg[sid] = record
         _save_sessions(reg, _locked=True)
@@ -896,6 +906,8 @@ def update_session(session_id: str, **fields) -> dict:
                "usage_gemini_segment",
                # Anchor Doctor P0: exact durable session-reuse identity.
                "doctor_mode", "doctor_posture", "model_policy",
+               # W0 of the steward revision (2026-09-28): a session bound to its step.
+               "step_id",
                # telemetry-resume W6: bounded oldest-first parked-worktree
                # eviction (worktree reclaimed, everything else survives) +
                # the greet-gate bounded-fallback stamp + the read-only

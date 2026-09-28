@@ -12227,6 +12227,43 @@ def _ecgberht_root():
     return Path(__file__).resolve().parent.parent / "Ecgberht"
 
 
+def _presence_record_dir(pid):
+    """The record folder the leave receipt goes to: the project's folder, or the effort touched last one
+    folder down (the card reads the same effort). None when the project is unknown."""
+    folder, _err, _status = _ecgberht_project_folder(pid)
+    if not folder:
+        return None
+    try:
+        import home_rows as _hr
+        rel = _hr.current_effort(folder)
+        return str(Path(folder) / rel) if rel else folder
+    except Exception:
+        return folder
+
+
+def _presence_leave(prev_pid, left_at_iso):
+    """The leave receipt for the project he just left (W0 of the steward revision, 2026-09-28): his own act,
+    recorded on that project's strip through the engine's update verb. Best-effort; never raises."""
+    try:
+        from steward_cockpit import presence as _pres
+        d = _presence_record_dir(prev_pid)
+        if d:
+            _pres.run_leave(d, left_at_iso)
+    except Exception:
+        pass
+
+
+def _presence_on_open(pid):
+    """He opened a project (a cockpit page or a card on the High Seat): note it; on a switch, record the
+    leave on the previous project's record in the background. Never raises, never blocks the page."""
+    try:
+        from steward_cockpit import presence as _pres
+        folder, _err, _status = _ecgberht_project_folder(pid)
+        _pres.on_open(pid, _presence_leave, folder=folder or "")
+    except Exception:
+        pass
+
+
 def _ecgberht_bridge(args, timeout=20):
     """Spawn the Ecgberht seal-chamber bridge (Node, read-only) and parse its
     one-line JSON. Same closed verb bodies as the ecgberht CLI (parity)."""
@@ -21968,6 +22005,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if not _entry:
                     self._send_json({"ok": False, "error": "no such project"}, code=404); return
                 from steward_cockpit.high_seat_card import card_part as _card_part
+                _presence_on_open(_pid)     # W0 (2026-09-28): a card opened = he is on this project now
                 _out = _card_part(_pid, _part, _entry.get("folder_path") or "", _entry.get("name") or "", (_q.get("dir", [""])[0] or "").strip())
                 self._send_json(_out, code=200 if _out.get("ok") else 400)
                 return
@@ -22385,6 +22423,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 _project_authed = self._term_token_ok()
                 _start_project_open_discovery(
                     pid, authorized=_project_authed)
+                if _project_authed and pid and not _unsafe_path_seg(pid):
+                    _presence_on_open(pid)  # W0 (2026-09-28): the cockpit opened = he is on this project now
                 # (2026-08-25) THE CUTOVER — THE COCKPIT IS THE PAGE (John
                 # approved 2026-08-25 after his first live run). Same URL,
                 # same click from the High Seat. The chamber PAGE moves

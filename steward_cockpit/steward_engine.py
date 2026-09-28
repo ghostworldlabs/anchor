@@ -2795,6 +2795,15 @@ class Engine:
                     and not self._working_bg()):
                 # commit-on-idle-close is a real mechanism, not a prompt
                 self._commit_if_dirty("steward auto-sleep checkpoint")
+                # W0 of the steward revision (2026-09-28): the FALLBACK leave receipt — only when
+                # presence still says he is on this project (he never switched away); the explicit
+                # switch on the High Seat or another cockpit is the trigger, this is the safety net.
+                try:
+                    from . import presence as _pres
+                    _pres.leave_if_still_here(
+                        self.dir, lambda _pid, at: _pres.run_leave(self.dir, at))
+                except Exception:
+                    pass
                 self._emit({"t": "sys", "text":
                             f"steward asleep after {IDLE_SLEEP_SECONDS // 60} "
                             "quiet minutes - everything saved; your next message wakes it"})
