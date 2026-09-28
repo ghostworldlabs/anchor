@@ -7768,6 +7768,8 @@ def _high_seat_context():
         overnight = [x for f in facts_list for x in (f.get("closed_recent") or ())
                      if since is not None and _hr._iso(x.get("when")) is not None and _hr._iso(x.get("when")) >= since]
         head = _ha.head_act(initiatives, facts_list, today=today)
+        if head and not head.get("pid") and campaign:
+            head["pid"] = str(campaign.get("pid") or "")   # a native Campaign task opens the Campaign's own card
         bullets = [_ha.head_sentence(head, overnight=overnight)] + [b for b in bullets if not b.startswith("Nothing is waiting")][:4]
     except Exception:
         head = None
