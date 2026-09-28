@@ -594,7 +594,7 @@ function openEffort(rel, step) {
   const src = "/steward/v1?embed=1" + _pid + _tok + "&dir=" + encodeURIComponent(rel) + _step;
   if (fsframe.dataset.rel !== rel || _step) { fsframe.src = src; fsframe.dataset.rel = rel; }
 }
-// W5 (2026-09-28): this page opened with ?dir= (and ?step=) — Resume from the High Seat, or a link to one effort —
+// W5 (2026-09-28): this page opened with ?dir= (and ?step=) — a Resume from the home, or a link to one effort —
 // opens that effort's plan cockpit at once, the step forwarded; once per load
 (function () {
   const q = new URLSearchParams(location.search);
