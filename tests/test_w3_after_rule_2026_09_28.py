@@ -34,8 +34,8 @@ def test_refresh_asks_the_engine_for_the_horizon_with_the_reason(tmp_path, monke
             stderr = ""
         return R()
     monkeypatch.setattr(horizon.subprocess, "run", fake_run)
-    from steward_cockpit import refinement_client
-    monkeypatch.setattr(refinement_client, "_resolve_dependencies", lambda a, b: ("node", "cli.mjs"))
+    from steward_cockpit import engine_cli
+    monkeypatch.setattr(engine_cli, "resolve", lambda: ("node", "cli.mjs"))
     out = horizon.refresh(str(d), "accepted", background=False)
     assert out == {"ok": True, "unchanged": False}
     assert seen["args"][2:] == ["update", "--project", str(d), "--horizon", "--horizon-reason", "accepted"]
@@ -120,6 +120,22 @@ def test_one_sweep_at_a_time(tmp_path):
             break
         _time.sleep(0.05)
     assert horizon._SWEEP_RUNNING["on"] is False
+
+
+def test_the_new_verbs_spawn_the_live_engine_never_the_vendored_bundle(tmp_path, monkeypatch):
+    from steward_cockpit import engine_cli
+    live = tmp_path / "Ecgberht" / "bin"
+    live.mkdir(parents=True)
+    (live / "ecgberht.mjs").write_text("// live", encoding="utf-8")
+    monkeypatch.setenv("ECGBERHT_ROOT", str(tmp_path / "Ecgberht"))
+    assert engine_cli.live_cli() == str(live / "ecgberht.mjs")
+    deps = engine_cli.resolve()
+    assert isinstance(deps, tuple) and deps[1] == str(live / "ecgberht.mjs")
+    assert "vendor" not in deps[1]
+    monkeypatch.setenv("ECGBERHT_ROOT", str(tmp_path / "nowhere"))
+    # no live engine at the env root: the sibling checkout beside Anchor, else the refinement client's resolution
+    got = engine_cli.live_cli()
+    assert got is None or got.endswith("ecgberht.mjs")
 
 
 def test_record_dirs_lists_the_root_and_its_efforts(tmp_path):

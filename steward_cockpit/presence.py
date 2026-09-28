@@ -148,8 +148,8 @@ def run_leave(record_dir, left_at_iso, timeout=20.0):
     never raises. The CLI and node are resolved the way the refinement client resolves them."""
     import subprocess
     try:
-        from . import refinement_client as _rc
-        deps = _rc._resolve_dependencies(None, None)
+        from . import engine_cli as _ecli
+        deps = _ecli.resolve()          # the LIVE engine, never the vendored bundle (the 2026-09-28 live look)
         if not isinstance(deps, tuple):
             return deps
         node, cli = deps

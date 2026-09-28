@@ -16,8 +16,8 @@ VERB = "update"
 
 def _call(record_dir, args, timeout=25.0):
     try:
-        from . import refinement_client as _rc
-        deps = _rc._resolve_dependencies(None, None)
+        from . import engine_cli as _ecli
+        deps = _ecli.resolve()          # the LIVE engine, never the vendored bundle (the 2026-09-28 live look)
         if not isinstance(deps, tuple):
             return deps
         node, cli = deps
