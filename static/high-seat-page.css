@@ -744,3 +744,11 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* the seed panel the Seeds button opens (2026-09-27) */
 .seedpanel .hint a{color:var(--accent-t)}
 .seedpanel .sd .st.dim{color:var(--text-dim2)}
+
+/* W2 of the steward revision (2026-09-28): the head is one act; the rest of the brief folds; the exception is marked; the age of a wait */
+.blist li.lead.exc{border-left:2px solid var(--red,#d9534f);padding-left:8px}
+.blist li.lead .h-open{margin-left:6px;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid var(--amber-edge);background:transparent;color:var(--amber-t);cursor:pointer}
+.blist li.fold{list-style:none;margin-left:-16px}
+.brief-more summary{cursor:pointer;font-size:11px;color:var(--text-dim);letter-spacing:.04em}
+.brief-more ul{margin:4px 0 0 16px;padding:0}
+.t-age{color:var(--text-dim);font-size:11px;white-space:nowrap}

@@ -283,8 +283,11 @@ def brief_bullets(rows, projects=(), today=None, seat_name="High Seat"):
     return bullets[:4]
 
 
-def the_move(rows, seat_name="High Seat"):
-    """The rail's one sentence: the top row, or an honest quiet line."""
+def the_move(rows, seat_name="High Seat", act=None):
+    """The rail's one sentence: the head act when there is one (W2, 2026-09-28), else the top row, else an honest
+    quiet line."""
+    if act:
+        return (head_sentence(act), "You can act from here. Opening the %s is optional." % seat_name)
     if not rows:
         return ("Nothing is waiting on you.",
                 "The steward will raise the next thing here.")
@@ -293,6 +296,86 @@ def the_move(rows, seat_name="High Seat"):
     if top["why"]:
         lead = "%s — %s." % (lead, top["why"])
     return (lead, "You can act from here. Opening the %s is optional." % seat_name)
+
+
+_PART_CLOSED = ("done", "cancelled", "dropped", "parked")
+
+
+def _part_open(p):
+    return (isinstance(p, dict) and not p.get("broken") and p.get("status") not in ("done", "parked")
+            and p.get("target_status") not in _PART_CLOSED)
+
+
+def head_act(initiatives, facts, today=None):
+    """THE HEAD — one act, never a list (W2 of the steward revision, 2026-09-28; the synthesis R2; his answer Q3).
+    His tiers order the day: the first Tier-1 part that needs him, in his order; else the oldest wait across the
+    projects, with its age from the record. The one exception, his word: a lower-tier part due today or overdue
+    leads — marked as the exception, with its date and what it decides — while his order stays untouched; it does
+    not fire when a Tier-1 part is itself due today. ``None`` when nothing needs him and nothing is due."""
+    today = today or date.today()
+    inits = sorted([i for i in initiatives or () if isinstance(i, dict)],
+                   key=lambda i: (i.get("tier") or 9, int(i.get("order") or 0), str(i.get("name") or "")))
+
+    def _act(i, p, kind, **more):
+        a = {"kind": kind, "tier": i.get("tier"), "initiative": str(i.get("name") or ""), "text": str(p.get("text") or ""),
+             "target": str(p.get("target") or ""), "pid": str(p.get("pid") or ""), "href": str(p.get("href") or ""),
+             "date": str(p.get("date") or ""), "consequence": str(i.get("done_when") or ""), "age_days": None, "dir": ""}
+        a.update(more)
+        return a
+
+    def _due(p):
+        d = _iso_date(p.get("date")) if p.get("date") else None
+        return d if (d is not None and d <= today) else None
+
+    tier1_due = any(_due(p) for i in inits if i.get("tier") == 1 for p in i.get("parts") or () if _part_open(p))
+    if not tier1_due:
+        low = sorted(((_due(p), int(i.get("tier") or 9), int(i.get("order") or 0), n, i, p)
+                      for i in inits if (i.get("tier") or 9) > 1
+                      for n, p in enumerate(i.get("parts") or ()) if _part_open(p) and _due(p)),
+                     key=lambda t: t[:4])
+        if low:
+            d, _t, _o, _n, i, p = low[0]
+            return _act(i, p, "exception", due=d.isoformat(), overdue=d < today)
+    for i in inits:
+        if i.get("tier") == 1:
+            for p in i.get("needs") or ():
+                if _part_open(p):
+                    return _act(i, p, "tier1")
+    waits = [f for f in facts or () if isinstance(f, dict) and f.get("needs_you")]
+    if waits:
+        f = max(waits, key=lambda f: (f.get("wait_age_days") if isinstance(f.get("wait_age_days"), (int, float)) else -1))
+        return {"kind": "oldest-wait", "tier": None, "initiative": "", "text": str(f.get("needs_you") or ""),
+                "target": str(f.get("name") or ""), "pid": str(f.get("id") or ""), "href": str(f.get("href") or ""),
+                "date": "", "consequence": "", "age_days": f.get("wait_age_days"),
+                "dir": str(f.get("needs_you_effort") or f.get("effort") or "")}
+    return None
+
+
+def head_sentence(act, overnight=()):
+    """The head as one sentence he can act on: the pick, why now, the exact record — and, only when something
+    closed since he last opened the page, what finished (gated on change: a quiet day repeats nothing)."""
+    s = _head_core(act)
+    closed = [x for x in overnight or () if isinstance(x, dict) and x.get("name")]
+    if closed:
+        names = ", ".join(str(x["name"]) for x in closed[:3]) + (" and %d more" % (len(closed) - 3) if len(closed) > 3 else "")
+        s += " Since you last opened: %d step%s closed — %s." % (len(closed), "" if len(closed) == 1 else "s", names)
+    return s
+
+
+def _head_core(act):
+    if not act:
+        return "Nothing is waiting on you."
+    age = act.get("age_days")
+    age_s = (" · waiting %d day%s" % (int(age), "" if int(age) == 1 else "s")) if isinstance(age, (int, float)) and age >= 1 else ""
+    if act["kind"] == "exception":
+        when = ("overdue since %s" % _short(act.get("due"))) if act.get("overdue") else "due today"
+        tail = (" — it decides: %s" % act["consequence"][:120]) if act.get("consequence") else ""
+        return "Exception, %s: %s (%s, tier %s)%s. Your order is untouched." % (
+            when, act["text"], act["initiative"], act.get("tier") or "?", tail)
+    if act["kind"] == "tier1":
+        where = (" (%s)" % act["target"]) if act.get("target") else ""
+        return "Tier 1 · %s: %s%s — waiting on you%s." % (act["initiative"], act["text"], where, age_s)
+    return "%s: %s%s." % (act.get("target") or "A project", act["text"], age_s)
 
 
 def rail_counts(sessions=(), rows=(), folders=0, open_projects=0):
