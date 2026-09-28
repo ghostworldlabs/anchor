@@ -594,11 +594,11 @@ function openEffort(rel, step) {
   const src = "/steward/v1?embed=1" + _pid + _tok + "&dir=" + encodeURIComponent(rel) + _step;
   if (fsframe.dataset.rel !== rel || _step) { fsframe.src = src; fsframe.dataset.rel = rel; }
 }
-// W5 (2026-09-28): this page opened with ?dir= (and ?step=) — a Resume from the home, or a link to one effort —
-// opens that effort's plan cockpit at once, the step forwarded; once per load
+// W5 (2026-09-28): this page opened with ?step= (a Resume from the home) opens that effort's plan cockpit at
+// once with the step forwarded; once per load. A bare ?dir= (the cockpit's own address) changes nothing.
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.has("dir") && !q.has("step")) return;
+  if (!q.has("step")) return;
   const open = () => { if (window._resumedOnce) return; window._resumedOnce = true; openEffort(q.get("dir") || "", q.get("step") || ""); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", open); else open();
 })();

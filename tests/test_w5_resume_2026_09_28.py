@@ -81,7 +81,7 @@ def test_lint_the_cockpit_reads_the_step_parameter_and_opens_the_fold_above_the_
     # frame and forward the step — the live look of 11:54 found it ignoring ?dir= and ?step= entirely
     chamber = open(os.path.join(root, "steward_cockpit", "static", "cockpit.html"), encoding="utf-8").read()
     assert "function openEffort(rel, step)" in chamber and '"&step=" + encodeURIComponent(step)' in chamber
-    assert 'q.has("dir") && !q.has("step")' in chamber and "openEffort(q.get(\"dir\") || \"\", q.get(\"step\") || \"\")" in chamber
+    assert 'if (!q.has("step")) return;' in chamber and "openEffort(q.get(\"dir\") || \"\", q.get(\"step\") || \"\")" in chamber
 
 
 def test_the_folds_a_quiet_workbench_is_one_line_and_the_desk_lists_nothing_unconnected():
