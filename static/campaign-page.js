@@ -162,6 +162,16 @@
 
   // the composer: the effort's own say route
   var say = $('#say'), send = $('#sendBtn');
+  // R12 (2026-09-28, John): the unsent text is kept in this browser on every keystroke and put back after a crash,
+  // a restart or a reload; a delivered turn clears it
+  var DRAFT_KEY = 'anchor:draft:campaign:' + PID, _draftT = null;
+  function saveDraft() { try { if (say && say.value.trim()) localStorage.setItem(DRAFT_KEY, say.value); else localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  if (say) {
+    say.addEventListener('input', function () { clearTimeout(_draftT); _draftT = setTimeout(saveDraft, 250); });
+    window.addEventListener('beforeunload', saveDraft);
+    try { var keptDraft = localStorage.getItem(DRAFT_KEY); if (keptDraft && keptDraft.trim() && !say.value.trim()) { say.value = keptDraft; receipt('Your unsent text is back in the box.'); } } catch (e) {}
+  }
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
     send.disabled = true; send.textContent = 'Thinking…';
@@ -170,6 +180,7 @@
       .then(function (j) {
         send.disabled = false; send.textContent = 'Send';
         if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
+        clearDraft();
         if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
           try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
           location.reload(); return;

@@ -306,6 +306,16 @@
 
   // the composer: the steward's say route (the same one the old home used)
   var say = $('#say'), send = $('#sendBtn');
+  // R12 (2026-09-28, John): the unsent text is kept in this browser on every keystroke and put back after a crash,
+  // a restart or a reload; a delivered turn clears it
+  var DRAFT_KEY = 'anchor:draft:highseat', _draftT = null;
+  function saveDraft() { try { if (say && say.value.trim()) localStorage.setItem(DRAFT_KEY, say.value); else localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  if (say) {
+    say.addEventListener('input', function () { clearTimeout(_draftT); _draftT = setTimeout(saveDraft, 250); });
+    window.addEventListener('beforeunload', saveDraft);
+    try { var keptDraft = localStorage.getItem(DRAFT_KEY); if (keptDraft && keptDraft.trim() && !say.value.trim()) { say.value = keptDraft; receipt('Your unsent text is back in the box.'); } } catch (e) {}
+  }
   // the Seeds button opens the seed panel; a seed's button puts the steward's verb in the composer — Send is the word
   var seedBtn = $('#seedBtn'), seedPanel = $('#seedPanel');
   if (seedBtn && seedPanel) seedBtn.addEventListener('click', function () {
@@ -327,7 +337,7 @@
       .then(function (j) {
         send.disabled = false; send.textContent = 'Send';
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
-        say.value = ''; receipt(j.say || '…', false, j.undo || null);
+        say.value = ''; clearDraft(); receipt(j.say || '…', false, j.undo || null);
         if (j.campaign_act && !j.read_only) {   // the Campaign tile shows the change after the reload; the line and its undo survive it
           try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
           setTimeout(function () { location.reload(); }, 900); return;

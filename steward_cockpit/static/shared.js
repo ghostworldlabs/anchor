@@ -2101,6 +2101,19 @@ const Proto = (() => {
     const grow = () => { ta.style.height = "auto";
                          ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; };
     ta.addEventListener("input", grow);
+    // R12 (2026-09-28, John: "conversations are saved as they are put in"): the unsent text is kept in this browser
+    // on every keystroke (localStorage, keyed to this record) and put back after a crash, a restart or a reload of
+    // the page; a delivered turn clears it, an undelivered one keeps it
+    const DRAFT_KEY = "anchor:draft:say:" + (PARAMS.get("pid") || "") + ":" + DIR;
+    let _draftT = null;
+    const saveDraft = () => { try { if (ta.value.trim()) localStorage.setItem(DRAFT_KEY, ta.value); else localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
+    const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
+    ta.addEventListener("input", () => { clearTimeout(_draftT); _draftT = setTimeout(saveDraft, 250); });
+    window.addEventListener("beforeunload", saveDraft);
+    try {
+      const kept = localStorage.getItem(DRAFT_KEY);
+      if (kept && kept.trim() && !ta.value.trim()) { ta.value = kept; grow(); addLine("sys", "your unsent text is back in the box"); }
+    } catch (e) {}
     const submit = async () => {
       let text = ta.value.trim();
       if (!text) return;
@@ -2111,7 +2124,7 @@ const Proto = (() => {
       const keep = ta.value;
       ta.value = ""; grow();
       const j = await sendSay(text, _answerQuestionId);
-      if (!j.ok) { ta.value = keep; grow(); }
+      if (!j.ok) { ta.value = keep; grow(); saveDraft(); } else { clearDraft(); }
     };
     if (send) send.onclick = submit;
     // (codex-discipline-2026-09-15 Wave 1.2) Send is disabled in the markup
