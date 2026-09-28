@@ -1374,6 +1374,9 @@ def handle_post(cdir, verb, body):
                 "Authenticated cockpit: Done with " + member["product_id"] + "; exact revision " + member["revision_id"]}})
         if result.get('committed') is True and not result.get('ok'):
             result={**result,'ok':True,'warning':'Approval saved; the derived collection needs repair.'}
+        if result.get("ok"):
+            from steward_cockpit import horizon as _horizon
+            _horizon.refresh(cdir, "accepted")      # W3 (2026-09-28): the line follows the acceptance, at once
         return result, 200 if result.get("ok") else 409
     if verb == "refinement-close":
         from steward_cockpit.refinement_client import update
@@ -1483,6 +1486,8 @@ def handle_post(cdir, verb, body):
                 "elegance": {"mode": "RC6", "source": "User selected Refine this slice", "reason": "Apply the user's requested changes within this slice; assess new elements before adding scope."}})
             if not result.get("ok"):
                 return result, 409
+            from steward_cockpit import horizon as _horizon
+            _horizon.refresh(cdir, "refined")       # W3 (2026-09-28): DURING a refinement the line says what follows this draft
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)
         if eng is None:

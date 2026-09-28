@@ -56,6 +56,12 @@ def record_terminal(rec):
             context=rec.get("refinement_context"),
             terminal=status,
         )
+        try:
+            from . import horizon as _horizon
+            # W3 (2026-09-28): the line follows a run's end — produced, or stalled when it failed
+            _horizon.refresh(campaign_dir, "produced" if status == "done" else "stalled")
+        except Exception:
+            pass
         if (
             isinstance(result, dict)
             and result.get("ok")

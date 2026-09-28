@@ -1518,6 +1518,11 @@ class Engine:
                     self.question_history = history
                     if not (answer_context.get("authorization_scope") or {}).get("request_id"):
                         self._strip_clear_wait()    # a decision answered: the wait on John is over (C2)
+                        try:
+                            from . import horizon as _horizon
+                            _horizon.refresh(self.dir, "answered")   # W3 (2026-09-28): the line follows the answer
+                        except Exception:
+                            pass
 
                 if wait.get("managed_refinement"):
                     # Conversation and drive controls never resolve a review.

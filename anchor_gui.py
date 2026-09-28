@@ -20497,6 +20497,15 @@ def _reconcile_sessions_tick(pid=None):
             _scr_silence.proceed_on_silence_sweep()
         except Exception:
             pass
+        # W3 of the steward revision (2026-09-28; his Q1 "yes, that one line only"): with no seat awake, every
+        # record whose roadmap moved past its line's stamp gets its line re-derived from the plan — the same
+        # server clock; at most a few per tick; the engine writes nothing when nothing changed
+        try:
+            from steward_cockpit import horizon as _horizon
+            _roots, _skipped, _failed = _ecgberht_portfolio_roots()
+            _horizon.sweep(_horizon.record_dirs(_roots))
+        except Exception:
+            pass
 
 
 _RECONCILE_TICK_LOCK = threading.Lock()
