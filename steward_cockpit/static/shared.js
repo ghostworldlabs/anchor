@@ -396,14 +396,47 @@ const Proto = (() => {
     const waits = (q && q.question ? 1 : 0) + acts.length;
     if (!waits) host.appendChild(el("div", "navempty", "Nothing waits on you."));
     const steps = (_lastMap && _lastMap.steps) || [];
-    const open = steps.filter(st => !stepDone(st));
-    const from = Math.max(0, open.findIndex(st => st.status === "active"));
-    const plan = open.slice(from, from + 3);
-    if (plan.length) {
+    const plan = nextInPlan(steps, (_lastMap && _lastMap.heartbeat) || {}, 3);
+    if (plan.steps.length) {
       host.appendChild(el("div", "naveyebrow", "Next in the plan"));
-      plan.forEach(st => host.appendChild(el("div", "navactlabel", ((st.navigation && st.navigation.label) || st.name) + (st.due ? " · due " + fmtDue(st.due) : ""))));
+      plan.steps.forEach(st => host.appendChild(el("div", "navactlabel", ((st.navigation && st.navigation.label) || st.name) + (st.due ? " · due " + fmtDue(st.due) : ""))));
+    } else if (plan.why) {
+      host.appendChild(el("div", "naveyebrow", "Next in the plan"));
+      host.appendChild(el("div", "navempty", plan.why));
     }
     return waits;
+  }
+  // W1 of the steward revision (2026-09-28): THE next-in-the-plan rule, the same as the server's
+  // steward_campaign.next_in_plan — the declared focus first (current_step_id, else the one pinned step, else the
+  // one active step; never a guess among several), then the open steps that follow it in the plan's order,
+  // parked/cancelled/dropped skipped. The array-order guess ("from the first active") is gone on every surface.
+  const _CLOSED_STATUSES = new Set(["done", "parked", "cancelled", "dropped"]);
+  function nextInPlan(steps, hb, n) {
+    let focus = null, why = "";
+    const cur = hb && hb.current_step_id;
+    if (cur) {
+      focus = steps.find(st => String(st.id) === String(cur)) || null;
+      if (!focus) why = "Current work item is unavailable: current_step_id does not match the roadmap.";
+    } else {
+      const pinned = steps.filter(st => st.navigation && (st.navigation.pin || st.navigation.current));
+      if (pinned.length === 1) focus = pinned[0];
+      else {
+        const active = steps.filter(st => st.status === "active");
+        if (active.length === 1) focus = active[0];
+        else if (active.length > 1) why = "Current work item is unavailable: " + active.length + " steps are active and no current_step_id is set - the steward must pin one.";
+        else if (steps.some(st => !_CLOSED_STATUSES.has(st.status))) why = "Current work item is unavailable: no step is active and no current_step_id is set - the steward must pin one.";
+      }
+    }
+    if (!focus) return {steps: [], why: why};
+    const out = [focus];
+    let seen = false;
+    for (const st of steps) {
+      if (st === focus) { seen = true; continue; }
+      if (!seen || _CLOSED_STATUSES.has(st.status)) continue;
+      out.push(st);
+      if (out.length >= n) break;
+    }
+    return {steps: out, why: ""};
   }
   function renderNextStepsTile() {
     const s = $("[data-delivmount]");

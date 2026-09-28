@@ -66,13 +66,19 @@ def campaign_initiatives(steps, resolved=None):
                     "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
                     "pid": str(r.get("pid") or ""), "lead": str(r.get("lead") or ""),
                     "href": r.get("href") or "", "status": str(p.get("status") or ""),
+                    "target_status": str(r.get("target_status") or ""),
                     "broken": bool(r.get("broken")) if ref else False, "gap": r.get("gap") or "",
                     "waiting_on": str(p.get("waiting_on") or "") if not ref else "",
                     "needs_you": "waiting on you" in str(state).lower() or (
                         not ref and str(p.get("status") or "") == "waiting"
                         and bool(re.search(r"\b(john|you|me)\b", str(p.get("waiting_on") or "").lower()))),
                 })
-        open_parts = [p for p in parts if p["status"] not in ("done", "parked") and not p["broken"]]
+        # W1 (2026-09-28): a referenced part is closed when its RESOLVED target is — done, cancelled, dropped or
+        # parked — not only when the wrapper's own status says so (Grok's live replay, 2026-09-27: a done target
+        # stayed the open "next" part while its wrapper was planned). An unavailable target is broken: named, never next.
+        def _closed(p):
+            return p["status"] in ("done", "parked") or p["target_status"] in ("done", "cancelled", "dropped", "parked")
+        open_parts = [p for p in parts if not _closed(p) and not p["broken"]]
         dates = sorted(p["date"] for p in open_parts if p["date"])
         out.append({
             "id": sid, "name": s.get("name") or sid, "tier": int(s["tier"]) if s.get("tier") in (1, 2, 3) else None,
@@ -80,7 +86,7 @@ def campaign_initiatives(steps, resolved=None):
             "done_when": s.get("done_when") or "", "status": s.get("status") or "",
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
-            "done_count": sum(1 for p in parts if p["status"] == "done"),
+            "done_count": sum(1 for p in parts if p["status"] == "done" or p["target_status"] == "done"),
         })
     out.sort(key=lambda i: (i["tier"] or 9, i["order"], i["name"]))   # an untiered initiative sorts last, its tier shown as missing
     for n, i in enumerate(out, 1):
@@ -396,12 +402,30 @@ def _card(e, f, cls):
         ) % (cls, pid, pid, name, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
     wait = " ".join(str(f.get("needs_you") or "").split())[:160]
     nxt = esc((f.get("next") or "")[:160]) or "not stated"
-    if wait:
+    # W1 (2026-09-28): EVERY effort's wait, each opening its own record (the Status part on that effort) — a
+    # project's second effort no longer disappears behind the one touched last. A wait promoted from another
+    # effort (the shown one has none) is that effort's line, with its open; the rest follow it.
+    promoted = str(f.get("needs_you_effort") or "")
+    other_waits = [x for x in (f.get("other_waits") or []) if isinstance(x, dict)]
+
+    def _eff_line(x):
+        return ('<div class="t-line wait"><span class="mk">&#9873; %s:</span>%s '
+                '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">open</button></div>') % (
+            esc(x.get("name")), esc(" ".join(str(x.get("needs_you") or "").split())[:160]), pid, esc(x.get("rel")))
+    lead_x = next((x for x in other_waits if str(x.get("rel") or "") == promoted), None) if (wait and promoted) else None
+    if lead_x is not None:
+        line = _eff_line(lead_x)
+        more_next = '<div class="t-next"><span class="k">Next</span>%s</div>' % nxt
+    elif wait:
         line = '<div class="t-line wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(wait)
         more_next = '<div class="t-next"><span class="k">Next</span>%s</div>' % nxt
     else:
         line = '<div class="t-line"><span class="k">Next</span>%s</div>' % nxt
         more_next = ""
+    for x in other_waits:
+        if x is lead_x:
+            continue
+        line += _eff_line(x).replace('class="t-line wait"', 'class="t-line wait other"', 1)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'

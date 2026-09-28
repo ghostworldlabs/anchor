@@ -135,6 +135,9 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         out["href"] = "/project/%s" % out["pid"]
         out["what"] = str(st.get("name") or p["sub"])
         out["state"] = str(st.get("status") or "")
+        # W1 (2026-09-28): the TARGET's own status, typed, so the Campaign's open/next reads the referenced step's
+        # truth and never the wrapper's status alone (Grok's live replay: a done target stayed "next")
+        out["target_status"] = str(st.get("status") or "")
         if st.get("waiting_on") and st.get("status") in ("waiting", "parked"):
             out["state"] += " · " + str(st.get("waiting_on"))
         out["date"] = str(st.get("due") or "")

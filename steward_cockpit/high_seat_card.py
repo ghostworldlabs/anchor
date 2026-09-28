@@ -133,10 +133,6 @@ def _item_link(it, pid):
     return what
 
 
-def _open_steps(m):
-    return [s for s in m.get("steps") or [] if not _done(s) and s.get("status") not in ("cancelled", "dropped")]
-
-
 def next_html(cdir, pid):
     m = campaign.read_map(cdir)
     d = _decision(cdir)
@@ -150,10 +146,9 @@ def next_html(cdir, pid):
     current = campaign.current_review_items(m, items)
     acts = campaign.review_acts(m, current)
     by_what = {str(it.get("what") or "").strip().lower(): it for it in items}
-    # the cockpit's Next-in-the-plan: from the first active not-done step, three of them
-    open_steps = _open_steps(m)
-    start = next((i for i, s in enumerate(open_steps) if s.get("status") == "active"), 0)
-    plan = open_steps[start:start + 3]
+    # W1 (2026-09-28): the ONE next-in-the-plan rule, shared with the cockpit and the status composer — the declared
+    # focus, then what follows it; never a guess from the first active step
+    plan, plan_why = campaign.next_in_plan(m, 3)
     out = ['<div class="cp-next">']
     if question:
         out.append('<div class="cp-q"><span class="k">Decide</span>%s%s</div>' % (
@@ -172,6 +167,8 @@ def next_html(cdir, pid):
         out.append('<div class="cp-plan"><span class="k">Next in the plan</span>%s</div>' % "".join(
             '<div class="cp-step">%s%s</div>' % (esc(_step_label(s)), (' <span class="dim">&middot; due %s</span>' % esc(s.get("due"))) if s.get("due") else "")
             for s in plan))
+    elif plan_why:
+        out.append('<div class="cp-plan"><span class="k">Next in the plan</span><div class="cp-step dim">%s</div></div>' % esc(plan_why))
     out.append('<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></div>' % esc(pid))
     return "".join(out)
 

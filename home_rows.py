@@ -95,6 +95,41 @@ def project_facts(entry, today=None):
         dated.sort(key=lambda x: (x["due"], x["name"]))
         out["dated"] = dated
         out["nearest_due"] = dated[0]["due"] if dated else ""
+    # W1 of the steward revision (2026-09-28): EVERY effort's wait, not only the effort touched last — Grok's live
+    # replay (2026-09-27) showed alternating touches hiding the second MBA effort's review from the home. The card
+    # keeps the shown effort for its line; the other efforts' waits ride beside it, each opening its own record.
+    out["efforts"] = _effort_waits(folder, rel)
+    out["other_waits"] = [x for x in out["efforts"] if x["needs_you"] and x["rel"] != rel]
+    if not out["needs_you"] and out["other_waits"]:
+        first = out["other_waits"][0]
+        out["needs_you"] = "%s: %s" % (first["name"], first["needs_you"])
+        out["needs_you_effort"] = first["rel"]
+    return out
+
+
+def _effort_waits(folder, shown_rel=""):
+    """Every steward effort of a project (the cockpit's own discovery: the root with a Face, plus one level of
+    subfolders with their own) with its wait — the strip's human wait, else the last status's "waiting on you" —
+    as ``[{rel, name, needs_you, shown}]`` in the cockpit's order. Read-only; never raises; ``[]`` without a record."""
+    try:
+        from steward_cockpit.steward_campaign import discover_efforts
+        efforts = discover_efforts(str(folder)) or []
+    except Exception:
+        return []
+    out = []
+    for e in efforts:
+        rel = str((e or {}).get("rel") or "")
+        root = Path(folder) / rel if rel else Path(folder)
+        wait = ""
+        strip = _read_json(root / "strip.json")
+        if isinstance(strip, dict):
+            wait = _real_wait(strip.get("human_wait"))
+        if not wait:
+            summ = _read_json(root / ".ecgberht" / "status-summary.json")
+            plan = summ.get("plan") if isinstance(summ, dict) and isinstance(summ.get("plan"), dict) else {}
+            wait = _real_wait(plan.get("waiting_on_you"))
+        out.append({"rel": rel, "name": str((e or {}).get("name") or rel or "root"), "needs_you": wait,
+                    "shown": rel == str(shown_rel or "")})
     return out
 
 

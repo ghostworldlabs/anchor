@@ -1097,6 +1097,34 @@ def _focused_step(m):
     return None, ""
 
 
+_CLOSED_STATUSES = ("done", "parked", "cancelled", "dropped")
+
+
+def next_in_plan(m, n=3):
+    """THE next-in-the-plan rule (W1 of the steward revision, 2026-09-28) — one rule for the card on the High Seat,
+    the cockpit's Next steps (shared.js mirrors it) and the status composer: the declared focus first
+    (``_focused_step``: ``current_step_id``, else the one pinned step, else the one active step — never a guess
+    among several), then the open steps that FOLLOW it in the plan's order, parked/cancelled/dropped skipped; at
+    most ``n``. With no focus: ``([], why)`` — the array-order guess ("from the first active") is gone, so two
+    surfaces can no longer recommend different work (ChatGPT's review, 2026-09-27, §2)."""
+    steps = [s for s in (m.get("steps") or []) if isinstance(s, dict)]
+    focus, why = _focused_step(m)
+    if focus is None:
+        return [], why
+    out = [focus]
+    seen = False
+    for s in steps:
+        if s is focus or str(s.get("id")) == str(focus.get("id")):
+            seen = True
+            continue
+        if not seen or str(s.get("status") or "") in _CLOSED_STATUSES:
+            continue
+        out.append(s)
+        if len(out) >= max(1, int(n or 1)):
+            break
+    return out, ""
+
+
 def _local_status_evidence(campaign_dir, m, engine_state, step):
     """Read explicit, current receipts rather than inferring a pass from prose."""
     heartbeat = m.get("heartbeat") or {}
