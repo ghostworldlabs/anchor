@@ -60,7 +60,7 @@ def test_the_card_offers_resume_at_that_step_with_its_age_and_what_moved(tmp_pat
          "resume": {"at": "2026-09-28T15:00:00Z", "ago": "2 h ago", "step_id": "lec4", "step": "Lecture 4 AI supplement", "events_since": 2}}
     html = hsp._card({"id": PID, "name": "MBA Teaching AI"}, f, "")
     assert 'class="t-resume" href="/project/%s?dir=mba&amp;step=lec4"' % PID in html
-    assert 'title="you left at Lecture 4 AI supplement (2 h ago) &middot; 2 events since"' in html
+    assert 'title="you left at Lecture 4 AI supplement (2 h ago)"' in html, "no numeral on the card (Grok W5)"
     assert "&#8617; Resume <span class=\"t-age\">2 h ago</span>" in html
     quiet = hsp._card({"id": PID, "name": "MBA Teaching AI"}, dict(f, resume=None), "")
     assert "t-resume" not in quiet
@@ -68,9 +68,15 @@ def test_the_card_offers_resume_at_that_step_with_its_age_and_what_moved(tmp_pat
     assert "nothing moved since" in still
 
 
-def test_the_cockpit_lands_on_the_step_resume_names():
-    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
+def test_lint_the_cockpit_reads_the_step_parameter_and_opens_the_fold_above_the_row():
+    """A LINT, not the landing: it reads the source for the parameter, the row lookup, the fold-opening walk and the
+    class mark. Whether the row is on the plan he can see is proved only on his screen (the exit gate, scenario 4)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    js = open(os.path.join(root, "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
     assert 'PARAMS.get("step")' in js and 'li[data-step-id="' in js and "_stepShown" in js
+    assert 'anc.tagName === "DETAILS" && !anc.open' in js and 'classList.add("navstep-land")' in js and "style.boxShadow" not in js
+    css = open(os.path.join(root, "steward_cockpit", "static", "shared.css"), encoding="utf-8").read()
+    assert ".navstep-land{" in css
 
 
 def test_the_folds_a_quiet_workbench_is_one_line_and_the_desk_lists_nothing_unconnected():

@@ -388,12 +388,13 @@ _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliver
 
 def _resume_act(pid, rel, r):
     """W5 (2026-09-28): Resume — where he left this record (W0's leave receipt), opened in the cockpit AT that step
-    (`?step=` scrolls the plan to it); the act's title says the step, when, and how many events landed since, so
-    the cockpit he lands in is read as it stands now. No receipt, no act."""
+    (`?step=` opens the plan's fold that holds it, scrolls to it and marks it once); the act's title says the step
+    and when, and "nothing moved since" when the roadmap has not moved (the count itself stays on the fact — a
+    number with no decision behind it is not for the card, Grok W5). No receipt, no act."""
     if not isinstance(r, dict) or not r.get("at"):
         return ""
     since = r.get("events_since")
-    moved = (" &middot; %d event%s since" % (since, "" if since == 1 else "s")) if isinstance(since, int) and since > 0 else (" &middot; nothing moved since" if since == 0 else "")
+    moved = " &middot; nothing moved since" if since == 0 else ""     # the count stays on the fact; the title says only the zero (Grok W5)
     href = "/project/%s?dir=%s%s" % (pid, esc(rel), ("&amp;step=%s" % esc(r.get("step_id"))) if r.get("step_id") else "")
     return ('<a class="t-resume" href="%s" target="_blank" rel="noopener" title="you left at %s (%s)%s">&#8617; Resume <span class="t-age">%s</span></a>'
             % (href, esc(r.get("step") or "where you were"), esc(r.get("ago") or r.get("at")), moved, esc(r.get("ago") or "")))

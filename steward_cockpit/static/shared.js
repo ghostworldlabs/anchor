@@ -1096,10 +1096,14 @@ const Proto = (() => {
       const row = list.querySelector('li[data-step-id="' + STEP.replace(/"/g, '') + '"]');
       if (row) {
         _stepShown = true;
+        // a done or parked step sits inside a closed disclosure: open every fold above it first, so the landing
+        // is on the plan he can see (Grok W5); the mark is the cockpit's own class, one ring for a moment
+        for (let anc = row.parentElement; anc && anc !== list; anc = anc.parentElement) {
+          if (anc.tagName === "DETAILS" && !anc.open) anc.open = true;
+        }
         row.scrollIntoView({block: "center"});
-        const was = row.style.boxShadow;
-        row.style.boxShadow = "0 0 0 2px var(--accent, #6c9cfc)";
-        setTimeout(() => { row.style.boxShadow = was; }, 2400);
+        row.classList.add("navstep-land");
+        setTimeout(() => row.classList.remove("navstep-land"), 2400);
       }
     }
   }
