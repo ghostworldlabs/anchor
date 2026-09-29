@@ -167,15 +167,44 @@ def _needs(folder, span, today):
     return {"ok": True, "say": "; ".join(bits) + ".", "receipt": "", "undo": None, "act": "campaign_needs", "campaign_act": True, "read_only": True, "model_called": False}
 
 
+_BARE_BY = re.compile(r"^(.+?) by (.+?)\s*[.!]?$", re.I)
+
+
+def _bare_pace(folder, text, today):
+    """"<name> by <date>" (fit 5) is a pace only when the left side is exactly one initiative: the whole name, or the
+    start of exactly one name ("MBA" for "MBA Teaching, Fall 2026"; "the trusts" for "The trusts and the holding
+    company"). An interior word ("teaching by Monday") names nothing here and the words go to the steward. The
+    engine's grammar does not carry this form (Grok W1): the names live here, so the reading does too."""
+    m = _BARE_BY.match(" ".join(str(text or "").split()))
+    if not m:
+        return None
+    from . import campaign_acts as acts
+    inits = [(s["id"], s.get("name") or s["id"]) for s, g in acts._initiatives(folder)]
+    key = _norm(m.group(1))
+    if not key:
+        return None
+    hits = [c for c in inits if _norm(c[1]) == key or _norm(c[0]) == key]
+    if not hits:
+        hits = [c for c in inits if _norm(c[1]).startswith(key + " ") or _norm(c[1]).startswith(key + ",")]
+    if len(hits) != 1:
+        return None
+    when = parse_due(m.group(2), today)
+    if when is None:
+        return None      # "<name> by <not a date>" is not a pace: the steward takes the words
+    return _answer(acts.pace(folder, hits[0][0], when), "campaign_pace")
+
+
 def say_campaign(folder, text, dialogue=None, today=None):
     """None when the words are not a Campaign verb (the steward takes them); else the act's answer."""
+    bare = _bare_pace(folder, text, today or date.today())
+    if bare is not None:
+        return bare
     c = compile_utterance(text, dialogue)
     if c is None:
         return _refuse("the Campaign\u2019s grammar could not be read (the engine did not answer) \u2014 nothing was done", "campaign_compile")
     if not c.get("campaign"):
         return None
     try:
-        c["text"] = text      # the pace verb hands a bare "<words> by <date>" that names no initiative back to the steward
         return _apply(folder, c, today or date.today())
     except Exception as e:
         return _refuse("that did not go through: %s \u2014 look at the board before saying it again" % e, str(c.get("act") or "campaign_act"))
@@ -233,10 +262,7 @@ def _apply(folder, c, today):
     if act == "campaign_pace":
         hit, why = _find(inits, a.get("initiative"), "initiative")
         if hit is None:
-            # a bare "<words> by <date>" that names no initiative is not a Campaign verb: the steward takes it
-            if not re.match(r"^(?:set )?(?:the )?pace\b", str(c.get("text") or ""), re.I) and not str(a.get("initiative") or "").lower().startswith("pace "):
-                return None
-            return _refuse(why, act)
+            return _refuse(why, act)      # an explicit pace verb that names no initiative is refused with the names
         when = parse_due(a.get("pace"), today) if a.get("pace") not in (None, "", "none") else "none"
         if when is None:
             return _refuse("I could not read \u2018%s\u2019 as a date \u2014 Oct 10, Tuesday or 2026-10-10; the pace is unchanged" % a.get("pace"), act)

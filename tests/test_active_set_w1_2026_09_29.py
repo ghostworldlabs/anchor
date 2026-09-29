@@ -56,27 +56,51 @@ def test_the_initiatives_carry_the_set_the_pace_the_goal_and_the_progress():
 def test_the_head_reads_the_active_set_first_and_the_pick_up_while_it_runs():
     inits = _inits()
     # nothing in the set needs him and both are running: the pick-up is the bench's nearest date
-    act = ha.head_act(inits, [], today=TODAY, working={"p-magi", "p-mba"})
+    act = ha.head_act(inits, [], today=TODAY)
     assert act is not None and act["kind"] == "tier1" and act["initiative"].startswith("The trusts"), "the tiers still lead when the set is quiet and a Tier-1 part needs him"
     # the same, but the trusts part does not need him: the head is None and the pick-up names the trusts by its deadline
     quiet = hsp.campaign_initiatives([dict(s, status="planned", waiting_on=None) if s["id"] == "trusts-pkg" else s for s in _steps()],
                                      {"magi-ch2": {"what": "Chapter 2 scenes", "state": "active", "pid": "p-magi"}, "mba-lec": {"what": "Lectures 3 + 4", "state": "active", "pid": "p-mba", "date": "2026-10-10"}})
-    assert ha.head_act(quiet, [], today=TODAY, working={"p-magi", "p-mba"}) is None
+    assert ha.head_act(quiet, [], today=TODAY) is None
     pk = ha.pick_up(quiet, [], working={"p-magi", "p-mba"}, today=TODAY)
     assert pk and pk["initiative"].startswith("The trusts") and pk["why"] == "due Oct 8" and pk["active"] == ["Artificial Magi", "MBA Teaching, Fall 2026"]
     s = ha.head_sentence(None, overnight=[], pickup=pk)
     assert s.startswith("Active: Artificial Magi and MBA Teaching, Fall 2026 are running. While they run: pick up The trusts and the holding company")
     assert "(due Oct 8)" in s
+    # one runs, the other only waits on someone else: the sentence says so (Grok W1: never "running" for a wait)
+    mixed = hsp.campaign_initiatives([dict(s, status="planned", waiting_on=None) if s["id"] == "trusts-pkg" else s for s in _steps()],
+                                     {"magi-ch2": {"what": "Chapter 2 scenes", "state": "active", "pid": "p-magi"}, "mba-lec": {"what": "Lectures 3 + 4", "state": "waiting on Ryan", "pid": "p-mba", "date": "2026-10-10"}})
+    pk = ha.pick_up(mixed, [], working={"p-magi"}, today=TODAY)
+    assert pk and pk["running"] == ["Artificial Magi"] and pk["waiting"] == ["MBA Teaching, Fall 2026"]
+    assert ha.head_sentence(None, pickup=pk).startswith("Active: Artificial Magi is running; MBA Teaching, Fall 2026 is waiting on someone else. Meanwhile: pick up The trusts")
+    pk = ha.pick_up(mixed, [], working=set(), today=TODAY)
+    assert pk is None, "Magi has a free hand: his next act, not a pick-up"
+    only_wait = hsp.campaign_initiatives([dict(s, status="planned", waiting_on=None) if s["id"] == "trusts-pkg" else s for s in _steps()],
+                                         {"magi-ch2": {"what": "Chapter 2 scenes", "state": "waiting on the editor", "pid": "p-magi"}, "mba-lec": {"what": "Lectures 3 + 4", "state": "waiting on Ryan", "pid": "p-mba"}})
+    assert ha.head_sentence(None, pickup=ha.pick_up(only_wait, [], working=set(), today=TODAY)).startswith("Active: Artificial Magi and MBA Teaching, Fall 2026 are waiting on someone else. While they wait: pick up")
     # an active initiative with a free hand: no pick-up (that is his next act)
     assert ha.pick_up(quiet, [], working={"p-magi"}, today=TODAY) is None
     # a part that needs him INSIDE the set leads everything, whatever the tier order says
     needs = hsp.campaign_initiatives(_steps() + [
         {"id": "mba-hw", "name": "Homework 1 to grade", "status": "waiting", "waiting_on": "John to grade", "navigation": {"path": ["mba"]}}], {})
-    act = ha.head_act(needs, [], today=TODAY, working=set())
+    act = ha.head_act(needs, [], today=TODAY)
     assert act["kind"] == "active" and act["initiative"] == "MBA Teaching, Fall 2026" and act["text"] == "Homework 1 to grade"
     assert ha.head_sentence(act).startswith("Active · MBA Teaching, Fall 2026: Homework 1 to grade")
     # an empty set: no pick-up, ever
     assert ha.pick_up([i for i in inits if not i["active"]], [], working=set(), today=TODAY) is None
+    # an undated need inside the set outranks a due exception outside it (the outside deadline is W3's nudge)
+    exc = hsp.campaign_initiatives(_steps() + [
+        {"id": "mba-hw", "name": "Homework 1 to grade", "status": "waiting", "waiting_on": "John to grade", "navigation": {"path": ["mba"]}},
+        {"id": "paper-fee", "name": "Pay the submission fee", "status": "waiting", "waiting_on": "John", "due": "2026-09-29", "navigation": {"path": ["paper"]}}], {})
+    act = ha.head_act(exc, [], today=TODAY)
+    assert act["kind"] == "active" and act["text"] == "Homework 1 to grade"
+    # two due needs inside the set: HIS order, not the earlier date; the sentence says the date
+    two = hsp.campaign_initiatives(_steps() + [
+        {"id": "magi-edit", "name": "Read the editor's notes", "status": "waiting", "waiting_on": "John", "due": "2026-09-28", "navigation": {"path": ["magi"]}},
+        {"id": "mba-hw", "name": "Homework 1 to grade", "status": "waiting", "waiting_on": "John to grade", "due": "2026-09-20", "navigation": {"path": ["mba"]}}], {})
+    act = ha.head_act(two, [], today=TODAY)
+    assert act["initiative"] == "Artificial Magi" and act["text"] == "Read the editor's notes" and act["overdue"] is True
+    assert ha.head_sentence(act).startswith("Active \u00b7 Artificial Magi: Read the editor's notes \u2014 waiting on you, overdue since Sep 28.")
 
 
 def _record(tmp_path):
@@ -125,6 +149,18 @@ def test_the_four_acts_write_through_the_engine_with_undo(tmp_path, monkeypatch)
     assert r["ok"] and r["receipt"].endswith("cleared")
     assert not acts.act(d, {"act": "bench", "step": "magi"})["ok"], "benching a benched one is refused"
     assert not acts.act(d, {"act": "order", "step": "magi", "position": 0})["ok"], "ordering a benched one is refused"
+    # the undo of a bench puts it back at its index and the others shift, no tie (Grok W1)
+    r = acts.act(d, {"act": "activate", "step": "magi", "order": 1})
+    assert r["ok"] and [(x["id"], x["active_order"]) for x, g in acts._active(d)] == [("trusts", 0), ("magi", 1), ("mba", 2), ("paper", 3)]
+    # one outcome per act: when the set cannot close up after a bench, the receipt is refused and carries no undo
+    real = acts._cli
+    def failing(project, *args):
+        if "--active-order" in args:
+            return {"ok": False, "error": "disk full"}
+        return real(project, *args)
+    monkeypatch.setattr(acts, "_cli", failing)
+    r = acts.act(d, {"act": "bench", "step": "trusts"})
+    assert not r["ok"] and "could not close up" in r["receipt"] and not r.get("undo")
 
 
 def test_the_spoken_verbs_apply_and_a_bare_by_that_names_no_initiative_goes_to_the_steward(tmp_path, monkeypatch):
@@ -139,8 +175,20 @@ def test_the_spoken_verbs_apply_and_a_bare_by_that_names_no_initiative_goes_to_t
     monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_pace", "args": {"initiative": "mba teaching", "pace": "Oct 10"}})
     r = say.say_campaign(d, "set the pace of mba teaching to Oct 10", today=TODAY)
     assert r and r["ok"] and r["act"] == "campaign_pace" and "2026-10-10" in r["receipt"]
-    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_pace", "args": {"initiative": "review the draft", "pace": "tuesday"}})
-    assert say.say_campaign(d, "review the draft by tuesday", today=TODAY) is None, "no initiative named: not a Campaign verb, the steward takes the words"
+    # the bare "<name> by <date>" is read by the applier against the names (the engine's grammar no longer carries it):
+    # the whole name or the start of exactly one name writes; an interior word or no name goes to the steward
+    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": False, "campaign": False})
+    written = []
+    monkeypatch.setattr(acts, "_cli", lambda project, *args: (written.append(list(args)), {"ok": True})[1])
+    r = say.say_campaign(d, "MBA by Oct 10", today=TODAY)
+    assert r and r["ok"] and r["act"] == "campaign_pace" and written[-1] == ["roadmap-set", "--step", "mba", "--pace", "2026-10-10"]
+    r = say.say_campaign(d, "the trusts by Oct 8.", today=TODAY)
+    assert r and r["ok"] and written[-1][2] == "trusts"
+    n = len(written)
+    assert say.say_campaign(d, "teaching by Monday", today=TODAY) is None, "an interior word names nothing"
+    assert say.say_campaign(d, "review the draft by tuesday", today=TODAY) is None, "no initiative named: the steward takes the words"
+    assert say.say_campaign(d, "MBA by the end of the world", today=TODAY) is None, "not a date: the steward takes the words"
+    assert len(written) == n, "nothing written for any of them"
     monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_pace", "args": {"initiative": "nothing here", "pace": "tuesday"}})
     r = say.say_campaign(d, "set the pace of nothing here to tuesday", today=TODAY)
     assert r and not r["ok"], "an explicit pace verb that names no initiative is refused with the names"

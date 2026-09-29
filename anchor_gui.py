@@ -7768,7 +7768,7 @@ def _high_seat_context():
         # closures after the real INSTANT of his previous page open, one per project and step (Grok W2)
         overnight = [x for f in facts_list for x in (f.get("closed_recent") or ())
                      if last_open is not None and isinstance(x.get("at"), (int, float)) and x["at"] > float(last_open)]
-        head = _ha.head_act(initiatives, facts_list, today=today, working=working)
+        head = _ha.head_act(initiatives, facts_list, today=today)
         pickup = _ha.pick_up(initiatives, facts_list, working=working, today=today)
         if head and not head.get("pid") and campaign:
             head["pid"] = str(campaign.get("pid") or "")   # a native Campaign task opens the Campaign's own card

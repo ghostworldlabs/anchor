@@ -405,6 +405,10 @@ def activate(project, step, order=None):
     r = _cli(project, "roadmap-set", "--step", step, "--active", "on", "--active-order", str(place))
     if not r.get("ok"):
         return _no("the engine refused: %s" % r.get("error"))
+    if order is not None:
+        err = _place(project, step, place)      # at a saved index (an undo) or a drop's position: the others close up around it
+        if err:
+            return _no("%s is active, but the set could not close up around it: %s — look at the board" % (s.get("name"), err))
     return _ok("%s is active — %s" % (s.get("name"), _set_line(project)), undo={"act": "bench", "step": step})
 
 
@@ -419,14 +423,34 @@ def bench(project, step):
     r = _cli(project, "roadmap-set", "--step", step, "--active", "off")
     if not r.get("ok"):
         return _no("the engine refused: %s" % r.get("error"))
-    _renumber_active(project)
+    err = _renumber_active(project)
+    if err:      # one outcome per act (Grok W1): a failed close-up refuses the receipt and carries no undo
+        return _no("%s is off the set, but the set could not close up: %s — look at the board" % (s.get("name"), err))
     return _ok("%s to the bench — %s" % (s.get("name"), _set_line(project)), undo={"act": "activate", "step": step, "order": old_order})
 
 
 def _renumber_active(project):
+    """Close the set up (0, 1, 2 …); the first refused write is the error, else None."""
     for k, (x, g) in enumerate(_active(project)):
         if x.get("active_order") != k:
-            _cli(project, "roadmap-set", "--step", x["id"], "--active-order", str(k))
+            r = _cli(project, "roadmap-set", "--step", x["id"], "--active-order", str(k))
+            if not r.get("ok"):
+                return "the engine refused: %s" % r.get("error")
+    return None
+
+
+def _place(project, step, position):
+    """Put an active initiative at a position; the others close up around it. The first refused write is the error."""
+    ids = [x["id"] for x, g in _active(project) if x["id"] != step]
+    position = max(0, min(int(position), len(ids)))
+    ids.insert(position, step)
+    for k, sid in enumerate(ids):
+        cur = _step(project, sid)
+        if cur.get("active_order") != k:
+            r = _cli(project, "roadmap-set", "--step", sid, "--active-order", str(k))
+            if not r.get("ok"):
+                return "the engine refused: %s" % r.get("error")
+    return None
 
 
 def order(project, step, position):
@@ -440,17 +464,10 @@ def order(project, step, position):
         position = int(position)
     except Exception:
         return _no("a position is a number")
-    ids = [x["id"] for x, g in _active(project)]
-    old = ids.index(step) if step in ids else None
-    ids = [i for i in ids if i != step]
-    position = max(0, min(position, len(ids)))
-    ids.insert(position, step)
-    for k, sid in enumerate(ids):
-        cur = _step(project, sid)
-        if cur.get("active_order") != k:
-            r = _cli(project, "roadmap-set", "--step", sid, "--active-order", str(k))
-            if not r.get("ok"):
-                return _no("the engine refused: %s" % r.get("error"))
+    old = next((k for k, (x, g) in enumerate(_active(project)) if x["id"] == step), None)
+    err = _place(project, step, position)
+    if err:
+        return _no(err)
     return _ok("%s is %s in the set — %s" % (s.get("name"), ("first" if position == 0 else "number %d" % (position + 1)), _set_line(project)),
                undo={"act": "order", "step": step, "position": old} if old is not None else None)
 
