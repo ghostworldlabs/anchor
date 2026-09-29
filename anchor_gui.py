@@ -7787,6 +7787,7 @@ def _high_seat_context():
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
+        "auth_required": bool(_paths.expected_token()),     # R14: the page shows its login box when a token is required and none is held
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head, "overnight": overnight,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
@@ -9810,6 +9811,18 @@ body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; m
 </div>
 
 <div class="toast" id="toast"></div>
+<!-- R14 (2026-09-29): the token is pasted into the page, never into a browser pop-up -->
+<div class="modal-overlay" id="tokenModal">
+  <div class="modal">
+    <h3>Anchor access token</h3>
+    <p id="tokenMsg" style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Paste your Anchor access token. It stays in this browser.</p>
+    <input type="password" id="tokenInput" placeholder="the token" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){{event.preventDefault();saveAnchorToken();}}" />
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('tokenModal')">Cancel</button>
+      <button class="btn" onclick="saveAnchorToken()">Save and reload</button>
+    </div>
+  </div>
+</div>
 
 <!-- v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. Hidden by
      default; shown when a project row is dropped into a folder header. -->
@@ -9886,13 +9899,25 @@ function setAnchorToken(opts) {{
     // a token rotation this is exactly what happens on every device that still
     // holds the old one — "it was still saved" was the symptom.
     const rejected = !!(opts && opts.rejected) && !!cur;
-    const msg = rejected
-        ? 'Your saved Anchor token was REJECTED (it is probably out of date).\\nPaste the current token:'
-        : 'Paste your Anchor access token:';
-    const t = window.prompt(msg, rejected ? '' : cur);
-    if (t === null) return false;
-    try {{ if (t) {{ localStorage.setItem('anchor_token', t.trim()); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
-    return true;
+    // R14 (2026-09-29): an in-page box, never window.prompt — a browser that suppresses dialogs showed nothing at
+    // all ("I click that button and nothing happens"). The box saves and reloads; this call returns false because
+    // nothing is known yet (its callers fall through; the reload carries the new token).
+    const msg = document.getElementById('tokenMsg'), inp = document.getElementById('tokenInput'), modal = document.getElementById('tokenModal');
+    if (!modal || !inp) return false;
+    if (msg) msg.textContent = rejected
+        ? 'Your saved Anchor token was REJECTED (it is probably out of date). Paste the current token:'
+        : 'Paste your Anchor access token. It stays in this browser.';
+    inp.value = rejected ? '' : cur;
+    modal.classList.add('open');
+    setTimeout(function () {{ try {{ inp.focus(); inp.select(); }} catch (e) {{}} }}, 50);
+    return false;
+}}
+function saveAnchorToken() {{
+    const inp = document.getElementById('tokenInput');
+    const t = inp ? inp.value.trim() : '';
+    try {{ if (t) {{ localStorage.setItem('anchor_token', t); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
+    closeModal('tokenModal');
+    location.reload();
 }}
 // On first load, if the server requires auth and we have no token yet, ask once.
 // Once stored, this never fires again (token persists in localStorage).

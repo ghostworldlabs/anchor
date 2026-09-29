@@ -96,13 +96,35 @@
   var askedOnce = false;
   function login(t) {
     try { localStorage.setItem('anchor_token', t); } catch (e) {}
-    return fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () {});
+    return fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () { return null; });
   }
+  // R14 (2026-09-29): the token is pasted INTO the page (no window.prompt — a browser that suppresses dialogs showed
+  // nothing). askToken() shows the box and answers false at once; a successful login reloads the page, which then
+  // reads every card with the cookie. The box also opens on load when a token is required and none is held.
+  var loginBox = $('#loginBox'), loginTok = $('#loginTok'), loginGo = $('#loginGo'), loginMsg = $('#loginMsg');
+  function showLogin(text) {
+    if (!loginBox) return;
+    loginBox.hidden = false; if (loginMsg) loginMsg.textContent = text || '';
+    try { loginBox.scrollIntoView({ block: 'center' }); } catch (e) {}
+    setTimeout(function () { try { loginTok.focus(); } catch (e) {} }, 50);
+  }
+  function doLogin() {
+    var t = ((loginTok && loginTok.value) || '').trim();
+    if (!t) { if (loginMsg) loginMsg.textContent = 'Paste the token first.'; return; }
+    if (loginGo) loginGo.disabled = true; if (loginMsg) loginMsg.textContent = 'Logging in\u2026';
+    login(t).then(function (r) {
+      if (loginGo) loginGo.disabled = false;
+      if (r && r.ok) { if (loginMsg) loginMsg.textContent = 'Logged in.'; try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: 'Logged in. This browser holds the token now.', undo: null })); } catch (e) {} location.reload(); return; }
+      try { localStorage.removeItem('anchor_token'); } catch (e) {}
+      if (loginMsg) loginMsg.textContent = (r && r.status === 401) ? 'That token was refused \u2014 it is not the current one.' : 'That did not go through; try again.';
+    });
+  }
+  if (loginGo) loginGo.addEventListener('click', doLogin);
+  if (loginTok) loginTok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
+  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token()) showLogin('');
   function askToken() {
-    var t = null;
-    try { t = window.prompt('Anchor access token:'); } catch (e) { t = null; }
-    t = (t || '').trim();
-    return t ? login(t).then(function () { return true; }) : Promise.resolve(false);
+    showLogin('');
+    return Promise.resolve(false);
   }
   function notLoggedIn() { return '<div class="cp-quiet cp-auth">' + NOT_LOGGED_IN + ' <button class="mini" data-login>paste the token</button></div>'; }
   function fetchPart(pid, part, dir, retried, open) {
