@@ -584,7 +584,7 @@ def place(project, step, band, position, tier=None, tier_position=None):
     if old_tier != tier:
         r = move_tier(project, step, tier)      # no order here: _place_tier is the one order writer
         if not r.get("ok"):
-            return dict(r, undo=undo) if landed else r
+            return _no("%s — undo puts it back" % r.get("receipt"), undo=undo) if landed else r
         landed.append("tier")
         said.append(("moved to tier %d" % tier) if said else "%s moved to tier %d" % (s.get("name"), tier))
     err = _place_tier(project, step, tier, position)

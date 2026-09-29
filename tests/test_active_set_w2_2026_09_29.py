@@ -44,7 +44,8 @@ def test_the_board_is_the_goals_in_bands_active_then_the_tiers():
     assert 'data-open="magi"' in magi and "Artificial Magi done" in magi and "pace Dec 15" in magi and "0 of 1" in magi and 'class="ilight working"' in magi and "tier 1" in magi
     assert 'class="iline next"' in magi and magi.count(">Artificial Magi done<") == 1, "the next thing under the goal; the goal never printed twice"
     html2 = cpg.render_campaign_html(_ctx([s for s in w1._steps() if s["id"] != "paper-draft"]))     # Paper 1 with nothing open: no one-line
-    paper = html2[html2.index('data-lane="paper"'):html2.index('id="viewCal"')]
+    board2 = html2[html2.index('<div class="bands"'):html2.index('id="viewCal"')]
+    paper = board2[board2.index('data-lane="paper"'):]
     assert 'class="iline' not in paper[:1200] and paper[:1200].count(">Paper 1 done<") == 1
     trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="paper"')]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
@@ -118,7 +119,7 @@ def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monk
     assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"] and r["undo"] == {"act": "bench", "step": "trusts"}
     # within Active
     r = acts.act(d, {"act": "place", "step": "mba", "band": "active", "position": 0})
-    assert r["ok"] and ids()[0] == ["mba", "trusts", "magi"] and r["undo"] == {"act": "place", "step": "mba", "band": "active", "position": 2}
+    assert r["ok"] and ids()[0] == ["mba", "trusts", "magi"] and r["undo"] == {"act": "place", "step": "mba", "band": "active", "position": 2, "tier": 1, "tier_position": 2}
     r = acts.act(d, r["undo"])
     assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"]
     # Active → a tier it was not in, at a position: off the set, the tier changed, its place there; one receipt, one undo back into Active
@@ -129,15 +130,19 @@ def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monk
     r = acts.act(d, r["undo"])
     assert r["ok"] and ids() == (["trusts", "magi", "mba"], ["trusts", "magi", "mba"], ["paper"]) and acts._step(d, "magi")["tier"] == 1, "back in the set at its index AND back in tier 1 at its place"
     assert r["receipt"].startswith("Artificial Magi back in tier 1 — Artificial Magi is active")
-    # within a tier: a new position; the others close up; the undo puts it back
-    r = acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 0})
-    assert r["ok"] and ids()[2] == ["paper", "magi"] and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 1}
+    # Magi out of the set into tier 2 behind Paper 1; then within tier 2: a new position, the others close up, the undo puts it back
+    r = acts.act(d, {"act": "place", "step": "magi", "band": "2", "position": 1})
+    assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["paper", "magi"])
+    r = acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 1})
+    assert r["ok"] and ids()[2] == ["magi", "paper"] and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
     r = acts.act(d, r["undo"])
-    assert r["ok"] and ids()[2] == ["magi", "paper"]
+    assert r["ok"] and ids()[2] == ["paper", "magi"]
     # a benched goal between tiers at a position
     r = acts.act(d, {"act": "place", "step": "paper", "band": "1", "position": 1})
-    assert r["ok"] and ids()[1] == ["trusts", "paper", "magi", "mba"] and acts._step(d, "paper")["tier"] == 1
-    assert r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 1}
+    assert r["ok"] and ids()[1] == ["trusts", "paper", "mba"] and acts._step(d, "paper")["tier"] == 1
+    assert r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
+    r = acts.act(d, r["undo"])
+    assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["paper", "magi"])
     assert not acts.act(d, {"act": "place", "step": "paper", "band": "4", "position": 0})["ok"]
     assert not acts.act(d, {"act": "place", "step": "nope", "band": "1", "position": 0})["ok"]
     # a refusal after a landed write carries the undo (one failure surface)
