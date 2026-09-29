@@ -439,3 +439,52 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .iline.wait{color:var(--amber-t)}
 .itile:not(.open) .imore{display:none}
 @media(max-width:1200px){.tiers{overflow:visible}}
+
+/* W2 of the active set (2026-09-29, A1 + C1): the goals band - every initiative's goal, pace, next deadline and
+   progress, the active set as one list in his order and the bench as another by nearest date; a row drags between
+   the lists and up and down inside Active; every drop is one act with undo. The brief folds to its lead; the
+   composer sits directly under it. */
+.goals{flex:none;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:6px 10px 8px}
+.goals .colk{padding:0 0 3px}
+.goals .colk .c b{color:var(--text-warm)}
+.glist{margin-top:3px}
+.glist h4{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);font-weight:700;padding:4px 6px 2px;display:flex;gap:8px;align-items:baseline}
+.glist h4 .c{font-size:10px;color:var(--text-dim2);letter-spacing:0;text-transform:none;font-weight:600}
+.glist[data-list="active"] h4{color:var(--accent-t)}
+.glist.over{outline:1px dashed var(--accent);outline-offset:1px;border-radius:8px}
+.grow{display:grid;grid-template-columns:minmax(200px,1.25fr) minmax(0,1.5fr) 92px 170px minmax(140px,.9fr);gap:10px;align-items:center;padding:3px 6px;border-radius:7px;font-size:11.5px;line-height:1.35;border:1px solid transparent;min-width:0}
+.grow.h{color:var(--text-dim2);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding-bottom:0}
+.grow[draggable]{cursor:grab;border-left:2px solid var(--areac,#8b93a6)}
+.grow[draggable]:hover{background:var(--surface2);border-color:var(--border);border-left-color:var(--areac,#8b93a6)}
+.grow.dragging{opacity:.4}
+.grow.over-before{box-shadow:0 -2px 0 0 var(--accent)}
+.grow.over-after{box-shadow:0 2px 0 0 var(--accent)}
+.gn{display:flex;align-items:center;gap:6px;min-width:0}
+.gh{color:var(--text-dim2);font-size:11px;letter-spacing:-2px;flex:none}
+.gname{color:var(--text);font-weight:650;text-align:left;padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.gname:hover{color:var(--accent-t)}
+.gtier,.glight{font-size:10px;color:var(--text-dim2);white-space:nowrap;flex:none}
+.glight.needs{color:var(--amber-t);font-weight:700}
+.glight.working{color:var(--success)}
+.glight.waiting{color:var(--text-dim)}
+.gg{color:var(--text-warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.gp,.gd{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.gg.dim,.gp.dim,.gd.dim{color:var(--text-dim2)}
+.gd.soon{color:var(--amber-t);font-weight:650}
+.gd.over{color:var(--danger);font-weight:650}
+.gpr{display:flex;align-items:center;gap:7px;min-width:0}
+.gpr .bar{flex:none;width:52px;height:5px;border-radius:3px;background:#2b3140;overflow:hidden}
+.gpr .bar i{display:block;height:100%;background:var(--accent)}
+.gpr .dim{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gpr .dim.am{color:var(--amber-t)}
+.gempty{font-size:11px;color:var(--text-dim2);padding:3px 8px 5px}
+.receipt[hidden]{display:none}   /* the receipt's flex was beating its hidden; under the brief it showed a bare tick */
+.gwide{color:var(--amber-t);font-weight:650}
+.blist li.fold{padding-left:0}
+.blist li.fold::before{display:none}
+.brief-more summary{font-size:11px;color:var(--text-dim);cursor:pointer;list-style:none;padding-left:13px}
+.brief-more summary::-webkit-details-marker{display:none}
+.brief-more summary::before{content:"\25B8 ";color:var(--amber)}
+.brief-more[open] summary::before{content:"\25BE "}
+.brief-more ul{list-style:none;margin-top:2px}
+@media (max-width:1100px){.grow{grid-template-columns:minmax(160px,1.2fr) minmax(0,1.4fr) 80px 140px minmax(110px,.8fr)}}

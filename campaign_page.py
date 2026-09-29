@@ -14,7 +14,8 @@ from __future__ import annotations
 from datetime import timedelta
 
 import home_rows as _hr
-from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html
+from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, active_set, bench_of
+import home_attention as _ha
 
 TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
 TIER_COLOURS = {1: "#6c9cfc", 2: "#8b93a6", 3: "#5f6674"}
@@ -304,23 +305,96 @@ def brief_bullets(ctx):
     return out
 
 
+# ── the goals band: the active set and the bench (W2 of the active set, 2026-09-29) ──────────────────────
+
+def _goalrow(i, ctx, which):
+    """One initiative as a row of the goals band: its name with the tier and the light, the goal (done when), the
+    pace, the next deadline with its part, the progress (parts done of parts). The row drags."""
+    today = ctx["today"]
+    glyph, word = LIGHTS[initiative_light(i, ctx.get("working") or set())]
+    n, done = len(i["parts"]), int(i.get("done_count") or 0)
+    pct = int(round(100.0 * done / n)) if n else 0
+    pace = i.get("pace") or ""
+    pace_d = _hr._iso(pace) if pace else None
+    nd = i.get("next_deadline") or ""
+    nd_d = _hr._iso(nd) if nd else None
+    nd_part = next((p for p in i["parts"] if p["date"] == nd and not p["broken"] and p["status"] not in ("done", "parked")), None) if nd else None
+    dcls = ("over" if nd_d and nd_d < today else ("soon" if nd_d and (nd_d - today).days <= 7 else ""))
+    notes = ["%d of %d part%s" % (done, n, "" if n == 1 else "s") if n else "no parts yet"]
+    if i["needs"]:
+        notes.append("a part waits on you" if len(i["needs"]) == 1 else "%d parts wait on you" % len(i["needs"]))
+    if pace_d and pace_d < today and done < n:
+        notes.append("past the pace")
+    return (
+        '<div class="grow" draggable="true" data-init="%s" data-list="%s" style="--areac:%s">'
+        '<span class="gn"><span class="gh" title="drag it">&#8942;&#8942;</span><button class="gname" data-goto="%s" title="open its tile">%s</button>'
+        '<span class="gtier">tier %s</span><span class="glight %s">%s %s</span></span>'
+        '<span class="gg%s">%s</span><span class="gp%s">%s</span><span class="gd%s%s">%s</span>'
+        '<span class="gpr"><span class="bar"><i style="width:%d%%"></i></span><span class="dim%s">%s</span></span></div>'
+    ) % (esc(i["id"]), which, AREA_COLOURS.get(i["area"], "#8b93a6"), esc(i["id"]), esc(i["name"]), i["tier"] or "?",
+         initiative_light(i, ctx.get("working") or set()), glyph, word,
+         "" if i["done_when"] else " dim", esc(i["done_when"]) or "not written yet",
+         "" if pace else " dim", ("by " + esc(_short(pace))) if pace else "no pace set",
+         (" " + dcls) if dcls else "", "" if nd else " dim", ("%s &middot; %s" % (esc(_short(nd)), esc((nd_part or {}).get("text") or ""))) if nd else "&mdash;",
+         pct, " am" if i["needs"] else "", esc(" &middot; ".join(notes)).replace("&amp;middot;", "&middot;"))
+
+
+def _goalsband(ctx):
+    """The plan at a glance (A1 + C1): two lists - Active, in his order, and the bench by the nearest pace or
+    deadline - every initiative one row of goal, pace, next deadline and progress. A row drags between the lists
+    and up and down inside Active; every drop is one act on the record with undo (the page script). No cap: a set
+    wider than three is named here and by the steward, never refused. The tiers below are untouched."""
+    inits = ctx["initiatives"]
+    act, bench = active_set(inits), bench_of(inits)
+    head = '<div class="grow h"><span>initiative</span><span>goal &middot; done when</span><span>pace</span><span>next deadline</span><span>progress</span></div>'
+    wide = (' <span class="gwide">%d active is wider than three &mdash; the steward would keep to three</span>' % len(act)) if len(act) > 3 else ""
+    return (
+        '<section class="goals" id="goals" aria-label="Goals and pace"><div class="colk"><h3>The plan &middot; goals and pace</h3>'
+        '<span class="c">Active <b>%d</b>%s &middot; the bench <b>%d</b> by nearest date &middot; drag a row between the lists, or up and down inside Active &mdash; one line with undo; the tiers below are untouched</span></div>%s'
+        '<div class="glist" data-list="active"><h4>Active <span class="c">what you are on now, in your order</span></h4>%s</div>'
+        '<div class="glist" data-list="bench"><h4>The bench <span class="c">by the nearest pace or deadline, then the tiers</span></h4>%s</div></section>'
+    ) % (len(act), wide, len(bench), head,
+         "".join(_goalrow(i, ctx, "active") for i in act) or '<div class="gempty">nothing active yet &mdash; drag an initiative here, or tell the steward &ldquo;make &hellip; active&rdquo;</div>',
+         "".join(_goalrow(i, ctx, "bench") for i in bench) or '<div class="gempty">every initiative is active</div>')
+
+
+def _lead(ctx):
+    """The brief's lead when a set exists: the head as the High Seat reads it - a part that needs him in an active
+    initiative, else the tiers, else the pick-up while the set runs - with an open to its tile."""
+    inits = ctx["initiatives"]
+    if not any(i.get("active") for i in inits):
+        return None
+    working = ctx.get("working") or set()
+    head = _ha.head_act(inits, [], today=ctx["today"])
+    pk = _ha.pick_up(inits, [], working=working, today=ctx["today"])
+    name = (head or {}).get("initiative") or (pk or {}).get("initiative") or ""
+    hit = next((i for i in inits if i["name"] == name), None)
+    goto = (' <button class="goto" data-goto="%s">open</button>' % esc(hit["id"])) if hit else ""
+    return esc(_ha.head_sentence(head, pickup=pk)) + goto
+
+
 def _panel(ctx):
     st = ctx["steward"]
-    bullets = "".join('<li%s>%s</li>' % (' class="lead"' if k == 0 else "", b) for k, b in enumerate(brief_bullets(ctx)))
+    rest = brief_bullets(ctx)
+    lead = _lead(ctx)
+    if lead is None:
+        lead, rest = rest[0], rest[1:]
+    # the brief shrinks to its lead plus a fold (A1): the composer sits directly under it
+    bullets = '<li class="lead">%s</li><li class="fold"><details class="brief-more"><summary>the rest, by tier</summary><ul>%s</ul></details></li>' % (
+        lead, "".join('<li>%s</li>' % b for b in rest))
     turns = ctx.get("turns") or []
     ex = "".join('<li class="exrow %s"><div class="exw %s">%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
         "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(st["label"]), esc(t["at"]), esc(t["text"][:600])) for t in turns[-6:])
     return (
-        '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief &mdash; by tier <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
-        '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div>'
+        '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
-        '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Campaign"></textarea>'
+        '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Campaign: make &hellip; active, bench &hellip;, &hellip; by Oct 10"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers here and acts on the record; the board shows what changed on the next look</span><button class="send" id="sendBtn">Send</button></div>'
-        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
-    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), ("%d shown" % min(6, len(turns))) if turns else "no transcript kept",
-         ex, "Only the last few exchanges are kept here. What the steward actually did is on the board." if turns else "Nothing said here yet. The cockpit's conversation is the same one.",
-         esc(st["label"]))
+        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
+        '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="note" id="exNote">%s</span></div>'
+        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div></aside>'
+    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), esc(st["label"]), ("%d shown" % min(6, len(turns))) if turns else "no transcript kept",
+         ex, "Only the last few exchanges are kept here. What the steward actually did is on the board." if turns else "Nothing said here yet. The cockpit's conversation is the same one.")
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────
@@ -334,12 +408,12 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_dated = sum(1 for i in inits for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked"))
     n_needs = sum(len(i["needs"]) for i in inits)
     board = (
-        '<section class="board" aria-label="The Campaign"><div class="colk"><h3 id="viewTitle">Initiatives by tier</h3>'
+        '<section class="board" aria-label="The Campaign">%s<div class="colk"><h3 id="viewTitle">Initiatives by tier</h3>'
         '<span class="c" id="boardCount">%d in priority order &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close all</button></div>'
         '%s%s%s%s'
         '<p class="boardfoot" id="boardFoot"><b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them; every change is one line with undo.</p></section>'
-    ) % (len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
+    ) % (_goalsband(ctx), len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _seedband(ctx), _areas(ctx), _grouped(ctx, open_id), _calendar(ctx))
     hdr = (
         '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>'

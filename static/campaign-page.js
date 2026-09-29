@@ -150,6 +150,47 @@
     go.addEventListener('click', function () { act({ act: 'promote', seed: go.getAttribute('data-pickgo'), tier: chosen('[data-picktier]') || '3', area: chosen('[data-pickarea]') || null }); });
   });
 
+  // W2 of the active set (2026-09-29, C1): the goals band's rows drag - between Active and the bench, and up and
+  // down inside Active; every drop is ONE act through the same route, with undo. The bench keeps its own order
+  // (by nearest date), so a drop there only benches. Nothing moves on the page until the record says so.
+  var dragId = null, dragFrom = null;
+  function rowsOf(list) { return $$('.grow[draggable]', list); }
+  function clearMarks() { $$('.grow.over-before, .grow.over-after').forEach(function (r) { r.classList.remove('over-before', 'over-after'); }); $$('.glist.over').forEach(function (l) { l.classList.remove('over'); }); }
+  function indexAt(list, y) {   // where the dragged row would land: before the first row whose middle is below the pointer
+    var rows = rowsOf(list).filter(function (r) { return r.getAttribute('data-init') !== dragId; }), k = rows.length;
+    for (var i = 0; i < rows.length; i++) { var b = rows[i].getBoundingClientRect(); if (y < b.top + b.height / 2) { k = i; break; } }
+    return { k: k, rows: rows };
+  }
+  $$('.grow[draggable]').forEach(function (r) {
+    r.addEventListener('dragstart', function (e) {
+      dragId = r.getAttribute('data-init'); dragFrom = r.getAttribute('data-list'); r.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
+    });
+    r.addEventListener('dragend', function () { r.classList.remove('dragging'); clearMarks(); dragId = null; dragFrom = null; });
+  });
+  $$('.glist').forEach(function (list) {
+    list.addEventListener('dragover', function (e) {
+      if (!dragId) return;
+      e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      clearMarks(); list.classList.add('over');
+      if (list.getAttribute('data-list') !== 'active') return;
+      var at = indexAt(list, e.clientY);
+      if (at.rows.length) { if (at.k < at.rows.length) at.rows[at.k].classList.add('over-before'); else at.rows[at.rows.length - 1].classList.add('over-after'); }
+    });
+    list.addEventListener('dragleave', function (e) { if (!list.contains(e.relatedTarget)) clearMarks(); });
+    list.addEventListener('drop', function (e) {
+      if (!dragId) return;
+      e.preventDefault();
+      var to = list.getAttribute('data-list'), id = dragId, from = dragFrom; clearMarks();
+      if (to === 'bench') { if (from === 'active') act({ act: 'bench', step: id }); return; }
+      var k = indexAt(list, e.clientY).k;
+      if (from === 'active') {
+        var was = rowsOf(list).map(function (r) { return r.getAttribute('data-init'); }).indexOf(id);
+        if (was !== k) act({ act: 'order', step: id, position: k });
+      } else act({ act: 'activate', step: id, order: k });
+    });
+  });
+
   // the tools
   $$('.tool[data-tool]').forEach(function (b) {
     b.addEventListener('click', function () {
