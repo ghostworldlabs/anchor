@@ -144,3 +144,20 @@ def test_the_spoken_verbs_apply_and_a_bare_by_that_names_no_initiative_goes_to_t
     monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_pace", "args": {"initiative": "nothing here", "pace": "tuesday"}})
     r = say.say_campaign(d, "set the pace of nothing here to tuesday", today=TODAY)
     assert r and not r["ok"], "an explicit pace verb that names no initiative is refused with the names"
+
+
+def test_the_page_leads_with_the_pick_up_while_the_set_runs():
+    """The brief's lead is rendered by the page from the head itself; with no head and a pick-up, the pick-up leads
+    and its button opens the picked project."""
+    import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import test_high_seat_page_2026_09_26 as t
+    ctx = t._ctx(); ctx["head"] = None
+    ctx["pickup"] = {"initiative": "The trusts and the holding company", "id": "trusts", "why": "due Oct 8", "text": "Send the Stanford package", "pid": "p-trusts", "active": ["Artificial Magi", "MBA Teaching, Fall 2026"]}
+    html = hsp.render_high_seat_html(ctx)
+    i = html.index('class="lead"')
+    lead = html[i:i + 400]
+    assert "Active: Artificial Magi and MBA Teaching, Fall 2026 are running. While they run: pick up The trusts" in lead
+    assert 'data-pid="p-trusts"' in lead, "the pick-up's button opens the picked project"
+    ctx["pickup"] = None
+    html = hsp.render_high_seat_html(ctx)
+    assert "Nothing is waiting on you." in html[html.index('class="lead"'):][:200]

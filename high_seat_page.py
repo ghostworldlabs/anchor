@@ -601,12 +601,15 @@ def _head_li(ctx):
     week's dates, folded and named for what they hold (Grok W2: the old count brief is gone)."""
     import home_attention as _ha
     head = ctx.get("head") if isinstance(ctx.get("head"), dict) else None
-    lead = esc(_ha.head_sentence(head, overnight=ctx.get("overnight") or ()))
+    pickup = ctx.get("pickup") if isinstance(ctx.get("pickup"), dict) else None   # W1 of the active set: while the set runs, what to pick up
+    lead = esc(_ha.head_sentence(head, overnight=ctx.get("overnight") or (), pickup=pickup))
     cls = "lead exc" if head and head.get("kind") == "exception" else "lead"
     act = ""
     if head and head.get("pid"):
         dir_attr = (' data-dir="%s"' % esc(head["dir"])) if head.get("dir") else ""   # only an act that names its effort
         act = ' <button class="h-open" data-part="status" data-pid="%s"%s>open</button>' % (esc(head["pid"]), dir_attr)
+    elif head is None and pickup and pickup.get("pid"):
+        act = ' <button class="h-open" data-part="status" data-pid="%s">open</button>' % esc(pickup["pid"])   # the pick-up opens its project
     week = [b for b in (ctx.get("bullets") or [])[1:] if str(b).startswith(("This week", "Nothing is due this week", "Nothing carries a date"))]
     more = ('<details class="brief-more"><summary>this week</summary><ul>%s</ul></details>' % "".join('<li>%s</li>' % esc(b) for b in week)) if week else ""
     return '<li class="%s">%s%s</li>%s' % (cls, lead, act, ('<li class="fold">%s</li>' % more) if more else "")
