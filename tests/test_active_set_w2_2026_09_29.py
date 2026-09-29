@@ -42,6 +42,10 @@ def test_the_board_is_the_goals_in_bands_active_then_the_tiers():
     assert tiles == [("magi", "active"), ("mba", "active"), ("trusts", "1"), ("paper", "2")], "his order in Active; the tiers' order in the tiers"
     magi = board[board.index('data-lane="magi"'):board.index('data-lane="mba"')]
     assert 'data-open="magi"' in magi and "Artificial Magi done" in magi and "pace Dec 15" in magi and "0 of 1" in magi and 'class="ilight working"' in magi and "tier 1" in magi
+    assert 'class="iline next"' in magi and magi.count(">Artificial Magi done<") == 1, "the next thing under the goal; the goal never printed twice"
+    html2 = cpg.render_campaign_html(_ctx([s for s in w1._steps() if s["id"] != "paper-draft"]))     # Paper 1 with nothing open: no one-line
+    paper = html2[html2.index('data-lane="paper"'):html2.index('id="viewCal"')]
+    assert 'class="iline' not in paper[:1200] and paper[:1200].count(">Paper 1 done<") == 1
     trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="paper"')]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
     assert 'id="viewTitle">The goals</h3>' in html and "4 in priority order &middot; Active 2 &middot; T1 3 / T2 1 / T3 0" in html
@@ -57,12 +61,14 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
     turns = {"trusts": [{"you": True, "text": "add a part: call the trustee", "at": "10:50", "goal": "trusts"},
                         {"you": False, "text": "Added to The trusts and the holding company.", "at": "10:50", "goal": "trusts"}]}
     html = cpg.render_campaign_html(_ctx(goal_turns=turns), open_id="trusts")
-    assert 'class="board" aria-label="The Campaign" data-open="trusts"' in html, "?open= deep-links the place"
+    assert 'class="board" aria-label="The Campaign" data-place="trusts"' in html, "?open= deep-links the place"
     place = html[html.index('id="place-trusts"'):html.index('id="place-paper"')]
     assert 'hidden' in place[:120], "rendered for every goal, shown by the page script"
     assert 'class="pname">The trusts and the holding company</span>' in place
     assert 'data-goal-text="trusts">The trusts and the holding company done</div>' in place, "the goal whole, to revise"
     assert "0 of 1 part done" in place and "1 waits on you &mdash; Send the Stanford package" in place and "the next deadline is <b>Oct 8</b>" in place and "no pace set" in place
+    assert '<div class="k">Progress</div>' not in place, "the third copy of N of M is cut (Grok W2)"
+    assert "nudge" not in place, "no promise W3 has not built"
     assert 'data-pace="trusts">set a pace</span>' in place and 'data-tiersel="trusts"' in place and 'data-activate="trusts">make it active</button>' in place
     assert 'data-act="date" data-part="trusts-pkg"' in place and 'data-act="add" data-lane="trusts"' in place, "the workflow carries the parts' acts as the tile's body did"
     assert 'data-thread="trusts"' in place and "add a part: call the trustee" in place and "Added to The trusts" in place
@@ -97,7 +103,7 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     assert "act({ act: 'done_when', step: id, text: v })" in place and "act({ act: 'pace', step: id, when: inp.value || 'none' })" in place
     assert "act({ act: 'activate', step: b.getAttribute('data-activate') })" in place and "act({ act: 'bench', step: b.getAttribute('data-bench') })" in place
     conv = js[js.index("// the goal's conversation"):js.index("// the tools")]
-    assert "goal: goal" in conv and "'/api/steward/history?pid='" in conv and "location.reload" in conv
+    assert "goal: goal" in conv and "'/api/steward/history?pid='" in conv and "location.reload" in conv and "No answer yet" in conv
     assert "window.prompt(" not in place and "window.prompt(" not in conv
     assert "openPlace(" in js and ".itile" not in js.replace("/* ", "").split("(function")[1]
 
@@ -119,9 +125,10 @@ def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monk
     r = acts.act(d, {"act": "place", "step": "magi", "band": "2", "position": 0})
     assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["magi", "paper"]), ids()
     assert r["receipt"].startswith("Artificial Magi to the bench, moved to tier 2, first in tier 2 — the set is The trusts and the holding company, MBA Teaching, Fall 2026")
-    assert r["undo"] == {"act": "place", "step": "magi", "band": "active", "position": 1}
+    assert r["undo"] == {"act": "place", "step": "magi", "band": "active", "position": 1, "tier": 1, "tier_position": 1}, "the undo carries the old band AND the old tier (Grok W2)"
     r = acts.act(d, r["undo"])
-    assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"] and acts._step(d, "magi")["tier"] == 2, "back in the set at its index; its tier as it now is"
+    assert r["ok"] and ids() == (["trusts", "magi", "mba"], ["trusts", "magi", "mba"], ["paper"]) and acts._step(d, "magi")["tier"] == 1, "back in the set at its index AND back in tier 1 at its place"
+    assert r["receipt"].startswith("Artificial Magi back in tier 1 — Artificial Magi is active")
     # within a tier: a new position; the others close up; the undo puts it back
     r = acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 0})
     assert r["ok"] and ids()[2] == ["paper", "magi"] and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 1}
@@ -129,10 +136,19 @@ def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monk
     assert r["ok"] and ids()[2] == ["magi", "paper"]
     # a benched goal between tiers at a position
     r = acts.act(d, {"act": "place", "step": "paper", "band": "1", "position": 1})
-    assert r["ok"] and ids()[1] == ["trusts", "paper", "mba"] and acts._step(d, "paper")["tier"] == 1, "Magi is tier 2 now (its undo kept its tier); Paper 1 sits second in tier 1"
+    assert r["ok"] and ids()[1] == ["trusts", "paper", "magi", "mba"] and acts._step(d, "paper")["tier"] == 1
     assert r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 1}
     assert not acts.act(d, {"act": "place", "step": "paper", "band": "4", "position": 0})["ok"]
     assert not acts.act(d, {"act": "place", "step": "nope", "band": "1", "position": 0})["ok"]
+    # a refusal after a landed write carries the undo (one failure surface)
+    real = acts._spine_set
+    def failing(project, step_id, fields):
+        if "navigation" in fields:
+            return {"ok": False, "error": "disk full"}
+        return real(project, step_id, fields)
+    monkeypatch.setattr(acts, "_spine_set", failing)
+    r = acts.act(d, {"act": "place", "step": "trusts", "band": "2", "position": 0})      # active -> tier 2: the bench lands, the tier lands, the place fails
+    assert not r["ok"] and "undo puts it back" in r["receipt"] and r["undo"] == {"act": "place", "step": "trusts", "band": "active", "position": 0, "tier": 1, "tier_position": 0}
 
 
 def test_the_goal_is_revised_as_its_done_when_with_undo(tmp_path, monkeypatch):
@@ -186,13 +202,22 @@ def test_the_goal_s_thread_is_the_one_log_tagged_and_the_steward_s_answer_carrie
     assert st._record_conversation("john", "what does the Campaign say?")
     turns = read_history_document(d)["turns"]
     assert [t.get("goal") for t in turns] == ["trusts", "trusts", None] and turns[0]["turn_id"]
-    # the words the model sees name the goal; his recorded words are his own
-    assert se._scoped_text("pace by Oct 10", "trusts", "The trusts and the holding company") == "About the goal ‘The trusts and the holding company’ (the Campaign initiative trusts) — pace by Oct 10"
+    # the words the model sees name the goal; his recorded words are his own; the tag for the answer is read from
+    # the text that went to stdin for THAT turn (never a slot the next turn could wear - Grok W2)
+    sent = se._scoped_text("pace by Oct 10", "trusts", "The trusts and the holding company")
+    assert sent == "About the goal ‘The trusts and the holding company’ (the Campaign initiative trusts) — pace by Oct 10"
+    assert se._goal_in(sent) == "trusts" and se._goal_in("what does the Campaign say?") is None and se._goal_in("") is None
     assert se._scoped_text("hello", None, "") == "hello"
+    assert not hasattr(st, "_goal_scope")
+    # a verb applied inside the place: his words and the writer's receipt land in the thread, marked as the writer's
+    from steward_cockpit import steward_routes as sr0
+    assert sr0.note_goal_receipt(d, "trusts", "pace by Oct 10", "The trusts and the holding company: the pace is now 2026-10-10")
+    turns = read_history_document(d)["turns"]
+    assert turns[-2]["goal"] == "trusts" and turns[-2]["via"] == "campaign_act" and turns[-1]["text"].endswith("2026-10-10")
     # the read of a goal's thread through the cockpit's history verb
     from steward_cockpit import steward_routes as sr
     out, code = sr.handle_get(d, "history", {"goal": "trusts"})
-    assert code == 200 and [t["text"] for t in out["turns"]] == ["add a part: call the trustee", "Added to The trusts and the holding company."]
+    assert code == 200 and [t["text"] for t in out["turns"]][:2] == ["add a part: call the trustee", "Added to The trusts and the holding company."] and len(out["turns"]) == 4
 
 
 def _fake_engine(tmp_path, monkeypatch):

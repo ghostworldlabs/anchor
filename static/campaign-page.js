@@ -88,7 +88,7 @@
   $$('.pc[data-act="chip"]').forEach(function (c) { c.addEventListener('click', function () { setView('grouped'); openPlace(c.getAttribute('data-lane')); var row = $('.row[data-part="' + c.getAttribute('data-part') + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('hot'); setTimeout(function () { row.classList.remove('hot'); }, 1600); } }); });
   var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { openPlace(null); $$('.lane.open').forEach(function (t) { t.classList.remove('open'); }); });
   $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openPlace(g.getAttribute('data-goto')); }); });
-  if (boardEl && boardEl.getAttribute('data-open')) openPlace(boardEl.getAttribute('data-open'));
+  if (boardEl && boardEl.getAttribute('data-place')) openPlace(boardEl.getAttribute('data-place'));
 
   // the area filter: dims, never removes, so the numbers stay true
   $$('.ac[data-area]').forEach(function (b) {
@@ -230,6 +230,8 @@
   // steward told which goal he is in, and its answer is read back here without a reload
   function threadLi(t) { var li = document.createElement('li'); li.className = 'exrow ' + (t.you ? 'you' : 'st'); li.innerHTML = '<div class="exw ' + (t.you ? 'you' : 'st') + '">' + (t.you ? 'You' : 'The steward') + '<span class="t">' + (t.at || '') + '</span></div><div class="ext"></div>'; li.querySelector('.ext').textContent = t.text; return li; }
   function pollThread(goal, seen) {
+    // stops only when a steward turn tagged with this goal has landed AFTER this send (the log grew and ends on
+    // the steward's side); after 14 tries it says so in the thread rather than falling silent (Grok W2)
     var list = $('.gthread[data-thread="' + goal + '"]'); if (!list) return;
     var tries = 0, t = setInterval(function () {
       tries++;
@@ -237,14 +239,14 @@
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var turns = (j && j.turns) || [];
+          var answered = turns.length > seen && turns[turns.length - 1].role === 'steward';
           if (turns.length > seen) {
             list.innerHTML = '';
             turns.slice(-12).forEach(function (x) { var at = String(x.at || ''); list.appendChild(threadLi({ you: (x.role || '') === 'john', text: x.text || '', at: at.length >= 16 ? at.slice(11, 16) : at })); });
             list.scrollTop = list.scrollHeight;
-            if (turns[turns.length - 1].role === 'steward') clearInterval(t);
-            seen = turns.length;
           }
-          if (tries >= 14) clearInterval(t);
+          if (answered) { clearInterval(t); return; }
+          if (tries >= 14) { clearInterval(t); list.appendChild(threadLi({ you: false, text: 'No answer yet — the steward has not finished this turn; it lands here on the next look.', at: '' })); list.scrollTop = list.scrollHeight; }
         }).catch(function () { if (tries >= 14) clearInterval(t); });
     }, 12000);
   }

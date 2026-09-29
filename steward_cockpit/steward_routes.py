@@ -917,6 +917,19 @@ def render_brief(proot, rel):
         ("last status " + e(at)) if at else "no status recorded")
 
 
+def note_goal_receipt(cdir, goal, text, receipt):
+    """A verb said inside a goal's place and applied by the Campaign's writer: his words and the receipt go into the
+    goal's thread — the one log, tagged — so the answer appears where he spoke (Grok W2, missing). Marked as the
+    writer's receipt, never as the steward's speech. Best-effort: a history error never undoes the act."""
+    try:
+        from steward_cockpit.conversation_history import append_turns
+        append_turns(cdir, [{"role": "john", "text": text, "goal": goal, "via": "campaign_act"},
+                            {"role": "steward", "text": receipt, "goal": goal, "via": "campaign_act"}])
+        return True
+    except Exception:
+        return False
+
+
 def handle_get(cdir, verb, qs):
     if verb == "notebook-status":
         import anchor_notebooks
@@ -1485,8 +1498,11 @@ def handle_post(cdir, verb, body):
         if not body.get("question_id") and not isinstance(body.get("refinement_context"), dict):
             from steward_cockpit.campaign_say import is_campaign_folder, say_campaign
             if is_campaign_folder(cdir):
-                spoken = say_campaign(cdir, str(body.get("text") or ""), goal=(str(body.get("goal") or "").strip() or None))
+                _goal = str(body.get("goal") or "").strip() or None
+                spoken = say_campaign(cdir, str(body.get("text") or ""), goal=_goal)
                 if spoken is not None:
+                    if _goal and spoken.get("ok"):
+                        note_goal_receipt(cdir, _goal, str(body.get("text") or ""), str(spoken.get("receipt") or spoken.get("say") or ""))
                     return spoken, (200 if spoken.get("ok") else 400)
         context = body.get("refinement_context")
         _refined_turn = False

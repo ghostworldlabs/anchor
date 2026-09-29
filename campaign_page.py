@@ -94,12 +94,13 @@ def _gtile(i, ctx, band):
         '<article class="gtile%s%s" draggable="true" data-lane="%s" data-band="%s" style="--areac:%s">'
         '<div class="ihead"><span class="pnum" title="priority %d of %d">%d</span><button class="iname" data-open="%s" title="open its place">%s</button>'
         '<span class="gtier">tier %s</span><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
-        '<div class="ggoal" title="%s">%s</div><div class="iline %s">%s</div>'
+        '<div class="ggoal" title="%s">%s</div>%s'
         '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span><span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
     ) % (" needs" if i["needs"] else "", " active" if i.get("active") else "", esc(i["id"]), band, AREA_COLOURS.get(i["area"], "#8b93a6"),
          i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["name"]), i["tier"] or "?",
          initiative_light(i, ctx.get("working") or set()), glyph, word,
-         esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>', kind, one,
+         esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>',
+         ('<div class="iline %s">%s</div>' % (kind, one)) if kind in ("wait", "next") else "",      # never the goal twice
          pct, done, n, "" if i.get("pace") else "dim", ("pace " + esc(_short(i["pace"]))) if i.get("pace") else "no pace",
          dcls, (("overdue " if dcls == "over" else "next ") + esc(_short(nd))) if nd else "no deadline",
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
@@ -132,7 +133,7 @@ def _bands(ctx):
 def _thread(i, ctx):
     turns = (ctx.get("goal_turns") or {}).get(i["id"]) or []
     if not turns:
-        return '<li class="exfade">Nothing said about this goal yet. The steward&rsquo;s first nudge about it will land here.</li>'
+        return '<li class="exfade">Nothing said about this goal yet.</li>'
     return "".join('<li class="exrow %s"><div class="exw %s">%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
         "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"][:900])) for t in turns[-12:])
 
@@ -168,8 +169,7 @@ def _place(i, ctx):
         '<div class="k">The goal &middot; done when <span class="h">(click to revise &mdash; one line with undo)</span></div><div class="g" data-goal-text="%s">%s</div>'
         '<div class="k">Where it stands</div><div class="stand">%s</div>%s'
         '<div class="facts3"><div class="fact"><div class="k">Pace</div><span class="v click" data-pace="%s">%s</span></div>'
-        '<div class="fact"><div class="k">Deadlines</div><span class="v">%s</span></div>'
-        '<div class="fact"><div class="k">Progress</div><span class="v"><span class="bar"><i style="width:%d%%"></i></span>%d of %d part%s</span></div></div>'
+        '<div class="fact"><div class="k">Deadlines</div><span class="v">%s</span></div></div>'
         '<div class="obody"><div class="plist"><div class="pl-h"><h4>The workflow &middot; the parts in order</h4><span class="c">%d &middot; %d dated%s</span>'
         '<span class="hint">Click a name to rename, a date to move it. A referenced part is read from its own record.</span></div>'
         '<ul class="rows">%s</ul>'
@@ -181,7 +181,7 @@ def _place(i, ctx):
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
         '<div class="k">Projects and cockpits <span class="h">(the projects this goal runs through)</span></div>%s'
         '</div><div>'
-        '<div class="k" style="margin-top:0">The conversation about this goal <span class="h">(dictate; the steward acts on this goal and answers here; its nudges about it land here)</span></div>'
+        '<div class="k" style="margin-top:0">The conversation about this goal <span class="h">(dictate; a verb acts on this goal, talk goes to the steward told which goal; both answer here)</span></div>'
         '<div class="gconv"><ul class="ex gthread" data-thread="%s">%s</ul>'
         '<div class="composer gcomp"><label class="sr" for="gsay-%s">Tell the steward about this goal</label>'
         '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; make it active &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
@@ -195,7 +195,6 @@ def _place(i, ctx):
          stands, initiative_status_html(i),
          esc(i["id"]), ("by " + esc(_short(i["pace"]))) if i.get("pace") else "set a pace",
          "<br>".join('<span class="%s">%s</span> %s' % ("over" if (_hr._iso(p["date"]) or today) < today else ("soon" if (_hr._iso(p["date"]) - today).days <= 7 else ""), esc(_short(p["date"])), esc(p["text"][:36]) + ("&hellip;" if len(p["text"]) > 36 else "")) for p in dated[:4]) or "none dated",
-         int(round(100.0 * done / n)) if n else 0, done, n, "" if n == 1 else "s",
          n, len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]),
          proj_html,
@@ -417,7 +416,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_needs = sum(len(i["needs"]) for i in inits)
     n_active = sum(1 for i in inits if i.get("active"))
     board = (
-        '<section class="board" aria-label="The Campaign" data-open="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
+        '<section class="board" aria-label="The Campaign" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
         '<span class="c" id="boardCount">%d in priority order &middot; Active %d &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close the goal</button></div>'
         '%s%s%s%s%s'

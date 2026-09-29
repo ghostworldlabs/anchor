@@ -232,6 +232,15 @@ TICK = (
 _STATE_LOCK = threading.RLock()
 
 
+_GOAL_MARK = re.compile(r"\(the Campaign initiative ([A-Za-z0-9_.-]+)\)")
+
+
+def _goal_in(text):
+    """The goal a turn's stdin text was scoped to (by _scoped_text), or None."""
+    m = _GOAL_MARK.search(str(text or ""))
+    return m.group(1) if m else None
+
+
 def _scoped_text(text, goal, goal_name):
     """The words as the model sees them when he speaks inside a goal's place (W2 v2): the goal named first, so a
     part, a date or a pace he mentions belongs to it. His displayed and recorded words stay his own."""
@@ -1481,8 +1490,6 @@ class Engine:
                 goal_name = ""
             if not goal_name:
                 goal = None
-            else:
-                self._goal_scope = goal
         answer_context = None
         if question_id:
             answer_context = next((q for q in self._question_contexts(self._attention()) if q["id"] == question_id), None)
@@ -2403,11 +2410,11 @@ class Engine:
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
             self._ledger_turn(ev, accounting, completed_turn_id)
             producer_id = getattr(self, "_refinement_producer_id", None)
-            _goal_tag = None if was_tick else getattr(self, "_goal_scope", None)
+            # the goal's tag rides THIS turn: read from the text that went to stdin for it (Grok W2: never a slot
+            # set at say(), which the next unrelated turn could wear)
+            _goal_tag = None if (was_tick or getattr(self, "_turn_origin", "") != "human") else _goal_in(getattr(self, "_last_submitted", ""))
             history_saved = (not txt or was_tick or self._record_conversation(
                 "steward", txt, turn_id=completed_turn_id, goal=_goal_tag))
-            if not was_tick:
-                self._goal_scope = None      # the answer to a goal's turn carries its tag; the next turn starts clean
             if (producer_id and getattr(self, "_turn_wrote_files", False) and not was_tick
                     and (Path(self.dir) / "roadmap.json").is_file()):
                 payload = {
