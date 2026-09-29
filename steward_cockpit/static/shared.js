@@ -2131,19 +2131,15 @@ const Proto = (() => {
     // and enabled only once its handler exists: a click in the load window
     // used to produce neither a POST nor a record.
     if (send) send.disabled = false;
-    // Dictation (Win+H, Siri) writes phrases, not keystrokes, and its "new line" / "new paragraph" press Enter.
-    // While a phrase is arriving or has just arrived, Enter is that new line, never Send (John, 2026-09-29: fast
-    // dictation broke into pieces and lost words). A phrase shows as a composition or as a multi-word insert;
-    // typing is one character at a time, and a paste is its own inputType.
-    let _dictatedAt = 0;
-    const dictated = (e) => e.isComposing || /omposition/.test(e.inputType || "") ||
-      (e.inputType === "insertText" && typeof e.data === "string" && /\s/.test(e.data.trim()));
-    ta.addEventListener("compositionstart", () => { _dictatedAt = Date.now(); });
-    ta.addEventListener("compositionend", () => { _dictatedAt = Date.now(); });
-    ta.addEventListener("input", (e) => { if (dictated(e)) _dictatedAt = Date.now(); });
+    let _dictatedAt = 0;      // a dictated phrase: a composition, or one insert longer than a typed character
+    ta.addEventListener("input", (e) => {
+      if (e.isComposing || /omposition/.test(e.inputType || "") ||
+          (e.inputType === "insertText" && typeof e.data === "string" && e.data.trim().length > 1)) _dictatedAt = Date.now();
+    });
     ta.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || e.isComposing) return;
-      // (2026-09-04, John) Enter sends, the same as the Send button; Shift+Enter keeps a newline.
+      // Enter sends (John, 2026-09-04); Shift+Enter keeps a newline; for two seconds after a dictated phrase
+      // Enter is the new line Win+H and Siri press for "new line" (John, 2026-09-29: dictation broke into pieces)
       if (e.shiftKey || Date.now() - _dictatedAt < 2000) return;
       e.preventDefault(); submit();
     });
