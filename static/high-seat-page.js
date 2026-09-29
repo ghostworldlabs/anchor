@@ -122,6 +122,12 @@
   if (loginGo) loginGo.addEventListener('click', doLogin);
   if (loginTok) loginTok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
   if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token()) showLogin('');
+  // a held token may be the OLD one (after a rotation): check it once on load; a refusal opens the box at once
+  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && token()) {
+    login(token()).then(function (r) {
+      if (r && r.status === 401) { try { localStorage.removeItem('anchor_token'); } catch (e) {} showLogin('Your saved token is out of date — paste the current one.'); }
+    });
+  }
   function askToken() {
     showLogin('');
     return Promise.resolve(false);
