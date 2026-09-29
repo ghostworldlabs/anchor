@@ -9,13 +9,17 @@
   (every other pair preserved), restarting the service, and putting the NEW token on your clipboard so each
   browser can be given it once when the page asks. The token is never printed to the console or a log.
 
+  The restart is a STOP, a wait for the port to be free, then a START, then a check that the service answers —
+  never `nssm restart`, which on 2026-09-28 stopped the service and left it stopped (the new process could not
+  bind while the old one drained, exited clean, and nothing came back).
+
 .PARAMETER Svc
   The service name (default: anchor).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\tools\rotate_token.ps1
 #>
-param([string]$Svc = 'anchor')
+param([string]$Svc = 'anchor', [int]$Port = 8777)
 
 $ErrorActionPreference = 'Stop'
 $me = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -48,10 +52,32 @@ $map['ANCHOR_TOKEN'] = $new
 $pairs = @(); foreach ($k in $map.Keys) { $pairs += ("{0}={1}" -f $k, $map[$k]) }
 & $nssm set $Svc AppEnvironmentExtra @pairs | Out-Null
 Set-Clipboard -Value $new
-& $nssm restart $Svc | Out-Null
-Start-Sleep -Seconds 3
-$up = try { (Invoke-RestMethod -Uri 'http://127.0.0.1:8777/api/version' -TimeoutSec 20).version } catch { $null }
+Write-Host "The new token is written into the service and is on your CLIPBOARD (never printed here)." -ForegroundColor Green
+
+# a real restart: stop, wait for the port, start, verify
+Write-Host "Stopping $Svc..." -ForegroundColor DarkGray
+try { Stop-Service -Name $Svc -Force -ErrorAction Stop } catch { Write-Host "  (stop: $($_.Exception.Message))" -ForegroundColor DarkGray }
+$deadline = (Get-Date).AddSeconds(60)
+while ((Get-Date) -lt $deadline) {
+    $svc = Get-Service -Name $Svc
+    $busy = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
+    if ($svc.Status -eq 'Stopped' -and -not $busy) { break }
+    Start-Sleep -Milliseconds 500
+}
+Write-Host "Starting $Svc..." -ForegroundColor DarkGray
+Start-Service -Name $Svc
+$up = $null
+$deadline = (Get-Date).AddSeconds(45)
+while ((Get-Date) -lt $deadline -and -not $up) {
+    Start-Sleep -Seconds 2
+    try { $up = (Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/version" -TimeoutSec 5).version } catch { $up = $null }
+}
 Write-Host ""
-Write-Host "Rotated. The new token is on your CLIPBOARD (never printed here)." -ForegroundColor Green
-Write-Host "Each browser and device will ask for it once: paste it when the page asks. Service: $(if ($up) { "up, build $up" } else { 'restarting' })."
+if ($up) {
+    Write-Host "Rotated. $Svc is up (build $up)." -ForegroundColor Green
+} else {
+    Write-Host "Rotated, but $Svc did not answer within 45 s (state: $((Get-Service -Name $Svc).Status))." -ForegroundColor Yellow
+    Write-Host "Run:  Start-Service $Svc   (elevated) and check logs\nssm-stderr.log."
+}
+Write-Host "Each browser and device will ask for the token once: paste it when the page asks (Ctrl+V; Win+V shows the clipboard)."
 Write-Host "Old links that carried ?token= are dead now; use the pages' own token prompt."
