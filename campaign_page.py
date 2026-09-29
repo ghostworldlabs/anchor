@@ -141,7 +141,8 @@ def _thread(i, ctx):
 def _place(i, ctx):
     """The goal's place (fit 10): the goal to revise, where it stands, the pace and the deadlines, the workflow
     (the parts with their acts, as the tile's body had them), the projects and cockpits, and the goal's own
-    conversation. Rendered for every goal, shown for the one he opens."""
+    conversation. Rendered for every goal, shown for the one he opens — UNDER the bands, which stay at the top
+    with their tiles shortened to a name (his 13:2x word: the list of goals first, the large details on a click)."""
     today = ctx["today"]
     glyph, word = LIGHTS[initiative_light(i, ctx.get("working") or set())]
     tier_opts = "".join('<option value="%d"%s>%d &middot; %s</option>' % (t, " selected" if i["tier"] == t else "", t, TIER_WORDS[t]) for t in (1, 2, 3))
@@ -422,7 +423,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '%s%s%s%s%s'
         '<p class="boardfoot" id="boardFoot">Drag a goal up or down in its band, into another tier, or into <b>Active</b>; click its name for its place &mdash; every change is one line with undo.</p></section>'
     ) % (esc(open_id or ""), len(inits), n_active, tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
-         _places(ctx), _seedband(ctx), _areas(ctx), _bands(ctx), _calendar(ctx))
+         _seedband(ctx), _areas(ctx), _bands(ctx), _places(ctx), _calendar(ctx))
     hdr = (
         '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'

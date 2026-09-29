@@ -464,6 +464,11 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .place[hidden]{display:none}
 /* a place open: the board scrolls whole - the place at its natural height, the bands below it (the mock-up he locked) */
 .board.placed{overflow-y:auto;padding-right:4px}.board.placed .bands{flex:none;overflow:visible}.board.placed .place{max-height:none;overflow:visible}.board.placed .boardfoot{flex:none}
+/* a place open: the goals stay on top as SHORT tiles - the name, its tier and light - the opened one marked; the place under them */
+.board.placed .band .tiles{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}
+.board.placed .gtile{padding:4px 8px 5px}.board.placed .gtile .ggoal,.board.placed .gtile .iline,.board.placed .gtile .gfacts{display:none}
+.board.placed .band{padding:4px 8px 6px}.board.placed .band-h{padding-bottom:4px}
+#placeSlot{flex:none}.board.placed #placeSlot{margin-top:8px}
 .ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.pname{font-size:17px;font-weight:700}.ptop .imore{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-dim)}.ptop .pact{font-size:11px;color:var(--text-dim)}.ptop .mini{margin-left:auto}
 .linkish{color:var(--accent-t);text-decoration:underline;text-underline-offset:2px;font-size:11px;padding:0}
 .pcols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin-top:6px}

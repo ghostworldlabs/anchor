@@ -79,7 +79,7 @@
     p.hidden = false; openedId = id;
     var t = $('.gtile[data-lane="' + id + '"]'); if (t) t.classList.add('opened');
     try { var u = new URL(location.href); u.searchParams.set('open', id); history.replaceState(null, '', u.toString()); } catch (e) {}
-    p.scrollIntoView({ block: 'nearest' });
+    p.scrollIntoView({ block: 'nearest' });   // the bands stay above it, shortened to names
     var th = $('.gthread', p); if (th) th.scrollTop = th.scrollHeight;
   }
   $$('button[data-open]').forEach(function (b) { b.addEventListener('click', function () { var id = b.getAttribute('data-open'); openPlace(openedId === id ? null : id); }); });
