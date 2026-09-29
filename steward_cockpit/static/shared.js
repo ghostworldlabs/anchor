@@ -2131,12 +2131,20 @@ const Proto = (() => {
     // and enabled only once its handler exists: a click in the load window
     // used to produce neither a POST nor a record.
     if (send) send.disabled = false;
+    // Dictation (Win+H, Siri) writes phrases, not keystrokes, and its "new line" / "new paragraph" press Enter.
+    // While a phrase is arriving or has just arrived, Enter is that new line, never Send (John, 2026-09-29: fast
+    // dictation broke into pieces and lost words). A phrase shows as a composition or as a multi-word insert;
+    // typing is one character at a time, and a paste is its own inputType.
+    let _dictatedAt = 0;
+    const dictated = (e) => e.isComposing || /omposition/.test(e.inputType || "") ||
+      (e.inputType === "insertText" && typeof e.data === "string" && /\s/.test(e.data.trim()));
+    ta.addEventListener("compositionstart", () => { _dictatedAt = Date.now(); });
+    ta.addEventListener("compositionend", () => { _dictatedAt = Date.now(); });
+    ta.addEventListener("input", (e) => { if (dictated(e)) _dictatedAt = Date.now(); });
     ta.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || e.isComposing) return;
-      // (2026-09-04, John) Enter sends, the same as the Send button; Shift+Enter
-      // keeps a newline. Dictation (Win+H) never presses Enter, so the button
-      // stays the way to send dictated text.
-      if (e.shiftKey) return;
+      // (2026-09-04, John) Enter sends, the same as the Send button; Shift+Enter keeps a newline.
+      if (e.shiftKey || Date.now() - _dictatedAt < 2000) return;
       e.preventDefault(); submit();
     });
     // Dictation is Win+H (2026-08-25, jrnl 0088): the in-page Web Speech mic
