@@ -303,7 +303,7 @@ def _part_open(p):
             and p.get("target_status") not in _PART_CLOSED)
 
 
-def head_act(initiatives, facts, today=None):
+def head_act(initiatives, facts, today=None, working=None):
     """THE HEAD — one act, never a list (W2 of the steward revision, 2026-09-28; the synthesis R2; his answer Q3).
     His tiers order the day: the first Tier-1 part that needs him, in his order (a Tier-1 part that needs him AND is
     due today or overdue comes first among them); else the oldest wait across the projects, with its age from the
@@ -331,6 +331,17 @@ def head_act(initiatives, facts, today=None):
     def _needs(p):
         return _part_open(p) and bool(p.get("needs_you"))
 
+    # the active set (2026-09-29) reads FIRST: a part that needs him in an initiative he works on now leads, in the
+    # set's order (a due one first inside the set) — before the tiers, whatever its tier
+    active = sorted([i for i in inits if i.get("active")], key=lambda i: (i.get("active_order") if isinstance(i.get("active_order"), int) else 999, i.get("tier") or 9, int(i.get("order") or 0)))
+    act_due = sorted(((_due(p), k, n, i, p) for k, i in enumerate(active) for n, p in enumerate(i.get("parts") or ()) if _needs(p) and _due(p)), key=lambda t: t[:3])
+    if act_due:
+        _d, _k, _n, i, p = act_due[0]
+        return _act(i, p, "active")
+    for i in active:
+        for p in i.get("parts") or ():
+            if _needs(p):
+                return _act(i, p, "active")
     # a Tier-1 part that needs him and is due leads everything
     t1_due = sorted(((_due(p), int(i.get("order") or 0), n, i, p) for i in inits if i.get("tier") == 1
                      for n, p in enumerate(i.get("parts") or ()) if _needs(p) and _due(p)), key=lambda t: t[:3])
@@ -360,11 +371,44 @@ def head_act(initiatives, facts, today=None):
     return None
 
 
-def head_sentence(act, overnight=()):
+def pick_up(initiatives, facts=None, working=None, today=None):
+    """What to take up while the active set runs (2026-09-29): when the set is not empty, nothing in it needs him and
+    every active initiative is working or waiting on someone else, the bench's first initiative by the nearest pace
+    or deadline, then the tiers' order. None otherwise — and never when the set is empty (there is nothing to be
+    "while" of)."""
+    working = working or set()
+    inits = [i for i in initiatives or () if isinstance(i, dict)]
+    active = [i for i in inits if i.get("active")]
+    if not active:
+        return None
+    def _open(i):
+        return [p for p in i.get("parts") or () if not p.get("closed", p.get("status") in ("done", "parked")) and not p.get("broken")]
+    for i in active:
+        if i.get("needs") or any(_part_open(p) and p.get("needs_you") for p in i.get("parts") or ()):
+            return None
+        busy = any(p.get("pid") and p["pid"] in working for p in _open(i)) or any(str(p.get("state") or "").startswith("waiting") or p.get("status") == "waiting" for p in _open(i))
+        if not busy:
+            return None      # an active initiative with a free hand: that is his next act, not a pick-up
+    rest = sorted([i for i in inits if not i.get("active")], key=lambda i: (i.get("pace") or i.get("next_deadline") or "9999-99-99", i.get("tier") or 9, int(i.get("order") or 0), str(i.get("name") or "")))
+    if not rest:
+        return None
+    i = rest[0]
+    nxt = i.get("next") or {}
+    why = ("pace %s" % _short(i["pace"])) if i.get("pace") else (("due %s" % _short(i["next_deadline"])) if i.get("next_deadline") else ("tier %s" % (i.get("tier") or "?")))
+    return {"initiative": str(i.get("name") or ""), "id": str(i.get("id") or ""), "why": why, "text": str(nxt.get("text") or ""),
+            "pid": str(nxt.get("pid") or ""), "active": [str(a.get("name") or "") for a in sorted(active, key=lambda a: a.get("active_order") if isinstance(a.get("active_order"), int) else 999)]}
+
+
+def head_sentence(act, overnight=(), pickup=None):
     """The head as one sentence he can act on: the pick, why now, the exact record (its effort when named), what
     follows — and, only when a step closed since he last opened the page, what finished (gated on the real
     instant of his last open: a quiet day and a second open repeat nothing)."""
     s = _head_core(act)
+    if act is None and isinstance(pickup, dict) and pickup.get("initiative"):
+        names = pickup.get("active") or []
+        who = (" and ".join(names) if len(names) <= 2 else ", ".join(names[:-1]) + " and " + names[-1]) or "The active set"
+        s = "Active: %s %s running. While they run: pick up %s%s (%s)." % (
+            who, "is" if len(names) == 1 else "are", pickup["initiative"], (" — " + pickup["text"][:80]) if pickup.get("text") else "", pickup.get("why") or "")
     closed = [x for x in overnight or () if isinstance(x, dict) and x.get("name")]
     if closed:
         names = ", ".join(str(x["name"]) for x in closed[:3]) + (" and %d more" % (len(closed) - 3) if len(closed) > 3 else "")
@@ -384,6 +428,9 @@ def _head_core(act):
     if act["kind"] == "tier1":
         where = (" (%s%s)" % (act["target"], (" · " + act["effort"]) if act.get("effort") else "")) if act.get("target") else ""
         return "Tier 1 · %s: %s%s — waiting on you%s.%s" % (act["initiative"], act["text"], where, age_s, then)
+    if act["kind"] == "active":
+        where = (" (%s%s)" % (act["target"], (" · " + act["effort"]) if act.get("effort") else "")) if act.get("target") else ""
+        return "Active · %s: %s%s — waiting on you%s.%s" % (act["initiative"], act["text"], where, age_s, then)
     where = "%s%s" % (act.get("target") or "A project", (" · " + act["effort"]) if act.get("effort") else "")
     return "%s: %s%s.%s" % (where, act["text"], age_s, then)
 

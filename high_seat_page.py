@@ -90,11 +90,29 @@ def campaign_initiatives(steps, resolved=None):
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
             "done_count": sum(1 for p in parts if p["done"]),
+            # the active set (2026-09-29): his flag and its order, the pace he drives toward, the parts' progress
+            "active": s.get("active") is True,
+            "active_order": int(s["active_order"]) if isinstance(s.get("active_order"), int) else None,
+            "pace": str(s.get("pace") or ""),
+            "open_count": len(open_parts), "part_count": sum(1 for p in parts if not p["broken"]),
         })
     out.sort(key=lambda i: (i["tier"] or 9, i["order"], i["name"]))   # an untiered initiative sorts last, its tier shown as missing
     for n, i in enumerate(out, 1):
         i["number"] = n
     return out
+
+
+def active_set(initiatives):
+    """The initiatives he works on now, in the set's order (his order, then the tiers' as a tiebreak)."""
+    act = [i for i in initiatives or () if i.get("active")]
+    return sorted(act, key=lambda i: (i.get("active_order") if isinstance(i.get("active_order"), int) else 999, i.get("tier") or 9, i.get("order") or 0, str(i.get("name") or "")))
+
+
+def bench_of(initiatives):
+    """The rest, by the nearest date he cares about — the pace, else the next deadline — then the tiers' order; an
+    undated initiative after every dated one."""
+    rest = [i for i in initiatives or () if not i.get("active")]
+    return sorted(rest, key=lambda i: (i.get("pace") or i.get("next_deadline") or "9999-99-99", i.get("tier") or 9, i.get("order") or 0, str(i.get("name") or "")))
 
 
 # ── an initiative's light, its one line, its status (the home's Campaign tile and the Campaign page share these) ──

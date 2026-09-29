@@ -373,7 +373,99 @@ def restore(project, step, navigation, seed=None):
     return _ok("%s is back on the board%s" % (s.get("name"), spent), undo={"act": "withdraw", "step": step, "seed": seed})
 
 
-ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag"}
+ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
+        "activate", "bench", "order", "pace"}
+
+
+# ── the active set (2026-09-29, John: "the active group") ─────────────────────────────────────────────────────────
+
+def _active(project):
+    """The active initiatives (step, group) in the set's order."""
+    act = [(x, g) for x, g in _initiatives(project) if x.get("active") is True]
+    return sorted(act, key=lambda t: (t[0].get("active_order") if isinstance(t[0].get("active_order"), int) else 999, t[0].get("tier") or 9, int(t[1].get("order") or 0)))
+
+
+def _set_line(project):
+    names = [x.get("name") or x["id"] for x, g in _active(project)]
+    n = len(names)
+    line = "the set is " + (", ".join(names) if names else "empty")
+    if n > 3:
+        line += " — %d active is wider than three; the steward would keep to three" % n     # said, never refused (his word: no cap)
+    return line
+
+
+def activate(project, step, order=None):
+    """Make an initiative active at the foot of the set (or at the order the undo carries)."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    if s.get("active") is True and order is None:
+        return _no("%s is already active" % s.get("name"))
+    place = int(order) if order is not None else len(_active(project))
+    r = _cli(project, "roadmap-set", "--step", step, "--active", "on", "--active-order", str(place))
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    return _ok("%s is active — %s" % (s.get("name"), _set_line(project)), undo={"act": "bench", "step": step})
+
+
+def bench(project, step):
+    """Take an initiative off the set; the set closes up; the pace stays (it is his date, not the set's)."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    if s.get("active") is not True:
+        return _no("%s is not active" % s.get("name"))
+    old_order = s.get("active_order") if isinstance(s.get("active_order"), int) else None
+    r = _cli(project, "roadmap-set", "--step", step, "--active", "off")
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    _renumber_active(project)
+    return _ok("%s to the bench — %s" % (s.get("name"), _set_line(project)), undo={"act": "activate", "step": step, "order": old_order})
+
+
+def _renumber_active(project):
+    for k, (x, g) in enumerate(_active(project)):
+        if x.get("active_order") != k:
+            _cli(project, "roadmap-set", "--step", x["id"], "--active-order", str(k))
+
+
+def order(project, step, position):
+    """Put an active initiative at a position in the set (a drag within Active); the others close up around it."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    if s.get("active") is not True:
+        return _no("%s is not active — make it active first" % s.get("name"))
+    try:
+        position = int(position)
+    except Exception:
+        return _no("a position is a number")
+    ids = [x["id"] for x, g in _active(project)]
+    old = ids.index(step) if step in ids else None
+    ids = [i for i in ids if i != step]
+    position = max(0, min(position, len(ids)))
+    ids.insert(position, step)
+    for k, sid in enumerate(ids):
+        cur = _step(project, sid)
+        if cur.get("active_order") != k:
+            r = _cli(project, "roadmap-set", "--step", sid, "--active-order", str(k))
+            if not r.get("ok"):
+                return _no("the engine refused: %s" % r.get("error"))
+    return _ok("%s is %s in the set — %s" % (s.get("name"), ("first" if position == 0 else "number %d" % (position + 1)), _set_line(project)),
+               undo={"act": "order", "step": step, "position": old} if old is not None else None)
+
+
+def pace(project, step, when):
+    """The date he drives an initiative toward (YYYY-MM-DD, or none)."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    when = str(when or "").strip() or "none"
+    r = _cli(project, "roadmap-set", "--step", step, "--pace", when)
+    if not r.get("ok"):
+        return _no("the engine refused: %s (a pace is YYYY-MM-DD, or none)" % r.get("error"))
+    old = s.get("pace") or "none"
+    return _ok("%s: the pace is %s" % (s.get("name"), ("now " + when) if when != "none" else "cleared"), undo={"act": "pace", "step": step, "when": old})
 
 
 def act(project, body):
@@ -407,6 +499,14 @@ def act(project, body):
             return promote(project, body.get("seed"), body.get("tier"), body.get("area"), body.get("done_when"))
         if a == "retag":
             return retag(project, body.get("step"), body.get("initiative"))
+        if a == "activate":
+            return activate(project, body.get("step"), body.get("order"))
+        if a == "bench":
+            return bench(project, body.get("step"))
+        if a == "order":
+            return order(project, body.get("step"), body.get("position"))
+        if a == "pace":
+            return pace(project, body.get("step"), body.get("when"))
         if a == "withdraw":
             return withdraw(project, body.get("step"), body.get("seed"))
         if a == "restore":

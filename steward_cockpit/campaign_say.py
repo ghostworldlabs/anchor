@@ -175,6 +175,7 @@ def say_campaign(folder, text, dialogue=None, today=None):
     if not c.get("campaign"):
         return None
     try:
+        c["text"] = text      # the pace verb hands a bare "<words> by <date>" that names no initiative back to the steward
         return _apply(folder, c, today or date.today())
     except Exception as e:
         return _refuse("that did not go through: %s \u2014 look at the board before saying it again" % e, str(c.get("act") or "campaign_act"))
@@ -222,4 +223,22 @@ def _apply(folder, c, today):
         return _refuse(why, act) if hit is None else _answer(acts.unpark(folder, hit[0]), act)
     if act == "campaign_needs":
         return _needs(folder, a.get("span") or "week", today)
+    # the active set (2026-09-29)
+    if act == "campaign_activate":
+        hit, why = _find(inits, a.get("initiative"), "initiative")
+        return _refuse(why, act) if hit is None else _answer(acts.activate(folder, hit[0]), act)
+    if act == "campaign_bench":
+        hit, why = _find(inits, a.get("initiative"), "initiative")
+        return _refuse(why, act) if hit is None else _answer(acts.bench(folder, hit[0]), act)
+    if act == "campaign_pace":
+        hit, why = _find(inits, a.get("initiative"), "initiative")
+        if hit is None:
+            # a bare "<words> by <date>" that names no initiative is not a Campaign verb: the steward takes it
+            if not re.match(r"^(?:set )?(?:the )?pace\b", str(c.get("text") or ""), re.I) and not str(a.get("initiative") or "").lower().startswith("pace "):
+                return None
+            return _refuse(why, act)
+        when = parse_due(a.get("pace"), today) if a.get("pace") not in (None, "", "none") else "none"
+        if when is None:
+            return _refuse("I could not read \u2018%s\u2019 as a date \u2014 Oct 10, Tuesday or 2026-10-10; the pace is unchanged" % a.get("pace"), act)
+        return _answer(acts.pace(folder, hit[0], when), act)
     return None
