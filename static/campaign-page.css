@@ -462,6 +462,8 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 /* the goal's place */
 .place{border:1px solid var(--amber);border-radius:12px;background:#141722;padding:12px 14px;margin-bottom:10px;border-left:3px solid var(--areac,#8b93a6);flex:none;max-height:72vh;overflow-y:auto}
 .place[hidden]{display:none}
+/* a place open: the board scrolls whole - the place at its natural height, the bands below it (the mock-up he locked) */
+.board.placed{overflow-y:auto;padding-right:4px}.board.placed .bands{flex:none;overflow:visible}.board.placed .place{max-height:none;overflow:visible}.board.placed .boardfoot{flex:none}
 .ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.pname{font-size:17px;font-weight:700}.ptop .imore{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-dim)}.ptop .pact{font-size:11px;color:var(--text-dim)}.ptop .mini{margin-left:auto}
 .linkish{color:var(--accent-t);text-decoration:underline;text-underline-offset:2px;font-size:11px;padding:0}
 .pcols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin-top:6px}

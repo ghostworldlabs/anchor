@@ -67,11 +67,12 @@
   if (viewBtn) viewBtn.addEventListener('click', function () { setView(cal && cal.style.display === 'none' ? 'cal' : 'grouped'); });
 
   // W2 v2 (2026-09-29, his lock): a goal opens into its place above the bands — one at a time; ?open= deep-links it
-  var slot = $('#placeSlot'), openedId = null;
+  var slot = $('#placeSlot'), openedId = null, boardEl = $('.board');
   function openPlace(id) {
     $$('.place').forEach(function (p) { p.hidden = true; });
     $$('.gtile.opened').forEach(function (t) { t.classList.remove('opened'); });
     openedId = null;
+    if (boardEl) boardEl.classList.toggle('placed', !!id);
     if (!id) return;
     var p = $('#place-' + id); if (!p) return;
     if (slot) slot.appendChild(p);
@@ -87,7 +88,7 @@
   $$('.pc[data-act="chip"]').forEach(function (c) { c.addEventListener('click', function () { setView('grouped'); openPlace(c.getAttribute('data-lane')); var row = $('.row[data-part="' + c.getAttribute('data-part') + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('hot'); setTimeout(function () { row.classList.remove('hot'); }, 1600); } }); });
   var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { openPlace(null); $$('.lane.open').forEach(function (t) { t.classList.remove('open'); }); });
   $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openPlace(g.getAttribute('data-goto')); }); });
-  var boardEl = $('.board'); if (boardEl && boardEl.getAttribute('data-open')) openPlace(boardEl.getAttribute('data-open'));
+  if (boardEl && boardEl.getAttribute('data-open')) openPlace(boardEl.getAttribute('data-open'));
 
   // the area filter: dims, never removes, so the numbers stay true
   $$('.ac[data-area]').forEach(function (b) {
