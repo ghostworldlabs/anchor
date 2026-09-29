@@ -440,51 +440,45 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .itile:not(.open) .imore{display:none}
 @media(max-width:1200px){.tiers{overflow:visible}}
 
-/* W2 of the active set (2026-09-29, A1 + C1): the goals band - every initiative's goal, pace, next deadline and
-   progress, the active set as one list in his order and the bench as another by nearest date; a row drags between
-   the lists and up and down inside Active; every drop is one act with undo. The brief folds to its lead; the
-   composer sits directly under it. */
-.goals{flex:none;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:6px 10px 8px}
-.goals .colk{padding:0 0 3px}
-.goals .colk .c b{color:var(--text-warm)}
-.glist{margin-top:3px}
-.glist h4{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);font-weight:700;padding:4px 6px 2px;display:flex;gap:8px;align-items:baseline}
-.glist h4 .c{font-size:10px;color:var(--text-dim2);letter-spacing:0;text-transform:none;font-weight:600}
-.glist[data-list="active"] h4{color:var(--accent-t)}
-.glist.over{outline:1px dashed var(--accent);outline-offset:1px;border-radius:8px}
-.grow{display:grid;grid-template-columns:minmax(200px,1.25fr) minmax(0,1.5fr) 92px 170px minmax(140px,.9fr);gap:10px;align-items:center;padding:3px 6px;border-radius:7px;font-size:11.5px;line-height:1.35;border:1px solid transparent;min-width:0}
-.grow.h{color:var(--text-dim2);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding-bottom:0}
-.grow[draggable]{cursor:grab;border-left:2px solid var(--areac,#8b93a6)}
-.grow[draggable]:hover{background:var(--surface2);border-color:var(--border);border-left-color:var(--areac,#8b93a6)}
-.grow.dragging{opacity:.4}
-.grow.over-before{box-shadow:0 -2px 0 0 var(--accent)}
-.grow.over-after{box-shadow:0 2px 0 0 var(--accent)}
-.gn{display:flex;align-items:center;gap:6px;min-width:0}
-.gh{color:var(--text-dim2);font-size:11px;letter-spacing:-2px;flex:none}
-.gname{color:var(--text);font-weight:650;text-align:left;padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.gname:hover{color:var(--accent-t)}
-.gtier,.glight{font-size:10px;color:var(--text-dim2);white-space:nowrap;flex:none}
-.glight.needs{color:var(--amber-t);font-weight:700}
-.glight.working{color:var(--success)}
-.glight.waiting{color:var(--text-dim)}
-.gg{color:var(--text-warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.gp,.gd{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.gg.dim,.gp.dim,.gd.dim{color:var(--text-dim2)}
-.gd.soon{color:var(--amber-t);font-weight:650}
-.gd.over{color:var(--danger);font-weight:650}
-.gpr{display:flex;align-items:center;gap:7px;min-width:0}
-.gpr .bar{flex:none;width:52px;height:5px;border-radius:3px;background:#2b3140;overflow:hidden}
-.gpr .bar i{display:block;height:100%;background:var(--accent)}
-.gpr .dim{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gpr .dim.am{color:var(--amber-t)}
-.gempty{font-size:11px;color:var(--text-dim2);padding:3px 8px 5px}
-.receipt[hidden]{display:none}   /* the receipt's flex was beating its hidden; under the brief it showed a bare tick */
-.gwide{color:var(--amber-t);font-weight:650}
-.blist li.fold{padding-left:0}
-.blist li.fold::before{display:none}
-.brief-more summary{font-size:11px;color:var(--text-dim);cursor:pointer;list-style:none;padding-left:13px}
-.brief-more summary::-webkit-details-marker{display:none}
-.brief-more summary::before{content:"\25B8 ";color:var(--amber)}
-.brief-more[open] summary::before{content:"\25BE "}
-.brief-more ul{list-style:none;margin-top:2px}
-@media (max-width:1100px){.grow{grid-template-columns:minmax(160px,1.2fr) minmax(0,1.4fr) 80px 140px minmax(110px,.8fr)}}
+/* W2 v2 of the active set (2026-09-29, his lock of the goal board): the board is the goals - one tile per goal in
+   bands Active · Tier 1 · 2 · 3; a tile drags up and down and between bands, one act with undo; a goal opens into
+   its place above the bands. The brief folds to its lead; the composer sits directly under it. */
+.bands{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;overflow-y:auto;padding-right:4px}
+.band{border:1px solid var(--border);border-radius:10px;background:#141722;padding:6px 8px 8px;flex:none}
+.band.active{border-color:rgba(108,156,252,.5);background:rgba(108,156,252,.05)}.band.over{outline:1px dashed var(--accent);outline-offset:2px}
+.band-h{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);font-weight:700;padding:2px 4px 6px;display:flex;gap:8px;align-items:baseline}
+.band.active .band-h{color:var(--accent-t)}.band-h .c{letter-spacing:0;text-transform:none;font-weight:600;color:var(--text-dim2);font-size:10.5px}
+.band .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;min-height:30px}
+.gtile{border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:7px 10px 8px;border-left:3px solid var(--areac,#8b93a6);cursor:grab;min-width:0}
+.gtile:hover{background:var(--surface2)}.gtile.dragging{opacity:.4}.gtile.over-before{box-shadow:-3px 0 0 0 var(--accent)}.gtile.over-after{box-shadow:3px 0 0 0 var(--accent)}
+.gtile.opened{outline:2px solid var(--amber);outline-offset:1px}.gtile.dimmed{opacity:.35}
+.gtile .ihead{display:flex;align-items:baseline;gap:6px;min-width:0}.gtile .iname{font-weight:650;font-size:13.5px;text-align:left;padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.gtile .iname:hover{color:var(--accent-t)}
+.gtier{font-size:10px;color:var(--text-dim2);white-space:nowrap;flex:none}.gtile .ilight{margin-left:auto;flex:none}
+.ggoal{font-size:11.5px;color:var(--text-warm);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gtile .iline{font-size:11px;margin-top:2px}
+.gfacts{display:flex;gap:10px;font-size:11px;color:var(--text-dim);margin-top:5px;flex-wrap:wrap;align-items:center}.gfacts .dim{color:var(--text-dim2)}.gfacts .gdl.soon{color:var(--amber-t);font-weight:650}.gfacts .gdl.over{color:var(--danger);font-weight:650}.gfacts .am{color:var(--amber-t);font-weight:650}
+.bar{display:inline-block;width:46px;height:5px;border-radius:3px;background:#2b3140;vertical-align:middle;margin-right:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+.band .empty{font-size:11.5px;color:var(--text-dim2);padding:5px 8px}
+/* the goal's place */
+.place{border:1px solid var(--amber);border-radius:12px;background:#141722;padding:12px 14px;margin-bottom:10px;border-left:3px solid var(--areac,#8b93a6);flex:none;max-height:72vh;overflow-y:auto}
+.place[hidden]{display:none}
+.ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.pname{font-size:17px;font-weight:700}.ptop .imore{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-dim)}.ptop .pact{font-size:11px;color:var(--text-dim)}.ptop .mini{margin-left:auto}
+.linkish{color:var(--accent-t);text-decoration:underline;text-underline-offset:2px;font-size:11px;padding:0}
+.pcols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin-top:6px}
+.place .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:10px}.place .k .h{text-transform:none;letter-spacing:0;color:var(--text-dim2);font-weight:500}
+.place .g{font-size:13.5px;color:var(--text);margin-top:2px;cursor:text;padding:4px 6px;border:1px dashed transparent;border-radius:6px}.place .g:hover{border-color:var(--border);background:var(--surface2)}
+.place .g textarea{width:100%;min-height:58px;background:#0a0c11;border:1px solid var(--accent);border-radius:6px;color:var(--text);font:inherit;padding:6px}.place .g .row2{display:flex;gap:8px;margin-top:5px;align-items:center}.place .g .row2 .hint{font-size:10.5px;color:var(--text-dim2);flex:1}
+.place .save{background:var(--accent);color:#0b1220;border-radius:7px;padding:3px 10px;font-size:12px;font-weight:650}
+.stand{font-size:12.5px;color:var(--text-warm);margin-top:2px}.stand b{color:var(--text)}.stand .am{color:var(--amber-t)}
+.facts3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.fact .v{font-size:12.5px;color:var(--text);font-weight:600}.fact .v.click{cursor:pointer;border-bottom:1px dashed var(--text-dim2)}.fact .v.click:hover{color:var(--accent-t)}.fact .v .soon{color:var(--amber-t)}.fact .v .over{color:var(--danger)}
+.fact input{background:#0a0c11;border:1px solid var(--accent);border-radius:6px;color:var(--text);font:inherit;font-size:12px;padding:2px 6px;width:130px}
+.place .obody{margin-top:6px}.place .pl-h{margin-top:0}
+.proj{font-size:12.5px;margin-top:3px}.proj a{color:var(--accent-t)}.proj .st{font-size:11px;color:var(--text-dim);display:block}.proj.dim{color:var(--text-dim2)}
+.gconv{border:1px solid var(--border);border-radius:10px;background:#0f1219;padding:8px 10px;display:flex;flex-direction:column}
+.gthread{list-style:none;max-height:340px;overflow-y:auto;padding-right:4px}
+.gcomp{margin-top:8px}.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.chips button{font-size:10.5px;color:var(--text-dim);border:1px solid var(--border);border-radius:999px;padding:1px 8px}.chips button:hover{color:var(--accent-t);border-color:var(--accent)}
+.receipt[hidden]{display:none}
+.blist li.fold{padding-left:0}.blist li.fold::before{display:none}
+.brief-more summary{font-size:11px;color:var(--text-dim);cursor:pointer;list-style:none;padding-left:13px}.brief-more summary::-webkit-details-marker{display:none}
+.brief-more summary::before{content:"\25B8 ";color:var(--amber)}.brief-more[open] summary::before{content:"\25BE "}.brief-more ul{list-style:none;margin-top:2px}
+@media (max-width:1100px){.pcols{grid-template-columns:1fr}.band .tiles{grid-template-columns:1fr}}

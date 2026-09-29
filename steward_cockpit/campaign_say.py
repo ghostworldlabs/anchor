@@ -194,8 +194,62 @@ def _bare_pace(folder, text, today):
     return _answer(acts.pace(folder, hits[0][0], when), "campaign_pace")
 
 
-def say_campaign(folder, text, dialogue=None, today=None):
-    """None when the words are not a Campaign verb (the steward takes them); else the act's answer."""
+_SCOPED = [
+    ("campaign_add_part", re.compile(r"^add(?: (?:a |the |another )?(?:part|task|step))?:?\s+(.+?)(?:,? due (.+?))?\s*[.!]?$", re.I)),
+    ("campaign_pace", re.compile(r"^(?:(?:set )?(?:the )?pace(?: (?:to|by|at|is|of))?|by|due|finish(?:ed)? by|done by)\s+(.+?)\s*[.!]?$", re.I)),
+    ("campaign_pace_clear", re.compile(r"^(?:clear|drop|remove) the pace\s*[.!]?$|^no pace\s*[.!]?$", re.I)),
+    ("campaign_activate", re.compile(r"^(?:make (?:it|this) active|activate(?: it| this)?|take (?:it|this) up|pick (?:it|this) up|(?:it is |this is )?active)\s*[.!]?$", re.I)),
+    ("campaign_bench", re.compile(r"^(?:bench(?: it| this)?|make (?:it|this) inactive|take (?:it|this) off(?: the)?(?: set| active)?|(?:it is |this is )?(?:inactive|not active))\s*[.!]?$", re.I)),
+    ("campaign_move_tier", re.compile(r"^(?:(?:move|put) (?:it |this )?(?:to |in |into )?)?tier ([123])\s*[.!]?$", re.I)),
+    ("campaign_done_when", re.compile(r"^(?:the )?(?:goal|done when|done looks like|done is|done means)(?: is)?:?\s+(.+?)\s*[.!]?$", re.I)),
+]
+
+
+def _scoped(folder, goal, text, today):
+    """Inside a goal's place (W2 v2) a verb needs no name: "add a part: …", "pace by Oct 10", "make it active",
+    "bench it", "tier 2", "goal: …". None when the words are none of these (the general grammar, then the steward,
+    take them — told which goal he is in)."""
+    from . import campaign_acts as acts
+    s = acts._step(folder, goal)
+    if s is None or acts._own_group(s) is None:
+        return None
+    t = " ".join(str(text or "").split())
+    for act, rx in _SCOPED:
+        m = rx.match(t)
+        if not m:
+            continue
+        if act == "campaign_add_part":
+            due = None
+            if m.group(2):
+                due = parse_due(m.group(2), today)
+                if due is None:
+                    return _refuse("I could not read \u2018%s\u2019 as a date \u2014 Oct 10, Tuesday or 2026-10-10; nothing was added" % m.group(2), act)
+            return _answer(acts.add(folder, goal, "task", m.group(1), due=due), act)
+        if act == "campaign_pace":
+            when = parse_due(m.group(1), today)
+            if when is None:
+                return None      # "by the end of the world": not a date — the steward takes the words
+            return _answer(acts.pace(folder, goal, when), act)
+        if act == "campaign_pace_clear":
+            return _answer(acts.pace(folder, goal, "none"), "campaign_pace")
+        if act == "campaign_activate":
+            return _answer(acts.activate(folder, goal), act)
+        if act == "campaign_bench":
+            return _answer(acts.bench(folder, goal), act)
+        if act == "campaign_move_tier":
+            return _answer(acts.move_tier(folder, goal, int(m.group(1))), act)
+        if act == "campaign_done_when":
+            return _answer(acts.done_when(folder, goal, m.group(1)), act)
+    return None
+
+
+def say_campaign(folder, text, dialogue=None, today=None, goal=None):
+    """None when the words are not a Campaign verb (the steward takes them); else the act's answer. With ``goal``
+    (an initiative id: the words were said inside that goal's place) the scoped forms are read first."""
+    if goal:
+        scoped = _scoped(folder, str(goal), text, today or date.today())
+        if scoped is not None:
+            return scoped
     bare = _bare_pace(folder, text, today or date.today())
     if bare is not None:
         return bare

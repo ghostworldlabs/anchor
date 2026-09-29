@@ -374,7 +374,7 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "activate", "bench", "order", "pace"}
+        "activate", "bench", "order", "pace", "done_when", "place"}
 
 
 # ── the active set (2026-09-29, John: "the active group") ─────────────────────────────────────────────────────────
@@ -485,6 +485,93 @@ def pace(project, step, when):
     return _ok("%s: the pace is %s" % (s.get("name"), ("now " + when) if when != "none" else "cleared"), undo={"act": "pace", "step": step, "when": old})
 
 
+def done_when(project, step, text):
+    """Revise a goal — what done looks like — on its initiative (the goal's place, W2 v2)."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    text = " ".join(str(text or "").split())
+    if not text:
+        return _no("a goal is a sentence — say what done looks like")
+    old = s.get("done_when") or ""
+    if text == old:
+        return _no("the goal of %s already reads so" % s.get("name"))
+    r = _cli(project, "roadmap-set", "--step", step, "--done-when", text)
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    return _ok("Goal of %s revised" % s.get("name"), undo={"act": "done_when", "step": step, "text": old} if old else None)
+
+
+def _tier_ids(project, tier, except_id=None):
+    same = sorted([(int(g.get("order") or 0), x.get("name") or "", x["id"]) for x, g in _initiatives(project) if x.get("tier") == tier and x["id"] != except_id])
+    return [sid for _o, _n, sid in same]
+
+
+def _place_tier(project, step, tier, position):
+    """Put an initiative at a position in its tier's order; the others close up. The first refused write is the error."""
+    ids = _tier_ids(project, tier, except_id=step)
+    position = max(0, min(int(position), len(ids)))
+    ids.insert(position, step)
+    for k, sid in enumerate(ids):
+        cur = _step(project, sid)
+        if int((_own_group(cur) or {}).get("order") or 0) != k:
+            r = _write_nav(project, cur, order=k)
+            if not r.get("ok"):
+                return "the engine refused: %s" % r.get("error")
+    return None
+
+
+def place(project, step, band, position):
+    """ONE act for a drop on the goal board (W2 v2): into Active at a position (activate there, or reorder), or into
+    a tier's band at a position (off the set if it was on it; the tier changed if it differs; its place in that
+    tier). One receipt, one undo that puts it back where it was."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such initiative")
+    band = str(band or "").strip().lower()
+    try:
+        position = int(position)
+    except Exception:
+        return _no("a position is a number")
+    was_active = s.get("active") is True
+    old_tier = s.get("tier") if s.get("tier") in (1, 2, 3) else None
+    old_active_pos = next((k for k, (x, g) in enumerate(_active(project)) if x["id"] == step), None)
+    old_tier_pos = _tier_ids(project, old_tier).index(step) if old_tier and step in _tier_ids(project, old_tier) else 0
+    if band == "active":
+        if was_active:
+            r = order(project, step, position)
+            if r.get("ok"):
+                r["undo"] = {"act": "place", "step": step, "band": "active", "position": old_active_pos or 0}
+            return r
+        return activate(project, step, order=position)      # its undo, bench, puts it back in its tier as it was
+    if band not in ("1", "2", "3"):
+        return _no("a band is Active or a tier 1, 2 or 3")
+    tier = int(band)
+    said = []
+    if was_active:
+        r = bench(project, step)
+        if not r.get("ok"):
+            return r
+        said.append("%s to the bench" % s.get("name"))
+    if old_tier != tier:
+        r = move_tier(project, step, tier, order=position)
+        if not r.get("ok"):
+            return r
+        said.append(("moved to tier %d" % tier) if said else "%s moved to tier %d" % (s.get("name"), tier))
+    err = _place_tier(project, step, tier, position)
+    if err:
+        return _no("%s — but its place in tier %d could not be set: %s — look at the board" % (", ".join(said) or s.get("name"), tier, err))
+    where = "first" if position == 0 else "number %d" % (position + 1)
+    if said:
+        said.append("%s in tier %d" % (where, tier))
+    else:
+        said.append("%s is %s in tier %d" % (s.get("name"), where, tier))
+    line = ", ".join(said) + ((" — " + _set_line(project)) if was_active else "")
+    undo = {"act": "place", "step": step, "band": "active", "position": old_active_pos or 0} if was_active else \
+        {"act": "place", "step": step, "band": str(old_tier), "position": old_tier_pos} if old_tier else None
+    return _ok(line, undo=undo)
+
+
 def act(project, body):
     """Dispatch one act from the page; every answer is a receipt sentence, ok or refused."""
     body = body if isinstance(body, dict) else {}
@@ -522,6 +609,10 @@ def act(project, body):
             return bench(project, body.get("step"))
         if a == "order":
             return order(project, body.get("step"), body.get("position"))
+        if a == "done_when":
+            return done_when(project, body.get("step"), body.get("text"))
+        if a == "place":
+            return place(project, body.get("step"), body.get("band"), body.get("position"))
         if a == "pace":
             return pace(project, body.get("step"), body.get("when"))
         if a == "withdraw":

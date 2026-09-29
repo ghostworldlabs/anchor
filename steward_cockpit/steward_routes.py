@@ -1009,6 +1009,14 @@ def handle_get(cdir, verb, qs):
         m["steward"] = CONFIG["steward"]
         return m, 200
     if verb == "history":
+        if qs.get("goal"):
+            # W2 v2 (the active set): a goal's thread — the Campaign's one log, the turns tagged with that goal
+            from steward_cockpit.conversation_history import read_history_document
+            try:
+                turns = [t for t in read_history_document(cdir)["turns"] if t.get("goal") == str(qs.get("goal"))]
+                return {"turns": turns[-campaign.TAIL_TURNS:], "goal": str(qs.get("goal"))}, 200
+            except (OSError, ValueError) as exc:
+                return {"turns": [], "note": "conversation history unreadable: " + str(exc)}, 409
         if qs.get("turn_id"):
             from steward_cockpit.conversation_history import read_history_document
             try:
@@ -1477,7 +1485,7 @@ def handle_post(cdir, verb, body):
         if not body.get("question_id") and not isinstance(body.get("refinement_context"), dict):
             from steward_cockpit.campaign_say import is_campaign_folder, say_campaign
             if is_campaign_folder(cdir):
-                spoken = say_campaign(cdir, str(body.get("text") or ""))
+                spoken = say_campaign(cdir, str(body.get("text") or ""), goal=(str(body.get("goal") or "").strip() or None))
                 if spoken is not None:
                     return spoken, (200 if spoken.get("ok") else 400)
         context = body.get("refinement_context")
@@ -1504,7 +1512,7 @@ def handle_post(cdir, verb, body):
         if eng is None:
             return {"ok": False, "error": "no such session / cap hit"}, 404
         result = (eng.say(body.get("text", ""), question_id=body["question_id"]) if body.get("question_id")
-                  else eng.say(body.get("text", "")))
+                  else eng.say(body.get("text", ""), goal=(str(body.get("goal") or "").strip() or None)))
         if _refined_turn:
             # W3 (Grok's hold): the turn's reply may have written the line — derive it again so the turn's own
             # sentence never stands over the stamped derivation

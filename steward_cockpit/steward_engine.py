@@ -232,6 +232,14 @@ TICK = (
 _STATE_LOCK = threading.RLock()
 
 
+def _scoped_text(text, goal, goal_name):
+    """The words as the model sees them when he speaks inside a goal's place (W2 v2): the goal named first, so a
+    part, a date or a pace he mentions belongs to it. His displayed and recorded words stay his own."""
+    if not goal or not goal_name:
+        return text
+    return "About the goal \u2018%s\u2019 (the Campaign initiative %s) \u2014 %s" % (goal_name, goal, text)
+
+
 def _reported_cost(value):
     """Only an explicit, finite provider dollar figure is a reported cost."""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -809,14 +817,17 @@ class Engine:
     def _history_thread(self):
         return str(self.tid or 1) if self.general else None
 
-    def _record_conversation(self, role, text, *, turn_id=None):
-        """The canonical project history survives provider and process changes."""
+    def _record_conversation(self, role, text, *, turn_id=None, goal=None):
+        """The canonical project history survives provider and process changes. A turn said inside a goal's place
+        (W2 v2 of the active set) carries the goal's id, so the place can show its own thread from the one log."""
         if self.fake or os.environ.get("STEWARD_COCKPIT_FAKE"):
             return True
         try:
-            from steward_cockpit.conversation_history import append_turn
-            append_turn(self.dir, role, text, thread_id=self._history_thread(),
-                        turn_id=turn_id or str(uuid.uuid4()))
+            from steward_cockpit.conversation_history import append_turns
+            turn = {"role": role, "text": text, "turn_id": turn_id or str(uuid.uuid4())}
+            if goal:
+                turn["goal"] = str(goal)
+            append_turns(self.dir, [turn], thread_id=self._history_thread())
             return True
         except (OSError, ValueError) as exc:
             self.broken = True
@@ -1455,10 +1466,23 @@ class Engine:
         return {"ok": ok, "cli": self.cli, "why": why}
 
     # ---------- talking ----------
-    def say(self, text, human=True, question_id=None):
+    def say(self, text, human=True, question_id=None, goal=None):
         text = (text or "").strip()
         if not text:
             return {"ok": False, "error": "empty"}
+        goal = str(goal or "").strip() or None      # W2 v2: said inside a goal's place — recorded with the tag, sent with the scope
+        goal_name = ""
+        if goal:
+            try:
+                from steward_cockpit import campaign_acts as _acts
+                _g = _acts._step(self.dir, goal)
+                goal_name = str((_g or {}).get("name") or "")
+            except Exception:
+                goal_name = ""
+            if not goal_name:
+                goal = None
+            else:
+                self._goal_scope = goal
         answer_context = None
         if question_id:
             answer_context = next((q for q in self._question_contexts(self._attention()) if q["id"] == question_id), None)
@@ -1471,9 +1495,9 @@ class Engine:
                 if human and maintenance.is_active():
                     # Wave 1.6: accepted durably, delivered after activation.
                     with self._lock:
-                        if not self._record_conversation("john", text):
+                        if not self._record_conversation("john", text, goal=goal):
                             return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
-                        self.queue.append(text)
+                        self.queue.append(_scoped_text(text, goal, goal_name))
                         if not self._persist_queue():
                             self.queue.pop()
                             return {"ok": False, "error": "could not durably queue your text"}
@@ -1492,7 +1516,7 @@ class Engine:
             if human:
                 if question_id and not any(q["id"] == question_id for q in self._question_contexts(wait)):
                     return {"ok": False, "error": "Question is no longer current"}
-                if not self._record_conversation("john", text):
+                if not self._record_conversation("john", text, goal=goal):
                     return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
                 # Only bare UI commands are controls. "go with option B" and
                 # "hold on" are substantive words, not drive switches.
@@ -1558,6 +1582,7 @@ class Engine:
                     _update_state(self.skey(), {"question_context":None})
 
             self._emit({"t": "john" if human else "sys", "text": text})
+            text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
             if answer_context:
                 text += ("\n\n(answer context, not a new request) This response concerns only the saved question and "
                          "versions below. Recheck applicability before acting; this is not automatic acceptance.\n" +
@@ -2378,8 +2403,11 @@ class Engine:
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
             self._ledger_turn(ev, accounting, completed_turn_id)
             producer_id = getattr(self, "_refinement_producer_id", None)
+            _goal_tag = None if was_tick else getattr(self, "_goal_scope", None)
             history_saved = (not txt or was_tick or self._record_conversation(
-                "steward", txt, turn_id=completed_turn_id))
+                "steward", txt, turn_id=completed_turn_id, goal=_goal_tag))
+            if not was_tick:
+                self._goal_scope = None      # the answer to a goal's turn carries its tag; the next turn starts clean
             if (producer_id and getattr(self, "_turn_wrote_files", False) and not was_tick
                     and (Path(self.dir) / "roadmap.json").is_file()):
                 payload = {

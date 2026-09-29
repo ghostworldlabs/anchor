@@ -56,13 +56,16 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     html = cpg.render_campaign_html(_ctx())
     assert "<title>The Campaign</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-seal-salver.jpg?v=test"' in html   # the tab: the steward's seal
     assert "campaign-page.css" in html and "campaign-page.js" in html and 'class="mh-stew"' in html
-    # tiers stacked, Tier 1 first; each tile compact — its light and one line — and its Status behind the open
-    t1, t2 = html.index("Tier 1<span"), html.index("Tier 2<span")
-    assert t1 < t2 and html.index('data-lane="mba-teaching"') < t2 < html.index('data-lane="trusts"')
-    tile = html[html.index('data-lane="mba-teaching"'):html.index('data-lane="trusts"')]
-    assert '<span class="ilight needs"' in tile and 'class="iline wait"' in tile and 'class="imore"' in tile and 'class="istatus"' in tile
-    assert tile.index('class="iline wait"') < tile.index('class="imore"') < tile.index('class="istatus"') < tile.index('class="obody"')
-    assert "2 in priority order &middot; T1 1 / T2 1 / T3 0" in html
+    # the goal board (W2 v2 of the active set, 2026-09-29): bands Active then the tiers, Tier 1 first; each goal a
+    # compact tile — its light and one line — and its place (the area and tier, the Status, the parts) rendered apart
+    board = html[html.index('<div class="bands"'):html.index('id="viewCal"')]
+    t1, t2 = board.index("Tier 1 <span"), board.index("Tier 2 <span")
+    assert t1 < t2 and board.index('data-lane="mba-teaching"') < t2 < board.index('data-lane="trusts"')
+    tile = board[board.index('data-lane="mba-teaching"'):board.index('data-lane="trusts"')]
+    assert '<span class="ilight needs"' in tile and 'class="iline wait"' in tile
+    place = html[html.index('id="place-mba-teaching"'):html.index('id="place-trusts"')]
+    assert place.index('class="imore"') < place.index('class="istatus"') < place.index('class="obody"')
+    assert "2 in priority order &middot; Active 0 &middot; T1 1 / T2 1 / T3 0" in html
     assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "priority 1 of 2" in html
     assert "retool homework 2" in html and "Oct 27" in html and "Lectures 3 + 4 revised, with AI supplements" in html
     assert 'data-act="date" data-part="hw"' in html                      # a native part's date can be moved here
@@ -85,8 +88,8 @@ def test_a_flagged_native_part_reads_as_needs_you_and_the_counts_say_so():
     roster = next(p for p in inits["mba-teaching"]["parts"] if p["id"] == "roster")
     assert roster["needs_you"] is True and len(inits["mba-teaching"]["needs"]) == 2
     assert 'data-act="unflag" data-part="roster"' in html                # the row offers to clear the flag
-    assert "&#9873; 1 initiative needs you" in html and "&#9873; 2 parts need you" in html   # the noun said (Grok R8)
-    assert "5 parts (1 done)" in html and "overdue Sep 19" in html         # done over named; a past next date is overdue
+    assert "&#9873; 1 goal needs you" in html and "&#9873; 2 parts need you" in html   # the noun said (Grok R8); a goal, his word (W2 v2)
+    assert "1 of 5 parts done" in html and "overdue Sep 19" in html         # done over named; a past next date is overdue
 
 
 def test_the_calendar_puts_past_dates_before_this_week_and_parked_parts_off_the_ruler():

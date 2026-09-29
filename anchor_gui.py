@@ -7844,17 +7844,20 @@ def _campaign_context(entry):
         seeds = _read_seeds(folder)
     except Exception:
         seeds = []
-    turns = []
+    turns, goal_turns = [], {}
     try:
         from steward_cockpit.conversation_history import read_history_document
         for tn in (read_history_document(folder) or {}).get("turns") or []:
             if not isinstance(tn, dict) or not tn.get("text"):
                 continue
             at = str(tn.get("at") or "")
-            turns.append({"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
-                          "text": " ".join(str(tn.get("text")).split()), "at": at[11:16] if len(at) >= 16 else at})
+            t = {"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
+                 "text": " ".join(str(tn.get("text")).split()), "at": at[11:16] if len(at) >= 16 else at, "goal": str(tn.get("goal") or "")}
+            turns.append(t)
+            if t["goal"]:
+                goal_turns.setdefault(t["goal"], []).append(t)      # W2 v2: a goal's thread is the one log, filtered
     except Exception:
-        turns = []
+        turns, goal_turns = [], {}
     try:
         projects = [{"id": e.get("id"), "name": e.get("name")} for e in _rnd.list_projects(include_archived=False, include_future=False, include_retired=False)
                     if e.get("id") and e.get("id") != entry.get("id")]
@@ -7872,8 +7875,8 @@ def _campaign_context(entry):
         working = set()
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
-            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False,
-            "working": working}
+            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
+            "projects": projects, "tick_allowed": False, "working": working}
 
 
 def _capacity_rows():

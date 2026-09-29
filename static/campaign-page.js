@@ -1,4 +1,4 @@
-/* The Campaign page (W3c, 2026-09-26; trimmed by its Rabbit read): the view toggle, the tiles and lanes that open,
+/* The Campaign page (W3c, 2026-09-26; trimmed by its Rabbit read; the goal board W2 v2, 2026-09-29): the view toggle, the goal tiles that drag and open into their place, the lanes that open,
    the area filter, and every act on the record through /api/high-seat/campaign — each act a receipt with undo,
    one act in flight at a time; the seed's two questions and the park's trigger are asked on the card, never in a
    browser prompt; the composer talks to the steward through the effort's own say route. Nothing here invents
@@ -66,23 +66,36 @@
   }
   if (viewBtn) viewBtn.addEventListener('click', function () { setView(cal && cal.style.display === 'none' ? 'cal' : 'grouped'); });
 
-  // tiles: one open at a time in the grouped view; lanes open independently
-  function openTile(id) {
-    $$('.itile').forEach(function (t) { t.classList.toggle('open', t.getAttribute('data-lane') === id && !t.classList.contains('open')); });
+  // W2 v2 (2026-09-29, his lock): a goal opens into its place above the bands — one at a time; ?open= deep-links it
+  var slot = $('#placeSlot'), openedId = null;
+  function openPlace(id) {
+    $$('.place').forEach(function (p) { p.hidden = true; });
+    $$('.gtile.opened').forEach(function (t) { t.classList.remove('opened'); });
+    openedId = null;
+    if (!id) return;
+    var p = $('#place-' + id); if (!p) return;
+    if (slot) slot.appendChild(p);
+    p.hidden = false; openedId = id;
+    var t = $('.gtile[data-lane="' + id + '"]'); if (t) t.classList.add('opened');
+    try { var u = new URL(location.href); u.searchParams.set('open', id); history.replaceState(null, '', u.toString()); } catch (e) {}
+    p.scrollIntoView({ block: 'nearest' });
+    var th = $('.gthread', p); if (th) th.scrollTop = th.scrollHeight;
   }
-  $$('.itile [data-act="toggle"]').forEach(function (b) { b.addEventListener('click', function () { openTile(b.getAttribute('data-lane')); }); });
+  $$('button[data-open]').forEach(function (b) { b.addEventListener('click', function () { var id = b.getAttribute('data-open'); openPlace(openedId === id ? null : id); }); });
+  $$('[data-close]').forEach(function (b) { b.addEventListener('click', function () { openPlace(null); try { var u = new URL(location.href); u.searchParams.delete('open'); history.replaceState(null, '', u.toString()); } catch (e) {} }); });
   $$('.lane [data-act="toggle"]').forEach(function (b) { b.addEventListener('click', function () { var l = b.closest('.lane'); l.classList.toggle('open'); }); });
-  $$('.pc[data-act="chip"]').forEach(function (c) { c.addEventListener('click', function () { setView('grouped'); openTile(c.getAttribute('data-lane')); var row = $('.row[data-part="' + c.getAttribute('data-part') + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('hot'); setTimeout(function () { row.classList.remove('hot'); }, 1600); } }); });
-  var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { $$('.itile.open, .lane.open').forEach(function (t) { t.classList.remove('open'); }); });
-  $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openTile(g.getAttribute('data-goto')); var t = $('.itile[data-lane="' + g.getAttribute('data-goto') + '"]'); if (t) t.scrollIntoView({ block: 'center' }); }); });
+  $$('.pc[data-act="chip"]').forEach(function (c) { c.addEventListener('click', function () { setView('grouped'); openPlace(c.getAttribute('data-lane')); var row = $('.row[data-part="' + c.getAttribute('data-part') + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('hot'); setTimeout(function () { row.classList.remove('hot'); }, 1600); } }); });
+  var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { openPlace(null); $$('.lane.open').forEach(function (t) { t.classList.remove('open'); }); });
+  $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openPlace(g.getAttribute('data-goto')); }); });
+  var boardEl = $('.board'); if (boardEl && boardEl.getAttribute('data-open')) openPlace(boardEl.getAttribute('data-open'));
 
   // the area filter: dims, never removes, so the numbers stay true
   $$('.ac[data-area]').forEach(function (b) {
     b.addEventListener('click', function () {
       var a = b.getAttribute('data-area'), was = b.classList.contains('on');
       $$('.ac').forEach(function (x) { x.classList.remove('on'); });
-      $$('.itile, .lane').forEach(function (t) { t.classList.remove('dimmed'); });
-      if (!was) { b.classList.add('on'); $$('.itile, .lane').forEach(function (t) { if ((t.querySelector('.larea') || {}).textContent.trim().toLowerCase() !== a) t.classList.add('dimmed'); }); }
+      $$('.gtile, .lane').forEach(function (t) { t.classList.remove('dimmed'); });
+      if (!was) { b.classList.add('on'); $$('.gtile, .lane').forEach(function (t) { var pl = t.classList.contains('gtile') ? $('#place-' + t.getAttribute('data-lane')) : t; if (((pl && pl.querySelector('.larea')) || {}).textContent.trim().toLowerCase() !== a) t.classList.add('dimmed'); }); }
     });
   });
 
@@ -150,45 +163,118 @@
     go.addEventListener('click', function () { act({ act: 'promote', seed: go.getAttribute('data-pickgo'), tier: chosen('[data-picktier]') || '3', area: chosen('[data-pickarea]') || null }); });
   });
 
-  // W2 of the active set (2026-09-29, C1): the goals band's rows drag - between Active and the bench, and up and
-  // down inside Active; every drop is ONE act through the same route, with undo. The bench keeps its own order
-  // (by nearest date), so a drop there only benches. Nothing moves on the page until the record says so.
+  // W2 v2 (2026-09-29, his lock of the goal board): a goal tile drags up and down inside its band, into another
+  // tier, into Active or out of it. Every drop is ONE act — place — through the same route, with undo. Nothing
+  // moves on the page until the record says so.
   var dragId = null, dragFrom = null;
-  function rowsOf(list) { return $$('.grow[draggable]', list); }
-  function clearMarks() { $$('.grow.over-before, .grow.over-after').forEach(function (r) { r.classList.remove('over-before', 'over-after'); }); $$('.glist.over').forEach(function (l) { l.classList.remove('over'); }); }
-  function indexAt(list, y) {   // where the dragged row would land: before the first row whose middle is below the pointer
-    var rows = rowsOf(list).filter(function (r) { return r.getAttribute('data-init') !== dragId; }), k = rows.length;
-    for (var i = 0; i < rows.length; i++) { var b = rows[i].getBoundingClientRect(); if (y < b.top + b.height / 2) { k = i; break; } }
-    return { k: k, rows: rows };
+  function tilesOf(band) { return $$('.gtile[draggable]', band); }
+  function clearMarks() { $$('.gtile.over-before, .gtile.over-after').forEach(function (r) { r.classList.remove('over-before', 'over-after'); }); $$('.band.over').forEach(function (l) { l.classList.remove('over'); }); }
+  function indexAt(band, x, y) {   // where the dragged tile would land in the band's grid: before the first tile whose middle is past the pointer
+    var tiles = tilesOf(band).filter(function (r) { return r.getAttribute('data-lane') !== dragId; }), k = tiles.length;
+    for (var i = 0; i < tiles.length; i++) { var b = tiles[i].getBoundingClientRect(); if (y < b.top || (y <= b.bottom && x < b.left + b.width / 2)) { k = i; break; } }
+    return { k: k, tiles: tiles };
   }
-  $$('.grow[draggable]').forEach(function (r) {
+  $$('.gtile[draggable]').forEach(function (r) {
     r.addEventListener('dragstart', function (e) {
-      dragId = r.getAttribute('data-init'); dragFrom = r.getAttribute('data-list'); r.classList.add('dragging');
+      dragId = r.getAttribute('data-lane'); dragFrom = r.getAttribute('data-band'); r.classList.add('dragging');
       try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
     });
     r.addEventListener('dragend', function () { r.classList.remove('dragging'); clearMarks(); dragId = null; dragFrom = null; });
   });
-  $$('.glist').forEach(function (list) {
-    list.addEventListener('dragover', function (e) {
+  $$('.band').forEach(function (band) {
+    band.addEventListener('dragover', function (e) {
       if (!dragId) return;
       e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-      clearMarks(); list.classList.add('over');
-      if (list.getAttribute('data-list') !== 'active') return;
-      var at = indexAt(list, e.clientY);
-      if (at.rows.length) { if (at.k < at.rows.length) at.rows[at.k].classList.add('over-before'); else at.rows[at.rows.length - 1].classList.add('over-after'); }
+      clearMarks(); band.classList.add('over');
+      var at = indexAt(band, e.clientX, e.clientY);
+      if (at.tiles.length) { if (at.k < at.tiles.length) at.tiles[at.k].classList.add('over-before'); else at.tiles[at.tiles.length - 1].classList.add('over-after'); }
     });
-    list.addEventListener('dragleave', function (e) { if (!list.contains(e.relatedTarget)) clearMarks(); });
-    list.addEventListener('drop', function (e) {
+    band.addEventListener('dragleave', function (e) { if (!band.contains(e.relatedTarget)) clearMarks(); });
+    band.addEventListener('drop', function (e) {
       if (!dragId) return;
       e.preventDefault();
-      var to = list.getAttribute('data-list'), id = dragId, from = dragFrom; clearMarks();
-      if (to === 'bench') { if (from === 'active') act({ act: 'bench', step: id }); return; }
-      var k = indexAt(list, e.clientY).k;
-      if (from === 'active') {
-        var was = rowsOf(list).map(function (r) { return r.getAttribute('data-init'); }).indexOf(id);
-        if (was !== k) act({ act: 'order', step: id, position: k });
-      } else act({ act: 'activate', step: id, order: k });
+      var to = band.getAttribute('data-band'), id = dragId, from = dragFrom; clearMarks();
+      if (to === 'none') return;
+      var k = indexAt(band, e.clientX, e.clientY).k;
+      if (to === from) { var was = tilesOf(band).map(function (r) { return r.getAttribute('data-lane'); }).indexOf(id); if (was === k) return; }
+      act({ act: 'place', step: id, band: to, position: k });
     });
+  });
+
+  // the goal's place: revise the goal, set the pace, take it up or bench it — each one act with undo
+  $$('.place .g[data-goal-text]').forEach(function (g) {
+    g.addEventListener('click', function () {
+      if (g.querySelector('textarea')) return;
+      var id = g.getAttribute('data-goal-text'), old = g.classList.contains('empty') ? '' : g.textContent.trim();
+      if (/^not written yet/.test(old)) old = '';
+      g.innerHTML = '<textarea></textarea><div class="row2"><span class="hint">one line with undo · written as the goal\u2019s done-when on the record</span><button type="button" class="save">Save</button><button type="button" class="mini">cancel</button></div>';
+      var ta = g.querySelector('textarea'); ta.value = old; ta.focus();
+      g.querySelector('.save').addEventListener('click', function (e) { e.stopPropagation(); var v = ta.value.trim(); if (!v) { receipt('A goal is a sentence — say what done looks like.', true); return; } act({ act: 'done_when', step: id, text: v }); });
+      g.querySelector('.mini').addEventListener('click', function (e) { e.stopPropagation(); g.innerHTML = old ? old.replace(/</g, '&lt;') : '<span class="dim">not written yet — say what done looks like</span>'; });
+      ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); g.querySelector('.save').click(); } if (e.key === 'Escape') g.querySelector('.mini').click(); });
+    });
+  });
+  $$('.place [data-pace]').forEach(function (s) {
+    s.addEventListener('click', function () {
+      var id = s.getAttribute('data-pace'); var inp = document.createElement('input'); inp.type = 'date'; inp.title = 'the pace — the date you drive this goal toward; clear it to drop the pace';
+      s.replaceWith(inp); inp.focus();
+      inp.addEventListener('change', function () { act({ act: 'pace', step: id, when: inp.value || 'none' }); });
+      inp.addEventListener('blur', function () { if (document.body.contains(inp)) inp.replaceWith(s); });
+    });
+  });
+  $$('.place [data-activate]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'activate', step: b.getAttribute('data-activate') }); }); });
+  $$('.place [data-bench]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'bench', step: b.getAttribute('data-bench') }); }); });
+
+  // the goal's conversation: the same say route with the goal; a verb inside needs no name; talk goes to the
+  // steward told which goal he is in, and its answer is read back here without a reload
+  function threadLi(t) { var li = document.createElement('li'); li.className = 'exrow ' + (t.you ? 'you' : 'st'); li.innerHTML = '<div class="exw ' + (t.you ? 'you' : 'st') + '">' + (t.you ? 'You' : 'The steward') + '<span class="t">' + (t.at || '') + '</span></div><div class="ext"></div>'; li.querySelector('.ext').textContent = t.text; return li; }
+  function pollThread(goal, seen) {
+    var list = $('.gthread[data-thread="' + goal + '"]'); if (!list) return;
+    var tries = 0, t = setInterval(function () {
+      tries++;
+      fetch('/api/steward/history?pid=' + encodeURIComponent(PID) + '&dir=&goal=' + encodeURIComponent(goal), { headers: headers() })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var turns = (j && j.turns) || [];
+          if (turns.length > seen) {
+            list.innerHTML = '';
+            turns.slice(-12).forEach(function (x) { var at = String(x.at || ''); list.appendChild(threadLi({ you: (x.role || '') === 'john', text: x.text || '', at: at.length >= 16 ? at.slice(11, 16) : at })); });
+            list.scrollTop = list.scrollHeight;
+            if (turns[turns.length - 1].role === 'steward') clearInterval(t);
+            seen = turns.length;
+          }
+          if (tries >= 14) clearInterval(t);
+        }).catch(function () { if (tries >= 14) clearInterval(t); });
+    }, 12000);
+  }
+  $$('.place .gsay').forEach(function (box) {
+    var goal = box.getAttribute('data-goal'), btn = $('.gsend[data-goal="' + goal + '"]'), list = $('.gthread[data-thread="' + goal + '"]');
+    var DK = 'anchor:draft:goal:' + PID + ':' + goal, dt = null;
+    try { var kept = localStorage.getItem(DK); if (kept && kept.trim() && !box.value.trim()) box.value = kept; } catch (e) {}
+    box.addEventListener('input', function () { clearTimeout(dt); dt = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
+    function go(text) {
+      text = (text || box.value || '').trim(); if (!text || btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'Thinking…';
+      fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: '', text: text, goal: goal }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          btn.disabled = false; btn.textContent = 'Send';
+          if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
+          try { localStorage.removeItem(DK); } catch (e) {}
+          if (j.campaign_act && !j.read_only) {
+            try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
+            location.reload(); return;
+          }
+          box.value = '';
+          if (list) { var fade = list.querySelector('.exfade'); if (fade) fade.remove(); list.appendChild(threadLi({ you: true, text: text, at: '' })); list.scrollTop = list.scrollHeight; }
+          receipt('Said to the steward about this goal — its answer lands here in a minute or two.');
+          pollThread(goal, list ? list.querySelectorAll('.exrow').length : 0);
+        })
+        .catch(function () { btn.disabled = false; btn.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
+    }
+    btn.addEventListener('click', function () { go(); });
+    box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+    $$('.chips [data-say]', box.closest('.gconv')).forEach(function (c) { c.addEventListener('click', function () { go(c.getAttribute('data-say')); }); });
   });
 
   // the tools
