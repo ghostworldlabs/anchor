@@ -7785,6 +7785,14 @@ def _high_seat_context():
         prefs_html = ""
     capacity = _capacity_rows()
     week = _hr.week_in_words(today)
+    hs_turns, hs_stamp = [], ""
+    if campaign:
+        try:
+            hs_turns, _ = _conversation_turns(str(_campaign_dir()))
+            from steward_cockpit.steward_campaign import map_stamp as _map_stamp
+            hs_stamp = str(_map_stamp(str(_campaign_dir())))
+        except Exception:
+            hs_turns, hs_stamp = [], ""
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
@@ -7795,6 +7803,8 @@ def _high_seat_context():
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": working, "pickup": pickup,
         "projects_html": _high_seat_projects_html(groups, facts),
+        # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
+        "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
     }
 
 
@@ -7825,6 +7835,33 @@ def _campaign_entry_for(pid):
     return None
 
 
+def _conversation_turns(folder):
+    """The Campaign's one conversation log as the pages show it (W2 v2; W2c-2: the Campaign page and the High Seat read
+    it through this one reader): every turn with who said it, its text, its time on HIS clock (the log's stamps are UTC),
+    and the goal it was said from; and the same turns filtered by goal."""
+    turns, goal_turns = [], {}
+    try:
+        from steward_cockpit.conversation_history import read_history_document
+        for tn in (read_history_document(folder) or {}).get("turns") or []:
+            if not isinstance(tn, dict) or not tn.get("text"):
+                continue
+            at = str(tn.get("at") or "")
+            try:
+                from datetime import datetime as _dt
+                _ts = _dt.fromisoformat(at.replace("Z", "+00:00"))
+                at_s = (_ts.astimezone() if _ts.tzinfo is not None else _ts).strftime("%H:%M")
+            except (ValueError, TypeError, OSError):
+                at_s = at[11:16] if len(at) >= 16 else at
+            t = {"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
+                 "text": " ".join(str(tn.get("text")).split()), "at": at_s, "goal": str(tn.get("goal") or "")}
+            turns.append(t)
+            if t["goal"]:
+                goal_turns.setdefault(t["goal"], []).append(t)      # a goal's thread is the one log, filtered
+    except Exception:
+        turns, goal_turns = [], {}
+    return turns, goal_turns
+
+
 def _campaign_context(entry):
     """Everything the Campaign page (W3c, 2026-09-26) is made of, read once per request: the record's
     initiatives and parts (resolved), the strip's seeds, the effort's conversation, the registry's
@@ -7844,26 +7881,7 @@ def _campaign_context(entry):
         seeds = _read_seeds(folder)
     except Exception:
         seeds = []
-    turns, goal_turns = [], {}
-    try:
-        from steward_cockpit.conversation_history import read_history_document
-        for tn in (read_history_document(folder) or {}).get("turns") or []:
-            if not isinstance(tn, dict) or not tn.get("text"):
-                continue
-            at = str(tn.get("at") or "")
-            try:      # the log's stamps are UTC; he reads his own clock (the live glance of W2b-3 showed 16:11 for his 10:11)
-                from datetime import datetime as _dt
-                _ts = _dt.fromisoformat(at.replace("Z", "+00:00"))
-                at_s = (_ts.astimezone() if _ts.tzinfo is not None else _ts).strftime("%H:%M")
-            except (ValueError, TypeError, OSError):
-                at_s = at[11:16] if len(at) >= 16 else at
-            t = {"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
-                 "text": " ".join(str(tn.get("text")).split()), "at": at_s, "goal": str(tn.get("goal") or "")}
-            turns.append(t)
-            if t["goal"]:
-                goal_turns.setdefault(t["goal"], []).append(t)      # W2 v2: a goal's thread is the one log, filtered
-    except Exception:
-        turns, goal_turns = [], {}
+    turns, goal_turns = _conversation_turns(folder)
     try:
         projects = [{"id": e.get("id"), "name": e.get("name")} for e in _rnd.list_projects(include_archived=False, include_future=False, include_retired=False)
                     if e.get("id") and e.get("id") != entry.get("id")]
@@ -13412,6 +13430,9 @@ def _e1_enforce_turn_close(utterance, out):
         return out
 
 
+_NEW_PROJECT_ASK = re.compile(r"\b(?:start|create|make|set up|begin)\b.{0,40}\b(?:new )?project\b|\bnew project\b", re.I)
+
+
 def handle_ecgberht_high_seat_say(handler, path, body):
     """POST /api/ecgberht/high_seat_say — TALK to the steward at portfolio
     level (2026-08-07, John: "I don't want to click a new project button —
@@ -13440,6 +13461,12 @@ def handle_ecgberht_high_seat_say(handler, path, body):
         if spoken is not None:
             handler._send_json(spoken, 200 if spoken.get("ok") else 400)
             return
+    # W2c-2 (2026-09-30): a page with a dialogue says it engages the steward itself — anything that is not a verb and
+    # not the new-project ask is answered 'talk' (no model call here); the page says it to the Campaign's steward and
+    # shows the exchange. The new-project ask keeps the dashboard steward's confirm card (R11).
+    if b.get("verbs_only") and not _NEW_PROJECT_ASK.search(text):
+        handler._send_json({"ok": True, "talk": True}, 200)
+        return
     folder, err, status = _ecgberht_project_folder("__dashboard__")
     if err is not None:
         handler._send_json({"ok": False, "error": "no_dashboard_steward",

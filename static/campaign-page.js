@@ -228,130 +228,15 @@
   $$('.place [data-seat]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') }); }); });
   $$('.place [data-home]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'home', step: b.getAttribute('data-home') }); }); });
 
-  // ── the dialogue (W2b-1, 2026-09-30; W2b-3 the same day, his word: "it should be interactive and able for me to follow
-  // what is going on, ask, discuss") ──────────────────────────────────────────────────────────────────────────────
-  // The page long-polls the cockpit's own event stream (/api/steward/events, the one the AI Cockpit uses) from the
-  // moment it opens — the cockpit's own rule: opening the page resumes a parked steward that has work kept for it, and
-  // a brand-new one is never woken by a mere view. What the steward writes lands as it writes: in the panel's dialogue,
-  // and when the turn was sent from a goal's brainstorm, there too. One log, two views. A turn that changed the record
-  // reloads the board with the receipt kept. The steward's state (parked · waking · listening · working) stands at
-  // the dialogue's head, read from the same poll.
-  var BOOT_STAMP = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '';
-  var STEWARD = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward';
-  var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '' };
-  function goalName(id) { var n = $('#place-' + id + ' .pname'); return (n && n.textContent.trim()) || id; }
-  function exLi(who, text, cls, goal) {
-    var li = document.createElement('li');
-    li.className = 'exrow ' + (who === 'you' ? 'you' : (who === 'st' ? 'st' : 'sysl')) + (cls ? ' ' + cls : '');
-    li.innerHTML = '<div class="exw ' + (who === 'you' ? 'you' : 'st') + '"><span class="w"></span><span class="t"></span></div><div class="ext"></div>';
-    li.querySelector('.w').textContent = who === 'you' ? 'You' : (who === 'st' ? STEWARD : '');
-    if (goal) { var c = document.createElement('button'); c.className = 'gchip'; c.title = 'open this goal'; c.textContent = 'about ' + goalName(goal); li.querySelector('.exw').insertBefore(c, li.querySelector('.t')); c.addEventListener('click', function () { openPlace(goal); }); }
-    li.querySelector('.ext').textContent = text;
-    return li;
-  }
-  function mainList() { return $('#exList'); }
-  function settle(list) { list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }
-  function put(list, li) { if (!list) return null; var fade = list.querySelector('.exfade'); if (fade) fade.remove(); list.appendChild(li); settle(list); return li; }
-  // one log, two views: a line lands in the list that sent the turn and, when that is a goal's thread, in the
-  // panel's dialogue as well, with the goal's chip
-  function appendLine(who, text, cls) {
-    var main = mainList(), tgt = live.target || main;
-    var pair = { li: put(tgt, exLi(who, text, cls, tgt === main ? live.goal : null)), mi: null };
-    if (tgt !== main) pair.mi = put(main, exLi(who, text, cls, live.goal));
-    return pair;
-  }
-  function each(pair, f) { if (!pair) return; if (pair.li) f(pair.li); if (pair.mi) f(pair.mi); }
-  function stateText(s) {
-    if (!s) return '';
-    if (s.busy) { var q = +(s.quiet_seconds || 0); return 'working' + (q > 300 ? ', quiet for ' + Math.floor(q / 60) + ' min' : '') + '…'; }
-    if (!s.alive) return s.queued ? 'parked — ' + s.queued + ' of yours waits for it to wake' : 'parked — it wakes on your word';
-    return s.queued ? 'listening · ' + s.queued + ' queued' : 'listening';
-  }
-  function showState(s) { var el = $('#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
-  // a turn that ended before this page saw its words (it was mid-turn when the page opened): the log has it
-  function catchUp() {
-    fetch('/api/steward/history?pid=' + encodeURIComponent(PID) + '&dir=', { headers: headers() })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        var ts = (j && j.turns) || [], last = null;
-        for (var i = ts.length - 1; i >= 0; i--) { var role = String(ts[i].role || '').toLowerCase(); if (ts[i].text && role !== 'john' && role !== 'you' && role !== 'user' && role !== 'human') { last = ts[i]; break; } }
-        if (!last) return;
-        var main = mainList(), rows = main ? $$('.exrow.st .ext', main) : [], txt = String(last.text).replace(/\s+/g, ' ').trim();
-        if (rows.length && rows[rows.length - 1].textContent.replace(/\s+/g, ' ').trim() === txt) return;
-        live.goal = last.goal || null; live.target = null; appendLine('st', txt, ''); live.goal = null;
-      })
-      .catch(function () {});
-  }
-  function handleEvent(ev) {
-    if (!ev || ev.tick) return;
-    if (ev.t === 'delta') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { li.querySelector('.ext').textContent += (ev.text || ''); settle(li.parentNode); }); return; }
-    if (ev.t === 'turn_end') { if (live.line) { each(live.line, function (li) { li.classList.remove('live'); }); live.line = null; } else catchUp(); live.target = null; live.goal = null; return; }
-    if (ev.t === 'john') { var t = String(ev.text || ''); if (live.skipJohn && t === live.skipJohn) { live.skipJohn = ''; return; } live.target = null; live.goal = null; appendLine('you', t, ''); return; }
-    if (ev.t === 'sys' && ev.text) { appendLine('sys', ev.text, 'dim'); return; }
-    if (ev.t === 'tool') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { var w = li.querySelector('.exw .t'); if (w) w.textContent = 'working…'; }); return; }
-  }
-  function primeSeq() {   // the ring's current top, so the poll never replays lines the log below already shows
-    return fetch('/api/steward/events?pid=' + encodeURIComponent(PID) + '&dir=&since=0', { headers: headers() })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); }); if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch; showState(j.state); })
-      .catch(function () {});
-  }
-  function pollLoop() {
-    if (live.polling) return; live.polling = true;
-    (function step() {
-      fetch('/api/steward/events?pid=' + encodeURIComponent(PID) + '&dir=&since=' + live.seq, { headers: headers() })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          var ep = j.state && j.state.epoch;
-          if (ep !== undefined && live.epoch !== null && ep !== live.epoch) { live.seq = 0; live.epoch = ep; appendLine('sys', '— the steward reconnected —', 'dim'); }
-          else if (ep !== undefined) live.epoch = ep;
-          showState(j.state);
-          (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); handleEvent(ev); });
-          if (j.stamp && BOOT_STAMP && j.stamp !== BOOT_STAMP && !live.line) {
-            try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: 'The steward changed the record — the board is reloaded.', bad: false, undo: null })); } catch (e) {}
-            location.reload(); return;
-          }
-          setTimeout(step, 250);
-        })
-        .catch(function () { setTimeout(step, 3000); });
-    })();
-  }
-  function sendToSteward(text, goal, list, btn, box, DK) {
-    btn.disabled = true; btn.textContent = 'Thinking…';
-    (live.polling ? Promise.resolve() : primeSeq()).then(function () {
-      return fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: '', text: text, goal: goal || undefined }) });
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        btn.disabled = false; btn.textContent = 'Send';
-        if (j && j.error === 'build-mismatch') {   // a stale tab: the draft is kept in this browser; the renewed page puts it back
-          try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: 'This page was older than the server — it is renewed; your unsent text is back in the box, send it again.', bad: true, undo: null })); } catch (e) {}
-          location.reload(); return;
-        }
-        if (!j || j.ok === false) {
-          var why = (j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.';
-          if (j && j.undo) {   // a verb that landed in part: the refusal and its undo survive the reload onto the record as it stands
-            try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: why, bad: true, undo: j.undo })); } catch (e) {}
-            location.reload(); return;
-          }
-          receipt(why, true); live.target = list; live.goal = goal || null; appendLine('sys', 'Not sent — ' + why, 'dim'); live.target = null; live.goal = null; return;
-        }
-        try { if (DK) localStorage.removeItem(DK); } catch (e) {}
-        if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
-          try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
-          location.reload(); return;
-        }
-        box.value = '';
-        live.target = list; live.goal = goal || null; live.line = null; live.skipJohn = text;
-        appendLine('you', text);
-        if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');
-        receipt(goal ? 'Said to the steward about this goal — it answers as it writes.' : 'Said — the steward answers below as it writes.');
-        pollLoop();
-      })
-      .catch(function () { btn.disabled = false; btn.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
-  }
-  // live from the open: the ring's top first (so the log shown below is not replayed), then the stream
-  if (PID && mainList()) primeSeq().then(pollLoop);
+  // ── the dialogue (W2b-1 and W2b-3, 2026-09-30; W2c-2: the one mechanism, static/steward-dialogue.js, shared with the
+  // High Seat) — live from the open through the cockpit's own stream; the goal's brainstorm and the panel's dialogue are
+  // two views of the one log; a turn that changed the record reloads the board with the receipt kept
+  var dlg = window.StewardDialogue ? window.StewardDialogue.init({
+    pid: PID, dir: '', headers: headers, receipt: receipt, receiptKey: 'campaign_receipt',
+    steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
+    goalName: function (id) { var n = $('#place-' + id + ' .pname'); return (n && n.textContent.trim()) || id; }, openGoal: function (id) { openPlace(id); }
+  }) : null;
+  function sendToSteward(text, goal, list, btn, box, DK) { if (dlg) dlg.send(text, goal, list, btn, box, DK); else receipt('The dialogue script did not load \u2014 reload the page.', true); }
   $$('.place .gsay').forEach(function (box) {
     var goal = box.getAttribute('data-goal'), btn = $('.gsend[data-goal="' + goal + '"]'), list = $('.gthread[data-thread="' + goal + '"]');
     var DK = 'anchor:draft:goal:' + PID + ':' + goal, dt = null;

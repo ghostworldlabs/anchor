@@ -121,14 +121,14 @@
     function seatedSource() { return !!(drag && drag.step && $('.tile[data-step="' + drag.step + '"], .irow.seated[data-step="' + drag.step + '"]')); }
     camp.addEventListener('dragover', function (e) {
       if (!drag) return; var g = e.target.closest('.grow');
-      if (drag.proj ? !g : !seatedSource()) return;
+      if (drag.proj ? false : !seatedSource()) return;   // an orphan may be dropped anywhere on the tile: a row adds it; the head answers with a line
       e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {} (g || camp).classList.add('over');
     });
     camp.addEventListener('dragleave', function (e) { var g = e.target.closest('.grow'); if (g && !g.contains(e.relatedTarget)) g.classList.remove('over'); if (!camp.contains(e.relatedTarget)) camp.classList.remove('over'); });
     camp.addEventListener('drop', function (e) {
       e.preventDefault(); $$('.over').forEach(function (z) { z.classList.remove('over'); }); if (!drag) return;
       var g = e.target.closest('.grow');
-      if (drag.proj) { if (g) act({ act: 'add', initiative: g.getAttribute('data-g'), kind: 'project', text: drag.name, project_id: drag.proj }); return; }
+      if (drag.proj) { if (g) act({ act: 'add', initiative: g.getAttribute('data-g'), kind: 'project', text: drag.name, project_id: drag.proj }); else receipt('Open the goals (Expand), then drop it on one goal.', true); return; }
       if (seatedSource()) act({ act: 'home', step: drag.step });
     });
   }
@@ -415,13 +415,23 @@
       receipt('The verb is in the composer — add the tier or the life area if you want, then Send.');
     });
   });
+  // W2c-2 (2026-09-30, his word: the dialogue must "engage the steward and then show the dialogue"): the composer is
+  // ONE box. A Campaign verb and the new-project ask are answered by the High Seat's own route as before (a receipt,
+  // the confirm card); anything else is said to the Campaign's steward — the Desk — and the exchange shows below, live
+  var dlg = (window.StewardDialogue && CAMPAIGN) ? window.StewardDialogue.init({
+    pid: CAMPAIGN, dir: '', headers: headers, receipt: receipt, receiptKey: 'highseat_receipt',
+    steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
+    goalName: function (id) { var g = $('.grow[data-g="' + id + '"] .gn'); return (g && g.textContent.trim()) || id; },
+    openGoal: function (id) { setCamp(true); var g = $('.grow[data-g="' + id + '"]'); if (g) { g.classList.add('open'); g.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+  }) : null;
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
     send.disabled = true; send.textContent = 'Thinking…';
-    fetch('/api/ecgberht/high_seat_say', { method: 'POST', headers: headers(), body: JSON.stringify({ text: text }) })
+    fetch('/api/ecgberht/high_seat_say', { method: 'POST', headers: headers(), body: JSON.stringify({ text: text, verbs_only: !!dlg }) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         send.disabled = false; send.textContent = 'Send';
+        if (j && j.ok && j.talk && dlg) { dlg.send(text, null, dlg.mainList(), send, say, DRAFT_KEY); return; }   // not a verb: the steward, in the dialogue
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
         say.value = ''; clearDraft(); receipt(j.say || '…', false, j.undo || null);
         if (j.campaign_act && !j.read_only) {   // the Campaign tile shows the change after the reload; the line and its undo survive it

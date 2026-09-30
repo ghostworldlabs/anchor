@@ -49,9 +49,9 @@ def test_the_goals_are_one_thin_line_that_expands_to_the_goals_and_their_compone
     html = hsp.render_high_seat_html(_ctx())
     camp = html[html.index('<section class="camp"'):html.index('id="shActive"')]
     assert 'id="camp" data-drop="home"' in camp and '<span class="k">Goals</span>' in camp and ">Expand<" in camp, "a thin tile, closed by default, the drop that sends a seated initiative home"
-    assert "<b>Tier 1:</b> MBA Teaching, Fall 2026 &middot; <b>Tier 2:</b> 1 &middot; <b>seed goals:</b> 0 &middot; 2 seeds &middot; <b>out:</b> 2 active, 1 on deck" in camp
+    assert "<b>Tier 1:</b> MBA Teaching, Fall 2026 &middot; <b>Tier 2:</b> 1 &middot; <b>seed goals:</b> 2 &middot; <b>out:</b> 2 active, 1 on deck" in camp
     mba = camp[camp.index('data-g="mba-teaching"'):camp.index('data-g="trusts"')]
-    assert '<b class="gn">MBA Teaching, Fall 2026</b><span class="t">tier 1</span>' in mba and "0 in the goal &middot; out: 2 active, 1 on deck" in mba
+    assert '<b class="gn">MBA Teaching, Fall 2026</b><span class="t">tier 1</span>' in mba and "2 in the goal &middot; out: 2 active, 1 on deck" in mba
     assert 'href="/project/df56?open=mba-teaching"' in mba, "the goal's place on the Campaign page"
     assert '<div class="irow seated" data-step="mba-project"><span class="kind">cockpit</span>' in mba and 'data-home="mba-project"' in mba and '<span class="seat active">active</span>' in mba
     assert '<span class="kind">a step of a project</span><span class="nm">Lectures 3 + 4 revised, with AI supplements <span class="dim">&middot; MBA Teaching AI</span></span><span class="el">rides inside' in mba, "an element rides inside its goal"
@@ -75,18 +75,20 @@ def test_the_shelves_hold_the_seated_initiatives_as_cards_with_their_goal_and_th
     assert "&#9873; Needs you:" in card and 'data-part="status"' in card and 'href="/project/%s"' % MBA in card, "the project card as today, with its acts"
     eff = active[active.index('id="card-%s-mba-lectures"' % MBA):]
     assert 'data-dir="lectures"' in eff and 'data-step="mba-lectures"' in eff and "a cockpit within the project" in eff and '<span class="t-eff">&middot; lectures</span>' in eff, "a cockpit within a project is its own card on its own effort"
+    assert 'href="/project/%s?dir=lectures"' % MBA in eff and "Needs you:" not in eff and "working: lecture 4" not in eff and "<span class=\"k\">Next</span>The lectures" in eff, "the effort card opens THAT effort and reads its own state, not the project's wait (Grok W2c)"
+    assert "camp-note" not in html[html.index('id="camp"'):html.index('id="shActive"')] and "def _shelf" not in open(os.path.join(HERE, "high_seat_page.py"), encoding="utf-8").read()
     assert active.index('id="card-%s"' % MBA) < active.index('id="card-%s-mba-lectures"' % MBA), "his order"
     deck = html[html.index('id="shDeck"'):html.index('id="ptile"')]
     assert '<h3>On deck</h3><span class="c">1</span>' in deck
     assert '<article class="tile desk" id="card-hw" data-step="hw" data-name="retool homework 2" draggable="true">' in deck and 'data-home="hw"' in deck
-    assert '<div class="t-goal">in <b>MBA Teaching, Fall 2026</b></div>' in deck and 'href="/project/df56?open=mba-teaching"' in deck and "talk to the desk" in deck and "due Oct 27" in deck
+    assert '<div class="t-goal">in <b>MBA Teaching, Fall 2026</b></div>' in deck and 'href="/project/df56?view=desk"' in deck and "talk to the desk" in deck and "due Oct 27" in deck, "a desk item is talked through at the Desk cockpit (Grok W2c)"
     # the Projects tile: the registry's projects in no goal, draggable onto a goal
     tile = html[html.index('id="ptile"'):html.index('id="deskline"')]
     assert '<span class="ok">In no goal &middot; 2</span>' in tile and 'class="orphan" draggable="true" data-proj="9405abe0" data-name="Family &lt;Trusts&gt;"' in tile and 'data-proj="quiet"' in tile
     assert 'data-proj="%s"' % MBA not in tile, "a project in a goal is not an orphan"
     # the rail and the ruler follow the seats
     assert '<button data-rail="active"><span class="n">Active</span><span class="c">2</span>' in html and '<button data-rail="deck"><span class="n">On deck</span><span class="c">1</span>' in html
-    assert "its card is on Active" in html and "its card is on Continuing" not in html
+    assert "seated on Active" in html and "its card is on" not in html
     # the empty shelves say what to do
     ctx = _ctx(); ctx["initiatives"] = hsp.campaign_initiatives(base._steps(), base._resolved())
     html = hsp.render_high_seat_html(ctx)
@@ -101,6 +103,7 @@ def test_the_page_script_moves_by_one_act_with_undo_and_drops_where_the_mock_up_
     assert "act({ act: 'seat', step: drag.step, seat: z.getAttribute('data-seat'), position: k })" in block, "a drop on a shelf at its place among the cards"
     assert "act({ act: 'add', initiative: g.getAttribute('data-g'), kind: 'project', text: drag.name, project_id: drag.proj })" in block, "a registry project onto a goal"
     assert "if (seatedSource()) act({ act: 'home', step: drag.step });" in block, "a seated initiative dropped on the goals tile goes home"
+    assert "else receipt('Open the goals (Expand), then drop it on one goal.', true)" in block, "an orphan dropped on the closed head gets one line (Grok W2c)"
     assert "'/api/high-seat/campaign'" in block and "if (acting || !CAMPAIGN) return; acting = true;" in block and "highseat_receipt" in block and "location.reload()" in block
     assert "e.dataTransfer.setData('text/plain'" in block and "'Collapse' : 'Expand'" in block
     assert "ini-tile" not in js and "active: '#shActive'" in js and "deck: '#shDeck'" in js and "#shNeeds" not in js

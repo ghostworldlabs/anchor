@@ -112,7 +112,7 @@ def test_the_page_renders_from_facts_and_escapes_them():
 
 def test_the_page_boots_with_the_campaign_id_and_an_undo_on_its_receipt_line():
     html = hsp.render_high_seat_html(_ctx(campaign=True))
-    assert 'window.ANCHOR_BOOT = {build_id: "test", campaign_pid: "df56", auth_required: false}' in html and 'id="undoBtn" hidden' in html
+    assert 'window.ANCHOR_BOOT = {build_id: "test", campaign_pid: "df56", auth_required: false, steward: "Jarvis", stamp: ""}' in html and 'id="undoBtn" hidden' in html      # W2c-2: the steward's label and the stamp ride the boot
     assert 'campaign_pid: ""' in hsp.render_high_seat_html(_ctx(campaign=False))
 
 
