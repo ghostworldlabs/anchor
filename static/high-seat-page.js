@@ -222,7 +222,7 @@
   function grow(card) { var d = $('.cdlg', card); if (d) d.classList.add('big'); card.classList.add('talking'); }
   function startTalk(card, pid, dir) {
     var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate');
-    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir) + (window.StewardDialogue ? window.StewardDialogue.tokenQ() : ''), { headers: headers() })
+    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         var ts = ((j && j.turns) || []).slice(-8); list.innerHTML = '';

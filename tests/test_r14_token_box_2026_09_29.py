@@ -19,8 +19,9 @@ def test_the_high_seat_has_a_login_box_and_no_browser_prompt():
     assert "function showLogin(" in js and "function doLogin()" in js and "loginGo.addEventListener('click', doLogin)" in js
     assert "window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('')" in js, "the box opens on load when a token is required and none is held"
     assert "'That token was refused" in js and "localStorage.removeItem('anchor_token')" in js, "a refused token is said and forgotten"
-    css = open(os.path.join(ROOT, "static", "high-seat-page.css"), encoding="utf-8").read()
-    assert ".loginbox{" in css
+    css = open(os.path.join(ROOT, "static", "steward-dialogue.css"), encoding="utf-8").read()
+    assert ".loginbox{" in css, "the box's look lives with the dialogue: both pages mount it (Grok's read of W2c-3)"
+    assert ".loginbox{" not in open(os.path.join(ROOT, "static", "high-seat-page.css"), encoding="utf-8").read(), "one copy"
 
 
 def test_the_page_carries_the_box_and_tells_the_script_whether_a_token_is_required():

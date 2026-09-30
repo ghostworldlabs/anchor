@@ -48,21 +48,23 @@
       return s.queued ? 'listening · ' + s.queued + ' queued' : 'listening';
     }
     function showState(s) { var el = $(o.state || '#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
-    // a GET on these pages carries the token on the query (the dashboard convention; the server's GET gate does not read
-    // the header) — his polls were refused with the header alone and the page asked again three times a second (W2c-3)
-    function q() { return '?pid=' + encodeURIComponent(PID) + '&dir=' + encodeURIComponent(DIR) + tokenQ(); }
+    // a GET on these pages carries the token in the standard Authorization header (the gate reads it; the X-Anchor-Token
+    // header it does not) — his polls were refused with the page's header alone and asked again three times a second
+    // (W2c-3); the token never rides the request line of a poll (Grok's read of W2c-3)
+    function q() { return '?pid=' + encodeURIComponent(PID) + '&dir=' + encodeURIComponent(DIR); }
+    function getHeaders() { return authHeaders(headers()); }
     var refused = false;
     function refusedOnce() {   // a refused poll: said once, the loop stopped; the page's own login (when it has one) is offered
       if (refused) return; refused = true; live.polling = false;
       var el = $(o.state || '#exState'); if (el) { el.textContent = 'not logged in — the steward’s words cannot reach this page'; el.setAttribute('data-state', 'auth'); }
       live.target = null; live.goal = null;
-      appendLine('sys', 'This browser is not logged in to Anchor, so the steward’s words cannot reach this page. Paste the token (the High Seat has the box), then reload.', 'dim');
+      appendLine('sys', 'This browser is not logged in to Anchor, so the steward’s words cannot reach this page \u2014 log in below.', 'dim');
       if (o.onAuth) o.onAuth();
     }
     function asJson(r) { if (r.status === 401 || r.status === 403) { var e = new Error('auth'); e.auth = true; throw e; } return r.json(); }
     // a turn that ended before this page saw its words (it was mid-turn when the page opened): the log has it
     function catchUp() {
-      fetch('/api/steward/history' + q(), { headers: headers() })
+      fetch('/api/steward/history' + q(), { headers: getHeaders() })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var ts = (j && j.turns) || [], last = null;
@@ -83,7 +85,7 @@
       if (ev.t === 'tool') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { var w = li.querySelector('.exw .t'); if (w) w.textContent = 'working…'; }); return; }
     }
     function primeSeq() {   // the ring's current top, so the poll never replays lines the log below already shows
-      return fetch('/api/steward/events' + q() + '&since=0', { headers: headers() })
+      return fetch('/api/steward/events' + q() + '&since=0', { headers: getHeaders() })
         .then(asJson)
         .then(function (j) { (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); }); if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch; showState(j.state); })
         .catch(function (e) { if (e && e.auth) refusedOnce(); });
@@ -92,7 +94,7 @@
       if (live.polling) return; live.polling = true;
       (function step() {
         if (live.stopped) { live.polling = false; return; }   // W2e: a card's dialogue stops when the card closes
-        fetch('/api/steward/events' + q() + '&since=' + live.seq, { headers: headers() })
+        fetch('/api/steward/events' + q() + '&since=' + live.seq, { headers: getHeaders() })
           .then(asJson)
           .then(function (j) {
             if (!j || !j.events) { setTimeout(step, 3000); return; }   // an answer with no stream in it: wait, never hammer
@@ -147,6 +149,11 @@
     function stop() { live.stopped = true; }
     return { send: send, appendLine: appendLine, mainList: mainList, stop: stop };
   }
-  function tokenQ() { var t = ''; try { t = localStorage.getItem('anchor_token') || ''; } catch (e) {} return t ? ('&token=' + encodeURIComponent(t)) : ''; }
-  window.StewardDialogue = { init: init, tokenQ: tokenQ };   // tokenQ: the one way a GET on these pages carries the token
+  function authHeaders(base) {   // the page's headers plus the standard Authorization header the GET gate reads
+    var h = {}; Object.keys(base || {}).forEach(function (k) { h[k] = base[k]; });
+    var t = ''; try { t = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+    if (t && !h.Authorization) h.Authorization = 'Bearer ' + t;
+    return h;
+  }
+  window.StewardDialogue = { init: init, authHeaders: authHeaders };   // authHeaders: the one way a GET on these pages carries the token
 })();

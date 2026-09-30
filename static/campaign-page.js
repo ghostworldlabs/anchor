@@ -231,10 +231,35 @@
   // ── the dialogue (W2b-1 and W2b-3, 2026-09-30; W2c-2: the one mechanism, static/steward-dialogue.js, shared with the
   // High Seat) — live from the open through the cockpit's own stream; the goal's brainstorm and the panel's dialogue are
   // two views of the one log; a turn that changed the record reloads the board with the receipt kept
+  // the login box (Grok's read of W2c-3: a refused read is answered on THIS page): hidden until the stream is refused;
+  // the token pasted here logs the browser in (POST /api/auth/login mints the cookie) and the page reloads
+  var loginBox = $('#loginBox'), loginTok = $('#loginTok'), loginGo = $('#loginGo'), loginMsg = $('#loginMsg');
+  function showLogin(text) {
+    if (!loginBox) return;
+    loginBox.hidden = false; if (loginMsg) loginMsg.textContent = text || '';
+    try { loginBox.scrollIntoView({ block: 'center' }); } catch (e) {}
+    setTimeout(function () { try { loginTok.focus(); } catch (e) {} }, 50);
+  }
+  function doLogin() {
+    var t = ((loginTok && loginTok.value) || '').trim();
+    if (!t) { if (loginMsg) loginMsg.textContent = 'Paste the token first.'; return; }
+    if (loginGo) loginGo.disabled = true; if (loginMsg) loginMsg.textContent = 'Logging in\u2026';
+    try { localStorage.setItem('anchor_token', t); } catch (e) {}
+    fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () { return null; })
+      .then(function (r) {
+        if (loginGo) loginGo.disabled = false;
+        if (r && r.ok) { if (loginMsg) loginMsg.textContent = 'Logged in.'; try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: 'Logged in. This browser holds the token now.', undo: null })); } catch (e) {} location.reload(); return; }
+        try { localStorage.removeItem('anchor_token'); } catch (e) {}
+        if (loginMsg) loginMsg.textContent = (r && r.status === 401) ? 'That token was refused — it is not the current one.' : 'That did not go through; try again.';
+      });
+  }
+  if (loginGo) loginGo.addEventListener('click', doLogin);
+  if (loginTok) loginTok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
   var dlg = window.StewardDialogue ? window.StewardDialogue.init({
     pid: PID, dir: '', headers: headers, receipt: receipt, receiptKey: 'campaign_receipt',
     steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
-    goalName: function (id) { var n = $('#place-' + id + ' .pname'); return (n && n.textContent.trim()) || id; }, openGoal: function (id) { openPlace(id); }
+    goalName: function (id) { var n = $('#place-' + id + ' .pname'); return (n && n.textContent.trim()) || id; }, openGoal: function (id) { openPlace(id); },
+    onAuth: function () { showLogin('The steward\u2019s words cannot reach this page until this browser is logged in.'); }
   }) : null;
   function sendToSteward(text, goal, list, btn, box, DK) { if (dlg) dlg.send(text, goal, list, btn, box, DK); else receipt('The dialogue script did not load \u2014 reload the page.', true); }
   $$('.place .gsay').forEach(function (box) {

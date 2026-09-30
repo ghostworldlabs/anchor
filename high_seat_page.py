@@ -733,7 +733,8 @@ def _head_li(ctx):
 def _dialogue(ctx):
     """The steward's dialogue on the High Seat (W2c-2, 2026-09-30, his word: both dialogues "need to engage the steward
     and then show the dialogue between the user and the steward"): the Campaign's one conversation log — the last 40
-    turns, a turn said from a goal's place with the goal's chip — under the composer, live from the open through the
+    turns, a turn said from a goal's place with the goal's chip — between the brief and the composer at the column's
+    foot (W2c-3: the cockpit's shape), live from the open through the
     cockpit's stream (static/steward-dialogue.js, the one mechanism the Campaign page uses), the steward's state at its
     head. Nothing here without a Campaign."""
     if not ctx.get("campaign"):
@@ -784,7 +785,6 @@ def _today_block(ctx):
     'more real estate on the right hand side' — his word)."""
     facts = ctx["facts"]
     rows = ctx.get("rows") or []
-    facts = ctx["facts"]
 
     def trow(r):
         href = r.get("href") or ""

@@ -427,17 +427,18 @@ def _lead(ctx):
 
 def _panel(ctx):
     """The steward's column (W2b-3, 2026-09-30, his word: the dialogue "should open up and fill the whole open space on
-    the right below the brief, it should be interactive and able for me to follow what is going on, ask, discuss"):
-    the brief, the composer directly under it (A1), then the DIALOGUE filling the rest of the column - the one
-    conversation log of the Campaign's cockpit (the last 40 turns; a turn said from a goal's place carries the goal's
-    chip, which opens the goal), live from the moment the page opens (the script polls the cockpit's own stream), with
-    the steward's state at its head."""
+    the right below the brief, it should be interactive and able for me to follow what is going on, ask, discuss";
+    W2c-3: the cockpit's shape): the brief, then the DIALOGUE filling the rest of the column - the one conversation log
+    of the Campaign's cockpit (the last 40 turns; a turn said from a goal's place carries the goal's chip, which opens
+    the goal), live from the moment the page opens (the script polls the cockpit's own stream), the steward's state at
+    its head - and the composer at the column's foot. A login box, hidden until a read is refused (Grok's read of
+    W2c-3: the refusal is answered on the page he is looking at)."""
     st = ctx["steward"]
     rest = brief_bullets(ctx)
     lead = _lead(ctx)
     if lead is None:
         lead, rest = rest[0], rest[1:]
-    # the brief shrinks to its lead plus a fold (A1): the composer sits directly under it
+    # the brief shrinks to its lead plus a fold (A1)
     bullets = '<li class="lead">%s</li><li class="fold"><details class="brief-more"><summary>the rest, by tier</summary><ul>%s</ul></details></li>' % (
         lead, "".join('<li>%s</li>' % b for b in rest))
     turns = (ctx.get("turns") or [])[-40:]
@@ -456,6 +457,9 @@ def _panel(ctx):
         '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
         '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
         '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section>'
+        '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
+        '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
+        '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it runs the Campaign: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'

@@ -106,12 +106,12 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
               "c.classList.add('ready')", "localStorage.setItem('hs_seen_' + card.id, tok)",
               "var a = e.target.closest('.cb-ask');", "var t = e.target.closest('.cb-talk');", "box.value = 'About: ' + (t.getAttribute('data-ask') || '')",
-              "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });", "window.StewardDialogue.tokenQ()"):
+              "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });", "window.StewardDialogue.authHeaders(headers())"):
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
-    assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, tokenQ: tokenQ" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
+    assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
     for f in ("high-seat-page.js", "steward-dialogue.js"):
         r = subprocess.run(["node", "--check", os.path.join(HERE, "static", f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
