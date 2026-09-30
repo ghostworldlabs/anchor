@@ -289,7 +289,7 @@ def _apply(folder, c, today):
         seeds = [(s["id"], s["text"]) for s in read_seeds(folder)]
         hit, why = _find(seeds, a.get("seed"), "seed")
         if hit is None:
-            return _refuse(why if seeds else "no seeds above the board yet", act)
+            return _refuse(why if seeds else "no seeds in Seed goals yet", act)
         area = str(a.get("area") or "").lower() or None
         if area and area not in AREAS:
             return _refuse("the life areas are %s \u2014 which?" % ", ".join(AREAS), act)

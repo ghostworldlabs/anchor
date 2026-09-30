@@ -52,10 +52,12 @@ def test_the_board_is_the_goals_in_tier_bands_then_seed_goals_then_the_boneyard(
     assert 'class="gcock"><span class="gpc working" title="active">Chapter 2 scenes <i>&#9679;</i></span></div>' in magi
     trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="trusts"') + 1200]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
-    assert "5 goals &middot; Tier 1 3 &middot; Tier 2 1 &middot; seed goals 2 &middot; the boneyard 1" in html, "the done goal is not counted among the goals; the tier-3 goal and the seed are seed goals"
+    assert "5 goals &middot; Tier 1 3 &middot; Tier 2 1 &middot; seed goals 1 &middot; the boneyard 1" in html, "Tier 1 + Tier 2 + seed goals = the goals; the done goal is out; the seeds keep their own count in the fold"
     assert 'data-band="active"' not in html and 'class="itile' not in html
     text = re.sub(r"<[^>]+>", " ", html).lower()
-    assert "an initiative is a cockpit or a desk item" in text and " initiatives " not in text.replace("initiative is", ""), "his words: a goal holds components; an initiative is a seatable component, never the goal"
+    assert "initiative" not in text, "the word retires from this page; the seats and their words come with the High Seat (W2b/W2c)"
+    cal = html[html.index('id="viewCal"'):]
+    assert 'class="tn">Seed goals</span>' in cal and "No tier yet" not in cal and 'class="rnum"' not in cal and 'data-lane="old"' not in cal, "the calendar uses the board's buckets: no rank, no third tier, the done goal out"
 
 
 def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_the_projects_and_its_thread():
@@ -87,14 +89,10 @@ def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
     panel = html[html.index('<aside class="panel"'):]
     assert panel.index('id="brief"') < panel.index('class="composer"') < panel.index('class="exwrap"'), "brief, composer, then the conversation"
     lead = panel[panel.index('<li class="lead">'):panel.index('<li class="fold">')]
-    assert lead.startswith('<li class="lead">Tier 1 ') and "The trusts and the holding company: Send the Stanford package" in lead
-    quiet = [dict(s, status="planned", waiting_on=None) if s["id"] == "trusts-pkg" else s for s in w1._steps()]
-    html = cpg.render_campaign_html(_ctx(quiet))
-    panel = html[html.index('<aside class="panel"'):]
-    lead = panel[panel.index('<li class="lead">'):panel.index('<li class="fold">')]
-    assert lead.startswith('<li class="lead">Active: Artificial Magi and MBA Teaching, Fall 2026 are running. While they run: pick up The trusts and the holding company')
-    assert 'data-goto="trusts">open</button>' in lead
-    assert "<summary>the rest, by tier</summary>" in panel and "<b>Tier 1</b> holds" in panel
+    assert lead.startswith('<li class="lead"><b>Tier 1</b> holds'), "the brief leads with the tiers' line; the set-first lead went with the Active band (Grok, the W2 trim)"
+    assert "<summary>the rest, by tier</summary>" in panel
+    assert "make &hellip; active" not in panel and "bench" not in panel, "the placeholders do not teach verbs the page no longer offers"
+    assert "in Seed goals" in panel and "above the board" not in panel
 
 
 def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():

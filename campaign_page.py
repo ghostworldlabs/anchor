@@ -49,6 +49,9 @@ def _part_state(p):
 
 # ── the board: grouped view ────────────────────────────────────────────────────────────────────
 
+KIND_WORDS = {"task": "desk item", "project": "cockpit", "step": "step of a project", "deliverable": "deliverable", "calendar": "date"}
+
+
 def _part_row(i, p, today, tick_allowed):
     pid = esc(p["id"])
     done = bool(p.get("done", p["status"] == "done"))
@@ -76,7 +79,7 @@ def _part_row(i, p, today, tick_allowed):
             '<span class="mchip kind">%s</span>%s%s%s%s%s'
             '</div></div></li>' % (
                 " done" if done else "", " pparked" if p["status"] == "parked" else "", pid, tick, name,
-                esc(p["kind"]), date_chip, flag_chip, state_chip, link, park))
+                esc(KIND_WORDS.get(p["kind"], p["kind"])), date_chip, flag_chip, state_chip, link, park))
 
 
 def _part_light(p, working):
@@ -132,13 +135,12 @@ def _gtile(i, ctx, band, draggable=True):
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
 
 
-def _band(key, label, note, items, ctx, cls="", extra="", draggable=True):
-    tiles = "".join(_gtile(i, ctx, key, draggable=draggable) for i in items)
-    empty = {"1": "nothing in tier 1", "2": "nothing in tier 2", "3": "no seed goal yet &mdash; a tier-3 goal sits here until you say tier 2"}.get(key, "nothing here")
-    return ('<section class="band%s" data-band="%s"><h4 class="band-h">%s <span class="c">%s</span>%s</h4>'
+def _band(key, label, note, items, ctx, cls="", extra="", quiet_empty=False):
+    tiles = "".join(_gtile(i, ctx, key) for i in items)
+    empty = {"1": "nothing in tier 1", "2": "nothing in tier 2", "3": "no seed goal yet"}.get(key, "nothing here")
+    return ('<section class="band%s" data-band="%s"><h4 class="band-h">%s <span class="c">%s</span></h4>'
             '<div class="tiles">%s</div>%s</section>' % ((" " + cls) if cls else "", key, label, note,
-                                                       ('<button class="mini" id="boneTog">show</button>' if key == "bone" else ""),
-                                                       tiles or '<div class="empty">%s</div>' % empty, extra))
+                                                       tiles or ("" if quiet_empty else '<div class="empty">%s</div>' % empty), extra))
 
 
 def _bands(ctx):
@@ -155,9 +157,9 @@ def _bands(ctx):
         out.append(_band(str(t), "Tier %d" % t, "%s &middot; %d goal%s%s" % (TIER_WORDS[t], len(mine), "" if len(mine) == 1 else "s",
                          (' &middot; <span class="am">%s</span>' % _needs(needs, "goal")) if needs else ""), mine, ctx))
     seedy = [i for i in live if i["tier"] not in (1, 2)]
-    out.append(_band("3", "Seed goals", "for the future &middot; a tier-3 goal sits here until you say tier 2; a seed becomes a goal on its card", seedy, ctx, "seeds", extra=_seedband(ctx)))
+    out.append(_band("3", "Seed goals", "for the future &middot; a tier-3 goal sits here until you say tier 2; a goal with no tier yet is marked tier ? until you pick one; a seed becomes a goal on its card", seedy, ctx, "seeds", extra=_seedband(ctx), quiet_empty=bool(ctx.get("seeds"))))
     out.append('<section class="band bone" data-band="bone"><h4 class="band-h">The boneyard <span class="c">done or abandoned goals &mdash; folded, never deleted</span><button class="mini" id="boneTog" aria-expanded="false">show (%d)</button></h4>'
-               '<div class="bonefold" id="boneFold" hidden>%s</div></section>' % (len(bone), "".join(_gtile(i, ctx, "bone", draggable=False) for i in bone) or '<div class="empty">nothing here yet &mdash; a goal marked done or parked lands here</div>'))
+               '<div class="bonefold" id="boneFold" hidden>%s</div></section>' % (len(bone), "".join(_gtile(i, ctx, "bone", draggable=False) for i in bone) or '<div class="empty">nothing here yet &mdash; a goal marked done or abandoned lands here</div>'))
     return '<div class="bands" id="viewGrouped">%s</div>' % "".join(out)
 
 
@@ -189,10 +191,9 @@ def _place(i, ctx):
         ("; the next deadline is <b>%s</b>" % esc(_short(i["next_deadline"]))) if i["next_deadline"] else "; nothing dated",
         ("; the pace is <b>%s</b>" % esc(_short(i["pace"]))) if i.get("pace") else "; no pace set",
         (". Next: <b>%s</b>" % esc(nxt["text"])) if nxt else "")
-    kinds = {"project": "cockpit", "task": "desk item", "step": "a step of a project", "deliverable": "deliverable", "calendar": "date"}
     comps = [p for p in i["parts"] if not p["done"]]
     proj_html = "".join('<div class="proj"><span class="ck">%s</span> %s<span class="st">%s</span></div>' % (
-        kinds.get(p["kind"], p["kind"]),
+        KIND_WORDS.get(p["kind"], p["kind"]),
         ('<a href="%s" target="_blank" rel="noopener">%s &#8599;</a>' % (esc(p["href"]), esc(p["target"] or p["text"]))) if p.get("href") else esc(p["text"] if p["kind"] != "project" else (p["target"] or p["text"])),
         esc(p["state"] or p["status"] or "")) for p in comps) or '<div class="proj dim">no open component &mdash; add one as a part</div>'
     return (
@@ -207,18 +208,18 @@ def _place(i, ctx):
         '<div class="obody"><div class="plist"><div class="pl-h"><h4>The workflow &middot; the parts in order</h4><span class="c">%d &middot; %d dated%s</span>'
         '<span class="hint">Click a name to rename, a date to move it. A project or a step of one is read from its own record.</span></div>'
         '<ul class="rows">%s</ul>'
-        '<div class="addline"><select data-add="kind"><option value="task">task</option><option value="project">project</option></select>'
+        '<div class="addline"><select data-add="kind"><option value="task">desk item</option><option value="project">cockpit</option></select>'
         '<input class="at" data-add="text" data-lane="%s" type="text" autocomplete="off" placeholder="Add a part">'
         '<select data-add="project" style="display:none"><option value="">which project</option>%s</select>'
         '<input class="ad" data-add="date" type="text" autocomplete="off" placeholder="2026-10-27 &middot; blank">'
         '<button class="mk" data-act="add" data-lane="%s">Add</button>'
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
-        '<div class="k">Its components <span class="h">(a cockpit, a desk item, a step of a project, a deliverable, a date; an initiative is a cockpit or a desk item &mdash; its seat comes with the High Seat)</span></div>%s'
+        '<div class="k">Its components <span class="h">(a cockpit, a desk item, a step of a project, a deliverable, a date)</span></div>%s'
         '</div><div>'
         '<div class="k" style="margin-top:0">The conversation about this goal <span class="h">(dictate; a verb acts on this goal, talk goes to the steward told which goal; both answer here)</span></div>'
         '<div class="gconv"><ul class="ex gthread" data-thread="%s">%s</ul>'
         '<div class="composer gcomp"><label class="sr" for="gsay-%s">Tell the steward about this goal</label>'
-        '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; make it active &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
+        '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; inside this goal nothing needs its name &middot; the answer appears here</span><button class="send gsend" data-goal="%s">Send</button></div>'
         '<div class="chips"><button data-say="summarize where this goal stands">summarize</button><button data-say="what is the next step?">what is the next step?</button><button data-say="what is starving here?">what is starving?</button></div></div></div>'
         '</div></div></article>'
@@ -260,7 +261,7 @@ def _calendar(ctx):
         return 6
     counts = [0] * 8
     overdue = parked_dated = 0
-    for i in inits:
+    for i in [x for x in inits if x["status"] not in ("done", "parked")]:
         for p in i["parts"]:
             b = bucket(p)
             counts[b] += 1
@@ -302,11 +303,11 @@ def _calendar(ctx):
             cells[b].append(chip(i, p, b == 7))
         track = "".join('<div class="cell%s">%s</div>' % (cell_class(k), "".join(cells[k])) for k in order)
         return (
-            '<section class="lane" data-lane="%s" style="--areac:%s"><div class="lane-h"><div class="rankbox"><b class="rnum">%s</b></div>'
+            '<section class="lane" data-lane="%s" style="--areac:%s"><div class="lane-h">'
             '<button class="lane-t" data-act="toggle" data-lane="%s"><span class="lrow1"><span class="ln">%s</span><span class="larea" style="--areac:%s">%s</span></span>'
             '<span class="ldone"><span class="k">Done looks like</span>%s</span></button><span class="lmeta">%s%d parts &middot; %d dated</span></div>'
             '<div class="track">%s</div></section>' % (
-                esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), i["number"] if i["tier"] else "&ndash;", esc(i["id"]), esc(i["name"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
+                esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), esc(i["id"]), esc(i["name"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
                 esc(i["area"].title() or "no area"), esc(i["done_when"]) or "not written yet",
                 ('<span class="fl">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
                 len(i["parts"]), sum(1 for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"]), track))
@@ -316,15 +317,16 @@ def _calendar(ctx):
         dated = sum(1 for i in mine for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"])
         return '<div class="tierstrip" style="--tierc:%s"><span class="tn">%s</span><span class="tw">%s</span><span class="tm">%d goal%s &middot; %s &middot; %d dated part%s</span></div>' % (
             colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs, "goal")) if needs else "no goal needs you", dated, "" if dated == 1 else "s")
+    # the board's buckets (Grok, the W2 trim): the live tier 1, the live tier 2, the seed goals; done and parked goals stay out
     lanes = []
-    for t in (1, 2, 3):
-        mine = [i for i in inits if i["tier"] == t]
+    live = [i for i in inits if i["status"] not in ("done", "parked")]
+    for t in (1, 2):
+        mine = [i for i in live if i["tier"] == t]
         lanes.append(strip("Tier %d" % t, TIER_WORDS[t], TIER_COLOURS[t], mine))
         lanes.extend(lane(i) for i in mine)
-    untiered = [i for i in inits if i["tier"] is None]
-    if untiered:
-        lanes.append(strip("No tier yet", "give each a tier", "#5f6674", untiered))
-        lanes.extend(lane(i) for i in untiered)
+    seedy = [i for i in live if i["tier"] not in (1, 2)]
+    lanes.append(strip("Seed goals", "for the future", TIER_COLOURS[3], seedy))
+    lanes.extend(lane(i) for i in seedy)
     return '<div class="scroll%s" id="viewCal" style="flex:1;display:none"><div id="boardScroll"><div class="rl-head">%s</div>%s</div></div>' % (
         " has-over" if has_over else "", "".join(head), "".join(lanes))
 
@@ -358,14 +360,13 @@ def _areas(ctx):
     chips = "".join('<button class="ac" data-area="%s" style="--c:%s"><i></i>%s <b>%d</b></button>' % (a, AREA_COLOURS[a], a.title(), counts[a]) for a in AREAS if counts[a])
     t = {k: sum(1 for i in inits if i["tier"] == k) for k in (1, 2, 3)}
     top = max(AREAS, key=lambda a: counts[a]) if inits else None
-    note = "%d goal%s &middot; tier 1 %d &middot; tier 2 %d &middot; tier 3 %d%s Click an area to hold all three tiers to it." % (
-        len(inits), "" if len(inits) == 1 else "s", t[1], t[2], t[3],
-        (" &mdash; <b style=\"color:%s\">%s</b> carries %d." % (AREA_COLOURS[top], top.title(), counts[top])) if top and counts[top] > 1 else "")
+    note = "Click an area to hold the board to it.%s" % (
+        (" <b style=\"color:%s\">%s</b> carries %d." % (AREA_COLOURS[top], top.title(), counts[top])) if top and counts[top] > 1 else "")
     return '<div class="areas" id="areas">%s<span class="note">%s</span></div>' % (chips or '<span class="note">no areas yet</span>', note)
 
 
 def brief_bullets(ctx):
-    inits = ctx["initiatives"]
+    inits = [i for i in ctx["initiatives"] if i["status"] not in ("done", "parked")]      # the board's live goals (Grok, the W2 trim)
     today = ctx["today"]
     out = []
     t1 = [i for i in inits if i["tier"] == 1]
@@ -392,7 +393,7 @@ def brief_bullets(ctx):
     else:
         out.append("Nothing in the Campaign waits on your word.")
     counts = {a: sum(1 for i in inits if i["area"] == a) for a in AREAS}
-    out.append("Across your life: %s. <span class=\"n\">%d</span> seed%s wait%s above the board." % (
+    out.append("Across your life: %s. <span class=\"n\">%d</span> seed%s sit%s in Seed goals." % (
         " &middot; ".join("%s <span class=\"n\">%d</span>" % (a.title(), counts[a]) for a in AREAS if counts[a]) or "no areas yet",
         len(ctx.get("seeds") or []), "" if len(ctx.get("seeds") or []) == 1 else "s", "s" if len(ctx.get("seeds") or []) == 1 else ""))
     return out
@@ -401,9 +402,8 @@ def brief_bullets(ctx):
 def _lead(ctx):
     """The brief's lead when a set exists: the head as the High Seat reads it - a part that needs him in an active
     initiative, else the tiers, else the pick-up while the set runs - with an open to its tile."""
+    return None      # Grok (the W2 trim): the set-first lead went with the Active band; the High Seat's head keeps head_act
     inits = ctx["initiatives"]
-    if not any(i.get("active") for i in inits):
-        return None
     working = ctx.get("working") or set()
     head = _ha.head_act(inits, [], today=ctx["today"])
     pk = _ha.pick_up(inits, [], working=working, today=ctx["today"])
@@ -428,7 +428,7 @@ def _panel(ctx):
     return (
         '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
-        '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Campaign: make &hellip; active, bench &hellip;, &hellip; by Oct 10"></textarea>'
+        '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Campaign: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers here and acts on the record; the board shows what changed on the next look</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="note" id="exNote">%s</span></div>'
@@ -449,7 +449,10 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_needs = sum(len(i["needs"]) for i in inits)
     live = [i for i in inits if i["status"] not in ("done", "parked")]
     n_bone = len(inits) - len(live)
-    n_seedy = sum(1 for i in live if i["tier"] not in (1, 2)) + len(ctx.get("seeds") or [])
+    n_seedy = sum(1 for i in live if i["tier"] not in (1, 2))      # Tier 1 + Tier 2 + seed goals = the goals; the seeds fold keeps its own idea count
+    n_parts = sum(len(i["parts"]) for i in live)
+    n_dated = sum(1 for i in live for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked"))
+    n_needs = sum(len(i["needs"]) for i in live)
     board = (
         '<section class="board" aria-label="The Campaign" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
         '<span class="c" id="boardCount">%d goals &middot; Tier 1 %d &middot; Tier 2 %d &middot; seed goals %d &middot; the boneyard %d &middot; %d parts &middot; %d dated%s</span>'
