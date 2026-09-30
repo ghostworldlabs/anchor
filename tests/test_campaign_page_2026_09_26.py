@@ -62,11 +62,11 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     t1, t2 = board.index("Tier 1 <span"), board.index("Tier 2 <span")
     assert t1 < t2 and board.index('data-lane="mba-teaching"') < t2 < board.index('data-lane="trusts"')
     tile = board[board.index('data-lane="mba-teaching"'):board.index('data-lane="trusts"')]
-    assert '<span class="ilight needs"' in tile and 'class="iline wait"' in tile
+    assert '<span class="ilight needs"' in tile and 'class="gpc needs"' in tile and "MBA Teaching AI" in tile    # the face: its cockpit with its light
     place = html[html.index('id="place-mba-teaching"'):html.index('id="place-trusts"')]
     assert place.index('class="imore"') < place.index('class="istatus"') < place.index('class="obody"')
     assert "2 in priority order &middot; Active 0 &middot; T1 1 / T2 1 / T3 0" in html
-    assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "priority 1 of 2" in html
+    assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "goal 1 of 2" in html
     assert "retool homework 2" in html and "Oct 27" in html and "Lectures 3 + 4 revised, with AI supplements" in html
     assert 'data-act="date" data-part="hw"' in html                      # a native part's date can be moved here
     assert 'its date lives in its own record' in html                    # a referenced part's cannot
@@ -74,7 +74,7 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert 'class="tickpad" href="/project/%s"' % MBA in html            # a referenced part's tick opens its cockpit
     assert 'data-act="pup"' not in html and 'data-act="pdown"' not in html
     assert "An AI mechanics class with the group" in html and 'data-act="promote" data-seed="s3"' in html
-    assert '<section class="seedband" id="seedband"' in html and 'id="seedToggle"' in html and "<b>1</b> idea, not yet initiatives" in html   # the seeds a closed tile with its count
+    assert '<section class="seedband" id="seedband"' in html and 'id="seedToggle"' in html and "<b>1</b> idea, not yet goals" in html   # the seeds a closed tile with its count
     assert 'data-pickgo="s3"' in html and "Create it in tier 3" in html and 'data-pickarea="family"' in html
     assert 'id="viewCal"' in html and "beyond the ruler" in html and 'class="tierstrip"' in html
     assert "<b>Tier 1</b> holds MBA Teaching, Fall 2026." in html and "nearest hard date is <b>Oct 10</b>" in html

@@ -456,6 +456,9 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .gtier{font-size:10px;color:var(--text-dim2);white-space:nowrap;flex:none}.gtile .ilight{margin-left:auto;flex:none}
 .ggoal{font-size:11.5px;color:var(--text-warm);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gtile .iline{font-size:11px;margin-top:2px}
+.gcock{font-size:11px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gcock .gpc i{font-style:normal;font-size:10px}
+.gcock .gpc.needs{color:var(--amber-t);font-weight:650}.gcock .gpc.working{color:var(--success)}.gcock .gpc.waiting{color:var(--text-dim)}.gcock .gpc.done{color:var(--text-dim2);text-decoration:line-through}
+.board.placed .gtile .gcock{display:none}
 .gfacts{display:flex;gap:10px;font-size:11px;color:var(--text-dim);margin-top:5px;flex-wrap:wrap;align-items:center}.gfacts .dim{color:var(--text-dim2)}.gfacts .gdl.soon{color:var(--amber-t);font-weight:650}.gfacts .gdl.over{color:var(--danger);font-weight:650}.gfacts .am{color:var(--amber-t);font-weight:650}
 .bar{display:inline-block;width:46px;height:5px;border-radius:3px;background:#2b3140;vertical-align:middle;margin-right:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 .band .empty{font-size:11.5px;color:var(--text-dim2);padding:5px 8px}

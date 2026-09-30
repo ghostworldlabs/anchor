@@ -79,12 +79,38 @@ def _part_row(i, p, today, tick_allowed):
                 esc(p["kind"]), date_chip, flag_chip, state_chip, link, park))
 
 
+def _part_light(p, working):
+    """A project part's own light: needs him · working (a live session on it) · waiting · done · idle."""
+    if p.get("done"):
+        return "done"
+    if p.get("needs_you"):
+        return "needs"
+    if p.get("pid") and p["pid"] in (working or set()):
+        return "working"
+    if str(p.get("state") or "").lower().startswith("waiting") or p.get("status") == "waiting":
+        return "waiting"
+    return "idle"
+
+
+def _cockpits(i, ctx):
+    """The goal's cockpits on the tile's face (his 13:5x word: a goal holds one, several, or no project yet): each
+    project part by name with its own light; "at the desk" when the goal has no project."""
+    working = ctx.get("working") or set()
+    projs = [p for p in i["parts"] if p["kind"] == "project" and not p["broken"]]
+    if not projs:
+        return '<div class="gcock"><span class="dim">at the desk &mdash; no project yet</span></div>'
+    glyphs = {"needs": "&#9873;", "working": "&#9679;", "waiting": "&#9679;", "idle": "&#9675;", "done": "&#10003;"}
+    return '<div class="gcock">%s</div>' % " &middot; ".join(
+        '<span class="gpc %s" title="%s">%s <i>%s</i></span>' % (_part_light(p, working), esc(p["state"] or p["status"] or ""), esc(p["target"] or p["text"]), glyphs[_part_light(p, working)])
+        for p in projs[:4]) + ((' <span class="dim">+%d</span>' % (len(projs) - 4)) if len(projs) > 4 else "")
+
+
 def _gtile(i, ctx, band):
     """One goal on the board (W2 v2, his lock of 11:0x): its number, its name (opens its place), its tier and light,
-    the goal in a line, the next thing, and the facts — progress, pace, next deadline, what waits on him. It drags."""
+    the goal in a line, its cockpits with their lights (or "at the desk"), and the facts — progress, pace, next
+    deadline, what waits on him. It drags."""
     today = ctx["today"]
     glyph, word = LIGHTS[initiative_light(i, ctx.get("working") or set())]
-    one, kind = initiative_line(i)
     n, done = len(i["parts"]), int(i.get("done_count") or 0)
     pct = int(round(100.0 * done / n)) if n else 0
     nd = i.get("next_deadline") or ""
@@ -92,7 +118,7 @@ def _gtile(i, ctx, band):
     dcls = ("over" if nd_d and nd_d < today else ("soon" if nd_d and (nd_d - today).days <= 7 else ""))
     return (
         '<article class="gtile%s%s" draggable="true" data-lane="%s" data-band="%s" style="--areac:%s">'
-        '<div class="ihead"><span class="pnum" title="priority %d of %d">%d</span><button class="iname" data-open="%s" title="open its place">%s</button>'
+        '<div class="ihead"><span class="pnum" title="goal %d of %d">%d</span><button class="iname" data-open="%s" title="open its place">%s</button>'
         '<span class="gtier">tier %s</span><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
         '<div class="ggoal" title="%s">%s</div>%s'
         '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span><span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
@@ -100,7 +126,7 @@ def _gtile(i, ctx, band):
          i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["name"]), i["tier"] or "?",
          initiative_light(i, ctx.get("working") or set()), glyph, word,
          esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>',
-         ('<div class="iline %s">%s</div>' % (kind, one)) if kind in ("wait", "next") else "",      # never the goal twice
+         _cockpits(i, ctx),
          pct, done, n, "" if i.get("pace") else "dim", ("pace " + esc(_short(i["pace"]))) if i.get("pace") else "no pace",
          dcls, (("overdue " if dcls == "over" else "next ") + esc(_short(nd))) if nd else "no deadline",
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
@@ -161,7 +187,7 @@ def _place(i, ctx):
     projs = [p for p in i["parts"] if p["kind"] == "project"]
     proj_html = "".join('<div class="proj">%s<span class="st">%s</span></div>' % (
         ('<a href="%s" target="_blank" rel="noopener">%s &#8599;</a>' % (esc(p["href"]), esc(p["target"] or p["text"]))) if p.get("href") else esc(p["target"] or p["text"]),
-        esc(p["state"] or p["status"] or "")) for p in projs) or '<div class="proj dim">no project yet &mdash; add one as a part (kind: project)</div>'
+        esc(p["state"] or p["status"] or "")) for p in projs) or '<div class="proj dim">at the desk &mdash; no project yet; add one as a part (kind: project)</div>'
     return (
         '<article class="place" id="place-%s" data-goal="%s" hidden style="--areac:%s"><div class="ptop"><span class="pname">%s</span>'
         '<span class="ilight %s">%s %s</span><div class="imore"><span class="larea">%s</span><span class="tierpick">Tier <select class="tsel" data-tiersel="%s">%s</select></span></div>'
@@ -172,7 +198,7 @@ def _place(i, ctx):
         '<div class="facts3"><div class="fact"><div class="k">Pace</div><span class="v click" data-pace="%s">%s</span></div>'
         '<div class="fact"><div class="k">Deadlines</div><span class="v">%s</span></div></div>'
         '<div class="obody"><div class="plist"><div class="pl-h"><h4>The workflow &middot; the parts in order</h4><span class="c">%d &middot; %d dated%s</span>'
-        '<span class="hint">Click a name to rename, a date to move it. A referenced part is read from its own record.</span></div>'
+        '<span class="hint">Click a name to rename, a date to move it. A project or a step of one is read from its own record.</span></div>'
         '<ul class="rows">%s</ul>'
         '<div class="addline"><select data-add="kind"><option value="task">task</option><option value="project">project</option></select>'
         '<input class="at" data-add="text" data-lane="%s" type="text" autocomplete="off" placeholder="Add a part">'
@@ -180,7 +206,7 @@ def _place(i, ctx):
         '<input class="ad" data-add="date" type="text" autocomplete="off" placeholder="2026-10-27 &middot; blank">'
         '<button class="mk" data-act="add" data-lane="%s">Add</button>'
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
-        '<div class="k">Projects and cockpits <span class="h">(the projects this goal runs through)</span></div>%s'
+        '<div class="k">Its cockpits <span class="h">(the projects this goal runs through; a project may hold several stewards)</span></div>%s'
         '</div><div>'
         '<div class="k" style="margin-top:0">The conversation about this goal <span class="h">(dictate; a verb acts on this goal, talk goes to the steward told which goal; both answer here)</span></div>'
         '<div class="gconv"><ul class="ex gthread" data-thread="%s">%s</ul>'
@@ -282,8 +308,8 @@ def _calendar(ctx):
     def strip(label, word, colour, mine):
         needs = sum(1 for i in mine if i["needs"])
         dated = sum(1 for i in mine for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"])
-        return '<div class="tierstrip" style="--tierc:%s"><span class="tn">%s</span><span class="tw">%s</span><span class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</span></div>' % (
-            colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs, "initiative")) if needs else "no initiative needs you", dated, "" if dated == 1 else "s")
+        return '<div class="tierstrip" style="--tierc:%s"><span class="tn">%s</span><span class="tw">%s</span><span class="tm">%d goal%s &middot; %s &middot; %d dated part%s</span></div>' % (
+            colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs, "goal")) if needs else "no goal needs you", dated, "" if dated == 1 else "s")
     lanes = []
     for t in (1, 2, 3):
         mine = [i for i in inits if i["tier"] == t]
@@ -309,13 +335,13 @@ def _seedband(ctx):
         tiers = "".join('<button data-picktier="%d"%s>Tier %d%s</button>' % (t, ' class="on"' if t == 3 else "", t, " &middot; suggested" if t == 3 else "") for t in (1, 2, 3))
         areas = "".join('<button data-pickarea="%s">%s</button>' % (a, a.title()) for a in AREAS) + '<button data-pickarea="" class="on">none yet</button>'
         row = "".join('<div class="seed" data-seed="%s"><div class="st">%s</div><div class="sw">would suit <b>tier 3</b> &mdash; you choose the tier and the life area</div>'
-                      '<button class="mk" data-act="promote" data-seed="%s">Make it an initiative</button>'
+                      '<button class="mk" data-act="promote" data-seed="%s">Make it a goal</button>'
                       '<div class="pick" hidden><div class="q">Which tier?</div><div class="prow">%s</div><div class="q">Which life area?</div><div class="prow">%s</div>'
                       '<div class="prow"><button class="go" data-pickgo="%s">Create it in tier 3</button><button class="cancel" data-pickcancel="1">cancel</button></div></div></div>'
                       % (esc(s["id"]), esc(s["text"]), esc(s["id"]), tiers, areas, esc(s["id"])) for s in seeds)
     return ('<section class="seedband" id="seedband" aria-label="Seeds"><button class="sb-h" id="seedToggle" aria-expanded="false"><span class="t">Seeds</span>'
-            '<span class="c" id="seedCount"><b>%d</b> idea%s, not yet initiatives</span>'
-            '<span class="note">Making one an initiative asks for its tier and its life area on the card &mdash; nothing is created until Create it.</span>'
+            '<span class="c" id="seedCount"><b>%d</b> idea%s, not yet goals</span>'
+            '<span class="note">Making one a goal asks for its tier and its life area on the card &mdash; nothing is created until Create it.</span>'
             '<span class="tog" id="seedTog">Show</span></button><div class="seedrow" id="seedRow">%s</div></section>'
             % (len(seeds), "" if len(seeds) == 1 else "s", row))
 
@@ -326,7 +352,7 @@ def _areas(ctx):
     chips = "".join('<button class="ac" data-area="%s" style="--c:%s"><i></i>%s <b>%d</b></button>' % (a, AREA_COLOURS[a], a.title(), counts[a]) for a in AREAS if counts[a])
     t = {k: sum(1 for i in inits if i["tier"] == k) for k in (1, 2, 3)}
     top = max(AREAS, key=lambda a: counts[a]) if inits else None
-    note = "%d initiative%s &middot; tier 1 %d &middot; tier 2 %d &middot; tier 3 %d%s Click an area to hold all three tiers to it." % (
+    note = "%d goal%s &middot; tier 1 %d &middot; tier 2 %d &middot; tier 3 %d%s Click an area to hold all three tiers to it." % (
         len(inits), "" if len(inits) == 1 else "s", t[1], t[2], t[3],
         (" &mdash; <b style=\"color:%s\">%s</b> carries %d." % (AREA_COLOURS[top], top.title(), counts[top])) if top and counts[top] > 1 else "")
     return '<div class="areas" id="areas">%s<span class="note">%s</span></div>' % (chips or '<span class="note">no areas yet</span>', note)
@@ -343,7 +369,7 @@ def brief_bullets(ctx):
         out.append("<b>Tier 1</b> holds %s.%s" % (" &middot; ".join(esc(i["name"]) for i in t1),
                    (" The nearest hard date is <b>%s</b>, on <b>%s</b> in %s (tier %d)." % (esc(_short(ahead[0])), esc(ahead[1]["text"]), esc(ahead[2]["name"]), ahead[2]["tier"])) if ahead else " Nothing in the Campaign carries a date yet."))
     else:
-        out.append("No Tier 1 initiative yet &mdash; give one a tier.")
+        out.append("No Tier 1 goal yet &mdash; give one a tier.")
     mon = today - timedelta(days=today.weekday()); sun = mon + timedelta(days=6)
     week = [(d, p, i) for d, p, i in dated if _hr._iso(d) and mon <= _hr._iso(d) <= sun]
     if week:
@@ -437,7 +463,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
-        '<span>&mdash; every initiative, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
+        '<span>&mdash; every goal, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
         '<script src="/static/campaign-page.js?v=%s"></script></body></html>'
     ) % (esc(st.get("seal") or "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
          _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))

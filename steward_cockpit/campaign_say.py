@@ -272,10 +272,10 @@ def _apply(folder, c, today):
     parts = [(p["id"], p.get("name") or p["id"]) for p in acts._projection(folder)
              if p.get("id") not in heads and isinstance(p.get("navigation"), dict) and (p["navigation"].get("path") or [])]
     if act == "campaign_move_tier":
-        hit, why = _find(inits, a.get("initiative"), "initiative")
+        hit, why = _find(inits, a.get("initiative"), "goal")
         return _refuse(why, act) if hit is None else _answer(acts.move_tier(folder, hit[0], a.get("tier")), act)
     if act == "campaign_add_part":
-        hit, why = _find(inits, a.get("initiative"), "initiative")
+        hit, why = _find(inits, a.get("initiative"), "goal")
         if hit is None:
             return _refuse(why, act)
         due = None
@@ -308,13 +308,13 @@ def _apply(folder, c, today):
         return _needs(folder, a.get("span") or "week", today)
     # the active set (2026-09-29)
     if act == "campaign_activate":
-        hit, why = _find(inits, a.get("initiative"), "initiative")
+        hit, why = _find(inits, a.get("initiative"), "goal")
         return _refuse(why, act) if hit is None else _answer(acts.activate(folder, hit[0]), act)
     if act == "campaign_bench":
-        hit, why = _find(inits, a.get("initiative"), "initiative")
+        hit, why = _find(inits, a.get("initiative"), "goal")
         return _refuse(why, act) if hit is None else _answer(acts.bench(folder, hit[0]), act)
     if act == "campaign_pace":
-        hit, why = _find(inits, a.get("initiative"), "initiative")
+        hit, why = _find(inits, a.get("initiative"), "goal")
         if hit is None:
             return _refuse(why, act)      # an explicit pace verb that names no initiative is refused with the names
         when = parse_due(a.get("pace"), today) if a.get("pace") not in (None, "", "none") else "none"

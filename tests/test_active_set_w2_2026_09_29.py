@@ -42,11 +42,11 @@ def test_the_board_is_the_goals_in_bands_active_then_the_tiers():
     assert tiles == [("magi", "active"), ("mba", "active"), ("trusts", "1"), ("paper", "2")], "his order in Active; the tiers' order in the tiers"
     magi = board[board.index('data-lane="magi"'):board.index('data-lane="mba"')]
     assert 'data-open="magi"' in magi and "Artificial Magi done" in magi and "pace Dec 15" in magi and "0 of 1" in magi and 'class="ilight working"' in magi and "tier 1" in magi
-    assert 'class="iline next"' in magi and magi.count(">Artificial Magi done<") == 1, "the next thing under the goal; the goal never printed twice"
-    html2 = cpg.render_campaign_html(_ctx([s for s in w1._steps() if s["id"] != "paper-draft"]))     # Paper 1 with nothing open: no one-line
-    board2 = html2[html2.index('<div class="bands"'):html2.index('id="viewCal"')]
-    paper = board2[board2.index('data-lane="paper"'):]
-    assert 'class="iline' not in paper[:1200] and paper[:1200].count(">Paper 1 done<") == 1
+    # the face names the goal's cockpits with their lights (his 13:5x word); a goal with no project is "at the desk"
+    assert 'class="gcock"><span class="gpc working" title="active">Chapter 2 scenes <i>&#9679;</i></span></div>' in magi and magi.count(">Artificial Magi done<") == 1
+    paper = board[board.index('data-lane="paper"'):]
+    assert "at the desk &mdash; no project yet" in paper[:1200] and 'class="iline' not in paper[:1200]
+    assert "initiative" not in re.sub(r"<[^>]+>", " ", html).lower(), "the word retires from what he reads (his choice, 18:0x)"
     trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="paper"')]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
     assert 'id="viewTitle">The goals</h3>' in html and "4 in priority order &middot; Active 2 &middot; T1 3 / T2 1 / T3 0" in html
@@ -75,7 +75,7 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
     assert 'data-thread="trusts"' in place and "add a part: call the trustee" in place and "Added to The trusts" in place
     assert 'class="gsay" data-goal="trusts"' in place and 'class="send gsend" data-goal="trusts"' in place
     magi = html[html.index('id="place-magi"'):html.index('id="place-mba"')]
-    assert 'href="/project/p-magi"' in magi and "Chapter 2 scenes" in magi, "a project part is openable from the place"
+    assert 'href="/project/p-magi"' in magi and "Chapter 2 scenes" in magi and "Its cockpits" in magi, "a project part is openable from the place"
     assert "active &middot; <button class=\"linkish\" data-bench=\"magi\">bench it</button>" in magi and "the pace is <b>Dec 15</b>" in magi
     assert "Nothing said about this goal yet" in magi
     assert 'class="istatus"' in magi, "the Status as the tile's body had it"

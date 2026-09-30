@@ -116,7 +116,7 @@ def move_tier(project, step, tier, order=None):
     order the undo carries (so a head of a tier comes back as its head, not at the bottom with a new number)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     try:
         tier = int(tier)
     except Exception:
@@ -145,7 +145,7 @@ def rank(project, step, direction):
     neighbours swap; a refused second write puts the first back."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     same = sorted([(int(g.get("order") or 0), x) for x, g in _initiatives(project) if x.get("tier") == s.get("tier")], key=lambda t: (t[0], t[1].get("name") or ""))
     idx = next((k for k, (o, x) in enumerate(same) if x.get("id") == step), None)
     if idx is None:
@@ -256,7 +256,7 @@ def tick(project, step):
 def add(project, initiative, kind, text, due=None, project_id=None):
     head = _step(project, initiative)
     if head is None or _own_group(head) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     kind = str(kind or "task")
     text = " ".join(str(text or "").split())
     if kind == "project":
@@ -297,7 +297,7 @@ def promote(project, seed_id, tier, area, done_when=None):
         return _no("a tier is 1, 2 or 3")
     sid = _slug(text)
     if _step(project, sid) is not None:
-        return _no("an initiative with that name exists already")
+        return _no("a goal with that name exists already")
     args = ["roadmap-propose", "--step", sid, "--name", text, "--tier", str(tier), "--done-when", done_when or "not written yet — say what done looks like"]
     if area:
         args += ["--area", str(area)]
@@ -309,7 +309,7 @@ def promote(project, seed_id, tier, area, done_when=None):
         return _no("the heading was written but not grouped: %s" % r2.get("error"))
     r3 = _cli(project, "grasscatch", "--deferred", text, "--reason", "promoted seed %s → the initiative %s, by John on the Campaign" % (seed["id"], sid))
     spent = " — but the seed could not be spent on the strip: %s" % r3.get("error") if not r3.get("ok") else ""
-    return _ok("%s is now an initiative in tier %d%s%s" % (text, tier, (" · " + str(area)) if area else "", spent),
+    return _ok("%s is now a goal in tier %d%s%s" % (text, tier, (" · " + str(area)) if area else "", spent),
                undo={"act": "withdraw", "step": sid, "seed": seed["id"]}, step=sid)
 
 
@@ -319,10 +319,10 @@ def retag(project, step, initiative):
     if s is None:
         return _no("no such part")
     if _own_group(s) is not None:
-        return _no("%s is an initiative, not a part — the Tier menu moves it" % s.get("name"))
+        return _no("%s is a goal, not a part — the Tier menu moves it" % s.get("name"))
     head = _step(project, initiative)
     if head is None or _own_group(head) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     nav = dict(s.get("navigation") or {})
     old = list(nav.get("path") or [])
     if old and old[0] == initiative:
@@ -398,7 +398,7 @@ def activate(project, step, order=None):
     """Make an initiative active at the foot of the set (or at the order the undo carries)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     if s.get("active") is True and order is None:
         return _no("%s is already active" % s.get("name"))
     place = int(order) if order is not None else len(_active(project))
@@ -416,7 +416,7 @@ def bench(project, step):
     """Take an initiative off the set; the set closes up; the pace stays (it is his date, not the set's)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     if s.get("active") is not True:
         return _no("%s is not active" % s.get("name"))
     old_order = s.get("active_order") if isinstance(s.get("active_order"), int) else None
@@ -457,7 +457,7 @@ def order(project, step, position):
     """Put an active initiative at a position in the set (a drag within Active); the others close up around it."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     if s.get("active") is not True:
         return _no("%s is not active — make it active first" % s.get("name"))
     try:
@@ -476,7 +476,7 @@ def pace(project, step, when):
     """The date he drives an initiative toward (YYYY-MM-DD, or none)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     when = str(when or "").strip() or "none"
     r = _cli(project, "roadmap-set", "--step", step, "--pace", when)
     if not r.get("ok"):
@@ -489,7 +489,7 @@ def done_when(project, step, text):
     """Revise a goal — what done looks like — on its initiative (the goal's place, W2 v2)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     text = " ".join(str(text or "").split())
     if not text:
         return _no("a goal is a sentence — say what done looks like")
@@ -529,7 +529,7 @@ def place(project, step, band, position, tier=None, tier_position=None):
     landed write carries that same undo, so he can put it back."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
-        return _no("no such initiative")
+        return _no("no such goal")
     band = str(band or "").strip().lower()
     try:
         position = int(position)

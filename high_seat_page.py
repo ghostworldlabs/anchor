@@ -327,7 +327,7 @@ def _campaign_tile(ctx):
     if t1_dates:
         who = next(i for i in t1 if i["next_deadline"] == t1_dates[0])
         nearest = "%s, %s" % (esc((who["next"] or {}).get("text") or who["name"]), esc(_short(t1_dates[0])))
-    line = ('&middot; your initiatives &middot; <b>Tier 1:</b> %s &middot; next deadline: <b>%s</b> &middot; <b>%d</b> seeds' % (
+    line = ('&middot; your goals &middot; <b>Tier 1:</b> %s &middot; next deadline: <b>%s</b> &middot; <b>%d</b> seeds' % (
         esc(", ".join(i["name"] for i in t1)) if t1 else "none yet", nearest or "none dated", int(ctx.get("seeds") or 0)))
     working = ctx.get("working") or set()
     tiles = []
@@ -367,11 +367,11 @@ def _campaign_tile(ctx):
                 ("next deadline " + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline",
                 len(i["parts"]), len(i["needs"]), "" if len(i["needs"]) == 1 else "s", "s" if len(i["needs"]) == 1 else "", initiative_status_html(i), rows))
     body = (
-        '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d initiative%s</b> &middot; &#9873; %d initiative%s need%s you</div>'
+        '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d goal%s</b> &middot; &#9873; %d goal%s need%s you</div>'
         '<div class="t1grid">%s</div>'
         '<div class="camp-tiers"><span><b>Tier 2</b> &middot; %d &middot; <b>Tier 3</b> &middot; %d%s &mdash; <span class="rest">open the Campaign for the rest</span></span></div>'
     ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "" if sum(1 for i in t1 if i["needs"]) == 1 else "s", "s" if sum(1 for i in t1 if i["needs"]) == 1 else "",
-         "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3,
+         "".join(tiles) or '<div class="camp-note">No Tier 1 goal yet.</div>', t2, t3,
          (" &middot; <b>no tier yet</b> &middot; %d" % untiered) if untiered else "")
     return (
         '<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
@@ -586,10 +586,10 @@ def _seed_panel(ctx):
     else:
         body = "".join(
             '<div class="sd" data-seed="%s"><span class="st">%s<em>%s</em></span>'
-            '<button class="go" data-seed-text="%s" title="puts the verb in the composer; Send is the word">Make it an initiative</button></div>' % (
+            '<button class="go" data-seed-text="%s" title="puts the verb in the composer; Send is the word">Make it a goal</button></div>' % (
                 esc(r.get("id")), esc(r.get("text")), ("caught " + esc(_hr.short_date(r.get("at")))) if r.get("at") else "from the grasscatcher", esc(r.get("text")))
             for r in rows)
-    foot = ('<div class="hint">A seed becomes an initiative in tier 3 unless you say the tier and the life area &mdash; '
+    foot = ('<div class="hint">A seed becomes a goal in tier 3 unless you say the tier and the life area &mdash; '
             '<a href="/project/%s" target="_blank" rel="noopener">the Campaign</a> asks both on the card.</div>' % esc(camp.get("pid"))) if camp else ""
     return '<section class="seedpanel" id="seedPanel"><h4>Seeds &middot; %d</h4>%s%s</section>' % (len(rows), body, foot)
 

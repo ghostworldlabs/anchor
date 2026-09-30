@@ -47,8 +47,8 @@ def test_names_resolve_exactly_then_by_the_one_that_contains_the_words_else_refu
     hit, why = cs._find(cands, "teach", "initiative")
     assert hit is None and why.startswith("did you mean") and "MBA Teaching" in why          # a looser match names, never selects
     assert cs._find(cands, "call the trustee about the trusts", "part")[0] is None             # a name inside the phrase never selects
-    hit, why = cs._find(cands, "the magi", "initiative")
-    assert hit is None and why.startswith("no initiative named") and "MBA Teaching" in why
+    hit, why = cs._find(cands, "the magi", "goal")
+    assert hit is None and why.startswith("no goal named") and "MBA Teaching" in why
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def test_the_verbs_move_add_park_unpark_and_promote_through_the_campaign_writer(
     amb = say("move the teaching to tier 3")
     assert amb["ok"] and acts._step(record, "mba-teaching")["tier"] == 3                          # one initiative contains the words
     none = say("move the magi to tier 3")
-    assert none["ok"] is False and none["say"].startswith("no initiative named")
+    assert none["ok"] is False and none["say"].startswith("no goal named")
     n_before = len(json.loads((record / "roadmap.json").read_text(encoding="utf-8"))["roadmap_events"])
     loose = say("move teach to tier 1")                                                        # inside one name only: named, never written
     assert loose["ok"] is False and loose["say"].startswith("did you mean") and acts._step(record, "mba-teaching")["tier"] == 3
