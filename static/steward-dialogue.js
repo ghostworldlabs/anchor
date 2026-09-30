@@ -155,5 +155,37 @@
     if (t && !h.Authorization) h.Authorization = 'Bearer ' + t;
     return h;
   }
-  window.StewardDialogue = { init: init, authHeaders: authHeaders };   // authHeaders: the one way a GET on these pages carries the token
+  // R14 (2026-09-29), one script for both pages (Grok's read of W2e-3): the login box each page mounts (#loginBox,
+  // #loginTok, #loginGo, #loginMsg) — the token pasted is held, the browser logged in (POST /api/auth/login mints the
+  // cookie) and the page reloaded with a receipt; a refused token is said and forgotten
+  function loginBox(o) {
+    o = o || {};
+    var box = document.getElementById('loginBox'), tok = document.getElementById('loginTok'), go = document.getElementById('loginGo'), msg = document.getElementById('loginMsg');
+    function say(t) { if (msg) msg.textContent = t || ''; }
+    function show(text) {
+      if (!box) return;
+      box.hidden = false; say(text);
+      try { box.scrollIntoView({ block: 'center' }); } catch (e) {}
+      setTimeout(function () { try { tok.focus(); } catch (e) {} }, 50);
+    }
+    function login(t) {
+      try { localStorage.setItem('anchor_token', t); } catch (e) {}
+      return fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () { return null; });
+    }
+    function doLogin() {
+      var t = ((tok && tok.value) || '').trim();
+      if (!t) { say('Paste the token first.'); return; }
+      if (go) go.disabled = true; say('Logging in\u2026');
+      login(t).then(function (r) {
+        if (go) go.disabled = false;
+        if (r && r.ok) { say('Logged in.'); if (o.receiptKey) { try { sessionStorage.setItem(o.receiptKey, JSON.stringify({ text: 'Logged in. This browser holds the token now.', undo: null })); } catch (e) {} } location.reload(); return; }
+        try { localStorage.removeItem('anchor_token'); } catch (e) {}
+        say((r && r.status === 401) ? 'That token was refused \u2014 it is not the current one.' : 'That did not go through; try again.');
+      });
+    }
+    if (go) go.addEventListener('click', doLogin);
+    if (tok) tok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
+    return { show: show, login: login };
+  }
+  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox };   // authHeaders: the one way a GET on these pages carries the token; loginBox: the one login script
 })();

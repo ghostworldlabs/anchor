@@ -152,33 +152,12 @@
   // old home did: store it, log the browser in (POST /api/auth/login mints the cookie), read the part again.
   var NOT_LOGGED_IN = 'This browser is not logged in to Anchor, so the record cannot be read.';
   var askedOnce = false;
-  function login(t) {
-    try { localStorage.setItem('anchor_token', t); } catch (e) {}
-    return fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () { return null; });
-  }
-  // R14 (2026-09-29): the token is pasted INTO the page (no window.prompt — a browser that suppresses dialogs showed
-  // nothing). askToken() shows the box and answers false at once; a successful login reloads the page, which then
-  // reads every card with the cookie. The box also opens on load when a token is required and none is held.
-  var loginBox = $('#loginBox'), loginTok = $('#loginTok'), loginGo = $('#loginGo'), loginMsg = $('#loginMsg');
-  function showLogin(text) {
-    if (!loginBox) return;
-    loginBox.hidden = false; if (loginMsg) loginMsg.textContent = text || '';
-    try { loginBox.scrollIntoView({ block: 'center' }); } catch (e) {}
-    setTimeout(function () { try { loginTok.focus(); } catch (e) {} }, 50);
-  }
-  function doLogin() {
-    var t = ((loginTok && loginTok.value) || '').trim();
-    if (!t) { if (loginMsg) loginMsg.textContent = 'Paste the token first.'; return; }
-    if (loginGo) loginGo.disabled = true; if (loginMsg) loginMsg.textContent = 'Logging in\u2026';
-    login(t).then(function (r) {
-      if (loginGo) loginGo.disabled = false;
-      if (r && r.ok) { if (loginMsg) loginMsg.textContent = 'Logged in.'; try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: 'Logged in. This browser holds the token now.', undo: null })); } catch (e) {} location.reload(); return; }
-      try { localStorage.removeItem('anchor_token'); } catch (e) {}
-      if (loginMsg) loginMsg.textContent = (r && r.status === 401) ? 'That token was refused \u2014 it is not the current one.' : 'That did not go through; try again.';
-    });
-  }
-  if (loginGo) loginGo.addEventListener('click', doLogin);
-  if (loginTok) loginTok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
+  // R14 (2026-09-29): the token is pasted INTO the page (no window.prompt \u2014 a browser that suppresses dialogs showed
+  // nothing); the box's script is the dialogue module's, one for both pages (Grok's read of W2e-3). askToken() shows the
+  // box and answers false at once; a successful login reloads the page, which then reads every card with the cookie.
+  var loginUi = window.StewardDialogue ? window.StewardDialogue.loginBox({ receiptKey: 'highseat_receipt' }) : null;
+  function login(t) { return loginUi ? loginUi.login(t) : Promise.resolve(null); }
+  function showLogin(text) { if (loginUi) loginUi.show(text); }
   // W2c-4 (his word, 2026-09-30): a browser the server already knows by its login cookie is logged in — no box, even with no token held here
   if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('');
   // a held token may be the OLD one (after a rotation): check it once on load; a refusal opens the box at once
@@ -208,22 +187,31 @@
   // opening any part of it is the look (kept in this browser, by the wait's own words: a new wait pulses again)
   function seen(card) { var tok = card.getAttribute('data-ready'); card.classList.remove('ready'); if (!tok) return; try { localStorage.setItem('hs_seen_' + card.id, tok); } catch (e) {} }
   $$('.tile[data-ready]').forEach(function (c) { var tok = c.getAttribute('data-ready'), was = ''; try { was = localStorage.getItem('hs_seen_' + c.id) || ''; } catch (e) {} if (was !== tok) c.classList.add('ready'); });
-  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
   // W2e-2 (2026-09-30, his word on the W2e preview): the tile OPENS to its decision brief — what waits on him, the
   // decision with the recommendation and one Accept, the material to review, the next step — and its dialogue, a
   // small window always there that grows to take the tile when a dialogue starts; the acts add a detail under the
   // brief. The dialogue is the same module the pages use, on THAT cockpit's stream; it stops when the tile closes.
+  // W2e-4 (his word, 16:0x): the dialogue is a THIN strip under the card and the rectangle \u2014 the steward's state and the
+  // last turn's gist (the context first) \u2014 that expands on a click, his send, "talk about it", Accept, or the steward at work
   function talkHtml(id) {
-    return '<div class="cdlg" id="' + id + '"><div class="exhead"><h3>this cockpit\u2019s steward</h3><span class="exstate" data-state="">\u2026</span><span class="note"></span></div>'
+    return '<div class="cdlg thin" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="false" title="open the conversation"><span class="dlg-h">this cockpit\u2019s steward</span><span class="exstate" data-state="">\u2026</span><span class="dlg-gist">reading the conversation\u2026</span><span class="dlg-caret">&#9662;</span></button>'
       + '<div class="scroll"><ul class="ex"><li class="exfade">Reading the conversation\u2026</li></ul></div>'
       + '<div class="composer"><textarea rows="2" placeholder="Ask this cockpit\u2019s steward, or tell it what to do \u2014 it answers here as it writes"></textarea>'
       + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
   }
-  function grow(card) { var d = $('.cdlg', card); if (d) d.classList.add('big'); card.classList.add('talking'); }
+  function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'true'); } card.classList.add('talking'); }
+  function shrink(card) { var d = $('.cdlg', card); if (d) { d.classList.add('thin'); d.classList.remove('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'false'); } card.classList.remove('talking'); }
   function startTalk(card, pid, dir) {
-    var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate');
+    var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate'), bar = $('#' + id + ' .dlg-bar');
+    function gist() {   // the strip's context: the last turn, whoever said it
+      var rows = $$('.exrow', list), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;
+      if (!last) { g.textContent = 'nothing said in this cockpit yet'; return; }
+      var t = ($('.ext', last) || {}).textContent || '';
+      g.textContent = (last.classList.contains('you') ? 'You: ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
+    }
+    if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });
     fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
-      .then(function (r) { return r.json(); })
+      .then(function (r) { if (r.status === 401 || r.status === 403) { var e = new Error('auth'); e.auth = true; throw e; } return r.json(); })
       .then(function (j) {
         var ts = ((j && j.turns) || []).slice(-8); list.innerHTML = '';
         if (!ts.length) { list.innerHTML = '<li class="exfade">Nothing said in this cockpit yet.</li>'; return; }
@@ -236,8 +224,14 @@
         });
         list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
       })
-      .catch(function () { list.innerHTML = '<li class="exfade">The conversation could not be read.</li>'; });
-    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '' }) : null;
+      .then(gist)
+      .catch(function (e) {   // a refused read offers the page's box (Grok's read of W2e-3), as the stream's refusal does
+        list.innerHTML = '<li class="exfade">' + (e && e.auth ? 'This browser is not logged in \u2014 log in below.' : 'The conversation could not be read.') + '</li>'; gist();
+        if (e && e.auth) showLogin('This cockpit\u2019s conversation cannot reach this page until this browser is logged in.');
+      });
+    if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
+    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '',
+      onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); } }) : null;
     card._talk = dlg;
     // a dialogue that starts — his send, or the steward at work — takes the tile
     if (state && window.MutationObserver) { var mo = new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); }); mo.observe(state, { attributes: true, attributeFilter: ['data-state'] }); card._talkMo = mo; }
@@ -245,12 +239,12 @@
     sendBtn.addEventListener('click', go);
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
   }
-  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._talkMo) { card._talkMo.disconnect(); card._talkMo = null; } }
+  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._talkMo) { card._talkMo.disconnect(); card._talkMo = null; } if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
-    if (card.classList.contains('open')) return;
+    if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });   // one tile open, one dialogue polling (Grok's read of W2e)
-    card.classList.add('open'); card.classList.remove('talking'); body.hidden = false; seen(card);
+    card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
     body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id);
     fetchPart(pid, 'brief', dir, false, true)
       .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; } })   // the served brief IS the rectangle (never one cbrief inside another)
@@ -258,7 +252,7 @@
     startTalk(card, pid, dir);
   }
   function closeTile(card) {
-    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open');
+    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir');
     var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
   }
@@ -267,7 +261,10 @@
     // and the open state is keyed by part AND effort so the same part on another effort opens rather than closes
     var dir = (btn && btn.getAttribute && btn.getAttribute('data-dir') !== null) ? btn.getAttribute('data-dir') : (card.getAttribute('data-dir') || '');
     var key = part + '|' + dir;
-    if (!card.classList.contains('open')) openTile(card, pid, card.getAttribute('data-dir') || '');
+    // the tile opens on the act's OWN effort (a button naming another effort's wait): its brief and dialogue are that
+    // cockpit's, never a different cockpit from the detail beside it (Grok's read of W2e-3)
+    if (!card.classList.contains('open')) openTile(card, pid, dir);
+    else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }
     var det = $('.cdetail', card);
     var same = card.getAttribute('data-open') === key;
     $$('.t-acts button, .t-eff-open', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
@@ -304,7 +301,11 @@
     b.disabled = true; grow(card);
     fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || ''), question_id: b.getAttribute('data-qid') || null }) })
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (!j || j.ok === false) { b.disabled = false; receipt((j && (j.error || j.say)) || 'That did not go through.', true); return; } b.textContent = 'Accepted'; receipt('Accepted \u2014 the steward answers in the tile as it writes.'); })
+      .then(function (j) {
+        if (!j || j.ok === false) { b.disabled = false; receipt((j && (j.error || j.say)) || 'That did not go through.', true); return; }
+        if (j.kept) { b.disabled = false; receipt('Kept \u2014 the steward could not wake; say the acceptance again when it is up (the question stays open).'); return; }   // Grok W2e-3: a kept send is not an acceptance
+        b.textContent = 'Accepted'; receipt('Accepted \u2014 the steward answers in the tile as it writes.');
+      })
       .catch(function () { b.disabled = false; receipt('That did not go through.', true); });
   });
   // W2 (2026-09-28): the head's one act — "open" on the brief's lead opens THAT project's card on THAT effort

@@ -184,11 +184,14 @@ def _description(q, ask):
     ctx = " ".join(str(q.get("context") or "").split())
     if not ctx:
         return ""
-    rec = str(q.get("recommendation") or "").strip().lower().rstrip(".")
+    # a sentence is left out only when it IS the ask or the recommendation, verbatim (Grok's read of W2e-3: a prefix
+    # match dropped real sentences and kept paraphrases; he opens the banner to read these)
+    rec = str(q.get("recommendation") or "").strip().lower().rstrip(".!")
+    ask_n = ask.strip().lower().rstrip("?.!")
     keep = []
     for sent in re.split(r"(?<=[.!?])\s+", ctx):
-        low = sent.strip().lower().rstrip(".")
-        if not low or low == ask.strip().lower().rstrip("?.") or low == ask.strip().lower() or low.startswith("i recommend") or (rec and (low.startswith(rec[:40]) or rec.startswith(low[:40]))):
+        low = sent.strip().lower().rstrip("?.!")
+        if not low or low == ask_n or (rec and low == rec):
             continue
         keep.append(sent.strip())
         if len(keep) >= 3:
@@ -245,7 +248,7 @@ def brief_html(cdir, pid, rel=""):
                 body.append('<div class="cb-rec"><button class="cb-accept" type="button" data-qid="%s" data-rec="%s">Accept the recommendation</button><span class="cb-rectext">%s%s</span></div>' % (
                     esc(str(q.get("id") or "")), esc(rec[:240]), esc(rec[:240]), (" &mdash; " + esc(why[:200])) if why else ""))
                 if q.get("reversible") is True and q.get("undo"):
-                    body.append('<div class="cb-auth">Reversible &middot; proceeds on the recommendation after four hours of silence &middot; undo: %s</div>' % esc(str(q.get("undo"))[:120]))
+                    body.append('<div class="cb-auth">Reversible &middot; undo: %s</div>' % esc(str(q.get("undo"))[:120]))   # no duration the record does not carry (Grok W2e-3)
                 elif q.get("reversible") is False:
                     body.append('<div class="cb-auth">Not reversible &middot; waits for you</div>')
             else:

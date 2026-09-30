@@ -607,8 +607,8 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     acts += _resume_act(pid, rel, f.get("resume"))
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top">%s<h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
-        '<a class="t-go" href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div>%s'
-        '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>'
+        '<a class="t-go" href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div><div class="t-face">%s'
+        '%s<div class="t-more"><div class="t-desc">%s</div>%s</div></div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
     ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else "/project/%s" % pid, xbtn, goal_line,

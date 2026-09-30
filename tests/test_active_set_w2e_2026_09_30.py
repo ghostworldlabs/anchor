@@ -9,7 +9,9 @@ a link to anything that needs to be reviewed … The user should not have to go 
 delivered - your text is back in the box": a send while the steward cannot wake is kept. W2e-3, his word on the
 opened tile (15:2x): "you could just have that red banner with the top line request and if it is clicked on you get the
 description and recommendation, which can be clicked on or you can click on a talk about it link"; the banner "can be a
-tile/rectangle on the left of the top of the open tile" — the dialogue to its right."""
+tile/rectangle on the left of the top of the open tile"; then (16:0x) "up on the same level as the in, run and next
+section, but over on the right side … the cockpit steward dialogue should be able to expand with a click on a very thin
+tile, but I want the context of the first web page there first"."""
 import json
 import os
 import subprocess
@@ -51,6 +53,7 @@ def test_the_card_carries_its_light_and_the_ready_mark_and_the_acts_are_the_deta
     assert '<span class="tlight orange" title="needs you: approve the Lecture 3 AI supplement"></span><h3 class="t-name">' in card, "the light in his words, before the name"
     assert 'data-ready="' in card, "a wait he has not looked at is marked, by the wait's own words"
     assert 'data-part="talk"' not in card and 'data-part="plan"' in card, "the dialogue is always in the opened tile (W2e-2); the acts are the details"
+    assert '</div><div class="t-face"><div class="t-goal">' in card and '</div></div><div class="t-acts">' in card, "the card's own lines wrapped, so the opened tile lays the rectangle beside them (W2e-4)"
     eff = active[active.index('id="card-%s-mba-lectures"' % MBA):]
     assert 'data-part="plan" data-pid="%s" data-dir="lectures"' % MBA in eff and 'class="tlight green" title="working: lecture 4"' in eff, "an effort's card takes ITS effort's flag (Grok W2e): working, not the project's wait"
     deck = html[html.index('id="shDeck"'):html.index('id="ptile"')]
@@ -99,8 +102,11 @@ def test_the_decision_brief_is_the_key_material_in_one_place(tmp_path, monkeypat
 def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_grows():
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     for s in ("function openTile(card, pid, dir)", "fetchPart(pid, 'brief', dir, false, true)", "function closeTile(card)", "function startTalk(card, pid, dir)", "function stopTalk(card)",
-              "if (!card.classList.contains('open')) openTile(card, pid, card.getAttribute('data-dir') || '');", "var det = $('.cdetail', card);",
-              "new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); })", "function grow(card) { var d = $('.cdlg', card); if (d) d.classList.add('big'); card.classList.add('talking'); }",
+              "if (!card.classList.contains('open')) openTile(card, pid, dir);", "var det = $('.cdetail', card);",
+              "new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); })", "function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
+              '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
+              "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
+              "if (e && e.auth) showLogin('This cockpit",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
@@ -109,6 +115,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });", "window.StewardDialogue.authHeaders(headers())"):
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
+    assert js.count("function stopTalk(card)") == 1 and "function doLogin()" not in js, "one stopTalk (Grok W2e-3 cut the dead one); the login script is the module's"
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
     assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
@@ -117,8 +124,8 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
         assert r.returncode == 0, r.stderr
     css = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
     for s in (".tlight.green{", ".tlight.orange{", ".tlight.red{", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
-              ".tile.open .t-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)", ".tile.open .cbrief{grid-column:1;grid-row:1", ".tile.open .cdlg{grid-column:2;grid-row:1", ".tile.open .cdetail{grid-column:1 / -1;grid-row:2",
-              ".tile.open.talking .t-body{grid-template-columns:minmax(0,320px) minmax(0,1fr)}",
+              '.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg"', ".tile.open>.t-face{grid-area:face}", ".tile.open>.t-body{display:contents}", ".tile.open .cbrief{grid-area:brief",
+              ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}",
               ".cdlg .scroll{max-height:20vh", ".cdlg.big .scroll{max-height:58vh}", ".tile.talking .cdetail{display:none}"):
         assert s in css, s
 

@@ -16,9 +16,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def test_the_high_seat_has_a_login_box_and_no_browser_prompt():
     js = open(os.path.join(ROOT, "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "window.prompt(" not in js, "no browser pop-up anywhere on the High Seat"
-    assert "function showLogin(" in js and "function doLogin()" in js and "loginGo.addEventListener('click', doLogin)" in js
+    dlg = open(os.path.join(ROOT, "static", "steward-dialogue.js"), encoding="utf-8").read()
+    assert "function loginBox(o)" in dlg and "function doLogin()" in dlg and "go.addEventListener('click', doLogin)" in dlg, "one login script, the dialogue module's (Grok's read of W2e-3)"
+    assert "loginBox({ receiptKey: 'highseat_receipt' })" in js and "function showLogin(" in js and "function doLogin()" not in js
     assert "window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('')" in js, "the box opens on load when a token is required and none is held"
-    assert "'That token was refused" in js and "localStorage.removeItem('anchor_token')" in js, "a refused token is said and forgotten"
+    assert "'That token was refused" in dlg and "localStorage.removeItem('anchor_token')" in dlg, "a refused token is said and forgotten"
+    cjs = open(os.path.join(ROOT, "static", "campaign-page.js"), encoding="utf-8").read()
+    assert "loginBox({ receiptKey: 'campaign_receipt' })" in cjs and "function doLogin()" not in cjs, "the Campaign page calls the same script"
     css = open(os.path.join(ROOT, "static", "steward-dialogue.css"), encoding="utf-8").read()
     assert ".loginbox{" in css, "the box's look lives with the dialogue: both pages mount it (Grok's read of W2c-3)"
     assert ".loginbox{" not in open(os.path.join(ROOT, "static", "high-seat-page.css"), encoding="utf-8").read(), "one copy"
