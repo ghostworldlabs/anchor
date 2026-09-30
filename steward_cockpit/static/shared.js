@@ -421,7 +421,9 @@ const Proto = (() => {
       s.appendChild(tile);
     }
     const n = paintNextSteps(tile.querySelector(".body"));
-    tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you");
+    const act = (_deliv.acts || []).find(a => a && (a.label || (a.item && a.item.what)));
+    const actLabel = act ? shortWhat(act.item || {what: act.label}).slice(0, 48) : "";
+    tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you") + (actLabel ? " \u2014 " + actLabel : "");
   }
   function renderStatus(stat) {
     const s = paneEl();
@@ -584,7 +586,12 @@ const Proto = (() => {
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
   let _deliv = {items: [], approved: [], acts: [], warning: ""}, _lastMap = null, _refinementContext = null, _answerQuestionId = null;
-  let _delivOpen = false;   // both tiles start closed (John, 2026-09-24); a click opens one for the session
+  let _delivOpen = null;   // null until he folds or opens it; current files start shown
+  function shortWhat(it) {
+    return String((it && (it.what || it.label)) || "")
+      .replace(/^(?:START HERE|FOR REVIEW|CURRENT)\s*[:\u2014\u2013-]?\s*/i, "")
+      .split(" \u2014 ")[0].trim();
+  }
   function stepDeliverables(step, idx1) {
     const steps=Array.isArray(_lastMap?.steps)?_lastMap.steps:[step];
     return _deliv.items.filter((it) => {
@@ -851,9 +858,8 @@ const Proto = (() => {
       const current=items.filter(i=>i.is_current===true)   // the server's one rule (current_review_items)
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
-        const files=navDisclosure(surface+':files','Files awaiting you · '+current.length);
-        current.forEach(it=>files.appendChild(navFile(it,surface+':pin',true)));
-        p.appendChild(files);
+        p.appendChild(el('div','naveyebrow','Files awaiting you \u00b7 '+current.length));
+        current.forEach(it=>p.appendChild(navFile(it,surface+':pin',true)));
       } else p.appendChild(el('div','navempty','No files awaiting review.'));
       target.appendChild(p);
       const approved=navDisclosure(surface+':approved','Approved deliverables · '+_deliv.approved.length);
@@ -1185,13 +1191,15 @@ const Proto = (() => {
       let tile = s.querySelector(".blk.deliv");
       const priorScroll=tile && tile.querySelector(".body") ? tile.querySelector(".body").scrollTop : 0;
       // starts CLOSED so the status keeps the room; his choice then sticks
+      const currentNow = items.filter(i => i.is_current === true);
       const wasOpen = tile ? !tile.classList.contains("folded")
-                           : (_delivOpen === true);
+                           : (_delivOpen === null ? currentNow.length > 0 : _delivOpen === true);
       if (!tile) {
-        tile = el("div", "blk steward deliv folded");
+        tile = el("div", "blk steward deliv" + (wasOpen ? "" : " folded"));
         s.insertBefore(tile, s.firstChild);
       } else tile.textContent = "";
       if (wasOpen) tile.classList.remove("folded");
+      else tile.classList.add("folded");
       // one-line summary in the header, so a folded tile still tells him what
       // is in there (John, 2026-08-27: "deliverables on top with a little
       // summary above that")
@@ -1203,10 +1211,13 @@ const Proto = (() => {
         String(b.date || "").localeCompare(String(a.date || "")));
       const newest = byDate.length
         ? (byDate[0].what || "").split(" — ")[0].trim() : "";
+      const names = currentNow.map(shortWhat).filter(Boolean).slice(0, 2)
+        .map(t => t.length > 42 ? t.slice(0, 41).replace(/\s+\S*$/, "") + "\u2026" : t);
       const who = el("div", "who",
-        "📦 DELIVERABLES (" + items.length + ")" +
-        (newest ? " — newest: " + newest : " — nothing registered yet"));
-      if(navModel(_lastMap,items))who.textContent="DELIVERABLES · current and earlier work";
+        "DELIVERABLES \u00b7 " + (currentNow.length
+          ? currentNow.length + " for you" + (names.length ? " \u2014 " + names.join(" \u00b7 ") : "")
+          : (items.length ? items.length + " registered" + (newest ? " \u2014 " + newest : "")
+                          : "nothing registered yet")));
       who.style.cursor = "pointer";
       who.onclick = () => {
         tile.classList.toggle("folded");
