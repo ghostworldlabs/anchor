@@ -26,8 +26,7 @@ def test_lint_the_high_seat_and_campaign_composers_keep_their_unsent_text():
     assert "say.value = ''; clearDraft(); receipt(j.say" in hs, "a delivered turn clears the draft"
     cp = _read("static/campaign-page.js")
     assert "var DRAFT_KEY = 'anchor:draft:campaign:' + PID" in cp and "receipt('Your unsent text is back in the box.')" in cp
-    assert "clearDraft();\n        if (j.campaign_act" in cp.replace("\r\n", "\n"), "cleared before the Campaign verb's reload"
-
+    assert "if (DK) localStorage.removeItem(DK); } catch (e) {}\n        if (j.campaign_act" in cp.replace("\r\n", "\n"), "cleared before the Campaign verb's reload (W2b-1: the one send path for both composers)"
 
 def test_the_rotation_script_never_prints_the_token():
     ps = _read("tools/rotate_token.ps1")

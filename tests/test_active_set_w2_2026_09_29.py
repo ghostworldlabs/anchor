@@ -76,6 +76,8 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
     assert 'data-act="date" data-part="trusts-pkg"' in place and 'data-act="add" data-lane="trusts"' in place, "the workflow carries the parts' acts as the tile's body did"
     assert 'data-thread="trusts"' in place and "add a part: call the trustee" in place and "Added to The trusts" in place
     assert 'class="gsay" data-goal="trusts"' in place and 'class="send gsend" data-goal="trusts"' in place
+    assert "Brainstorm with the steward" in place and "The objective &middot; done when" in place and "The plan &middot; the parts in order" in place
+    assert 'stamp: ""' in html or "stamp: " in html
     magi = html[html.index('id="place-magi"'):html.index('id="place-mba"')]
     assert 'href="/project/p-magi"' in magi and "Chapter 2 scenes" in magi and "Its components" in magi and '<span class="ck">cockpit</span>' in magi, "a project part is openable from the place, named for its kind"
     assert "the pace is <b>Dec 15</b>" in magi and "bench it" not in magi
@@ -100,11 +102,14 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     drag = js[js.index("var dragId"):js.index("// the goal's place")]
     assert "act({ act: 'place', step: id, band: to, position: 0 })" in drag and drag.count("act({") == 1, "one drop, one act: the tier only"
     assert "data-band=\"active\"" not in drag and "#boneTog" in drag
-    place = js[js.index("// the goal's place"):js.index("// the goal's conversation")]
+    place = js[js.index("// the goal's place"):js.index("// W2b-1")]
     assert "act({ act: 'done_when', step: id, text: v })" in place and "act({ act: 'pace', step: id, when: inp.value || 'none' })" in place
     assert "data-activate" not in place and "data-bench" not in place
-    conv = js[js.index("// the goal's conversation"):js.index("// the tools")]
-    assert "goal: goal" in conv and "'/api/steward/history?pid='" in conv and "location.reload" in conv and "No answer yet" in conv
+    conv = js[js.index("// W2b-1"):js.index("// the tools")]
+    assert "'/api/steward/events?pid='" in conv and "ev.t === 'delta'" in conv and "ev.t === 'turn_end'" in conv and "goal: goal || undefined" in conv
+    assert "EventSource" not in js and "pollThread" not in js and "/api/steward/history" not in js, "one mechanism: the cockpit's event stream, long-polled"
+    assert conv.index("function pollLoop") > 0 and "pollLoop();" in conv[conv.index("function sendToSteward"):], "the poll starts with a send, never on a page view"
+    assert "j.stamp !== BOOT_STAMP" in conv and "location.reload" in conv
     assert "window.prompt(" not in place and "window.prompt(" not in conv
     assert "openPlace(" in js and ".itile" not in js.replace("/* ", "").split("(function")[1]
 

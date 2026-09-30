@@ -217,55 +217,77 @@
     });
   });
 
-  // the goal's conversation: the same say route with the goal; a verb inside needs no name; talk goes to the
-  // steward told which goal he is in, and its answer is read back here without a reload
-  function threadLi(t) { var li = document.createElement('li'); li.className = 'exrow ' + (t.you ? 'you' : 'st'); li.innerHTML = '<div class="exw ' + (t.you ? 'you' : 'st') + '">' + (t.you ? 'You' : 'The steward') + '<span class="t">' + (t.at || '') + '</span></div><div class="ext"></div>'; li.querySelector('.ext').textContent = t.text; return li; }
-  function pollThread(goal, seen) {
-    // stops only when a steward turn tagged with this goal has landed AFTER this send (the log grew and ends on
-    // the steward's side); after 14 tries it says so in the thread rather than falling silent (Grok W2)
-    var list = $('.gthread[data-thread="' + goal + '"]'); if (!list) return;
-    var tries = 0, t = setInterval(function () {
-      tries++;
-      fetch('/api/steward/history?pid=' + encodeURIComponent(PID) + '&dir=&goal=' + encodeURIComponent(goal), { headers: headers() })
+  // W2b-1 (2026-09-30, his word: the steward box "just disappeared"): the conversation is LIVE. After a send the
+  // page long-polls the cockpit's own event stream (/api/steward/events, the one the AI Cockpit uses) and shows
+  // the steward's answer as it writes, into the list whose composer sent the turn (the panel's, or a goal's
+  // brainstorm). A turn that changed the record reloads the board with the receipt kept. The poll starts with the
+  // first send — a page view never wakes a session.
+  var BOOT_STAMP = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '';
+  var live = { seq: 0, polling: false, target: null, line: null, epoch: null };
+  function exLi(who, text, cls) { var li = document.createElement('li'); li.className = 'exrow ' + (who === 'you' ? 'you' : (who === 'st' ? 'st' : 'sysl')) + (cls ? ' ' + cls : ''); li.innerHTML = '<div class="exw ' + (who === 'you' ? 'you' : 'st') + '">' + (who === 'you' ? 'You' : (who === 'st' ? 'The steward' : '')) + '<span class="t"></span></div><div class="ext"></div>'; li.querySelector('.ext').textContent = text; return li; }
+  function targetList() { return live.target || $('#exList'); }
+  function appendLine(who, text, cls) { var list = targetList(); if (!list) return null; var fade = list.querySelector('.exfade'); if (fade) fade.remove(); var li = exLi(who, text, cls); list.appendChild(li); list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight; return li; }
+  function handleEvent(ev) {
+    if (!ev || ev.tick) return;
+    if (ev.t === 'delta') { if (!live.line) live.line = appendLine('st', '', 'live'); if (live.line) { live.line.querySelector('.ext').textContent += (ev.text || ''); var list = targetList(); list.scrollTop = list.scrollHeight; } return; }
+    if (ev.t === 'turn_end') { if (live.line) { live.line.classList.remove('live'); live.line = null; } return; }
+    if (ev.t === 'sys' && ev.text) { appendLine('sys', ev.text, 'dim'); return; }
+    if (ev.t === 'tool') { if (!live.line) live.line = appendLine('st', '', 'live'); var w = live.line.querySelector('.exw .t'); if (w) w.textContent = 'working…'; return; }
+  }
+  function primeSeq() {   // the ring's current top, so the poll starts after this send and never replays old lines
+    return fetch('/api/steward/events?pid=' + encodeURIComponent(PID) + '&dir=&since=0', { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); }); if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch; })
+      .catch(function () {});
+  }
+  function pollLoop() {
+    if (live.polling) return; live.polling = true;
+    (function step() {
+      fetch('/api/steward/events?pid=' + encodeURIComponent(PID) + '&dir=&since=' + live.seq, { headers: headers() })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-          var turns = (j && j.turns) || [];
-          var answered = turns.length > seen && turns[turns.length - 1].role === 'steward';
-          if (turns.length > seen) {
-            list.innerHTML = '';
-            turns.slice(-12).forEach(function (x) { var at = String(x.at || ''); list.appendChild(threadLi({ you: (x.role || '') === 'john', text: x.text || '', at: at.length >= 16 ? at.slice(11, 16) : at })); });
-            list.scrollTop = list.scrollHeight;
+          var ep = j.state && j.state.epoch;
+          if (ep !== undefined && live.epoch !== null && ep !== live.epoch) { live.seq = 0; live.epoch = ep; appendLine('sys', '— the steward reconnected —', 'dim'); }
+          else if (ep !== undefined) live.epoch = ep;
+          (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); handleEvent(ev); });
+          if (j.stamp && BOOT_STAMP && j.stamp !== BOOT_STAMP && !live.line) {
+            try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: 'The steward changed the record — the board is reloaded.', bad: false, undo: null })); } catch (e) {}
+            location.reload(); return;
           }
-          if (answered) { clearInterval(t); return; }
-          if (tries >= 14) { clearInterval(t); list.appendChild(threadLi({ you: false, text: 'No answer yet — the steward has not finished this turn; it lands here on the next look.', at: '' })); list.scrollTop = list.scrollHeight; }
-        }).catch(function () { if (tries >= 14) clearInterval(t); });
-    }, 12000);
+          setTimeout(step, 250);
+        })
+        .catch(function () { setTimeout(step, 3000); });
+    })();
+  }
+  function sendToSteward(text, goal, list, btn, box, DK) {
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    primeSeq().then(function () {
+      return fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: '', text: text, goal: goal || undefined }) });
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        btn.disabled = false; btn.textContent = 'Send';
+        if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
+        try { if (DK) localStorage.removeItem(DK); } catch (e) {}
+        if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
+          try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
+          location.reload(); return;
+        }
+        box.value = '';
+        live.target = list; live.line = null;
+        appendLine('you', text);
+        if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');
+        receipt(goal ? 'Said to the steward about this goal — it answers here as it writes.' : 'Said — the steward answers here as it writes.');
+        pollLoop();
+      })
+      .catch(function () { btn.disabled = false; btn.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
   }
   $$('.place .gsay').forEach(function (box) {
     var goal = box.getAttribute('data-goal'), btn = $('.gsend[data-goal="' + goal + '"]'), list = $('.gthread[data-thread="' + goal + '"]');
     var DK = 'anchor:draft:goal:' + PID + ':' + goal, dt = null;
     try { var kept = localStorage.getItem(DK); if (kept && kept.trim() && !box.value.trim()) box.value = kept; } catch (e) {}
     box.addEventListener('input', function () { clearTimeout(dt); dt = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
-    function go(text) {
-      text = (text || box.value || '').trim(); if (!text || btn.disabled) return;
-      btn.disabled = true; btn.textContent = 'Thinking…';
-      fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: '', text: text, goal: goal }) })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          btn.disabled = false; btn.textContent = 'Send';
-          if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
-          try { localStorage.removeItem(DK); } catch (e) {}
-          if (j.campaign_act && !j.read_only) {
-            try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
-            location.reload(); return;
-          }
-          box.value = '';
-          if (list) { var fade = list.querySelector('.exfade'); if (fade) fade.remove(); list.appendChild(threadLi({ you: true, text: text, at: '' })); list.scrollTop = list.scrollHeight; }
-          receipt('Said to the steward about this goal — its answer lands here in a minute or two.');
-          pollThread(goal, list ? list.querySelectorAll('.exrow').length : 0);
-        })
-        .catch(function () { btn.disabled = false; btn.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
-    }
+    function go(text) { text = (text || box.value || '').trim(); if (!text || btn.disabled) return; sendToSteward(text, goal, list, btn, box, DK); }
     btn.addEventListener('click', function () { go(); });
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
     $$('.chips [data-say]', box.closest('.gconv')).forEach(function (c) { c.addEventListener('click', function () { go(c.getAttribute('data-say')); }); });
@@ -295,20 +317,7 @@
   }
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
-    send.disabled = true; send.textContent = 'Thinking…';
-    fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: '', text: text }) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        send.disabled = false; send.textContent = 'Send';
-        if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
-        clearDraft();
-        if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
-          try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
-          location.reload(); return;
-        }
-        say.value = ''; receipt(j.say || j.reply || j.text || 'Said. The steward answers in the conversation; look again in a moment.');
-      })
-      .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
+    sendToSteward(text, null, $('#exList'), send, say, DRAFT_KEY);
   }
   if (send) send.addEventListener('click', doSend);
   if (say) say.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } });
