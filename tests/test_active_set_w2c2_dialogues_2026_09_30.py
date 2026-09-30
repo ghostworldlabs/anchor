@@ -36,6 +36,9 @@ def test_the_high_seat_shows_the_one_conversation_under_the_composer_and_boots_t
     assert panel.count('class="exrow') == 3 and "3 turns" in panel and 'id="exState"' in panel and 'id="exList"' in panel
     assert 'class="gchip" href="/project/df56?open=trusts"' in panel and "about The trusts" in panel, "a turn said from a goal's place carries the goal's chip, to its place"
     assert 'steward: "Jarvis", stamp: "s9"' in html, "the boot carries the steward's label and the record's stamp for the live lines"
+    assert "it answers in the dialogue below; a Campaign verb applies on the record" in panel and "the Campaign steward answers below &middot; start a new project called" in panel, "the composer says where the answer lands (Grok W2c-2)"
+    hcss = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
+    assert "#dialogue .scroll{max-height:38vh;overflow-y:auto}" in hcss, "the High Seat's dialogue is capped so Today stays up in the sticky column (Grok W2c-2)"
     assert '<link rel="stylesheet" href="/static/steward-dialogue.css?v=test">' in html and '<script src="/static/steward-dialogue.js?v=test"></script><script src="/static/high-seat-page.js?v=test">' in html
     ctx["turns"] = []; ctx["n_turns"] = 0
     assert "Nothing said here yet. This is the same conversation as the Campaign page" in hsp.render_high_seat_html(ctx)
@@ -60,6 +63,8 @@ def test_one_dialogue_script_and_one_stylesheet_carry_the_mechanism():
     for page in (cp, hs):
         assert "window.StewardDialogue.init({" in page and "'/api/steward/events'" not in page and "function pollLoop" not in page, "the pages do not carry a second copy"
     assert "receiptKey: 'campaign_receipt'" in cp and "receiptKey: 'highseat_receipt'" in hs
+    assert "openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); }" in hs, "the live chip opens the goal's place, as the rendered chip does (Grok W2c-2)"
+    assert "openGoal: function (id) { openPlace(id); }" in cp
     assert "verbs_only: !!dlg" in hs and "if (j && j.ok && j.talk && dlg) { dlg.send(text, null, dlg.mainList(), send, say, DRAFT_KEY); return; }" in hs, "the High Seat's composer: a verb answered by its route; talk said to the steward"
     for f in ("steward-dialogue.js", "campaign-page.js", "high-seat-page.js"):
         r = subprocess.run(["node", "--check", os.path.join(HERE, "static", f)], capture_output=True, text=True)
@@ -73,10 +78,10 @@ def test_one_dialogue_script_and_one_stylesheet_carry_the_mechanism():
 def test_the_high_seat_say_route_answers_talk_for_free_text_and_keeps_the_verbs_and_the_new_project_ask():
     import anchor_gui as ag
     assert ag._NEW_PROJECT_ASK.search("start a new project called Bread at C:/dev/Bread") and ag._NEW_PROJECT_ASK.search("create a project for the AI club")
-    assert not ag._NEW_PROJECT_ASK.search("what should I pick up next?") and not ag._NEW_PROJECT_ASK.search("summarize the trusts goal")
+    assert not ag._NEW_PROJECT_ASK.search("what should I pick up next?") and not ag._NEW_PROJECT_ASK.search("summarize the trusts goal") and not ag._NEW_PROJECT_ASK.search("show me the new project list"), "the imperative only (Grok W2c-2)"
     src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
     i = src.index("def handle_ecgberht_high_seat_say")
     body = src[i:i + 4000]
     assert 'if b.get("verbs_only") and not _NEW_PROJECT_ASK.search(text):' in body and '{"ok": True, "talk": True}' in body
-    assert body.index("say_campaign(str(_cd), text)") < body.index('b.get("verbs_only")') < body.index('_ecgberht_project_folder("__dashboard__")'), "the verbs first, then talk, then the dashboard steward only for the new-project ask"
+    assert body.index('b.get("verbs_only")') < body.index("say_campaign(str(_cd), text)") < body.index('_ecgberht_project_folder("__dashboard__")'), "talk answered before the grammar compile (Grok W2c-2: the say route applies the verb itself); the dashboard steward only for the new-project ask"
     assert src.count("def _conversation_turns(folder)") == 1 and src.count("_conversation_turns(") >= 3, "one reader of the log for both contexts"

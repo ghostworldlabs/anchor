@@ -252,6 +252,10 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .orphan.dragging{opacity:.5}
 .orphans .oh{font-size:10.5px;color:var(--text-dim2);margin-left:auto}
 
+/* the dialogue on this page (W2c-2; Grok: cap it so Today stays up in the sticky column) */
+#dialogue .scroll{max-height:38vh;overflow-y:auto}
+#dialogue{margin-top:9px}
+
 /* ═════════ the Desk line ═════════ */
 .deskline{border:1px solid var(--border);border-radius:7px;background:var(--surface);margin:0 0 20px;
   scroll-margin-top:12px}

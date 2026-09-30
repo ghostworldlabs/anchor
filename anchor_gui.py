@@ -13430,7 +13430,7 @@ def _e1_enforce_turn_close(utterance, out):
         return out
 
 
-_NEW_PROJECT_ASK = re.compile(r"\b(?:start|create|make|set up|begin)\b.{0,40}\b(?:new )?project\b|\bnew project\b", re.I)
+_NEW_PROJECT_ASK = re.compile(r"\b(?:start|create|make|set up|begin)\b.{0,40}\b(?:new )?project\b", re.I)      # the imperative only (Grok W2c-2): "the new project list" is talk
 
 
 def handle_ecgberht_high_seat_say(handler, path, body):
@@ -13452,6 +13452,13 @@ def handle_ecgberht_high_seat_say(handler, path, body):
         return
     if _ecgberht_reject_oversized(handler, text):
         return
+    # W2c-2 (2026-09-30): a page with a dialogue says it engages the steward itself — anything but the new-project ask
+    # is answered 'talk' at once (no grammar compile, no model call here; Grok's read of W2c-2): the page says it to
+    # the Campaign's steward, whose say route applies a Campaign verb first and shows the exchange for the rest. The
+    # new-project ask keeps the dashboard steward's confirm card (R11).
+    if b.get("verbs_only") and not _NEW_PROJECT_ASK.search(text):
+        handler._send_json({"ok": True, "talk": True}, 200)
+        return
     # W5 (High Seat, 2026-09-26): a Campaign verb typed on the home is applied on the Campaign record by its own
     # writer (the engine names the act; nothing is sent to a model); anything else talks to the dashboard steward
     from steward_cockpit.campaign_say import say_campaign
@@ -13461,12 +13468,6 @@ def handle_ecgberht_high_seat_say(handler, path, body):
         if spoken is not None:
             handler._send_json(spoken, 200 if spoken.get("ok") else 400)
             return
-    # W2c-2 (2026-09-30): a page with a dialogue says it engages the steward itself — anything that is not a verb and
-    # not the new-project ask is answered 'talk' (no model call here); the page says it to the Campaign's steward and
-    # shows the exchange. The new-project ask keeps the dashboard steward's confirm card (R11).
-    if b.get("verbs_only") and not _NEW_PROJECT_ASK.search(text):
-        handler._send_json({"ok": True, "talk": True}, 200)
-        return
     folder, err, status = _ecgberht_project_folder("__dashboard__")
     if err is not None:
         handler._send_json({"ok": False, "error": "no_dashboard_steward",
