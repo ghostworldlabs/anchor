@@ -7851,8 +7851,14 @@ def _campaign_context(entry):
             if not isinstance(tn, dict) or not tn.get("text"):
                 continue
             at = str(tn.get("at") or "")
+            try:      # the log's stamps are UTC; he reads his own clock (the live glance of W2b-3 showed 16:11 for his 10:11)
+                from datetime import datetime as _dt
+                _ts = _dt.fromisoformat(at.replace("Z", "+00:00"))
+                at_s = (_ts.astimezone() if _ts.tzinfo is not None else _ts).strftime("%H:%M")
+            except (ValueError, TypeError, OSError):
+                at_s = at[11:16] if len(at) >= 16 else at
             t = {"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
-                 "text": " ".join(str(tn.get("text")).split()), "at": at[11:16] if len(at) >= 16 else at, "goal": str(tn.get("goal") or "")}
+                 "text": " ".join(str(tn.get("text")).split()), "at": at_s, "goal": str(tn.get("goal") or "")}
             turns.append(t)
             if t["goal"]:
                 goal_turns.setdefault(t["goal"], []).append(t)      # W2 v2: a goal's thread is the one log, filtered
