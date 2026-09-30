@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import unquote
 
 REF_KINDS = ("project", "step", "deliverable", "calendar", "effort")   # effort:<pid>/<dir> — one cockpit within a project (2026-09-30)
 _OPEN = ("proposed", "planned", "active", "waiting")
@@ -32,6 +33,13 @@ def parse_ref(ref):
         pid, sub = rest.split("/", 1)
         if not pid or not sub:
             return None
+        if kind == "effort":
+            # Stored refs have no literal whitespace; effort folders commonly do.
+            # Decode once, then let resolve_ref enforce the one-directory boundary.
+            try:
+                sub = unquote(sub, errors="strict")
+            except UnicodeError:
+                return None
         return {"kind": kind, "pid": pid, "sub": sub}
     if kind == "calendar":
         return {"kind": kind, "pid": "", "sub": rest}
@@ -147,7 +155,9 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         try:
             for ln in (eff / "ECGBERHT.md").read_text(encoding="utf-8", errors="replace").splitlines()[:40]:
                 if ln.startswith("# "):
-                    title = ln[2:].strip() or title
+                    heading = ln[2:].strip()
+                    if heading and not heading.lower().startswith("ecgberht"):
+                        title = heading
                     break
         except OSError:
             pass
