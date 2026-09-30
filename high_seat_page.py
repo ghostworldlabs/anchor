@@ -740,6 +740,28 @@ def _dialogue(ctx):
 def _panel(ctx):
     st = ctx["steward"]
     bullets = _head_li(ctx)
+    seeds = int(ctx.get("seeds") or 0)
+    return (
+        '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn" aria-expanded="false" aria-controls="seedPanel"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>%s'
+        '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
+        # R14 (2026-09-29): the token is pasted INTO the page — a browser pop-up (window.prompt) is what his desktop
+        # browser suppressed ("I click that button and nothing happens"); the box is hidden until it is needed
+        '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
+        '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
+        '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
+        '%s'
+        '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
+        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a Campaign verb applies on the record"></textarea>'
+        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Campaign steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
+        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
+    ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
+         esc(ctx["brief_when"]), bullets, _dialogue(ctx), esc(st["label"]))
+
+
+def _today_block(ctx):
+    """Today and Later this week (W2c-3: moved under the board so the right column is the brief and the dialogue,
+    'more real estate on the right hand side' — his word)."""
+    facts = ctx["facts"]
     rows = ctx.get("rows") or []
     facts = ctx["facts"]
 
@@ -760,7 +782,6 @@ def _panel(ctx):
             ('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), esc(r.get("text")))) if href.startswith("/") else esc(r.get("text")), "".join(meta))
     today_rows = "".join(trow(r) for r in rows if r.get("rule") not in ("health", "failed"))
     n_today = sum(1 for r in rows if r.get("rule") not in ("health", "failed"))
-    seeds = int(ctx.get("seeds") or 0)
     # Later this week: dated open steps after today, through Sunday
     today = ctx["today"]
     week_end = today + timedelta(days=6 - today.weekday())
@@ -788,23 +809,10 @@ def _panel(ctx):
         ('<p class="emptyline"><b>Nothing is dated inside the rest of this week.</b>%s</p>' % (
             (" The next dated step is %s (%s, %s)." % (esc(nearest[1].get("name")), esc(_short(nearest[1].get("due"))), esc(nearest[2].get("name")))) if nearest else ""))))
     return (
-        '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn" aria-expanded="false" aria-controls="seedPanel"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>%s'
-        '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
-        # R14 (2026-09-29): the token is pasted INTO the page — a browser pop-up (window.prompt) is what his desktop
-        # browser suppressed ("I click that button and nothing happens"); the box is hidden until it is needed
-        '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
-        '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
-        '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
-        '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
-        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers in the dialogue below; a Campaign verb applies on the record"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Campaign steward answers below &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
-        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
-        '%s'
         '<section class="today" id="todayBlock"><div class="today-h"><h3>Today</h3><span class="c">%d raised</span></div>'
         '<div class="today-sub">What needs you, and what is due soonest &mdash; every row a fact from a record, each saying what raised it.</div>'
-        '<ul class="tlist">%s</ul>%s</section></aside>'
-    ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
-         esc(ctx["brief_when"]), bullets, esc(st["label"]), _dialogue(ctx), n_today, today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>', later_block)
+        '<ul class="tlist">%s</ul>%s</section>'
+    ) % (n_today, today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>', later_block)
 
 
 def render_high_seat_html(ctx) -> str:
@@ -826,7 +834,7 @@ def render_high_seat_html(ctx) -> str:
     ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
     ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("deck", "active") for g, p in seated(live_inits, seat) if p.get("pid")}      # Active wins when a project has cards on both (Grok's read of W2c)
     board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _projects_tile(ctx)
-             + _desk_line(ctx) + _ruler(ctx) + _workbench(ctx) + '</div>')
+             + _desk_line(ctx) + _ruler(ctx) + _today_block(ctx) + _workbench(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'

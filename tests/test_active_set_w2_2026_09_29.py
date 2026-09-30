@@ -89,7 +89,7 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
 def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
     html = cpg.render_campaign_html(_ctx())
     panel = html[html.index('<aside class="panel"'):]
-    assert panel.index('id="brief"') < panel.index('class="composer"') < panel.index('class="exwrap"'), "brief, composer, then the conversation"
+    assert panel.index('id="brief"') < panel.index('class="exwrap"') < panel.index('class="composer"'), "brief, the conversation, then the composer at its foot (W2c-3: the cockpit's shape)"
     lead = panel[panel.index('<li class="lead">'):panel.index('<li class="fold">')]
     assert lead.startswith('<li class="lead"><b>Tier 1</b> holds'), "the brief leads with the tiers' line; the set-first lead went with the Active band (Grok, the W2 trim)"
     assert "<summary>the rest, by tier</summary>" in panel
@@ -111,7 +111,7 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     assert "'/api/steward/events'" in dlg and "ev.t === 'delta'" in dlg and "ev.t === 'turn_end'" in dlg and "goal: goal || undefined" in dlg
     assert "EventSource" not in js and "pollThread" not in js and "EventSource" not in dlg, "one mechanism: the cockpit's event stream, long-polled"
     assert dlg.count("/api/steward/history") == 1 and "function catchUp" in dlg and "/api/steward/history" not in js, "the log is read once, only for a turn that ended before the page saw its words"
-    assert "primeSeq().then(pollLoop)" in dlg, "the poll starts with the open (W2b-3): the cockpit's own soft start, never a fresh session from a view"
+    assert "primeSeq().then(function () { if (!refused) pollLoop(); })" in dlg, "the poll starts with the open (W2b-3): the cockpit's own soft start, never a fresh session from a view; a refused poll stops (W2c-3)"
     assert "j.stamp !== BOOT_STAMP" in dlg and "location.reload" in dlg
     assert "window.prompt(" not in place and "window.prompt(" not in conv
     assert "openPlace(" in js and ".itile" not in js.replace("/* ", "").split("(function")[1]

@@ -57,7 +57,7 @@ a{color:inherit}
 .prefs select{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:11px}
 
 /* ═════════ canvas ═════════ */
-.canvas{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:16px;flex:1;min-height:0;margin-top:10px}
+.canvas{display:grid;grid-template-columns:minmax(0,1fr) 470px;gap:16px;flex:1;min-height:0;margin-top:10px}   /* W2c-3: the dialogue's real estate */
 .board{min-width:0;min-height:0;display:flex;flex-direction:column}
 .colk{display:flex;align-items:center;gap:9px;padding:0 2px 6px;flex:none}
 .colk h3{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-dim);font-weight:700}
@@ -354,6 +354,7 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 
 
 .composer{border:1px solid var(--border);border-radius:11px;background:#0a0c11;padding:9px 12px 10px;flex:none;margin-top:9px}
+.panel>.composer{margin-top:8px}   /* W2c-3: at the foot of the dialogue, as the cockpit's */
 .composer textarea{width:100%;background:transparent;border:0;color:var(--text);
   font:13.5px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif;resize:none;min-height:34px;outline:none}
 .composer textarea::placeholder{color:#6f7480}
@@ -378,7 +379,7 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .foot img{width:15px;height:15px;display:block}
 .foot .sd{color:var(--amber-t);font-weight:650}
 
-@media(max-width:1380px){:root{--cols:150px repeat(5,minmax(0,1fr)) 112px;--cols-over:150px 112px repeat(5,minmax(0,1fr)) 112px}.canvas{grid-template-columns:minmax(0,1fr) 344px;gap:13px}}
+@media(max-width:1380px){:root{--cols:150px repeat(5,minmax(0,1fr)) 112px;--cols-over:150px 112px repeat(5,minmax(0,1fr)) 112px}.canvas{grid-template-columns:minmax(0,1fr) 420px;gap:13px}}
 @media(max-width:1200px){
   .page{height:auto;overflow:visible}
   .canvas{grid-template-columns:1fr}

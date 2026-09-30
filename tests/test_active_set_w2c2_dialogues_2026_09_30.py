@@ -32,13 +32,14 @@ def test_the_high_seat_shows_the_one_conversation_under_the_composer_and_boots_t
     ctx = w2c._ctx(); ctx["turns"] = _turns(); ctx["n_turns"] = 3; ctx["goal_names"] = {"trusts": "The trusts"}; ctx["stamp"] = "s9"
     html = hsp.render_high_seat_html(ctx)
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
-    assert panel.index('id="brief"') < panel.index('class="composer"') < panel.index('id="dialogue"') < panel.index('id="todayBlock"'), "brief, composer, the dialogue, then Today"
+    assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"') and 'id="todayBlock"' not in panel, "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape); Today is under the board"
+    assert html.index('id="ruler"') < html.index('id="todayBlock"') < html.index('<aside class="panel"'), "Today and Later this week under the board, after the ruler"
     assert panel.count('class="exrow') == 3 and "3 turns" in panel and 'id="exState"' in panel and 'id="exList"' in panel
     assert 'class="gchip" href="/project/df56?open=trusts"' in panel and "about The trusts" in panel, "a turn said from a goal's place carries the goal's chip, to its place"
     assert 'steward: "Jarvis", stamp: "s9"' in html, "the boot carries the steward's label and the record's stamp for the live lines"
-    assert "it answers in the dialogue below; a Campaign verb applies on the record" in panel and "the Campaign steward answers below &middot; start a new project called" in panel, "the composer says where the answer lands (Grok W2c-2)"
+    assert "it answers above as it writes; a Campaign verb applies on the record" in panel and "the Campaign steward answers above &middot; start a new project called" in panel, "the composer says where the answer lands"
     hcss = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
-    assert "#dialogue .scroll{max-height:38vh;overflow-y:auto}" in hcss, "the High Seat's dialogue is capped so Today stays up in the sticky column (Grok W2c-2)"
+    assert "grid-template-columns:minmax(0,1fr) 480px" in hcss and "height:calc(100vh - 24px);display:flex;flex-direction:column" in hcss and "max-height:38vh" not in hcss, "W2c-3: the column is wider, the panel is the cockpit's shape, the dialogue fills it"
     assert '<link rel="stylesheet" href="/static/steward-dialogue.css?v=test">' in html and '<script src="/static/steward-dialogue.js?v=test"></script><script src="/static/high-seat-page.js?v=test">' in html
     ctx["turns"] = []; ctx["n_turns"] = 0
     assert "Nothing said here yet. This is the same conversation as the Campaign page" in hsp.render_high_seat_html(ctx)
@@ -56,7 +57,8 @@ def test_the_campaign_page_uses_the_same_dialogue():
 
 def test_one_dialogue_script_and_one_stylesheet_carry_the_mechanism():
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
-    for s in ("window.StewardDialogue = { init: init }", "primeSeq().then(pollLoop)", "'/api/steward/events'", "'/api/steward/say'", "function catchUp", "'build-mismatch'", "function stateText", "pair.mi = put(main"):
+    for s in ("window.StewardDialogue = { init: init }", "primeSeq().then(function () { if (!refused) pollLoop(); })", "'/api/steward/events'", "'/api/steward/say'", "function catchUp", "'build-mismatch'", "function stateText", "pair.mi = put(main",
+              "function tokenQ()", "+ tokenQ()", "function refusedOnce()", "if (r.status === 401 || r.status === 403)", "if (!j || !j.events) { setTimeout(step, 3000); return; }"):
         assert s in dlg, s
     cp = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
     hs = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()

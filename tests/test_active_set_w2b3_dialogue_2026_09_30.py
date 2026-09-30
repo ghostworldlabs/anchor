@@ -32,7 +32,7 @@ def test_the_panel_is_the_brief_the_composer_then_the_dialogue_of_the_whole_log(
     ctx["turns"] = _turns(45)[-40:]; ctx["n_turns"] = 45; ctx["goal_names"] = {"trusts": "The trusts and the holding company"}
     html = cpg.render_campaign_html(ctx)
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
-    assert panel.index('id="brief"') < panel.index('class="composer"') < panel.index('id="dialogue"'), "brief, composer, then the dialogue"
+    assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"'), "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape)"
     assert panel.count('class="exrow') == 40 and "the last 40 of 45" in panel, "the last 40 turns of the log, and said so"
     assert 'class="gchip" data-open="trusts"' in panel and "about The trusts and the holding company" in panel, "a turn said from a goal's place carries the goal's chip, which opens the goal"
     assert 'id="exState"' in panel and 'id="exScroll"' in panel, "the steward's state at the head; the list scrolls inside"
@@ -46,7 +46,7 @@ def test_the_panel_is_the_brief_the_composer_then_the_dialogue_of_the_whole_log(
 def test_the_script_is_live_from_the_open_watches_the_build_and_says_a_refusal():
     page = open(os.path.join(W, "static", "campaign-page.js"), encoding="utf-8").read()
     js = open(os.path.join(W, "static", "steward-dialogue.js"), encoding="utf-8").read()      # W2c-2: the one mechanism, shared with the High Seat
-    assert "primeSeq().then(pollLoop)" in js, "the stream is polled from the moment the page opens"
+    assert "primeSeq().then(function () { if (!refused) pollLoop(); })" in js, "the stream is polled from the moment the page opens; a refused poll stops (W2c-3)"
     assert "'/api/version'" in page and "campaign_reloaded_for" in page and "typing()" in page, "a new build reloads the page once, never while he types"
     assert "'build-mismatch'" in js and "renewed" in js, "a send from a stale tab renews the page and keeps the draft"
     assert "function catchUp" in js and "/api/steward/history" in js, "a turn that ended before the page saw its words is read from the log"

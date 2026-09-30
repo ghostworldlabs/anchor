@@ -422,7 +422,8 @@
     pid: CAMPAIGN, dir: '', headers: headers, receipt: receipt, receiptKey: 'highseat_receipt',
     steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
     goalName: function (id) { var g = $('.grow[data-g="' + id + '"] .gn'); return (g && g.textContent.trim()) || id; },
-    openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); }   // the goal's place, as the rendered chip opens it (Grok W2c-2)
+    openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); },   // the goal's place, as the rendered chip opens it (Grok W2c-2)
+    onAuth: function () { showLogin('The steward’s words cannot reach this page until this browser is logged in.'); }
   }) : null;
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;

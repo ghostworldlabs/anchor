@@ -48,7 +48,19 @@
       return s.queued ? 'listening · ' + s.queued + ' queued' : 'listening';
     }
     function showState(s) { var el = $(o.state || '#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
-    function q() { return '?pid=' + encodeURIComponent(PID) + '&dir=' + encodeURIComponent(DIR); }
+    // a GET on these pages carries the token on the query (the dashboard convention; the server's GET gate does not read
+    // the header) — his polls were refused with the header alone and the page asked again three times a second (W2c-3)
+    function tokenQ() { var t = ''; try { t = localStorage.getItem('anchor_token') || ''; } catch (e) {} return t ? ('&token=' + encodeURIComponent(t)) : ''; }
+    function q() { return '?pid=' + encodeURIComponent(PID) + '&dir=' + encodeURIComponent(DIR) + tokenQ(); }
+    var refused = false;
+    function refusedOnce() {   // a refused poll: said once, the loop stopped; the page's own login (when it has one) is offered
+      if (refused) return; refused = true; live.polling = false;
+      var el = $(o.state || '#exState'); if (el) { el.textContent = 'not logged in — the steward’s words cannot reach this page'; el.setAttribute('data-state', 'auth'); }
+      live.target = null; live.goal = null;
+      appendLine('sys', 'This browser is not logged in to Anchor, so the steward’s words cannot reach this page. Paste the token (the High Seat has the box), then reload.', 'dim');
+      if (o.onAuth) o.onAuth();
+    }
+    function asJson(r) { if (r.status === 401 || r.status === 403) { var e = new Error('auth'); e.auth = true; throw e; } return r.json(); }
     // a turn that ended before this page saw its words (it was mid-turn when the page opened): the log has it
     function catchUp() {
       fetch('/api/steward/history' + q(), { headers: headers() })
@@ -73,16 +85,17 @@
     }
     function primeSeq() {   // the ring's current top, so the poll never replays lines the log below already shows
       return fetch('/api/steward/events' + q() + '&since=0', { headers: headers() })
-        .then(function (r) { return r.json(); })
+        .then(asJson)
         .then(function (j) { (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); }); if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch; showState(j.state); })
-        .catch(function () {});
+        .catch(function (e) { if (e && e.auth) refusedOnce(); });
     }
     function pollLoop() {
       if (live.polling) return; live.polling = true;
       (function step() {
         fetch('/api/steward/events' + q() + '&since=' + live.seq, { headers: headers() })
-          .then(function (r) { return r.json(); })
+          .then(asJson)
           .then(function (j) {
+            if (!j || !j.events) { setTimeout(step, 3000); return; }   // an answer with no stream in it: wait, never hammer
             var ep = j.state && j.state.epoch;
             if (ep !== undefined && live.epoch !== null && ep !== live.epoch) { live.seq = 0; live.epoch = ep; appendLine('sys', '— the steward reconnected —', 'dim'); }
             else if (ep !== undefined) live.epoch = ep;
@@ -94,7 +107,7 @@
             }
             setTimeout(step, 250);
           })
-          .catch(function () { setTimeout(step, 3000); });
+          .catch(function (e) { if (e && e.auth) { refusedOnce(); return; } setTimeout(step, 3000); });
       })();
     }
     function send(text, goal, list, btn, box, DK) {
@@ -102,7 +115,7 @@
       (live.polling ? Promise.resolve() : primeSeq()).then(function () {
         return fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: DIR, text: text, goal: goal || undefined }) });
       })
-        .then(function (r) { return r.json(); })
+        .then(asJson)
         .then(function (j) {
           btn.disabled = false; btn.textContent = 'Send';
           if (j && j.error === 'build-mismatch') {   // a stale tab: the draft is kept in this browser; the renewed page puts it back
@@ -123,13 +136,13 @@
           live.target = list; live.goal = goal || null; live.line = null; live.skipJohn = text;
           appendLine('you', text);
           if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');
-          receipt(goal ? 'Said to the steward about this goal — it answers as it writes.' : 'Said — the steward answers below as it writes.');
-          pollLoop();
+          receipt(goal ? 'Said to the steward about this goal — it answers as it writes.' : 'Said — the steward answers above as it writes.');
+          if (!refused) pollLoop();
         })
-        .catch(function () { btn.disabled = false; btn.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
+        .catch(function (e) { btn.disabled = false; btn.textContent = 'Send'; if (e && e.auth) { refusedOnce(); receipt('Not sent — this browser is not logged in to Anchor.', true); return; } receipt('That did not go through — nothing was done.', true); });
     }
     // live from the open: the ring's top first (so the log shown below is not replayed), then the stream
-    if (PID && mainList()) primeSeq().then(pollLoop);
+    if (PID && mainList()) primeSeq().then(function () { if (!refused) pollLoop(); });
     return { send: send, appendLine: appendLine, mainList: mainList };
   }
   window.StewardDialogue = { init: init };

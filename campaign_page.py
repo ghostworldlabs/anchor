@@ -454,14 +454,15 @@ def _panel(ctx):
     note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
     return (
         '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
+        '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
+        '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it runs the Campaign: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers below as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
+        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
-        '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section></aside>'
-    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), esc(st["label"]), note, ex,
-         "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign&rsquo;s cockpit; what the steward does with the record shows on the board.</li>')
+        '</aside>'
+    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), note, ex,
+         "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign&rsquo;s cockpit; what the steward does with the record shows on the board.</li>', esc(st["label"]))
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────

@@ -98,7 +98,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .prefs label{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .prefs select{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:11px}
 
-.canvas{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start;margin-top:14px}
+.canvas{display:grid;grid-template-columns:minmax(0,1fr) 480px;gap:20px;align-items:start;margin-top:14px}   /* W2c-3: the dialogue's real estate */
 .board{min-width:0}
 
 /* ═════════ the Campaign tile ═════════ */
@@ -252,9 +252,11 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .orphan.dragging{opacity:.5}
 .orphans .oh{font-size:10.5px;color:var(--text-dim2);margin-left:auto}
 
-/* the dialogue on this page (W2c-2; Grok: cap it so Today stays up in the sticky column) */
-#dialogue .scroll{max-height:38vh;overflow-y:auto}
-#dialogue{margin-top:9px}
+/* the dialogue on this page (W2c-3: it fills the column; the brief, the seeds and the composer keep their height) */
+.panel>.seedbar,.panel>.brief,.panel>.loginbox,.panel>.composer{flex:none}
+#dialogue{margin-top:9px;min-height:200px}
+.panel>.composer{margin-top:8px}
+.today{margin:0 0 20px}
 
 /* ═════════ the Desk line ═════════ */
 .deskline{border:1px solid var(--border);border-radius:7px;background:var(--surface);margin:0 0 20px;
@@ -521,7 +523,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .bench .dim{color:var(--text-dim);font-size:12px}
 
 /* ═════════ steward panel ═════════ */
-.panel{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-right:2px;
+.panel{position:sticky;top:12px;height:calc(100vh - 24px);display:flex;flex-direction:column;min-height:0;overflow:hidden;padding-right:2px;   /* W2c-3: the cockpit's shape — the dialogue fills the column, the composer at its foot */
   display:flex;flex-direction:column;gap:11px}
 .stew{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:11px;
   background:var(--surface);padding:8px 11px}

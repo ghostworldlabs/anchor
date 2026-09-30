@@ -9,6 +9,7 @@
 .exstate[data-state="busy"]{color:var(--amber-t)}
 .exstate[data-state="busy"]::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:5px;vertical-align:middle;animation:blink 1.1s steps(2) infinite}
 .exstate[data-state="idle"]{color:var(--success)}
+.exstate[data-state="auth"]{color:var(--amber-t)}
 .gchip{font-size:9px;letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--accent-t);border:1px solid rgba(158,192,255,.35);border-radius:999px;padding:0 6px;line-height:1.5;background:transparent}
 .gchip:hover{background:rgba(108,156,252,.12)}
 .ex{list-style:none;padding-right:4px}
@@ -19,7 +20,7 @@
 .exw.st{color:var(--amber-t)}
 .exw .t{margin-left:auto;letter-spacing:0;text-transform:none;font-weight:500;font-size:10px;color:var(--text-dim2);
   font-variant-numeric:tabular-nums}
-.ext{font-size:12.5px;line-height:1.5;margin-top:3px;color:var(--text-warm)}
+.ext{font-size:13.5px;line-height:1.55;margin-top:3px;color:var(--text-warm);white-space:pre-wrap}
 .exrow.you .ext{color:var(--text)}
 .ext b{color:var(--text);font-weight:650}
 .ext .amberword{color:var(--amber-t);font-weight:700}
