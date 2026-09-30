@@ -14,7 +14,7 @@
     var PID = o.pid || '', DIR = o.dir || '', headers = o.headers, receipt = o.receipt || function () {};
     var STEWARD = o.steward || 'The steward', BOOT_STAMP = o.stamp || '', KEY = o.receiptKey || 'steward_receipt';
     var goalName = o.goalName || function (id) { return id; }, openGoal = o.openGoal || null;
-    var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '' };
+    var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '', stopped: false };
     function keep(text, bad, undo) { try { sessionStorage.setItem(KEY, JSON.stringify({ text: text, bad: !!bad, undo: undo || null })); } catch (e) {} }
     function mainList() { return $(o.list || '#exList'); }
     function exLi(who, text, cls, goal) {
@@ -92,6 +92,7 @@
     function pollLoop() {
       if (live.polling) return; live.polling = true;
       (function step() {
+        if (live.stopped) { live.polling = false; return; }   // W2e: a card's dialogue stops when the card closes
         fetch('/api/steward/events' + q() + '&since=' + live.seq, { headers: headers() })
           .then(asJson)
           .then(function (j) {
@@ -105,9 +106,9 @@
               keep('The steward changed the record — the page is reloaded.', false, null);
               location.reload(); return;
             }
-            setTimeout(step, 250);
+            if (!live.stopped) setTimeout(step, 250);
           })
-          .catch(function (e) { if (e && e.auth) { refusedOnce(); return; } setTimeout(step, 3000); });
+          .catch(function (e) { if (e && e.auth) { refusedOnce(); return; } if (!live.stopped) setTimeout(step, 3000); });
       })();
     }
     function send(text, goal, list, btn, box, DK) {
@@ -143,7 +144,8 @@
     }
     // live from the open: the ring's top first (so the log shown below is not replayed), then the stream
     if (PID && mainList()) primeSeq().then(function () { if (!refused) pollLoop(); });
-    return { send: send, appendLine: appendLine, mainList: mainList };
+    function stop() { live.stopped = true; }
+    return { send: send, appendLine: appendLine, mainList: mainList, stop: stop };
   }
   window.StewardDialogue = { init: init };
 })();

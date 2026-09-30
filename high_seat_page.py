@@ -450,7 +450,7 @@ def _seat_shelves(ctx):
                     wait = re.sub(r"^waiting on you[:\s]*", "", st_, flags=re.I).strip(" .") if st_.lower().startswith("waiting on you") else ""
                     f = dict(f, effort=p.get("dir") or f.get("effort") or "", needs_you=wait or ("" if st_ else f.get("needs_you") or ""), needs_you_effort="", other_waits=[],
                              wait_age_days=None, next=p.get("lead") or p.get("text") or f.get("next") or "", repair_proposals=[], efforts_gap="")
-                out.append(_card(e, f, "", goal=g, step=p))
+                out.append(_card(e, f, "", goal=g, step=p, light=(ctx.get("lights") or {}).get(p["pid"])))
             else:
                 out.append(_desk_card(ctx, g, p))
         return "".join(out)
@@ -501,7 +501,8 @@ def _orphans_line(ctx):
             % (len(orphans), chips))
 
 
-_ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))
+_ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"), ("talk", "Talk"))   # Talk (W2e): the cockpit's own dialogue, in the card
+LIGHT_WORDS = {"green": "working", "orange": "needs you", "red": "a problem", "gray": "idle"}
 
 
 def _resume_act(pid, rel, r):
@@ -518,7 +519,7 @@ def _resume_act(pid, rel, r):
             % (href, esc(r.get("step") or "where you were"), esc(r.get("ago") or r.get("at")), moved, esc(r.get("ago") or "")))
 
 
-def _card(e, f, cls, goal=None, step=None):
+def _card(e, f, cls, goal=None, step=None, light=None):
     """A project's one card, compact (John, 2026-09-27: "the tiles still seem larger than needed"): the name with the
     effort it reads as a small suffix, ONE line — the Needs-you sentence when there is one, else the next step —
     clamped to two lines, and the acts on one line, Status first (his word: "there should also be a status option");
@@ -534,13 +535,21 @@ def _card(e, f, cls, goal=None, step=None):
     # its goal; a cockpit within a project is its own card on its own effort
     cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
     attr = (' data-step="%s" data-name="%s" draggable="true"' % (esc(step["id"]), name)) if step else ""
+    # W2e (2026-09-30, his words): the light in his words, and the mark that says "ready for you" until he looks —
+    # the wait's own words are the mark, so a new wait pulses again
+    lt = light if isinstance(light, dict) else {}
+    lclass = lt.get("light") if lt.get("light") in LIGHT_WORDS else "gray"
+    dot = '<span class="tlight %s" title="%s"></span>' % (lclass, esc((LIGHT_WORDS[lclass] + ((": " + lt["why"]) if lt.get("why") else ""))[:200]))
+    if lclass == "orange":
+        import hashlib as _hl
+        attr += ' data-ready="%s"' % _hl.sha1((str(lt.get("why") or "") + "|" + str(f.get("needs_you") or "")).encode("utf-8")).hexdigest()[:10]
     xbtn = ('<button class="t-x" data-home="%s" title="back to its goal">&times;</button>' % esc(step["id"])) if step else ""
     goal_line = ('<div class="t-goal">in <b>%s</b> &middot; %s</div>' % (esc(goal["name"]), "a cockpit within the project" if step.get("kind") == "effort" else "the project&rsquo;s cockpit")) if (goal and step) else ""
     if not f.get("has_record"):
         return (
-            '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top"><h3 class="t-name">%s</h3>%s</div>%s'
+            '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top">%s<h3 class="t-name">%s</h3>%s</div>%s'
             '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
-        ) % (cls, cid, pid, attr, name, xbtn, goal_line, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
+        ) % (cls, cid, pid, attr, dot, name, xbtn, goal_line, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
     wait = " ".join(str(f.get("needs_you") or "").split())[:160]
     nxt = esc((f.get("next") or "")[:160]) or "not stated"
     # W1 (2026-09-28): EVERY effort's wait, each opening its own record (the Status part on that effort) — a
@@ -585,12 +594,12 @@ def _card(e, f, cls, goal=None, step=None):
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     acts += _resume_act(pid, rel, f.get("resume"))
     return (
-        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
+        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top">%s<h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
         '<a class="t-go" href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div>%s'
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, cid, pid, rel, attr, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else "/project/%s" % pid, xbtn, goal_line,
+    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else "/project/%s" % pid, xbtn, goal_line,
          line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 

@@ -204,6 +204,43 @@
         return r.json().then(function (jr) { return (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'); });
       });
   }
+  // W2e (2026-09-30, his words): the mark "ready for you" — a card whose wait he has not looked at pulses its edge;
+  // opening any part of it is the look (kept in this browser, by the wait's own words: a new wait pulses again)
+  function seen(card) { var tok = card.getAttribute('data-ready'); card.classList.remove('ready'); if (!tok) return; try { localStorage.setItem('hs_seen_' + card.id, tok); } catch (e) {} }
+  $$('.tile[data-ready]').forEach(function (c) { var tok = c.getAttribute('data-ready'), was = ''; try { was = localStorage.getItem('hs_seen_' + c.id) || ''; } catch (e) {} if (was !== tok) c.classList.add('ready'); });
+  function tokenQ2() { var t = token(); return t ? ('&token=' + encodeURIComponent(t)) : ''; }
+  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
+  // W2e: Talk — the cockpit's own dialogue inside the card (the conversation with THAT cockpit's steward, live through
+  // the same dialogue module the page uses, and a box to interject); it stops when the card closes or another part opens
+  function openTalk(card, pid, dir, btn, key) {
+    var body = $('.t-body', card), id = 'talk-' + card.id;
+    card.setAttribute('data-open', key); card.classList.add('open'); body.hidden = false;
+    body.innerHTML = '<div class="cdlg" id="' + id + '"><div class="exhead"><h3>this cockpit\u2019s steward</h3><span class="exstate" data-state="">\u2026</span><span class="note"></span></div>'
+      + '<div class="scroll"><ul class="ex"><li class="exfade">Reading the conversation\u2026</li></ul></div>'
+      + '<div class="composer"><textarea rows="2" placeholder="Ask this cockpit\u2019s steward, or tell it what to do \u2014 it answers here as it writes"></textarea>'
+      + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
+    var list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send');
+    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir) + tokenQ2(), { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var ts = ((j && j.turns) || []).slice(-12); list.innerHTML = '';
+        if (!ts.length) { list.innerHTML = '<li class="exfade">Nothing said in this cockpit yet.</li>'; return; }
+        ts.forEach(function (t) {
+          var you = ['john', 'you', 'user', 'human'].indexOf(String(t.role || '').toLowerCase()) >= 0;
+          var li = document.createElement('li'); li.className = 'exrow ' + (you ? 'you' : 'st');
+          li.innerHTML = '<div class="exw ' + (you ? 'you' : 'st') + '"><span class="w"></span></div><div class="ext"></div>';
+          li.querySelector('.w').textContent = you ? 'You' : 'The steward'; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
+          list.appendChild(li);
+        });
+        list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
+      })
+      .catch(function () { list.innerHTML = '<li class="exfade">The conversation could not be read.</li>'; });
+    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '' }) : null;
+    card._talk = dlg;
+    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; dlg.send(t, null, list, sendBtn, box, null); }
+    sendBtn.addEventListener('click', go);
+    box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+  }
   function openPart(card, pid, part, btn) {
     var body = $('.t-body', card);
     // W1/W2 (2026-09-28): a button may name ITS effort (another effort's wait; the head's pick) — its data-dir wins,
@@ -212,7 +249,9 @@
     var key = part + '|' + dir;
     var same = card.getAttribute('data-open') === key;
     $$('.t-acts button, .t-eff-open', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
+    stopTalk(card); seen(card);
     if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
+    if (part === 'talk') { openTalk(card, pid, dir, btn, key); return; }
     card.setAttribute('data-open', key); card.classList.add('open');
     body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
     fetchPart(pid, part, dir, false, true)

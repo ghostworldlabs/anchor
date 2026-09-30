@@ -131,7 +131,7 @@ def test_the_board_names_the_effort_a_card_reads_and_shelves_the_record_less_pro
     c = hsp._card(e, f, "")
     assert 'data-dir="steward-refinement"' in c and '<span class="t-eff">&middot; steward-refinement</span>' in c
     assert "touched" not in c                                                        # no age on the card (Grok R6: not a receipt, not the cockpit's clock)
-    assert c.count('data-dir="steward-refinement"') == 5                            # the card and its four acts
+    assert c.count('data-dir="steward-refinement"') == 6      # W2e: the Talk act names its effort too                            # the card and its four acts
     assert "reads the effort" not in c and "t-effort" not in c                     # no third naming of the effort (Grok R7): the suffix and the Status part say it
     assert '<span class="t-nm">Skill Foundry</span><span class="t-eff">&middot; steward-refinement</span>' in c   # two spans: the name gives way, the suffix stays whole
     q = hsp._card({"id": "q1", "name": "Quiet one", "blurb": "nothing yet"}, {"has_record": False}, "")
@@ -143,7 +143,7 @@ def test_the_compact_card_says_one_line_and_puts_status_first_among_the_acts():
     e = {"id": "p1", "name": "MBA Teaching AI", "blurb": "The course."}
     waiting = hsp._card(e, {"has_record": True, "effort": "", "next": "Lecture 4", "needs_you": "approve the Lecture 3 AI supplement"}, " need")
     acts = waiting[waiting.index('class="t-acts"'):waiting.index('class="t-body"')]
-    assert re.findall(r'data-part="([a-z]+)"', acts) == ["status", "next", "deliverables", "plan"]
+    assert re.findall(r'data-part="([a-z]+)"', acts) == ["status", "next", "deliverables", "plan", "talk"]      # W2e: Talk, the cockpit's dialogue in the card
     assert "statusbtn" not in waiting and 'class="t-go" href="/project/p1"' in waiting
     # the one line is the wait; the description and the next step wait behind the open, before the acts
     assert waiting.index('class="t-line wait"') < waiting.index('class="t-more"') < waiting.index('class="t-next"') < waiting.index('class="t-acts"')

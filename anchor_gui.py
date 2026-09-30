@@ -7691,6 +7691,50 @@ def _working_pids(entries, sessions):
     return out
 
 
+def _project_lights(entries, facts, working):
+    """W2e (2026-09-30, his words): every card's light — green working · orange needs you · red a problem · gray idle —
+    read from the record (the attention flag, the wait the facts already carry) and from the live steward when one is
+    up in this process. The word and the reason ride with it. Read-only; never raises."""
+    out = {}
+    try:
+        from steward_cockpit.steward_routes import ENGINES as _engines
+        engines = dict(_engines)
+    except Exception:
+        engines = {}
+    for e in entries or ():
+        pid = str((e or {}).get("id") or "")
+        if not pid:
+            continue
+        f = (facts or {}).get(pid) or {}
+        folder = str(e.get("folder_path") or "")
+        att = {}
+        try:
+            ap = Path(folder) / ".ecgberht" / "attention.json"
+            if folder and ap.is_file():
+                att = json.loads(ap.read_text(encoding="utf-8")) or {}
+        except Exception:
+            att = {}
+        if not isinstance(att, dict):
+            att = {}
+        state = str(att.get("state") or "").lower()
+        elight = ""
+        try:
+            eng = engines.get(folder) if folder else None
+            elight = eng.light() if eng is not None else ""
+        except Exception:
+            elight = ""
+        if elight == "red" or state == "blocked":
+            light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
+        elif f.get("needs_you") or state == "needs_you" or elight == "orange":
+            light, word, why = "orange", "needs you", str(f.get("needs_you") or att.get("reason") or "")
+        elif pid in (working or set()) or state == "working" or elight == "green":
+            light, word, why = "green", "working", str(att.get("reason") or "")
+        else:
+            light, word, why = "gray", "idle", ""
+        out[pid] = {"light": light, "word": word, "why": " ".join(why.split())[:160]}
+    return out
+
+
 def _high_seat_context():
     """Everything the High Seat page (W1b, 2026-09-26) is made of, read once per request: the
     registry, each project's steward record (home_rows), the ranked rows and the brief
@@ -7785,6 +7829,10 @@ def _high_seat_context():
         prefs_html = ""
     capacity = _capacity_rows()
     week = _hr.week_in_words(today)
+    try:
+        lights = _project_lights(everything, facts, working)      # W2e: every card's light in his words
+    except Exception:
+        lights = {}
     hs_turns, hs_stamp = [], ""
     if campaign:
         try:
@@ -7805,6 +7853,7 @@ def _high_seat_context():
         "projects_html": _high_seat_projects_html(groups, facts),
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
+        "lights": lights,
     }
 
 
