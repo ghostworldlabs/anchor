@@ -523,10 +523,10 @@ def _place_tier(project, step, tier, position):
 
 def place(project, step, band, position, tier=None, tier_position=None):
     """ONE act for a drop on the goal board (W2 v2): into Active at a position (activate there, or reorder), or into
-    a tier's band at a position (off the set if it was on it; the tier changed if it differs; its place in that
-    tier). One receipt; one undo that inverts the whole drop — the old band, the old tier and the old place in it
-    (Grok W2: an active goal dropped onto another tier comes back active AND in its old tier). A refusal after a
-    landed write carries that same undo, so he can put it back."""
+    a tier's band (off the set if it was on it; the tier changed if it differs — no position: his word, no ranking
+    inside a tier). One receipt; one undo that inverts the whole drop — the old band and the old tier (Grok W2: an
+    active goal dropped onto another tier comes back active AND in its old tier). A refusal after a landed write
+    carries that same undo, so he can put it back."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
         return _no("no such goal")
@@ -538,9 +538,8 @@ def place(project, step, band, position, tier=None, tier_position=None):
     was_active = s.get("active") is True
     old_tier = s.get("tier") if s.get("tier") in (1, 2, 3) else None
     old_active_pos = next((k for k, (x, g) in enumerate(_active(project)) if x["id"] == step), None)
-    old_tier_pos = _tier_ids(project, old_tier).index(step) if old_tier and step in _tier_ids(project, old_tier) else 0
-    undo = ({"act": "place", "step": step, "band": "active", "position": old_active_pos or 0, "tier": old_tier, "tier_position": old_tier_pos} if was_active
-            else {"act": "place", "step": step, "band": str(old_tier), "position": old_tier_pos} if old_tier else None)
+    undo = ({"act": "place", "step": step, "band": "active", "position": old_active_pos or 0, "tier": old_tier} if was_active
+            else {"act": "place", "step": step, "band": str(old_tier), "position": 0} if old_tier else None)
     landed = []          # what has been written so far — a refusal after this point carries the undo
     said = []
     # an undo that names the tier puts the goal back in it first (the set is a mark; the tier is its home)
@@ -550,9 +549,6 @@ def place(project, step, band, position, tier=None, tier_position=None):
         if not r.get("ok"):
             return r
         landed.append("tier")
-        err = _place_tier(project, step, want_tier, int(tier_position or 0))
-        if err:
-            return _no("%s moved to tier %d, but its place there could not be set: %s — undo puts it back" % (s.get("name"), want_tier, err), undo=undo)
         said.append("%s back in tier %d" % (s.get("name"), want_tier))
     if band == "active":
         if was_active:
@@ -575,6 +571,8 @@ def place(project, step, band, position, tier=None, tier_position=None):
     if band not in ("1", "2", "3"):
         return _no("a band is Active or a tier 1, 2 or 3")
     tier = int(band)
+    if not was_active and old_tier == tier:
+        return _no("%s is already in tier %d — there is no order inside a tier" % (s.get("name"), tier))
     if was_active:
         r = bench(project, step)
         if not r.get("ok"):
@@ -582,19 +580,10 @@ def place(project, step, band, position, tier=None, tier_position=None):
         landed.append("bench")
         said.append("%s to the bench" % s.get("name"))
     if old_tier != tier:
-        r = move_tier(project, step, tier)      # no order here: _place_tier is the one order writer
+        r = move_tier(project, step, tier)      # the tier only (his word, 18:4x): no ranking inside a tier
         if not r.get("ok"):
             return _no("%s — undo puts it back" % r.get("receipt"), undo=undo) if landed else r
-        landed.append("tier")
         said.append(("moved to tier %d" % tier) if said else "%s moved to tier %d" % (s.get("name"), tier))
-    err = _place_tier(project, step, tier, position)
-    if err:
-        return _no("%s — but its place in tier %d could not be set: %s — undo puts it back" % (", ".join(said) or s.get("name"), tier, err), undo=undo if landed else None)
-    where = "first" if position == 0 else "number %d" % (position + 1)
-    if said:
-        said.append("%s in tier %d" % (where, tier))
-    else:
-        said.append("%s is %s in tier %d" % (s.get("name"), where, tier))
     line = ", ".join(said) + ((" — " + _set_line(project)) if was_active else "")
     return _ok(line, undo=undo)
 

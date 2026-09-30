@@ -187,6 +187,7 @@
       if (!dragId) return;
       e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
       clearMarks(); band.classList.add('over');
+      if (band.getAttribute('data-band') !== 'active') return;      // no order inside a tier (his word): the band lights, no slot
       var at = indexAt(band, e.clientX, e.clientY);
       if (at.tiles.length) { if (at.k < at.tiles.length) at.tiles[at.k].classList.add('over-before'); else at.tiles[at.tiles.length - 1].classList.add('over-after'); }
     });
@@ -196,6 +197,7 @@
       e.preventDefault();
       var to = band.getAttribute('data-band'), id = dragId, from = dragFrom; clearMarks();
       if (to === 'none') return;
+      if (to !== 'active') { if (to === from) return; act({ act: 'place', step: id, band: to, position: 0 }); return; }   // a tier: the tier only
       var k = indexAt(band, e.clientX, e.clientY).k;
       if (to === from) { var was = tilesOf(band).map(function (r) { return r.getAttribute('data-lane'); }).indexOf(id); if (was === k) return; }
       act({ act: 'place', step: id, band: to, position: k });

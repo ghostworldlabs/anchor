@@ -49,7 +49,7 @@ def test_the_board_is_the_goals_in_bands_active_then_the_tiers():
     assert "initiative" not in re.sub(r"<[^>]+>", " ", html).lower(), "the word retires from what he reads (his choice, 18:0x)"
     trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="paper"')]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
-    assert 'id="viewTitle">The goals</h3>' in html and "4 in priority order &middot; Active 2 &middot; T1 3 / T2 1 / T3 0" in html
+    assert 'id="viewTitle">The goals</h3>' in html and "4 goals &middot; Active 2 &middot; T1 3 / T2 1 / T3 0" in html
     assert 'class="itile' not in html, "no second board: the old tiles are gone"
     # the tiers as bands even when the set is empty; an untiered goal gets its own band
     steps = [dict((k, v) for k, v in s.items() if k not in ("active", "active_order")) for s in w1._steps()]
@@ -99,7 +99,7 @@ def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
 def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     js = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
     drag = js[js.index("var dragId"):js.index("// the goal's place")]
-    assert "act({ act: 'place', step: id, band: to, position: k })" in drag and drag.count("act({") == 1, "one drop, one act"
+    assert "act({ act: 'place', step: id, band: to, position: k })" in drag and "act({ act: 'place', step: id, band: to, position: 0 })" in drag and drag.count("act({") == 2, "one drop, one act: a position only inside Active"
     place = js[js.index("// the goal's place"):js.index("// the goal's conversation")]
     assert "act({ act: 'done_when', step: id, text: v })" in place and "act({ act: 'pace', step: id, when: inp.value || 'none' })" in place
     assert "act({ act: 'activate', step: b.getAttribute('data-activate') })" in place and "act({ act: 'bench', step: b.getAttribute('data-bench') })" in place
@@ -110,50 +110,44 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
 
 
 def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monkeypatch):
+    """His word (18:4x): no ranking inside a tier. A drop into a tier band is the tier only; into Active, a position."""
     d = w1._record(tmp_path)
     _fake_engine(tmp_path, monkeypatch)
-    ids = lambda: ([x["id"] for x, g in acts._active(d)], acts._tier_ids(d, 1), acts._tier_ids(d, 2))
-    assert ids() == (["magi", "mba"], ["trusts", "magi", "mba"], ["paper"])
-    # tier → Active at the top
+    ids = lambda: ([x["id"] for x, g in acts._active(d)], sorted(acts._tier_ids(d, 1)), sorted(acts._tier_ids(d, 2)))
+    assert ids() == (["magi", "mba"], ["magi", "mba", "trusts"], ["paper"])
+    # tier -> Active at the top
     r = acts.act(d, {"act": "place", "step": "trusts", "band": "active", "position": 0})
     assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"] and r["undo"] == {"act": "bench", "step": "trusts"}
-    # within Active
+    # within Active: a position; the undo carries the old position (and the tier, unchanged)
     r = acts.act(d, {"act": "place", "step": "mba", "band": "active", "position": 0})
-    assert r["ok"] and ids()[0] == ["mba", "trusts", "magi"] and r["undo"] == {"act": "place", "step": "mba", "band": "active", "position": 2, "tier": 1, "tier_position": 2}
+    assert r["ok"] and ids()[0] == ["mba", "trusts", "magi"] and r["undo"] == {"act": "place", "step": "mba", "band": "active", "position": 2, "tier": 1}
     r = acts.act(d, r["undo"])
     assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"]
-    # Active → a tier it was not in, at a position: off the set, the tier changed, its place there; one receipt, one undo back into Active
+    # Active -> another tier: off the set and the tier changed, no position; one receipt; the undo puts it back active AND in its old tier
     r = acts.act(d, {"act": "place", "step": "magi", "band": "2", "position": 0})
-    assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["magi", "paper"]), ids()
-    assert r["receipt"].startswith("Artificial Magi to the bench, moved to tier 2, first in tier 2 — the set is The trusts and the holding company, MBA Teaching, Fall 2026")
-    assert r["undo"] == {"act": "place", "step": "magi", "band": "active", "position": 1, "tier": 1, "tier_position": 1}, "the undo carries the old band AND the old tier (Grok W2)"
+    assert r["ok"] and ids() == (["trusts", "mba"], ["mba", "trusts"], ["magi", "paper"]), ids()
+    assert r["receipt"].startswith("Artificial Magi to the bench, moved to tier 2 — the set is The trusts and the holding company, MBA Teaching, Fall 2026")
+    assert r["undo"] == {"act": "place", "step": "magi", "band": "active", "position": 1, "tier": 1}
     r = acts.act(d, r["undo"])
-    assert r["ok"] and ids() == (["trusts", "magi", "mba"], ["trusts", "magi", "mba"], ["paper"]) and acts._step(d, "magi")["tier"] == 1, "back in the set at its index AND back in tier 1 at its place"
+    assert r["ok"] and ids() == (["trusts", "magi", "mba"], ["magi", "mba", "trusts"], ["paper"]) and acts._step(d, "magi")["tier"] == 1
     assert r["receipt"].startswith("Artificial Magi back in tier 1 — Artificial Magi is active")
-    # Magi out of the set into tier 2 behind Paper 1; then within tier 2: a new position, the others close up, the undo puts it back
-    r = acts.act(d, {"act": "place", "step": "magi", "band": "2", "position": 1})
-    assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["paper", "magi"])
-    r = acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 1})
-    assert r["ok"] and ids()[2] == ["magi", "paper"] and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
+    # a benched goal between tiers: the tier only; the undo is the old tier
+    r = acts.act(d, {"act": "place", "step": "paper", "band": "1", "position": 0})
+    assert r["ok"] and ids()[1] == ["magi", "mba", "paper", "trusts"] and acts._step(d, "paper")["tier"] == 1 and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
     r = acts.act(d, r["undo"])
-    assert r["ok"] and ids()[2] == ["paper", "magi"]
-    # a benched goal between tiers at a position
-    r = acts.act(d, {"act": "place", "step": "paper", "band": "1", "position": 1})
-    assert r["ok"] and ids()[1] == ["trusts", "paper", "mba"] and acts._step(d, "paper")["tier"] == 1
-    assert r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
-    r = acts.act(d, r["undo"])
-    assert r["ok"] and ids() == (["trusts", "mba"], ["trusts", "mba"], ["paper", "magi"])
+    assert r["ok"] and ids()[2] == ["paper"]
+    assert not acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 0})["ok"], "already in its tier: nothing to do (no order inside a tier)"
     assert not acts.act(d, {"act": "place", "step": "paper", "band": "4", "position": 0})["ok"]
     assert not acts.act(d, {"act": "place", "step": "nope", "band": "1", "position": 0})["ok"]
-    # a refusal after a landed write carries the undo (one failure surface)
-    real = acts._spine_set
-    def failing(project, step_id, fields):
-        if "navigation" in fields:
+    # a refusal after a landed write carries the undo (one failure surface): Active -> tier 2, the bench lands, the tier write fails
+    real = acts._cli
+    def failing(project, *args):
+        if "--tier" in args:
             return {"ok": False, "error": "disk full"}
-        return real(project, step_id, fields)
-    monkeypatch.setattr(acts, "_spine_set", failing)
-    r = acts.act(d, {"act": "place", "step": "trusts", "band": "2", "position": 0})      # active -> tier 2: the bench lands, the tier lands, the place fails
-    assert not r["ok"] and "undo puts it back" in r["receipt"] and r["undo"] == {"act": "place", "step": "trusts", "band": "active", "position": 0, "tier": 1, "tier_position": 0}
+        return real(project, *args)
+    monkeypatch.setattr(acts, "_cli", failing)
+    r = acts.act(d, {"act": "place", "step": "trusts", "band": "2", "position": 0})
+    assert not r["ok"] and "undo puts it back" in r["receipt"] and r["undo"] == {"act": "place", "step": "trusts", "band": "active", "position": 0, "tier": 1}
 
 
 def test_the_goal_is_revised_as_its_done_when_with_undo(tmp_path, monkeypatch):

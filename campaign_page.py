@@ -118,12 +118,12 @@ def _gtile(i, ctx, band):
     dcls = ("over" if nd_d and nd_d < today else ("soon" if nd_d and (nd_d - today).days <= 7 else ""))
     return (
         '<article class="gtile%s%s" draggable="true" data-lane="%s" data-band="%s" style="--areac:%s">'
-        '<div class="ihead"><span class="pnum" title="goal %d of %d">%d</span><button class="iname" data-open="%s" title="open its place">%s</button>'
+        '<div class="ihead"><button class="iname" data-open="%s" title="open its place">%s</button>'
         '<span class="gtier">tier %s</span><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
         '<div class="ggoal" title="%s">%s</div>%s'
         '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span><span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
     ) % (" needs" if i["needs"] else "", " active" if i.get("active") else "", esc(i["id"]), band, AREA_COLOURS.get(i["area"], "#8b93a6"),
-         i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["name"]), i["tier"] or "?",
+         esc(i["id"]), esc(i["name"]), i["tier"] or "?",
          initiative_light(i, ctx.get("working") or set()), glyph, word,
          esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>',
          _cockpits(i, ctx),
@@ -144,7 +144,7 @@ def _bands(ctx):
     inits = ctx["initiatives"]
     act = active_set(inits)
     rest = [i for i in inits if not i.get("active")]
-    out = [_band("active", "Active", "what you are on now, in your order &middot; drag a goal in or out, whatever its tier", act, ctx, "active")]
+    out = [_band("active", "Active", "what you are on now, in your order &middot; drag a goal in or out, whatever its tier; up or down here to order them", act, ctx, "active")]
     for t in (1, 2, 3):
         mine = [i for i in rest if i["tier"] == t]
         needs = sum(1 for i in mine if i["needs"])
@@ -444,10 +444,10 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_active = sum(1 for i in inits if i.get("active"))
     board = (
         '<section class="board" aria-label="The Campaign" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
-        '<span class="c" id="boardCount">%d in priority order &middot; Active %d &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
+        '<span class="c" id="boardCount">%d goals &middot; Active %d &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close the goal</button></div>'
         '%s%s%s%s%s'
-        '<p class="boardfoot" id="boardFoot">Drag a goal up or down in its band, into another tier, or into <b>Active</b>; click its name for its place &mdash; every change is one line with undo.</p></section>'
+        '<p class="boardfoot" id="boardFoot">Drag a goal into another tier, or into <b>Active</b> and up or down there; there is no order inside a tier. Click a name for its place &mdash; every change is one line with undo.</p></section>'
     ) % (esc(open_id or ""), len(inits), n_active, tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _seedband(ctx), _areas(ctx), _bands(ctx), _places(ctx), _calendar(ctx))
     hdr = (

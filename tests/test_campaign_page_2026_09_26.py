@@ -65,8 +65,8 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert '<span class="ilight needs"' in tile and 'class="gpc needs"' in tile and "MBA Teaching AI" in tile    # the face: its cockpit with its light
     place = html[html.index('id="place-mba-teaching"'):html.index('id="place-trusts"')]
     assert place.index('class="imore"') < place.index('class="istatus"') < place.index('class="obody"')
-    assert "2 in priority order &middot; Active 0 &middot; T1 1 / T2 1 / T3 0" in html
-    assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "goal 1 of 2" in html
+    assert "2 goals &middot; Active 0 &middot; T1 1 / T2 1 / T3 0" in html
+    assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "goal" in html
     assert "retool homework 2" in html and "Oct 27" in html and "Lectures 3 + 4 revised, with AI supplements" in html
     assert 'data-act="date" data-part="hw"' in html                      # a native part's date can be moved here
     assert 'its date lives in its own record' in html                    # a referenced part's cannot
