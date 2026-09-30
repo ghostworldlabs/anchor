@@ -208,7 +208,6 @@
   // opening any part of it is the look (kept in this browser, by the wait's own words: a new wait pulses again)
   function seen(card) { var tok = card.getAttribute('data-ready'); card.classList.remove('ready'); if (!tok) return; try { localStorage.setItem('hs_seen_' + card.id, tok); } catch (e) {} }
   $$('.tile[data-ready]').forEach(function (c) { var tok = c.getAttribute('data-ready'), was = ''; try { was = localStorage.getItem('hs_seen_' + c.id) || ''; } catch (e) {} if (was !== tok) c.classList.add('ready'); });
-  function tokenQ2() { var t = token(); return t ? ('&token=' + encodeURIComponent(t)) : ''; }
   function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
   // W2e-2 (2026-09-30, his word on the W2e preview): the tile OPENS to its decision brief — what waits on him, the
   // decision with the recommendation and one Accept, the material to review, the next step — and its dialogue, a
@@ -223,7 +222,7 @@
   function grow(card) { var d = $('.cdlg', card); if (d) d.classList.add('big'); card.classList.add('talking'); }
   function startTalk(card, pid, dir) {
     var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate');
-    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir) + tokenQ2(), { headers: headers() })
+    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir) + (window.StewardDialogue ? window.StewardDialogue.tokenQ() : ''), { headers: headers() })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         var ts = ((j && j.turns) || []).slice(-8); list.innerHTML = '';
@@ -250,10 +249,11 @@
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (card.classList.contains('open')) return;
+    $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });   // one tile open, one dialogue polling (Grok's read of W2e)
     card.classList.add('open'); card.classList.remove('talking'); body.hidden = false; seen(card);
     body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id);
     fetchPart(pid, 'brief', dir, false, true)
-      .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) b.innerHTML = html; })
+      .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; } })   // the served brief IS the rectangle (never one cbrief inside another)
       .catch(function () { var b = $('.cbrief', card); if (b) b.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
     startTalk(card, pid, dir);
   }
@@ -286,6 +286,14 @@
       if (e.target.closest('a, button, .t-body')) return;
       if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
     });
+  });
+  // W2e-3 (his word): the ask is a banner; a click opens the description and the recommendation; "talk about it" puts
+  // the ask into the tile's dialogue and grows it
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('.cb-ask');
+    if (a) { e.preventDefault(); e.stopPropagation(); var bd = a.parentNode.querySelector('.cb-body'); if (!bd) return; var open = bd.hidden; bd.hidden = !open; a.setAttribute('aria-expanded', open ? 'true' : 'false'); a.classList.toggle('open', open); return; }
+    var t = e.target.closest('.cb-talk');
+    if (t) { e.preventDefault(); e.stopPropagation(); var card = t.closest('.tile'), box = card && card.querySelector('.cdlg textarea'); if (!box) return; grow(card); box.value = 'About: ' + (t.getAttribute('data-ask') || '') + ' \u2014 '; box.focus(); try { box.setSelectionRange(box.value.length, box.value.length); } catch (err) {} }
   });
   // Accept in the brief: one click, the answer said to the steward as the cockpit says it, the dialogue takes the tile
   document.addEventListener('click', function (e) {

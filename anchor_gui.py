@@ -7717,15 +7717,24 @@ def _project_lights(entries, facts, working):
         if not isinstance(att, dict):
             att = {}
         state = str(att.get("state") or "").lower()
-        elight = ""
+        # the live light: every steward awake under this project's folder — the root or an effort — as the working
+        # rule finds them (Grok's read of W2e); red ahead of orange ahead of green
+        elights = []
         try:
-            eng = engines.get(folder) if folder else None
-            elight = eng.light() if eng is not None else ""
+            root = Path(folder).resolve() if folder else None
+            for cdir, eng in engines.items():
+                try:
+                    c = Path(str(cdir)).resolve()
+                    if root is not None and (c == root or root in c.parents):
+                        elights.append(str(eng.light() or ""))
+                except Exception:
+                    continue
         except Exception:
-            elight = ""
+            elights = []
+        elight = "red" if "red" in elights else ("orange" if "orange" in elights else ("green" if "green" in elights else ""))
         if elight == "red" or state == "blocked":
             light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
-        elif f.get("needs_you") or state == "needs_you" or elight == "orange":
+        elif f.get("needs_you") or state in ("needs_you", "deliverable_ready") or elight == "orange":
             light, word, why = "orange", "needs you", str(f.get("needs_you") or att.get("reason") or "")
         elif pid in (working or set()) or state == "working" or elight == "green":
             light, word, why = "green", "working", str(att.get("reason") or "")

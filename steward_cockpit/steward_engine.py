@@ -1511,6 +1511,20 @@ class Engine:
                         self._emit({"t": "john", "text": text})
                         self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
                     return {"ok": True, "queued": True, "maintenance": True}
+                if human:
+                    # W2e (2026-09-30, John: "not delivered - your text is back in the box" after a restart): a wake that
+                    # failed (the provider deferred, the settings unreadable, the CLI gone) keeps his words durably; they
+                    # go on the next wake - never his to retype. A control that cannot be delivered is simply not sent.
+                    with self._lock:
+                        if not self._record_conversation("john", text, goal=goal):
+                            return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
+                        self.queue.append(_scoped_text(text, goal, goal_name))
+                        if not self._persist_queue():
+                            self.queue.pop()
+                            return {"ok": False, "error": "could not durably queue your text"}
+                        self._emit({"t": "john", "text": text})
+                        self._emit({"t": "sys", "text": "the steward could not wake just now (" + str(why) + ") - your text is kept and goes when it wakes"})
+                    return {"ok": True, "queued": True, "kept": True}
                 return {"ok": False, "error": why}
 
         # One ingress transaction: update the human/control state, append the
@@ -1634,15 +1648,6 @@ class Engine:
                 return {"ok": True, "queued": True, "maintenance": True}
             ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""),
                                    origin="human" if human else "control")
-            if not ok and human:
-                # W2e (2026-09-30, John: "not delivered - your text is back in the box" after a restart): a send that
-                # could not reach the steward (its pipe gone in a restart's window, the provider deferred, the
-                # settings unreadable) is KEPT durably and goes when the steward next wakes - never his to retype.
-                self.queue.append(text)
-                if self._persist_queue():
-                    self._emit({"t": "sys", "text": "the steward could not take your text just now - it is kept and goes when the steward wakes"})
-                    return {"ok": True, "queued": True, "kept": True}
-                self.queue.pop()
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}

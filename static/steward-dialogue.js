@@ -50,7 +50,6 @@
     function showState(s) { var el = $(o.state || '#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
     // a GET on these pages carries the token on the query (the dashboard convention; the server's GET gate does not read
     // the header) — his polls were refused with the header alone and the page asked again three times a second (W2c-3)
-    function tokenQ() { var t = ''; try { t = localStorage.getItem('anchor_token') || ''; } catch (e) {} return t ? ('&token=' + encodeURIComponent(t)) : ''; }
     function q() { return '?pid=' + encodeURIComponent(PID) + '&dir=' + encodeURIComponent(DIR) + tokenQ(); }
     var refused = false;
     function refusedOnce() {   // a refused poll: said once, the loop stopped; the page's own login (when it has one) is offered
@@ -136,7 +135,8 @@
           box.value = '';
           live.target = list; live.goal = goal || null; live.line = null; live.skipJohn = text;
           appendLine('you', text);
-          if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');
+          if (j.kept) appendLine('sys', 'the steward could not wake just now — your text is kept and goes when it wakes', 'dim');
+          else if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');
           receipt(goal ? 'Said to the steward about this goal — it answers as it writes.' : 'Said — the steward answers above as it writes.');
           if (!refused) pollLoop();
         })
@@ -147,5 +147,6 @@
     function stop() { live.stopped = true; }
     return { send: send, appendLine: appendLine, mainList: mainList, stop: stop };
   }
-  window.StewardDialogue = { init: init };
+  function tokenQ() { var t = ''; try { t = localStorage.getItem('anchor_token') || ''; } catch (e) {} return t ? ('&token=' + encodeURIComponent(t)) : ''; }
+  window.StewardDialogue = { init: init, tokenQ: tokenQ };   // tokenQ: the one way a GET on these pages carries the token
 })();

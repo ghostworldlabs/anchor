@@ -14,6 +14,7 @@ effort without a steward record yields an honest line, never a blank.
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 
 from . import steward_campaign as campaign
@@ -174,10 +175,32 @@ def _question(cdir, eng):
     return q if isinstance(q, dict) and q.get("question") else None
 
 
+def _description(q, ask):
+    """The sentences the question stands on: the steward's stake lines when it gave them, else the context's own
+    sentences with the question and the recommendation left out (they have their own places)."""
+    stake = [str(x).strip() for x in (q.get("stake") or []) if str(x).strip()]
+    if stake:
+        return " ".join(stake)
+    ctx = " ".join(str(q.get("context") or "").split())
+    if not ctx:
+        return ""
+    rec = str(q.get("recommendation") or "").strip().lower().rstrip(".")
+    keep = []
+    for sent in re.split(r"(?<=[.!?])\s+", ctx):
+        low = sent.strip().lower().rstrip(".")
+        if not low or low == ask.strip().lower().rstrip("?.") or low == ask.strip().lower() or low.startswith("i recommend") or (rec and (low.startswith(rec[:40]) or rec.startswith(low[:40]))):
+            continue
+        keep.append(sent.strip())
+        if len(keep) >= 3:
+            break
+    return " ".join(keep)
+
+
 def brief_html(cdir, pid, rel=""):
-    """W2e-2 (2026-09-30, his word): the decision brief the tile opens to — what waits on him, the decision with the
-    steward's recommendation and one Accept, the material to review as links (the question's members, the items
-    pinned for review), the next step. The key material, never hunted for."""
+    """W2e-2/3 (2026-09-30, his words): the decision brief the tile opens to. The ASK as the cockpit's banner — one
+    line, the question the steward put to him (else the wait) — which opens to the description (the sentences the
+    question stands on), the recommendation with one Accept and its why, the alternatives, the material to review as
+    links, and "talk about it"; under the banner the next step. The key material, never hunted for."""
     eng = _live_engine(cdir)
     m = campaign.read_map(cdir)
     hb = m.get("heartbeat") or {}
@@ -204,23 +227,43 @@ def brief_html(cdir, pid, rel=""):
     except Exception:
         pass
     nxt = str(hb.get("next_recommended") or hb.get("why_next") or "").strip()
-    out = ['<div class="cbrief">']
-    out.append('<div class="cb-wait%s">%s</div>' % (" on" if wait else "", ("&#9873; Needs you: " + esc(wait)) if wait else "Nothing waits on you here."))
-    if q:
-        rec = str(q.get("recommendation") or "").strip()
-        why = str(q.get("why") or "").strip()
-        out.append('<div class="cb-q"><span class="k">The decision</span>%s</div>' % esc(str(q.get("question") or "")[:400]))
-        if rec:
-            out.append('<div class="cb-rec"><button class="cb-accept" data-qid="%s" data-rec="%s">Accept the recommendation</button><span class="cb-rectext">%s%s</span></div>' % (
-                esc(str(q.get("id") or "")), esc(rec[:240]), esc(rec[:240]), (" &mdash; " + esc(why[:200])) if why else ""))
-            if q.get("reversible") is True and q.get("undo"):
-                out.append('<div class="cb-auth">Reversible &middot; proceeds on the recommendation after four hours of silence &middot; undo: %s</div>' % esc(str(q.get("undo"))[:120]))
-        else:
-            out.append('<div class="cb-rec dim">No recommendation given &mdash; answer in the dialogue below.</div>')
-        for alt in (q.get("alternatives") or [])[:3]:
-            out.append('<div class="cb-alt">or: %s</div>' % esc(str(alt)[:160]))
-    if links:
-        out.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
+    ask = (str(q.get("question") or "").strip() if q else "") or wait
+    out = ['<div class="cbrief%s">' % (" ask" if ask else "")]
+    if ask:
+        out.append('<button class="cb-ask" type="button" aria-expanded="false"><span class="cb-flag">%s</span><span class="cb-line">%s</span><span class="cb-caret">&#9662;</span></button>' % (
+            "decision" if q else "needs you", esc(ask[:220])))
+        body = []
+        if q:
+            desc = _description(q, ask)
+            if desc:
+                body.append('<div class="cb-desc">%s</div>' % esc(desc[:700]))
+            if wait and wait.lower() not in ask.lower():
+                body.append('<div class="cb-wait on">&#9873; %s</div>' % esc(wait))
+            rec = str(q.get("recommendation") or "").strip()
+            why = str(q.get("why") or "").strip()
+            if rec:
+                body.append('<div class="cb-rec"><button class="cb-accept" type="button" data-qid="%s" data-rec="%s">Accept the recommendation</button><span class="cb-rectext">%s%s</span></div>' % (
+                    esc(str(q.get("id") or "")), esc(rec[:240]), esc(rec[:240]), (" &mdash; " + esc(why[:200])) if why else ""))
+                if q.get("reversible") is True and q.get("undo"):
+                    body.append('<div class="cb-auth">Reversible &middot; proceeds on the recommendation after four hours of silence &middot; undo: %s</div>' % esc(str(q.get("undo"))[:120]))
+                elif q.get("reversible") is False:
+                    body.append('<div class="cb-auth">Not reversible &middot; waits for you</div>')
+            else:
+                body.append('<div class="cb-rec dim">No recommendation given &mdash; talk about it below.</div>')
+            for alt in (q.get("alternatives") or [])[:3]:
+                body.append('<div class="cb-alt">or: %s</div>' % esc(str(alt)[:160]))
+            if q.get("authorizes"):
+                body.append('<div class="cb-auth">Authorizes: %s</div>' % esc(str(q.get("authorizes"))[:160]))
+            if q.get("decide_by"):
+                body.append('<div class="cb-auth">Decide by: %s</div>' % esc(str(q.get("decide_by"))[:80]))
+        if links:
+            body.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
+        body.append('<a class="cb-talk" href="#" data-ask="%s">talk about it</a>' % esc(ask[:220]))
+        out.append('<div class="cb-body" hidden>%s</div>' % "".join(body))
+    else:
+        out.append('<div class="cb-wait">Nothing waits on you here.</div>')
+        if links:
+            out.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
     if nxt:
         out.append('<div class="cb-next"><span class="k">Next</span>%s</div>' % esc(nxt[:200]))
     out.append('</div>')

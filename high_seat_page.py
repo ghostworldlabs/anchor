@@ -416,8 +416,9 @@ def _desk_card(ctx, g, p):
     else:
         line = '<div class="t-line"><span class="k">State</span>%s</div>' % esc(p.get("state") or p.get("status") or "planned")
     date = (' &middot; %s' % esc(_hr.due_label(p["date"], ctx["today"]))) if p.get("date") else ""
+    dot = '<span class="tlight %s" title="%s"></span>' % (("orange", "needs you") if p.get("needs_you") else ("gray", "idle"))      # a desk card has a light too (Grok's read of W2e)
     return (
-        '<article class="tile desk%s" id="card-%s" data-step="%s" data-name="%s" draggable="true"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span><span class="t-eff">at the desk%s</span></h3>'
+        '<article class="tile desk%s" id="card-%s" data-step="%s" data-name="%s" draggable="true"><div class="t-top">' + dot + '<h3 class="t-name"><span class="t-nm">%s</span><span class="t-eff">at the desk%s</span></h3>'
         '<button class="t-x" data-home="%s" title="back to its goal">&times;</button></div><div class="t-goal">in <b>%s</b></div>%s'
         '<div class="t-acts"><a class="t-talk" href="/project/%s?view=desk" target="_blank" rel="noopener">talk to the desk &#8599;</a></div></article>'
     ) % (" need" if p.get("needs_you") else "", esc(p["id"]), esc(p["id"]), esc(part_name(p)), esc(part_name(p)), date, esc(p["id"]), esc(g["name"]), line,
@@ -450,7 +451,18 @@ def _seat_shelves(ctx):
                     wait = re.sub(r"^waiting on you[:\s]*", "", st_, flags=re.I).strip(" .") if st_.lower().startswith("waiting on you") else ""
                     f = dict(f, effort=p.get("dir") or f.get("effort") or "", needs_you=wait or ("" if st_ else f.get("needs_you") or ""), needs_you_effort="", other_waits=[],
                              wait_age_days=None, next=p.get("lead") or p.get("text") or f.get("next") or "", repair_proposals=[], efforts_gap="")
-                out.append(_card(e, f, "", goal=g, step=p, light=(ctx.get("lights") or {}).get(p["pid"])))
+                lt = (ctx.get("lights") or {}).get(p["pid"])
+                if p["kind"] == "effort" and p.get("state"):      # an effort's card takes ITS effort's flag (Grok's read of W2e): the resolver read it into the part's state
+                    st_ = str(p.get("state") or "").lower()
+                    if st_.startswith("blocked"):
+                        lt = {"light": "red", "word": "a problem", "why": st_}
+                    elif st_.startswith("waiting on you") or st_.startswith("needs you") or st_.startswith("deliverable ready"):
+                        lt = {"light": "orange", "word": "needs you", "why": re.sub(r"^(waiting on you|needs you)[:\s]*", "", str(p.get("state") or ""), flags=re.I)}
+                    elif st_.startswith("working") or st_ == "active":
+                        lt = {"light": "green", "word": "working", "why": re.sub(r"^working[:\s]*", "", str(p.get("state") or ""), flags=re.I)}
+                    else:
+                        lt = {"light": "gray", "word": "idle", "why": ""}
+                out.append(_card(e, f, "", goal=g, step=p, light=lt))
             else:
                 out.append(_desk_card(ctx, g, p))
         return "".join(out)

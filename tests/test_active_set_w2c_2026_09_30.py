@@ -75,7 +75,7 @@ def test_the_shelves_hold_the_seated_initiatives_as_cards_with_their_goal_and_th
     assert "&#9873; Needs you:" in card and 'data-part="status"' in card and 'href="/project/%s"' % MBA in card, "the project card as today, with its acts"
     eff = active[active.index('id="card-%s-mba-lectures"' % MBA):]
     assert 'data-dir="lectures"' in eff and 'data-step="mba-lectures"' in eff and "a cockpit within the project" in eff and '<span class="t-eff">&middot; lectures</span>' in eff, "a cockpit within a project is its own card on its own effort"
-    assert 'href="/project/%s?dir=lectures"' % MBA in eff and "Needs you:" not in eff and "working: lecture 4" not in eff and "<span class=\"k\">Next</span>The lectures" in eff, "the effort card opens THAT effort and reads its own state, not the project's wait (Grok W2c)"
+    assert 'href="/project/%s?dir=lectures"' % MBA in eff and "Needs you:" not in eff and 'class="tlight green" title="working: lecture 4"' in eff and "<span class=\"k\">Next</span>The lectures" in eff, "the effort card opens THAT effort and reads its own state (its light, W2e) — not the project's wait (Grok W2c)"
     assert "camp-note" not in html[html.index('id="camp"'):html.index('id="shActive"')] and "def _shelf" not in open(os.path.join(HERE, "high_seat_page.py"), encoding="utf-8").read()
     assert active.index('id="card-%s"' % MBA) < active.index('id="card-%s-mba-lectures"' % MBA), "his order"
     deck = html[html.index('id="shDeck"'):html.index('id="ptile"')]

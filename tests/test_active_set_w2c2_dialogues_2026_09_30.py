@@ -57,7 +57,7 @@ def test_the_campaign_page_uses_the_same_dialogue():
 
 def test_one_dialogue_script_and_one_stylesheet_carry_the_mechanism():
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
-    for s in ("window.StewardDialogue = { init: init }", "primeSeq().then(function () { if (!refused) pollLoop(); })", "'/api/steward/events'", "'/api/steward/say'", "function catchUp", "'build-mismatch'", "function stateText", "pair.mi = put(main",
+    for s in ("window.StewardDialogue = { init: init, tokenQ: tokenQ }", "primeSeq().then(function () { if (!refused) pollLoop(); })", "'/api/steward/events'", "'/api/steward/say'", "function catchUp", "'build-mismatch'", "function stateText", "pair.mi = put(main",
               "function tokenQ()", "+ tokenQ()", "function refusedOnce()", "if (r.status === 401 || r.status === 403)", "if (!j || !j.events) { setTimeout(step, 3000); return; }"):
         assert s in dlg, s
     cp = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
