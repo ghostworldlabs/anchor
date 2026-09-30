@@ -374,102 +374,154 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "activate", "bench", "order", "pace", "done_when", "place"}
+        "pace", "done_when", "place", "seat", "home", "new_goal"}
 
 
-# ── the active set (2026-09-29, John: "the active group") ─────────────────────────────────────────────────────────
+# ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
 
-def _active(project):
-    """The active initiatives (step, group) in the set's order."""
-    act = [(x, g) for x, g in _initiatives(project) if x.get("active") is True]
-    return sorted(act, key=lambda t: (t[0].get("active_order") if isinstance(t[0].get("active_order"), int) else 999, t[0].get("tier") or 9, int(t[1].get("order") or 0)))
+SEATS = ("active", "deck")
+INITIATIVE_KINDS = ("project", "effort", "task")
 
 
-def _set_line(project):
-    names = [x.get("name") or x["id"] for x, g in _active(project)]
-    n = len(names)
-    line = "the set is " + (", ".join(names) if names else "empty")
-    if n > 3:
-        line += " — %d active is wider than three; the steward would keep to three" % n     # said, never refused (his word: no cap)
+def _kind_of(step):
+    ref = str(step.get("ref") or "")
+    return ref.split(":", 1)[0] if ref else "task"
+
+
+def _goal_of(project, step):
+    """The heading a part sits under (its navigation path's root), or None."""
+    nav = step.get("navigation") if isinstance(step.get("navigation"), dict) else {}
+    path = nav.get("path") or []
+    return _step(project, path[0]) if path else None
+
+
+def _seat_ids(project, seat, except_id=None):
+    """The components in a seat, in his order."""
+    rows = [(x.get("seat_order") if isinstance(x.get("seat_order"), int) else 999, x.get("name") or "", x["id"])
+            for x in _projection(project) if x.get("seat") == seat and x["id"] != except_id and x.get("status") not in ("done", "parked")]
+    return [sid for _o, _n, sid in sorted(rows)]
+
+
+def _seat_line(project, seat):
+    names = []
+    for sid in _seat_ids(project, seat):
+        x = _step(project, sid) or {}
+        names.append(x.get("name") or sid)
+    line = ("active: " if seat == "active" else "on deck: ") + (", ".join(names) if names else "nothing")
+    if seat == "active" and len(names) > 3:
+        line += " %s %d active is wider than three; the steward would keep to three" % ("\u2014", len(names))     # said, never refused (his word: no cap)
     return line
 
 
-def activate(project, step, order=None):
-    """Make an initiative active at the foot of the set (or at the order the undo carries)."""
-    s = _step(project, step)
-    if s is None or _own_group(s) is None:
-        return _no("no such goal")
-    if s.get("active") is True and order is None:
-        return _no("%s is already active" % s.get("name"))
-    place = int(order) if order is not None else len(_active(project))
-    r = _cli(project, "roadmap-set", "--step", step, "--active", "on", "--active-order", str(place))
-    if not r.get("ok"):
-        return _no("the engine refused: %s" % r.get("error"))
-    if order is not None:
-        err = _place(project, step, place)      # at a saved index (an undo) or a drop's position: the others close up around it
-        if err:
-            return _no("%s is active, but the set could not close up around it: %s — look at the board" % (s.get("name"), err))
-    return _ok("%s is active — %s" % (s.get("name"), _set_line(project)), undo={"act": "bench", "step": step})
-
-
-def bench(project, step):
-    """Take an initiative off the set; the set closes up; the pace stays (it is his date, not the set's)."""
-    s = _step(project, step)
-    if s is None or _own_group(s) is None:
-        return _no("no such goal")
-    if s.get("active") is not True:
-        return _no("%s is not active" % s.get("name"))
-    old_order = s.get("active_order") if isinstance(s.get("active_order"), int) else None
-    r = _cli(project, "roadmap-set", "--step", step, "--active", "off")
-    if not r.get("ok"):
-        return _no("the engine refused: %s" % r.get("error"))
-    err = _renumber_active(project)
-    if err:      # one outcome per act (Grok W1): a failed close-up refuses the receipt and carries no undo
-        return _no("%s is off the set, but the set could not close up: %s — look at the board" % (s.get("name"), err))
-    return _ok("%s to the bench — %s" % (s.get("name"), _set_line(project)), undo={"act": "activate", "step": step, "order": old_order})
-
-
-def _renumber_active(project):
-    """Close the set up (0, 1, 2 …); the first refused write is the error, else None."""
-    for k, (x, g) in enumerate(_active(project)):
-        if x.get("active_order") != k:
-            r = _cli(project, "roadmap-set", "--step", x["id"], "--active-order", str(k))
-            if not r.get("ok"):
-                return "the engine refused: %s" % r.get("error")
-    return None
-
-
-def _place(project, step, position):
-    """Put an active initiative at a position; the others close up around it. The first refused write is the error."""
-    ids = [x["id"] for x, g in _active(project) if x["id"] != step]
+def _place_seat(project, step, seat, position):
+    """Put a component at a position in a seat's order; the others close up. The first refused write is the error."""
+    ids = _seat_ids(project, seat, except_id=step)
     position = max(0, min(int(position), len(ids)))
     ids.insert(position, step)
     for k, sid in enumerate(ids):
         cur = _step(project, sid)
-        if cur.get("active_order") != k:
-            r = _cli(project, "roadmap-set", "--step", sid, "--active-order", str(k))
+        if cur.get("seat_order") != k:
+            r = _cli(project, "roadmap-set", "--step", sid, "--seat-order", str(k))
             if not r.get("ok"):
                 return "the engine refused: %s" % r.get("error")
     return None
 
 
-def order(project, step, position):
-    """Put an active initiative at a position in the set (a drag within Active); the others close up around it."""
+def _component(project, step):
+    """The step as a seatable component, or a refusal."""
     s = _step(project, step)
-    if s is None or _own_group(s) is None:
-        return _no("no such goal")
-    if s.get("active") is not True:
-        return _no("%s is not active — make it active first" % s.get("name"))
-    try:
-        position = int(position)
-    except Exception:
-        return _no("a position is a number")
-    old = next((k for k, (x, g) in enumerate(_active(project)) if x["id"] == step), None)
-    err = _place(project, step, position)
+    if s is None:
+        return None, _no("no such part")
+    if _own_group(s) is not None:
+        names = ", ".join((x.get("name") or x["id"]) for x in _parts_of(project, step) if _kind_of(x) in INITIATIVE_KINDS)[:200]
+        return None, _no("%s is a goal \u2014 a goal has no seat; name one of its components%s" % (s.get("name"), (": " + names) if names else ""))
+    if _kind_of(s) not in INITIATIVE_KINDS:
+        return None, _no("%s is a %s \u2014 it rides inside its goal; a cockpit, an effort or a desk item takes a seat" % (s.get("name"), _kind_of(s)))
+    return s, None
+
+
+def seat(project, step, seat, position=None):
+    """Put a component on the desk: ACTIVE or ON DECK, at a position (the foot when none); one receipt naming the
+    seat as it now is; the undo puts it back where it sat (its old seat and place, or its goal)."""
+    s, refusal = _component(project, step)
+    if refusal:
+        return refusal
+    seat = str(seat or "").strip().lower()
+    if seat not in SEATS:
+        return _no("a seat is active or deck")
+    old_seat = s.get("seat") if s.get("seat") in SEATS else None
+    old_pos = _seat_ids(project, old_seat).index(step) if old_seat and step in _seat_ids(project, old_seat) else None
+    if old_seat == seat and position is None:
+        return _no("%s is already %s" % (s.get("name"), "active" if seat == "active" else "on deck"))
+    place = int(position) if position is not None else len(_seat_ids(project, seat, except_id=step))
+    r = _cli(project, "roadmap-set", "--step", step, "--seat-in", seat, "--seat-order", str(place))
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    undo = {"act": "seat", "step": step, "seat": old_seat, "position": old_pos or 0} if old_seat else {"act": "home", "step": step}
+    err = _place_seat(project, step, seat, place)
+    if not err and old_seat and old_seat != seat:
+        err = _renumber_seat(project, old_seat)
     if err:
-        return _no(err)
-    return _ok("%s is %s in the set — %s" % (s.get("name"), ("first" if position == 0 else "number %d" % (position + 1)), _set_line(project)),
-               undo={"act": "order", "step": step, "position": old} if old is not None else None)
+        return _no("%s is %s, but the order could not close up: %s \u2014 undo puts it back" % (s.get("name"), "active" if seat == "active" else "on deck", err), undo=undo)
+    g = _goal_of(project, s)
+    where = ("%s (%s)" % (s.get("name"), g.get("name"))) if g else s.get("name")
+    return _ok("%s is %s \u2014 %s" % (where, "active" if seat == "active" else "on deck", _seat_line(project, seat)), undo=undo)
+
+
+def _renumber_seat(project, seat):
+    for k, sid in enumerate(_seat_ids(project, seat)):
+        cur = _step(project, sid)
+        if cur.get("seat_order") != k:
+            r = _cli(project, "roadmap-set", "--step", sid, "--seat-order", str(k))
+            if not r.get("ok"):
+                return "the engine refused: %s" % r.get("error")
+    return None
+
+
+def home(project, step):
+    """Send a component back into its goal (no seat); the seat it left closes up; the undo re-seats it where it was."""
+    s, refusal = _component(project, step)
+    if refusal:
+        return refusal
+    old_seat = s.get("seat") if s.get("seat") in SEATS else None
+    if not old_seat:
+        return _no("%s is in its goal already" % s.get("name"))
+    old_pos = _seat_ids(project, old_seat).index(step) if step in _seat_ids(project, old_seat) else 0
+    r = _cli(project, "roadmap-set", "--step", step, "--seat-in", "none")
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    undo = {"act": "seat", "step": step, "seat": old_seat, "position": old_pos}
+    err = _renumber_seat(project, old_seat)
+    if err:
+        return _no("%s is back in its goal, but %s could not close up: %s \u2014 undo puts it back" % (s.get("name"), "Active" if old_seat == "active" else "On deck", err), undo=undo)
+    g = _goal_of(project, s)
+    return _ok("%s back in %s \u2014 %s" % (s.get("name"), g.get("name") if g else "its goal", _seat_line(project, old_seat)), undo=undo)
+
+
+def new_goal(project, text, tier=None, area=None, done_when=None):
+    """A goal from his words (no seed): the heading step with its tier and its root group at the foot of that tier."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return _no("a goal needs a name")
+    try:
+        tier = int(tier) if str(tier or "").strip() else 3
+    except Exception:
+        return _no("a tier is 1, 2 or 3")
+    if tier not in (1, 2, 3):
+        return _no("a tier is 1, 2 or 3")
+    sid = _slug(text)
+    if _step(project, sid) is not None:
+        return _no("a goal with that name exists already")
+    args = ["roadmap-propose", "--step", sid, "--name", text, "--tier", str(tier), "--done-when", done_when or "not written yet \u2014 say what done looks like"]
+    if area:
+        args += ["--area", str(area)]
+    r = _cli(project, *args)
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    r2 = _spine_set(project, sid, {"navigation": {"path": [sid], "groups": [{"id": sid, "label": text, "order": _foot(project, tier), "parent_id": None}], "role": "primary"}})
+    if not r2.get("ok"):
+        return _no("the heading was written but not grouped: %s" % r2.get("error"))
+    return _ok("%s is now a goal in tier %d%s" % (text, tier, (" \u00b7 " + str(area)) if area else ""), undo={"act": "withdraw", "step": sid}, step=sid)
 
 
 def pace(project, step, when):
@@ -521,71 +573,23 @@ def _place_tier(project, step, tier, position):
     return None
 
 
-def place(project, step, band, position, tier=None, tier_position=None):
-    """ONE act for a drop on the goal board (W2 v2): into Active at a position (activate there, or reorder), or into
-    a tier's band (off the set if it was on it; the tier changed if it differs — no position: his word, no ranking
-    inside a tier). One receipt; one undo that inverts the whole drop — the old band and the old tier (Grok W2: an
-    active goal dropped onto another tier comes back active AND in its old tier). A refusal after a landed write
-    carries that same undo, so he can put it back."""
+def place(project, step, band, position=0, tier=None, tier_position=None):
+    """ONE act for a drop of a goal on the board: into a tier's band (1 · 2 · 3, the last being the seed goals). The
+    tier only \u2014 his word: no ranking inside a tier. One receipt; the undo is the old tier."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
         return _no("no such goal")
     band = str(band or "").strip().lower()
-    try:
-        position = int(position)
-    except Exception:
-        return _no("a position is a number")
-    was_active = s.get("active") is True
-    old_tier = s.get("tier") if s.get("tier") in (1, 2, 3) else None
-    old_active_pos = next((k for k, (x, g) in enumerate(_active(project)) if x["id"] == step), None)
-    undo = ({"act": "place", "step": step, "band": "active", "position": old_active_pos or 0, "tier": old_tier} if was_active
-            else {"act": "place", "step": step, "band": str(old_tier), "position": 0} if old_tier else None)
-    landed = []          # what has been written so far — a refusal after this point carries the undo
-    said = []
-    # an undo that names the tier puts the goal back in it first (the set is a mark; the tier is its home)
-    want_tier = int(tier) if tier in (1, 2, 3, "1", "2", "3") else None
-    if want_tier and old_tier != want_tier:
-        r = move_tier(project, step, want_tier)
-        if not r.get("ok"):
-            return r
-        landed.append("tier")
-        said.append("%s back in tier %d" % (s.get("name"), want_tier))
-    if band == "active":
-        if was_active:
-            r = order(project, step, position)
-            if r.get("ok"):
-                r["undo"] = undo
-                if said:
-                    r["receipt"] = ", ".join(said) + " — " + r["receipt"]
-            elif landed:
-                r["undo"] = undo
-            return r
-        r = activate(project, step, order=position)
-        if r.get("ok"):
-            if said:      # the tier was restored first: the undo must carry the whole drop; else activate's own bench inverts it
-                r["undo"] = undo
-                r["receipt"] = ", ".join(said) + " — " + r["receipt"]
-        elif landed:
-            r["undo"] = undo
-        return r
     if band not in ("1", "2", "3"):
-        return _no("a band is Active or a tier 1, 2 or 3")
+        return _no("a band is a tier 1, 2 or 3")
     tier = int(band)
-    if not was_active and old_tier == tier:
-        return _no("%s is already in tier %d — there is no order inside a tier" % (s.get("name"), tier))
-    if was_active:
-        r = bench(project, step)
-        if not r.get("ok"):
-            return r
-        landed.append("bench")
-        said.append("%s to the bench" % s.get("name"))
-    if old_tier != tier:
-        r = move_tier(project, step, tier)      # the tier only (his word, 18:4x): no ranking inside a tier
-        if not r.get("ok"):
-            return _no("%s — undo puts it back" % r.get("receipt"), undo=undo) if landed else r
-        said.append(("moved to tier %d" % tier) if said else "%s moved to tier %d" % (s.get("name"), tier))
-    line = ", ".join(said) + ((" — " + _set_line(project)) if was_active else "")
-    return _ok(line, undo=undo)
+    old_tier = s.get("tier") if s.get("tier") in (1, 2, 3) else None
+    if old_tier == tier:
+        return _no("%s is already in tier %d \u2014 there is no order inside a tier" % (s.get("name"), tier))
+    r = move_tier(project, step, tier)
+    if not r.get("ok"):
+        return r
+    return _ok("%s moved to tier %d" % (s.get("name"), tier), undo={"act": "place", "step": step, "band": str(old_tier), "position": 0} if old_tier else None)
 
 
 def act(project, body):
@@ -619,16 +623,16 @@ def act(project, body):
             return promote(project, body.get("seed"), body.get("tier"), body.get("area"), body.get("done_when"))
         if a == "retag":
             return retag(project, body.get("step"), body.get("initiative"))
-        if a == "activate":
-            return activate(project, body.get("step"), body.get("order"))
-        if a == "bench":
-            return bench(project, body.get("step"))
-        if a == "order":
-            return order(project, body.get("step"), body.get("position"))
+        if a == "seat":
+            return seat(project, body.get("step"), body.get("seat"), body.get("position"))
+        if a == "home":
+            return home(project, body.get("step"))
+        if a == "new_goal":
+            return new_goal(project, body.get("text"), body.get("tier"), body.get("area"), body.get("done_when"))
         if a == "done_when":
             return done_when(project, body.get("step"), body.get("text"))
         if a == "place":
-            return place(project, body.get("step"), body.get("band"), body.get("position"), body.get("tier"), body.get("tier_position"))
+            return place(project, body.get("step"), body.get("band"), body.get("position") or 0)
         if a == "pace":
             return pace(project, body.get("step"), body.get("when"))
         if a == "withdraw":

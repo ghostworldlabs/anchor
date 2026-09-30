@@ -465,6 +465,8 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .band.seeds .band-h{color:var(--accent-t)}.band.seeds .seedband{margin-top:8px}.band.bone .band-h{color:var(--text-dim2)}.band.bone .band-h .mini{margin-left:auto}
 .bonefold{margin-top:6px}.bonefold[hidden]{display:none}.gtile.bone{opacity:.6;cursor:default}.gtile[draggable="false"]{cursor:default}
 .proj .ck{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim2);border:1px solid var(--border);border-radius:4px;padding:0 4px;margin-right:4px}
+.seat{font-size:9.5px;padding:0 6px;border-radius:999px;border:1px solid var(--border);margin-left:6px;vertical-align:middle}.seat.active{color:var(--success);border-color:rgba(74,222,128,.4)}.seat.deck{color:var(--amber-t);border-color:rgba(240,191,89,.4)}
+.sacts{margin-left:8px;font-size:10.5px}.sacts .linkish{margin-right:8px}.gcock .seat{margin-left:3px}
 /* the goal's place */
 .place{border:1px solid var(--amber);border-radius:12px;background:#141722;padding:12px 14px;margin-bottom:10px;border-left:3px solid var(--areac,#8b93a6);flex:none;max-height:72vh;overflow-y:auto}
 .place[hidden]{display:none}

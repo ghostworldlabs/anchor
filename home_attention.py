@@ -16,6 +16,7 @@ bridge process, which the home render must never spawn. The page adds that row
 client-side from the badge it already polls (``static/high-seat.js``).
 """
 from __future__ import annotations
+import re
 
 from datetime import date, datetime, timedelta
 
@@ -305,9 +306,9 @@ def _part_open(p):
 
 def head_act(initiatives, facts, today=None):
     """THE HEAD — one act, never a list (W2 of the steward revision, 2026-09-28; the synthesis R2; his answer Q3).
-    The ACTIVE SET reads first (2026-09-29, his word: the initiatives he works on now, whatever their tier): a part
-    that needs him inside the set leads — the due ones (today or overdue) as a group before the undated, his order
-    within each group — and the sentence says the date. Then his tiers: the first Tier-1 part that needs him, in his
+    The SEATS read first (2026-09-30, his three levels): an ACTIVE initiative — a cockpit, an effort or a desk item
+    he pulled out of its goal — that needs him leads, in his order; then one ON DECK that needs him; the sentence
+    says the date when there is one. Then his tiers: the first Tier-1 part that needs him, in his
     order (a Tier-1 part that needs him AND is due comes first among them); the one exception, his word (narrowed on
     Grok's W2 read): a Tier-2/3 part that NEEDS him and is due today or overdue — marked as the exception, with its
     date — earliest date first, then his tier and order; it yields to a Tier-1 part that needs him and is due, and to
@@ -324,7 +325,10 @@ def head_act(initiatives, facts, today=None):
         a = {"kind": kind, "tier": i.get("tier"), "initiative": str(i.get("name") or ""), "text": str(p.get("text") or ""),
              "target": str(p.get("target") or ""), "pid": str(p.get("pid") or ""), "href": str(p.get("href") or ""),
              "date": str(p.get("date") or ""), "then": str(after.get("text") or "") if after else "", "age_days": None,
-             "effort": "", "dir": None}
+             "effort": "", "dir": None,
+             # the seated act (2026-09-30): the initiative's own name and what it waits for, said as the sentence says them
+             "part": str(p.get("target") or p.get("text") or ""),
+             "what": (re.sub(r"^waiting on you:\s*", "", str(p.get("state") or ""), flags=re.I).strip() or str(p.get("text") or "")) if str(p.get("state") or "").lower().startswith("waiting on you") else str(p.get("text") or "")}
         a.update(more)
         return a
 
@@ -335,18 +339,13 @@ def head_act(initiatives, facts, today=None):
     def _needs(p):
         return _part_open(p) and bool(p.get("needs_you"))
 
-    # the active set (2026-09-29) reads FIRST: a part that needs him in an initiative he works on now leads — the due
-    # ones as a group, then the undated, HIS order within each (Grok W1: the date never reorders the set)
-    active = sorted([i for i in inits if i.get("active")], key=lambda i: (i.get("active_order") if isinstance(i.get("active_order"), int) else 999, i.get("tier") or 9, int(i.get("order") or 0)))
-    for i in active:
-        for p in i.get("parts") or ():
-            if _needs(p) and _due(p):
-                d = _due(p)
-                return _act(i, p, "active", due=d.isoformat(), overdue=d < today)
-    for i in active:
-        for p in i.get("parts") or ():
+    # the seats read FIRST (2026-09-30): an active initiative that needs him, in his order; then one on deck
+    from high_seat_page import seated
+    for kind in ("active", "deck"):
+        for g, p in seated(inits, kind):
             if _needs(p):
-                return _act(i, p, "active")
+                d = _due(p)
+                return _act(g, p, kind, due=d.isoformat() if d else "", overdue=bool(d and d < today))
     # a Tier-1 part that needs him and is due leads everything
     t1_due = sorted(((_due(p), int(i.get("order") or 0), n, i, p) for i in inits if i.get("tier") == 1
                      for n, p in enumerate(i.get("parts") or ()) if _needs(p) and _due(p)), key=lambda t: t[:3])
@@ -377,37 +376,35 @@ def head_act(initiatives, facts, today=None):
 
 
 def pick_up(initiatives, facts=None, working=None, today=None):
-    """What to take up while the active set runs (2026-09-29): when the set is not empty, nothing in it needs him and
-    every active initiative is RUNNING (a live session on its project) or WAITING on someone else, the bench's first
-    initiative by the nearest pace or deadline, then the tiers' order (high_seat_page.bench_of — the one sort). None
-    otherwise — and never when the set is empty (there is nothing to be "while" of). The answer says which active
-    initiatives run and which wait, so the sentence can too."""
-    from high_seat_page import bench_of
+    """What to take up while Active runs (2026-09-30, his three levels): when Active is not empty, nothing in it needs
+    him and every active initiative is RUNNING (a live session on its project) or WAITING on someone else, the top
+    of ON DECK — his own pick-up list, in his order. None otherwise: an active initiative with a free hand is his
+    next act, not a pick-up; an empty Active has nothing to be "while" of; an empty deck offers nothing. The answer
+    says which active initiatives run and which wait, so the sentence can too."""
+    from high_seat_page import seated, part_name
     working = working or set()
     inits = [i for i in initiatives or () if isinstance(i, dict)]
-    active = sorted([i for i in inits if i.get("active")], key=lambda a: a.get("active_order") if isinstance(a.get("active_order"), int) else 999)
+    active = seated(inits, "active")
     if not active:
         return None
-    def _open(i):
-        return [p for p in i.get("parts") or () if not p.get("closed", p.get("status") in ("done", "parked")) and not p.get("broken")]
     running, waiting = [], []
-    for i in active:
-        if i.get("needs") or any(_part_open(p) and p.get("needs_you") for p in i.get("parts") or ()):
+    for g, p in active:
+        if _part_open(p) and p.get("needs_you"):
             return None
-        if any(p.get("pid") and p["pid"] in working for p in _open(i)):
-            running.append(str(i.get("name") or ""))
-        elif any(str(p.get("state") or "").startswith("waiting") or p.get("status") == "waiting" for p in _open(i)):
-            waiting.append(str(i.get("name") or ""))
+        if p.get("pid") and p["pid"] in working:
+            running.append(part_name(p))
+        elif str(p.get("state") or "").lower().startswith("waiting") or p.get("status") == "waiting":
+            waiting.append(part_name(p))
         else:
-            return None      # an active initiative with a free hand: that is his next act, not a pick-up
-    rest = bench_of(inits)
-    if not rest:
+            return None      # a free hand: that is his next act, not a pick-up
+    deck = seated(inits, "deck")
+    if not deck:
         return None
-    i = rest[0]
-    nxt = i.get("next") or {}
-    why = ("pace %s" % _short(i["pace"])) if i.get("pace") else (("due %s" % _short(i["next_deadline"])) if i.get("next_deadline") else ("tier %s" % (i.get("tier") or "?")))
-    return {"initiative": str(i.get("name") or ""), "id": str(i.get("id") or ""), "why": why, "text": str(nxt.get("text") or ""),
-            "pid": str(nxt.get("pid") or ""), "active": [str(a.get("name") or "") for a in active], "running": running, "waiting": waiting}
+    g, p = deck[0]
+    st = str(p.get("state") or "")
+    what = re.sub(r"^waiting on you:\s*", "", st, flags=re.I).strip() if st.lower().startswith("waiting on you") else ""
+    return {"initiative": part_name(p), "goal": str(g.get("name") or ""), "id": str(p.get("id") or ""), "why": "on deck", "text": what,
+            "pid": str(p.get("pid") or ""), "active": [part_name(x) for _g, x in active], "running": running, "waiting": waiting}
 
 
 def head_sentence(act, overnight=(), pickup=None):
@@ -428,8 +425,9 @@ def head_sentence(act, overnight=(), pickup=None):
             state.append("%s %s waiting on someone else" % _who(wait))      # said as the light says it (Grok W1): never "running" for a wait
         clause = ("While %s run%s" % (("it", "s") if len(run) == 1 else ("they", ""))) if run and not wait else (
             ("While %s wait%s" % (("it", "s") if len(wait) == 1 else ("they", ""))) if wait and not run else "Meanwhile")
-        s = "Active: %s. %s: pick up %s%s (%s)." % (
-            "; ".join(state) or "the set", clause, pickup["initiative"], (" — " + pickup["text"][:80]) if pickup.get("text") else "", pickup.get("why") or "")
+        s = "Active: %s. %s: pick up %s%s%s (%s)." % (
+            "; ".join(state) or "the set", clause, pickup["initiative"], (" (%s)" % pickup["goal"]) if pickup.get("goal") else "",
+            (" — " + pickup["text"][:80]) if pickup.get("text") else "", pickup.get("why") or "")
     closed = [x for x in overnight or () if isinstance(x, dict) and x.get("name")]
     if closed:
         names = ", ".join(str(x["name"]) for x in closed[:3]) + (" and %d more" % (len(closed) - 3) if len(closed) > 3 else "")
@@ -449,10 +447,11 @@ def _head_core(act):
     if act["kind"] == "tier1":
         where = (" (%s%s)" % (act["target"], (" · " + act["effort"]) if act.get("effort") else "")) if act.get("target") else ""
         return "Tier 1 · %s: %s%s — waiting on you%s.%s" % (act["initiative"], act["text"], where, age_s, then)
-    if act["kind"] == "active":
-        where = (" (%s%s)" % (act["target"], (" · " + act["effort"]) if act.get("effort") else "")) if act.get("target") else ""
+    if act["kind"] in ("active", "deck"):
+        # a seated initiative (2026-09-30): "Active · Family Trusts (The trusts): <what it waits for> — waiting on you."
         when = (", overdue since %s" % _short(act.get("due"))) if act.get("overdue") else (", due today" if act.get("due") else "")
-        return "Active · %s: %s%s — waiting on you%s%s.%s" % (act["initiative"], act["text"], where, when, age_s, then)
+        head = "Active" if act["kind"] == "active" else "On deck"
+        return "%s · %s (%s): %s — waiting on you%s%s.%s" % (head, act.get("part") or act["text"], act["initiative"], act.get("what") or act["text"], when, age_s, then)
     where = "%s%s" % (act.get("target") or "A project", (" · " + act["effort"]) if act.get("effort") else "")
     return "%s: %s%s.%s" % (where, act["text"], age_s, then)
 

@@ -217,6 +217,10 @@
     });
   });
 
+  // the seats (W2b-2, 2026-09-30): a cockpit or a desk item goes on deck or active, or back into its goal — one act with undo
+  $$('.place [data-seat]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') }); }); });
+  $$('.place [data-home]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'home', step: b.getAttribute('data-home') }); }); });
+
   // W2b-1 (2026-09-30, his word: the steward box "just disappeared"): the conversation is LIVE. After a send the
   // page long-polls the cockpit's own event stream (/api/steward/events, the one the AI Cockpit uses) and shows
   // the steward's answer as it writes, into the list whose composer sent the turn (the panel's, or a goal's

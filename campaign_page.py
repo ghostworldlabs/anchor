@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import home_rows as _hr
-from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, active_set, bench_of
+from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative
 import home_attention as _ha
 
 TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
@@ -49,7 +49,7 @@ def _part_state(p):
 
 # ── the board: grouped view ────────────────────────────────────────────────────────────────────
 
-KIND_WORDS = {"task": "desk item", "project": "cockpit", "step": "step of a project", "deliverable": "deliverable", "calendar": "date"}
+KIND_WORDS = {"task": "desk item", "project": "cockpit", "effort": "effort (a cockpit within a project)", "step": "step of a project", "deliverable": "deliverable", "calendar": "date"}
 
 
 def _part_row(i, p, today, tick_allowed):
@@ -99,12 +99,13 @@ def _cockpits(i, ctx):
     """The goal's cockpits on the tile's face (his 13:5x word: a goal holds one, several, or no project yet): each
     project part by name with its own light; "at the desk" when the goal has no project."""
     working = ctx.get("working") or set()
-    projs = [p for p in i["parts"] if p["kind"] == "project" and not p["broken"]]
+    projs = [p for p in i["parts"] if p["kind"] in ("project", "effort") and not p["broken"]]
     if not projs:
         return '<div class="gcock"><span class="dim">at the desk &mdash; no project yet</span></div>'
     glyphs = {"needs": "&#9873;", "working": "&#9679;", "waiting": "&#9679;", "idle": "&#9675;", "done": "&#10003;"}
     return '<div class="gcock">%s</div>' % " &middot; ".join(
-        '<span class="gpc %s" title="%s">%s <i>%s</i></span>' % (_part_light(p, working), esc(p["state"] or p["status"] or ""), esc(p["target"] or p["text"]), glyphs[_part_light(p, working)])
+        '<span class="gpc %s" title="%s">%s <i>%s</i>%s</span>' % (_part_light(p, working), esc(p["state"] or p["status"] or ""), esc(p["target"] or p["text"]), glyphs[_part_light(p, working)],
+                                                                    ('<b class="seat %s">%s</b>' % (p["seat"], "active" if p["seat"] == "active" else "on deck")) if p.get("seat") else "")
         for p in projs[:4]) + ((' <span class="dim">+%d</span>' % (len(projs) - 4)) if len(projs) > 4 else "")
 
 
@@ -192,10 +193,20 @@ def _place(i, ctx):
         ("; the pace is <b>%s</b>" % esc(_short(i["pace"]))) if i.get("pace") else "; no pace set",
         (". Next: <b>%s</b>" % esc(nxt["text"])) if nxt else "")
     comps = [p for p in i["parts"] if not p["done"]]
-    proj_html = "".join('<div class="proj"><span class="ck">%s</span> %s<span class="st">%s</span></div>' % (
+
+    def _seat_ctl(p):
+        if not is_initiative(p):
+            return ""
+        pid_ = esc(p["id"])
+        if p.get("seat"):
+            return ('<span class="seat %s">%s</span><span class="sacts">%s<button class="linkish" data-home="%s">back to the goal</button></span>' % (
+                p["seat"], "active" if p["seat"] == "active" else "on deck",
+                ('<button class="linkish" data-seat="deck" data-step="%s">&rarr; on deck</button>' % pid_) if p["seat"] == "active" else ('<button class="linkish" data-seat="active" data-step="%s">&rarr; active</button>' % pid_), pid_))
+        return '<span class="sacts"><button class="linkish" data-seat="deck" data-step="%s">&rarr; on deck</button><button class="linkish" data-seat="active" data-step="%s">&rarr; active</button></span>' % (pid_, pid_)
+    proj_html = "".join('<div class="proj"><span class="ck">%s</span> %s%s<span class="st">%s</span></div>' % (
         KIND_WORDS.get(p["kind"], p["kind"]),
-        ('<a href="%s" target="_blank" rel="noopener">%s &#8599;</a>' % (esc(p["href"]), esc(p["target"] or p["text"]))) if p.get("href") else esc(p["text"] if p["kind"] != "project" else (p["target"] or p["text"])),
-        esc(p["state"] or p["status"] or "")) for p in comps) or '<div class="proj dim">no open component &mdash; add one as a part</div>'
+        ('<a href="%s" target="_blank" rel="noopener">%s &#8599;</a>' % (esc(p["href"]), esc(p["target"] or p["text"]))) if p.get("href") else esc(p["text"] if p["kind"] not in ("project", "effort") else (p["target"] or p["text"])),
+        _seat_ctl(p), esc(p["state"] or p["status"] or "")) for p in comps) or '<div class="proj dim">no open component &mdash; add one as a part</div>'
     return (
         '<article class="place" id="place-%s" data-goal="%s" hidden style="--areac:%s"><div class="ptop"><span class="pname">%s</span>'
         '<span class="ilight %s">%s %s</span><div class="imore"><span class="larea">%s</span><span class="tierpick">Tier <select class="tsel" data-tiersel="%s">%s</select></span></div>'
@@ -214,7 +225,7 @@ def _place(i, ctx):
         '<input class="ad" data-add="date" type="text" autocomplete="off" placeholder="2026-10-27 &middot; blank">'
         '<button class="mk" data-act="add" data-lane="%s">Add</button>'
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
-        '<div class="k">Its components <span class="h">(a cockpit, a desk item, a step of a project, a deliverable, a date)</span></div>%s'
+        '<div class="k">Its components <span class="h">(a cockpit, a desk item, a step of a project, a deliverable, a date; a cockpit or a desk item can be put on deck or made active &mdash; then it sits on the High Seat)</span></div>%s'
         '</div><div>'
         '<div class="k" style="margin-top:0">Brainstorm with the steward <span class="h">(dictate here &mdash; it is logged to this goal; a verb acts on the goal; the steward answers here as it writes)</span></div>'
         '<div class="gconv"><ul class="ex gthread" data-thread="%s">%s</ul>'

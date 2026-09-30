@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-REF_KINDS = ("project", "step", "deliverable", "calendar")
+REF_KINDS = ("project", "step", "deliverable", "calendar", "effort")   # effort:<pid>/<dir> — one cockpit within a project (2026-09-30)
 _OPEN = ("proposed", "planned", "active", "waiting")
 
 
@@ -26,7 +26,7 @@ def parse_ref(ref):
     rest = rest.strip()
     if kind not in REF_KINDS or not rest or any(ch.isspace() for ch in rest):
         return None
-    if kind in ("step", "deliverable"):
+    if kind in ("step", "deliverable", "effort"):
         if "/" not in rest:
             return None
         pid, sub = rest.split("/", 1)
@@ -100,7 +100,7 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
            "date": "", "href": "", "lead": "", "broken": True, "gap": ""}
     p = parse_ref(ref)
     if not p:
-        out["gap"] = "not a reference the Campaign knows (project: · step: · deliverable: · calendar:)"
+        out["gap"] = "not a reference the Campaign knows (project: · step: · deliverable: · calendar: · effort:)"
         return out
     out["kind"] = p["kind"]
     if p["kind"] == "calendar":
@@ -125,6 +125,37 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
             wait = (wait[:88].rstrip() + "…") if len(wait) > 90 else wait
         out["state"] = ("waiting on you: " + wait) if wait else ""
         out["date"] = _nearest_due(steps)
+        out["broken"] = False
+    elif p["kind"] == "effort":
+        # one cockpit within the project (2026-09-30): the effort directory with its own Face; its light is the
+        # ONE attention flag the steward writes; its date the nearest due of its own roadmap
+        from pathlib import Path as _P
+        from urllib.parse import quote as _q
+        eff = _P(folder) / p["sub"]
+        if not (eff / "ECGBERHT.md").is_file():
+            out["gap"] = "no effort '%s' in %s" % (p["sub"], out["name"])
+            return out
+        title = p["sub"]
+        try:
+            for ln in (eff / "ECGBERHT.md").read_text(encoding="utf-8", errors="replace").splitlines()[:40]:
+                if ln.startswith("# "):
+                    title = ln[2:].strip() or title
+                    break
+        except OSError:
+            pass
+        out["what"] = title
+        out["name"] = "%s · %s" % (out["name"], title)
+        out["href"] = "/project/%s?dir=%s" % (out["pid"], _q(p["sub"]))
+        try:
+            import json as _json
+            att = _json.loads((eff / ".ecgberht" / "attention.json").read_text(encoding="utf-8"))
+        except Exception:
+            att = {}
+        state = str((att or {}).get("state") or "").lower() if isinstance(att, dict) else ""
+        reason = " ".join(str((att or {}).get("reason") or "").split()) if isinstance(att, dict) else ""
+        reason = (reason[:88].rstrip() + "…") if len(reason) > 90 else reason
+        out["state"] = ("waiting on you: " + reason) if state == "needs_you" else ((state.replace("_", " ") + ((": " + reason) if reason else "")) if state else "")
+        out["date"] = _nearest_due(_projection(str(eff), cache))
         out["broken"] = False
     elif p["kind"] == "step":
         st = next((s for s in steps or () if isinstance(s, dict) and s.get("id") == p["sub"]), None)

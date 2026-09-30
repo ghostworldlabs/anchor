@@ -114,45 +114,20 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     assert "openPlace(" in js and ".itile" not in js.replace("/* ", "").split("(function")[1]
 
 
-def test_a_drop_is_one_place_act_with_one_undo_in_every_direction(tmp_path, monkeypatch):
-    """His word (18:4x): no ranking inside a tier. A drop into a tier band is the tier only; into Active, a position."""
+def test_a_drop_is_one_place_act_the_tier_only(tmp_path, monkeypatch):
+    """His word (09-29 18:4x): no ranking inside a tier; and since W2b-2 the Active band is at the High Seat (the seats
+    on components), so a drop on the board is the tier only."""
     d = w1._record(tmp_path)
     _fake_engine(tmp_path, monkeypatch)
-    ids = lambda: ([x["id"] for x, g in acts._active(d)], sorted(acts._tier_ids(d, 1)), sorted(acts._tier_ids(d, 2)))
-    assert ids() == (["magi", "mba"], ["magi", "mba", "trusts"], ["paper"])
-    # tier -> Active at the top
-    r = acts.act(d, {"act": "place", "step": "trusts", "band": "active", "position": 0})
-    assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"] and r["undo"] == {"act": "bench", "step": "trusts"}
-    # within Active: a position; the undo carries the old position (and the tier, unchanged)
-    r = acts.act(d, {"act": "place", "step": "mba", "band": "active", "position": 0})
-    assert r["ok"] and ids()[0] == ["mba", "trusts", "magi"] and r["undo"] == {"act": "place", "step": "mba", "band": "active", "position": 2, "tier": 1}
+    r = acts.act(d, {"act": "place", "step": "paper", "band": "1"})
+    assert r["ok"] and acts._step(d, "paper")["tier"] == 1 and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
     r = acts.act(d, r["undo"])
-    assert r["ok"] and ids()[0] == ["trusts", "magi", "mba"]
-    # Active -> another tier: off the set and the tier changed, no position; one receipt; the undo puts it back active AND in its old tier
-    r = acts.act(d, {"act": "place", "step": "magi", "band": "2", "position": 0})
-    assert r["ok"] and ids() == (["trusts", "mba"], ["mba", "trusts"], ["magi", "paper"]), ids()
-    assert r["receipt"].startswith("Artificial Magi to the bench, moved to tier 2 — the set is The trusts and the holding company, MBA Teaching, Fall 2026")
-    assert r["undo"] == {"act": "place", "step": "magi", "band": "active", "position": 1, "tier": 1}
-    r = acts.act(d, r["undo"])
-    assert r["ok"] and ids() == (["trusts", "magi", "mba"], ["magi", "mba", "trusts"], ["paper"]) and acts._step(d, "magi")["tier"] == 1
-    assert r["receipt"].startswith("Artificial Magi back in tier 1 — Artificial Magi is active")
-    # a benched goal between tiers: the tier only; the undo is the old tier
-    r = acts.act(d, {"act": "place", "step": "paper", "band": "1", "position": 0})
-    assert r["ok"] and ids()[1] == ["magi", "mba", "paper", "trusts"] and acts._step(d, "paper")["tier"] == 1 and r["undo"] == {"act": "place", "step": "paper", "band": "2", "position": 0}
-    r = acts.act(d, r["undo"])
-    assert r["ok"] and ids()[2] == ["paper"]
-    assert not acts.act(d, {"act": "place", "step": "paper", "band": "2", "position": 0})["ok"], "already in its tier: nothing to do (no order inside a tier)"
-    assert not acts.act(d, {"act": "place", "step": "paper", "band": "4", "position": 0})["ok"]
-    assert not acts.act(d, {"act": "place", "step": "nope", "band": "1", "position": 0})["ok"]
-    # a refusal after a landed write carries the undo (one failure surface): Active -> tier 2, the bench lands, the tier write fails
-    real = acts._cli
-    def failing(project, *args):
-        if "--tier" in args:
-            return {"ok": False, "error": "disk full"}
-        return real(project, *args)
-    monkeypatch.setattr(acts, "_cli", failing)
-    r = acts.act(d, {"act": "place", "step": "trusts", "band": "2", "position": 0})
-    assert not r["ok"] and "undo puts it back" in r["receipt"] and r["undo"] == {"act": "place", "step": "trusts", "band": "active", "position": 0, "tier": 1}
+    assert r["ok"] and acts._step(d, "paper")["tier"] == 2
+    r = acts.act(d, {"act": "place", "step": "trusts", "band": "3"})
+    assert r["ok"] and acts._step(d, "trusts")["tier"] == 3, "Seed goals is tier 3"
+    assert not acts.act(d, {"act": "place", "step": "trusts", "band": "3"})["ok"], "already in its tier: nothing to do (no order inside a tier)"
+    assert not acts.act(d, {"act": "place", "step": "paper", "band": "active"})["ok"], "no Active band on the board: the seats live at the High Seat"
+    assert not acts.act(d, {"act": "place", "step": "nope", "band": "1"})["ok"]
 
 
 def test_the_goal_is_revised_as_its_done_when_with_undo(tmp_path, monkeypatch):
@@ -177,9 +152,9 @@ def test_inside_a_goal_s_place_a_verb_needs_no_name(tmp_path, monkeypatch):
     r = say.say_campaign(d, "clear the pace", today=TODAY, goal="trusts")
     assert r and r["ok"] and not acts._step(d, "trusts").get("pace")
     r = say.say_campaign(d, "make it active", today=TODAY, goal="trusts")
-    assert r and r["ok"] and r["act"] == "campaign_activate" and acts._step(d, "trusts")["active"] is True
+    assert r and not r["ok"] and "a goal has no seat" in r["say"], "a goal has no seat (W2b-2): its components do"
     r = say.say_campaign(d, "bench it", today=TODAY, goal="trusts")
-    assert r and r["ok"] and r["act"] == "campaign_bench"
+    assert r and not r["ok"] and "a goal has no seat" in r["say"]
     r = say.say_campaign(d, "tier 2", today=TODAY, goal="trusts")
     assert r and r["ok"] and r["act"] == "campaign_move_tier" and acts._step(d, "trusts")["tier"] == 2
     r = say.say_campaign(d, "goal: the estate plan executed; the company formed", today=TODAY, goal="trusts")
@@ -190,7 +165,7 @@ def test_inside_a_goal_s_place_a_verb_needs_no_name(tmp_path, monkeypatch):
     # the general grammar still works inside a place when another goal is named
     monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_activate", "args": {"initiative": "paper 1"}})
     r = say.say_campaign(d, "make paper 1 active", today=TODAY, goal="trusts")
-    assert r and r["ok"] and r["act"] == "campaign_activate"
+    assert r and not r["ok"] and r["act"] == "campaign_activate" and "a goal has no seat" in r["say"], "the general grammar ran; a goal's whole name refuses and names its components (W2b-2)"
 
 
 def test_the_goal_s_thread_is_the_one_log_tagged_and_the_steward_s_answer_carries_the_tag(tmp_path, monkeypatch):

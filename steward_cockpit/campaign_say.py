@@ -198,8 +198,10 @@ _SCOPED = [
     ("campaign_add_part", re.compile(r"^add(?: (?:a |the |another )?(?:part|task|step))?:?\s+(.+?)(?:,? due (.+?))?\s*[.!]?$", re.I)),
     ("campaign_pace", re.compile(r"^(?:(?:set )?(?:the )?pace(?: (?:to|by|at|is|of))?|by|due|finish(?:ed)? by|done by)\s+(.+?)\s*[.!]?$", re.I)),
     ("campaign_pace_clear", re.compile(r"^(?:clear|drop|remove) the pace\s*[.!]?$|^no pace\s*[.!]?$", re.I)),
-    ("campaign_activate", re.compile(r"^(?:make (?:it|this) active|activate(?: it| this)?|take (?:it|this) up|pick (?:it|this) up|(?:it is |this is )?active)\s*[.!]?$", re.I)),
-    ("campaign_bench", re.compile(r"^(?:bench(?: it| this)?|make (?:it|this) inactive|take (?:it|this) off(?: the)?(?: set| active)?|(?:it is |this is )?(?:inactive|not active))\s*[.!]?$", re.I)),
+    ("campaign_goal_seat", re.compile(r"^(?:make (?:it|this) active|activate(?: it| this)?|put (?:it|this) on deck|bench(?: it| this)?|send (?:it|this) back)\s*[.!]?$", re.I)),
+    ("campaign_activate", re.compile(r"^(?:make|set) (.+?) active\s*[.!]?$|^activate (.+?)\s*[.!]?$", re.I)),
+    ("campaign_deck", re.compile(r"^put (.+?) on deck\s*[.!]?$|^deck (.+?)\s*[.!]?$", re.I)),
+    ("campaign_home", re.compile(r"^send (.+?) (?:back|home)(?: to (?:its|the) goal)?\s*[.!]?$|^put (.+?) back(?: in (?:its|the) goal)?\s*[.!]?$|^bench (.+?)\s*[.!]?$", re.I)),
     ("campaign_move_tier", re.compile(r"^(?:(?:move|put) (?:it |this )?(?:to |in |into )?)?tier ([123])\s*[.!]?$", re.I)),
     ("campaign_done_when", re.compile(r"^(?:the )?(?:goal|done when|done looks like|done is|done means)(?: is)?:?\s+(.+?)\s*[.!]?$", re.I)),
 ]
@@ -232,10 +234,15 @@ def _scoped(folder, goal, text, today):
             return _answer(acts.pace(folder, goal, when), act)
         if act == "campaign_pace_clear":
             return _answer(acts.pace(folder, goal, "none"), "campaign_pace")
-        if act == "campaign_activate":
-            return _answer(acts.activate(folder, goal), act)
-        if act == "campaign_bench":
-            return _answer(acts.bench(folder, goal), act)
+        if act == "campaign_goal_seat":
+            return _answer(acts.seat(folder, goal, "active"), "campaign_activate")      # refused by the writer: a goal has no seat — it names the components
+        if act in ("campaign_activate", "campaign_deck", "campaign_home"):
+            name = next((x for x in m.groups() if x), "")
+            mine = [(p["id"], p.get("name") or p["id"]) for p in acts._parts_of(folder, goal) if acts._kind_of(p) in acts.INITIATIVE_KINDS]
+            hit, why = _find(mine, name, "component")
+            if hit is None:
+                return None      # not one of this goal's components: the general grammar reads the name across the record
+            return _answer(acts.home(folder, hit[0]) if act == "campaign_home" else acts.seat(folder, hit[0], "active" if act == "campaign_activate" else "deck"), act)
         if act == "campaign_move_tier":
             return _answer(acts.move_tier(folder, goal, int(m.group(1))), act)
         if act == "campaign_done_when":
@@ -289,7 +296,8 @@ def _apply(folder, c, today):
         seeds = [(s["id"], s["text"]) for s in read_seeds(folder)]
         hit, why = _find(seeds, a.get("seed"), "seed")
         if hit is None:
-            return _refuse(why if seeds else "no seeds in Seed goals yet", act)
+            # no seed by that name: a goal from his words (2026-09-30), at the tier and area he said
+            return _answer(acts.new_goal(folder, a.get("seed"), a.get("tier"), a.get("area")), act)
         area = str(a.get("area") or "").lower() or None
         if area and area not in AREAS:
             return _refuse("the life areas are %s \u2014 which?" % ", ".join(AREAS), act)
@@ -306,13 +314,18 @@ def _apply(folder, c, today):
         return _refuse(why, act) if hit is None else _answer(acts.unpark(folder, hit[0]), act)
     if act == "campaign_needs":
         return _needs(folder, a.get("span") or "week", today)
-    # the active set (2026-09-29)
-    if act == "campaign_activate":
-        hit, why = _find(inits, a.get("initiative"), "goal")
-        return _refuse(why, act) if hit is None else _answer(acts.activate(folder, hit[0]), act)
-    if act == "campaign_bench":
-        hit, why = _find(inits, a.get("initiative"), "goal")
-        return _refuse(why, act) if hit is None else _answer(acts.bench(folder, hit[0]), act)
+    # the seats (2026-09-30, his three levels): the verbs name a COMPONENT — a cockpit, an effort or a desk item
+    comps = [(p["id"], p.get("name") or p["id"]) for p in acts._projection(folder)
+             if p.get("id") not in heads and isinstance(p.get("navigation"), dict) and (p["navigation"].get("path") or []) and acts._kind_of(p) in acts.INITIATIVE_KINDS]
+    if act in ("campaign_activate", "campaign_deck", "campaign_home"):
+        key = _norm(a.get("initiative"))
+        g = next((c for c in inits if key and (_norm(c[1]) == key or _norm(c[0]) == key)), None)
+        if g is not None:      # he named a goal by its whole name: a goal has no seat — the writer's refusal names its components
+            return _answer(acts.seat(folder, g[0], "active"), act)
+        hit, why = _find(comps, a.get("initiative"), "initiative")
+        if hit is None:
+            return _refuse(why, act)
+        return _answer(acts.home(folder, hit[0]) if act == "campaign_home" else acts.seat(folder, hit[0], "active" if act == "campaign_activate" else "deck"), act)
     if act == "campaign_pace":
         hit, why = _find(inits, a.get("initiative"), "goal")
         if hit is None:

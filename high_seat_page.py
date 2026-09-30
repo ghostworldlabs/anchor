@@ -72,6 +72,11 @@ def campaign_initiatives(steps, resolved=None):
                     "needs_you": "waiting on you" in str(state).lower() or (
                         not ref and str(p.get("status") or "") == "waiting"
                         and bool(re.search(r"\b(john|you|me)\b", str(p.get("waiting_on") or "").lower()))),
+                    # the seat (2026-09-30, his three levels): a component he works interactively — a cockpit, an
+                    # effort, a desk item — sits in its goal (""), on deck, or active, in his order
+                    "seat": str(p.get("seat")) if p.get("seat") in ("active", "deck") else "",
+                    "seat_order": int(p["seat_order"]) if isinstance(p.get("seat_order"), int) else None,
+                    "goal": sid, "goal_name": s.get("name") or sid,
                 })
         # W1 (2026-09-28): a referenced part is closed when its RESOLVED target is — done, cancelled, dropped or
         # parked — not only when the wrapper's own status says so (Grok's live replay, 2026-09-27: a done target
@@ -90,9 +95,8 @@ def campaign_initiatives(steps, resolved=None):
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
             "done_count": sum(1 for p in parts if p["done"]),
-            # the active set (2026-09-29): his flag and its order, the pace he drives toward, the parts' progress
-            "active": s.get("active") is True,
-            "active_order": int(s["active_order"]) if isinstance(s.get("active_order"), int) else None,
+            # the pace he drives the goal toward (2026-09-29); the parts' progress. The goal itself has no seat: its
+            # components do (his three levels, 2026-09-30)
             "pace": str(s.get("pace") or ""),
             "open_count": len(open_parts), "part_count": sum(1 for p in parts if not p["broken"]),
         })
@@ -102,13 +106,36 @@ def campaign_initiatives(steps, resolved=None):
     return out
 
 
-def active_set(initiatives):
+INITIATIVE_KINDS = ("project", "effort", "task")   # a component he works interactively: a cockpit, an effort, a desk item
+
+
+def is_initiative(part):
+    return part.get("kind") in INITIATIVE_KINDS and not part.get("broken")
+
+
+def part_name(part):
+    """An initiative's own name: the project or effort it points at, else the desk item's words."""
+    return str(part.get("target") or part.get("text") or "")
+
+
+def seated(initiatives, seat):
+    """The components sitting in a seat — (goal, part) pairs in his order (seat_order; then the goal's tier and
+    order; then the name). The one sort for Active and On deck (the head, the pick-up, the shelves)."""
+    out = []
+    for i in initiatives or ():
+        for p in i.get("parts") or ():
+            if p.get("seat") == seat and not p.get("closed"):
+                out.append((i, p))
+    return sorted(out, key=lambda t: (t[1].get("seat_order") if isinstance(t[1].get("seat_order"), int) else 999, t[0].get("tier") or 9, int(t[0].get("order") or 0), part_name(t[1]).lower()))
+
+
+def _active_set_legacy(initiatives):
     """The initiatives he works on now, in the set's order (his order, then the tiers' as a tiebreak)."""
     act = [i for i in initiatives or () if i.get("active")]
     return sorted(act, key=lambda i: (i.get("active_order") if isinstance(i.get("active_order"), int) else 999, i.get("tier") or 9, i.get("order") or 0, str(i.get("name") or "")))
 
 
-def bench_of(initiatives):
+def _bench_of_legacy(initiatives):
     """The rest, by the nearest date he cares about — the pace, else the next deadline — then the tiers' order; an
     undated initiative after every dated one."""
     rest = [i for i in initiatives or () if not i.get("active")]

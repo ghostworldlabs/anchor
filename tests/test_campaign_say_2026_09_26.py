@@ -108,7 +108,8 @@ def test_the_verbs_move_add_park_unpark_and_promote_through_the_campaign_writer(
     assert s["ok"] and s["act"] == "campaign_promote_seed" and "tier 2" in s["say"] and seeds_mod.read_seeds(record) == []
     head = acts._step(record, s["step"])
     assert head["tier"] == 2 and head["area"] == "writing"
-    assert say("make nothing here an initiative")["ok"] is False
+    made = say("make nothing here an initiative")
+    assert made["ok"] and "nothing here is now a goal in tier 3" in made["say"], "no seed by that name: a goal from his words (W2b-2)"
     assert say("make the trusts an initiative under moonlight")["ok"] is False
 
 
