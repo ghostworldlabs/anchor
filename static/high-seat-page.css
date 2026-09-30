@@ -267,7 +267,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile.ready{animation:readyedge 2.4s ease-in-out infinite}
 @keyframes readyedge{0%,100%{box-shadow:0 0 0 1px var(--amber-edge)}50%{box-shadow:0 0 0 2px var(--amber),0 0 14px rgba(226,169,63,.5)}}
 .cbrief{margin-top:6px;padding:8px 10px;border:1px solid var(--amber-edge);border-radius:8px;background:linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--surface);font-size:12.5px;line-height:1.45}
-.cbrief .k{display:inline-block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:6px}
+.cbrief .k,.cmat .k{display:inline-block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:6px}
 .cb-wait{color:var(--text-dim)}.cb-wait.on{color:var(--amber-t);font-weight:650}
 .cb-ask{display:flex;align-items:baseline;gap:9px;width:100%;text-align:left;padding:7px 10px;border-radius:7px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.12);color:#f6c5c5;font-size:13px;line-height:1.4;cursor:pointer}
 .cb-ask:hover,.cb-ask.open{background:rgba(248,113,113,.2)}
@@ -282,18 +282,20 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cbrief.ask .cb-ask:hover .cb-line,.cbrief.ask .cb-ask.open .cb-line{text-decoration:underline;text-underline-offset:3px}
 /* W2e-4 (his word): the opened tile is a grid — the card's own lines and acts left, the red rectangle right at their level,
    an act's detail and the dialogue's thin strip under both */
-.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg";column-gap:18px;align-items:start}
+.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg" "mat mat";column-gap:18px;align-items:start}
 .tile.open>.t-top{grid-area:top}.tile.open>.t-face{grid-area:face}.tile.open>.t-acts{grid-area:acts;align-self:end}
 .tile.open>.t-body{display:contents}
 .tile.open .cbrief{grid-area:brief;margin-top:4px}
 .tile.open .cdetail{grid-area:detail;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .tile.open .cdlg{grid-area:dlg;margin-top:8px;border-top:1px solid var(--line);padding-top:3px;min-width:0}
+.tile.open .cmat{grid-area:mat}
+.cmat{margin-top:6px;padding-top:6px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px}
 .cdlg .dlg-bar{display:flex;align-items:baseline;gap:9px;width:100%;padding:3px 0;background:transparent;border:0;color:var(--text-dim);font:inherit;cursor:pointer;text-align:left}
 .cdlg .dlg-h{flex:none;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--text-dim2)}
 .cdlg .dlg-gist{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;color:var(--text-warm)}
 .cdlg .dlg-caret{flex:none;font-size:11px;color:var(--text-dim);transition:transform .15s}.cdlg.big .dlg-caret{transform:rotate(180deg)}
 .cdlg.thin .scroll,.cdlg.thin .composer{display:none}
-@media (max-width:1100px){.tile.open{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "face" "brief" "acts" "detail" "dlg"}}
+@media (max-width:1100px){.tile.open{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "face" "brief" "acts" "detail" "dlg" "mat"}}
 .cb-q{margin-top:5px;color:var(--text);font-weight:600}
 .cb-rec{margin-top:5px;display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
 .cb-accept{flex:none;background:var(--amber);color:#0b1220;border-radius:7px;padding:4px 11px;font-size:12px;font-weight:700;border:0}

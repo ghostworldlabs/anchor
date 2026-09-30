@@ -202,8 +202,9 @@ def _description(q, ask):
 def brief_html(cdir, pid, rel=""):
     """W2e-2/3 (2026-09-30, his words): the decision brief the tile opens to. The ASK as the cockpit's banner — one
     line, the question the steward put to him (else the wait) — which opens to the description (the sentences the
-    question stands on), the recommendation with one Accept and its why, the alternatives, the material to review as
-    links, and "talk about it"; under the banner the next step. The key material, never hunted for."""
+    question stands on), the recommendation with one Accept and its why, the alternatives, and "talk about it"; under the banner
+    the next step; the material to review as links on its own line under the dialogue's strip (W2e-5). The key
+    material, never hunted for."""
     eng = _live_engine(cdir)
     m = campaign.read_map(cdir)
     hb = m.get("heartbeat") or {}
@@ -259,17 +260,15 @@ def brief_html(cdir, pid, rel=""):
                 body.append('<div class="cb-auth">Authorizes: %s</div>' % esc(str(q.get("authorizes"))[:160]))
             if q.get("decide_by"):
                 body.append('<div class="cb-auth">Decide by: %s</div>' % esc(str(q.get("decide_by"))[:80]))
-        if links:
-            body.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
         body.append('<a class="cb-talk" href="#" data-ask="%s">talk about it</a>' % esc(ask[:220]))
         out.append('<div class="cb-body" hidden>%s</div>' % "".join(body))
     else:
         out.append('<div class="cb-wait">Nothing waits on you here.</div>')
-        if links:
-            out.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
     if nxt:
         out.append('<div class="cb-next"><span class="k">Next</span>%s</div>' % esc(nxt[:200]))
     out.append('</div>')
+    if links:   # W2e-5 (his word, 16:1x): the material to review is its own line under the dialogue's strip, always in view
+        out.append('<div class="cmat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
     return "".join(out)
 
 

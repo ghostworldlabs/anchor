@@ -82,13 +82,14 @@ def test_the_decision_brief_is_the_key_material_in_one_place(tmp_path, monkeypat
     h = r["html"]
     assert '<div class="cbrief ask">' in h, "the brief is the red rectangle when something is asked"
     assert '<button class="cb-ask" type="button" aria-expanded="false"><span class="cb-flag">decision</span><span class="cb-line">Accept the chapter 2 revision?</span>' in h, "the ask as the cockpit's banner: one line, the question"
-    body = h[h.index('<div class="cb-body" hidden>'):]
+    body = h[h.index('<div class="cb-body" hidden>'):h.index('<div class="cb-next">')]   # the banner's body, before the next line and the To review line
     assert '<div class="cb-desc">The pacing dragged in v2. The scenes now land in v3.</div>' in body, "the description: the sentences the question stands on"
     assert "&#9873; John: read the chapter 2 revision" in body, "the wait, when it is not the ask itself"
     import re as _re
     assert _re.search(r'class="cb-accept" type="button" data-qid="[^"]+" data-rec="I recommend accepting it; the pacing is fixed"', body) and "the scenes now land" in body, "one Accept (the question's own stable id), the recommendation and its why"
-    assert 'href="/api/steward/deliverable-file?pid=p-magi&amp;dir=&amp;path=drafts/chapter-2-v3.md"' in body and ">chapter-2-v3.md</a>" in body, "the material to review, as a link"
-    assert "or: hold for one more pass" in body and '<a class="cb-talk" href="#" data-ask="Accept the chapter 2 revision?">talk about it</a>' in body
+    assert 'href="/api/steward/deliverable-file?pid=p-magi&amp;dir=&amp;path=drafts/chapter-2-v3.md"' in h and ">chapter-2-v3.md</a>" in h, "the material to review, as a link"
+    assert "cb-mat" not in h and h.index('<div class="cmat"><span class="k">To review</span>') > h.index("</div>", h.index('<div class="cb-next">')), "W2e-5: the material on its own line after the rectangle (under the dialogue's strip on the tile)"
+    assert "or: hold for one more pass" in body and '<a class="cb-talk" href="#" data-ask="Accept the chapter 2 revision?">talk about it</a>' in body and "To review" not in body
     assert '<span class="k">Next</span>Chapter 3 outline' in h
     steward_engine._update_state(str(proj), {"question_context": None})
     h2 = hc.card_part("p-magi", "brief", str(proj), "Artificial Magi", "")["html"]
@@ -125,7 +126,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     css = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
     for s in (".tlight.green{", ".tlight.orange{", ".tlight.red{", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
               '.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg"', ".tile.open>.t-face{grid-area:face}", ".tile.open>.t-body{display:contents}", ".tile.open .cbrief{grid-area:brief",
-              ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}",
+              ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}", '"dlg dlg" "mat mat"', ".tile.open .cmat{grid-area:mat}",
               ".cdlg .scroll{max-height:20vh", ".cdlg.big .scroll{max-height:58vh}", ".tile.talking .cdetail{display:none}"):
         assert s in css, s
 
