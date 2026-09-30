@@ -7873,8 +7873,13 @@ def _campaign_context(entry):
         working = _working_pids(_all, _sessreg.list_sessions())
     except Exception:
         working = set()
+    try:
+        from steward_cockpit.steward_campaign import map_stamp as _map_stamp
+        stamp = str(_map_stamp(folder))      # the cheap change detector the cockpit polls (W2b-1: a turn that changed the record reloads the board)
+    except Exception:
+        stamp = ""
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
-            "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
+            "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
             "projects": projects, "tick_allowed": False, "working": working}
 
