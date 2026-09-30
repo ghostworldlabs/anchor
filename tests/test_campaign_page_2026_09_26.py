@@ -65,7 +65,7 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert '<span class="ilight needs"' in tile and 'class="gpc needs"' in tile and "MBA Teaching AI" in tile    # the face: its cockpit with its light
     place = html[html.index('id="place-mba-teaching"'):html.index('id="place-trusts"')]
     assert place.index('class="imore"') < place.index('class="istatus"') < place.index('class="obody"')
-    assert "2 goals &middot; Active 0 &middot; T1 1 / T2 1 / T3 0" in html
+    assert "2 goals &middot; Tier 1 1 &middot; Tier 2 1 &middot; seed goals 1 &middot; the boneyard 0" in html
     assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "goal" in html
     assert "retool homework 2" in html and "Oct 27" in html and "Lectures 3 + 4 revised, with AI supplements" in html
     assert 'data-act="date" data-part="hw"' in html                      # a native part's date can be moved here
@@ -109,7 +109,9 @@ def test_an_untiered_initiative_gets_its_own_column_and_strip_and_no_number_in_t
     steps[6].pop("tier")
     ctx = _ctx(); ctx["initiatives"] = hsp.campaign_initiatives(steps, _resolved())
     html = cpg.render_campaign_html(ctx)
-    assert "No tier yet" in html and "T1 1 / T2 0 / T3 0" in html
+    assert "2 goals &middot; Tier 1 1 &middot; Tier 2 0 &middot; seed goals 2" in html, "an untiered goal is a seed goal on the board (PLAN v1.3)"
+    board = html[html.index('<div class="bands"'):html.index('id="viewCal"')]
+    assert 'data-lane="trusts" data-band="3"' in board and "No tier yet" not in board
     cal = html[html.index('id="viewCal"'):]
     assert 'class="tn">No tier yet</span>' in cal and 'data-lane="trusts"' in cal
 

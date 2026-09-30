@@ -164,45 +164,36 @@
     go.addEventListener('click', function () { act({ act: 'promote', seed: go.getAttribute('data-pickgo'), tier: chosen('[data-picktier]') || '3', area: chosen('[data-pickarea]') || null }); });
   });
 
-  // W2 v2 (2026-09-29, his lock of the goal board): a goal tile drags up and down inside its band, into another
-  // tier, into Active or out of it. Every drop is ONE act — place — through the same route, with undo. Nothing
-  // moves on the page until the record says so.
+  // W2 (PLAN v1.3, 2026-09-30): a goal tile drags into another tier or into Seed goals (tier 3). Every drop is ONE
+  // act — place — through the same route, with undo; there is no order inside a tier. Nothing moves on the page
+  // until the record says so. Seats (Active, On deck) live at the High Seat.
   var dragId = null, dragFrom = null;
-  function tilesOf(band) { return $$('.gtile[draggable]', band); }
-  function clearMarks() { $$('.gtile.over-before, .gtile.over-after').forEach(function (r) { r.classList.remove('over-before', 'over-after'); }); $$('.band.over').forEach(function (l) { l.classList.remove('over'); }); }
-  function indexAt(band, x, y) {   // where the dragged tile would land in the band's grid: before the first tile whose middle is past the pointer
-    var tiles = tilesOf(band).filter(function (r) { return r.getAttribute('data-lane') !== dragId; }), k = tiles.length;
-    for (var i = 0; i < tiles.length; i++) { var b = tiles[i].getBoundingClientRect(); if (y < b.top || (y <= b.bottom && x < b.left + b.width / 2)) { k = i; break; } }
-    return { k: k, tiles: tiles };
-  }
-  $$('.gtile[draggable]').forEach(function (r) {
+  function clearMarks() { $$('.band.over').forEach(function (l) { l.classList.remove('over'); }); }
+  $$('.gtile[draggable="true"]').forEach(function (r) {
     r.addEventListener('dragstart', function (e) {
       dragId = r.getAttribute('data-lane'); dragFrom = r.getAttribute('data-band'); r.classList.add('dragging');
       try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
     });
     r.addEventListener('dragend', function () { r.classList.remove('dragging'); clearMarks(); dragId = null; dragFrom = null; });
   });
-  $$('.band').forEach(function (band) {
+  $$('.band[data-band="1"], .band[data-band="2"], .band[data-band="3"]').forEach(function (band) {
     band.addEventListener('dragover', function (e) {
       if (!dragId) return;
       e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
       clearMarks(); band.classList.add('over');
-      if (band.getAttribute('data-band') !== 'active') return;      // no order inside a tier (his word): the band lights, no slot
-      var at = indexAt(band, e.clientX, e.clientY);
-      if (at.tiles.length) { if (at.k < at.tiles.length) at.tiles[at.k].classList.add('over-before'); else at.tiles[at.tiles.length - 1].classList.add('over-after'); }
     });
     band.addEventListener('dragleave', function (e) { if (!band.contains(e.relatedTarget)) clearMarks(); });
     band.addEventListener('drop', function (e) {
       if (!dragId) return;
       e.preventDefault();
       var to = band.getAttribute('data-band'), id = dragId, from = dragFrom; clearMarks();
-      if (to === 'none') return;
-      if (to !== 'active') { if (to === from) return; act({ act: 'place', step: id, band: to, position: 0 }); return; }   // a tier: the tier only
-      var k = indexAt(band, e.clientX, e.clientY).k;
-      if (to === from) { var was = tilesOf(band).map(function (r) { return r.getAttribute('data-lane'); }).indexOf(id); if (was === k) return; }
-      act({ act: 'place', step: id, band: to, position: k });
+      if (to === from) return;
+      act({ act: 'place', step: id, band: to, position: 0 });      // the tier only
     });
   });
+  // the boneyard: folded, never deleted
+  var boneTog = $('#boneTog'), boneFold = $('#boneFold');
+  if (boneTog && boneFold) boneTog.addEventListener('click', function () { boneFold.hidden = !boneFold.hidden; boneTog.setAttribute('aria-expanded', boneFold.hidden ? 'false' : 'true'); boneTog.textContent = (boneFold.hidden ? 'show' : 'hide') + boneTog.textContent.replace(/^(show|hide)/, ''); });
 
   // the goal's place: revise the goal, set the pace, take it up or bench it — each one act with undo
   $$('.place .g[data-goal-text]').forEach(function (g) {
@@ -225,8 +216,6 @@
       inp.addEventListener('blur', function () { if (document.body.contains(inp)) inp.replaceWith(s); });
     });
   });
-  $$('.place [data-activate]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'activate', step: b.getAttribute('data-activate') }); }); });
-  $$('.place [data-bench]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'bench', step: b.getAttribute('data-bench') }); }); });
 
   // the goal's conversation: the same say route with the goal; a verb inside needs no name; talk goes to the
   // steward told which goal he is in, and its answer is read back here without a reload

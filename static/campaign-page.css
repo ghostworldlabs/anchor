@@ -462,6 +462,9 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .gfacts{display:flex;gap:10px;font-size:11px;color:var(--text-dim);margin-top:5px;flex-wrap:wrap;align-items:center}.gfacts .dim{color:var(--text-dim2)}.gfacts .gdl.soon{color:var(--amber-t);font-weight:650}.gfacts .gdl.over{color:var(--danger);font-weight:650}.gfacts .am{color:var(--amber-t);font-weight:650}
 .bar{display:inline-block;width:46px;height:5px;border-radius:3px;background:#2b3140;vertical-align:middle;margin-right:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
 .band .empty{font-size:11.5px;color:var(--text-dim2);padding:5px 8px}
+.band.seeds .band-h{color:var(--accent-t)}.band.seeds .seedband{margin-top:8px}.band.bone .band-h{color:var(--text-dim2)}.band.bone .band-h .mini{margin-left:auto}
+.bonefold{margin-top:6px}.bonefold[hidden]{display:none}.gtile.bone{opacity:.6;cursor:default}.gtile[draggable="false"]{cursor:default}
+.proj .ck{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim2);border:1px solid var(--border);border-radius:4px;padding:0 4px;margin-right:4px}
 /* the goal's place */
 .place{border:1px solid var(--amber);border-radius:12px;background:#141722;padding:12px 14px;margin-bottom:10px;border-left:3px solid var(--areac,#8b93a6);flex:none;max-height:72vh;overflow-y:auto}
 .place[hidden]{display:none}

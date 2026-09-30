@@ -33,29 +33,29 @@ def _ctx(steps=None, working=None, goal_turns=None):
     return ctx
 
 
-def test_the_board_is_the_goals_in_bands_active_then_the_tiers():
-    html = cpg.render_campaign_html(_ctx())
+def test_the_board_is_the_goals_in_tier_bands_then_seed_goals_then_the_boneyard():
+    """PLAN v1.3 (his lock, 09-30): Tier 1 · Tier 2 · Seed goals (the tier-3 goals and the seeds) · the Boneyard (done or
+    parked goals, folded). No Active band on this page; no order inside a tier."""
+    steps = w1._steps() + [
+        {"id": "old", "name": "An old goal", "status": "done", "tier": 1, "done_when": "it was done", "navigation": {"path": ["old"], "groups": [{"id": "old", "label": "An old goal", "order": 9, "parent_id": None}]}},
+        {"id": "later", "name": "A later goal", "status": "proposed", "tier": 3, "done_when": "some day", "navigation": {"path": ["later"], "groups": [{"id": "later", "label": "A later goal", "order": 0, "parent_id": None}]}}]
+    html = cpg.render_campaign_html(_ctx(steps))
     board = html[html.index('<div class="bands"'):html.index('id="viewCal"')]
     bands = re.findall(r'<section class="band[^"]*" data-band="([^"]+)"', board)
-    assert bands == ["active", "1", "2", "3"], "Active first, then the tiers; no untiered band when every goal has a tier"
+    assert bands == ["1", "2", "3", "bone"], "Tier 1, Tier 2, Seed goals, the boneyard - and no Active band"
     tiles = re.findall(r'<article class="gtile[^"]*" draggable="true" data-lane="([^"]+)" data-band="([^"]+)"', board)
-    assert tiles == [("magi", "active"), ("mba", "active"), ("trusts", "1"), ("paper", "2")], "his order in Active; the tiers' order in the tiers"
-    magi = board[board.index('data-lane="magi"'):board.index('data-lane="mba"')]
-    assert 'data-open="magi"' in magi and "Artificial Magi done" in magi and "pace Dec 15" in magi and "0 of 1" in magi and 'class="ilight working"' in magi and "tier 1" in magi
-    # the face names the goal's cockpits with their lights (his 13:5x word); a goal with no project is "at the desk"
-    assert 'class="gcock"><span class="gpc working" title="active">Chapter 2 scenes <i>&#9679;</i></span></div>' in magi and magi.count(">Artificial Magi done<") == 1
-    paper = board[board.index('data-lane="paper"'):]
-    assert "at the desk &mdash; no project yet" in paper[:1200] and 'class="iline' not in paper[:1200]
-    assert "initiative" not in re.sub(r"<[^>]+>", " ", html).lower(), "the word retires from what he reads (his choice, 18:0x)"
-    trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="paper"')]
+    assert sorted(tiles) == sorted([("magi", "1"), ("mba", "1"), ("trusts", "1"), ("paper", "2"), ("later", "3")]), "the goals in their tiers; a tier-3 goal among the seed goals"
+    assert 'draggable="false" data-lane="old" data-band="bone"' in board and 'id="boneFold" hidden' in board and "show (1)" in board, "a done goal in the boneyard, folded"
+    assert '<section class="seedband" id="seedband"' in board[board.index('data-band="3"'):board.index('data-band="bone"')], "the seeds live in the Seed goals band"
+    magi = board[board.index('data-lane="magi"'):board.index('data-lane="magi"') + 1200]
+    assert 'data-open="magi"' in magi and "Artificial Magi done" in magi and "pace Dec 15" in magi and 'class="ilight working"' in magi
+    assert 'class="gcock"><span class="gpc working" title="active">Chapter 2 scenes <i>&#9679;</i></span></div>' in magi
+    trusts = board[board.index('data-lane="trusts"'):board.index('data-lane="trusts"') + 1200]
     assert "next Oct 8" in trusts and "&#9873; 1 part needs you" in trusts
-    assert 'id="viewTitle">The goals</h3>' in html and "4 goals &middot; Active 2 &middot; T1 3 / T2 1 / T3 0" in html
-    assert 'class="itile' not in html, "no second board: the old tiles are gone"
-    # the tiers as bands even when the set is empty; an untiered goal gets its own band
-    steps = [dict((k, v) for k, v in s.items() if k not in ("active", "active_order")) for s in w1._steps()]
-    steps.append({"id": "loose", "name": "A loose one", "status": "proposed", "done_when": "", "navigation": {"path": ["loose"], "groups": [{"id": "loose", "label": "A loose one", "order": 0, "parent_id": None}]}})
-    html = cpg.render_campaign_html(_ctx(steps))
-    assert "nothing active yet &mdash; drag a goal here" in html and 'data-band="none"' in html and "No tier yet" in html
+    assert "5 goals &middot; Tier 1 3 &middot; Tier 2 1 &middot; seed goals 2 &middot; the boneyard 1" in html, "the done goal is not counted among the goals; the tier-3 goal and the seed are seed goals"
+    assert 'data-band="active"' not in html and 'class="itile' not in html
+    text = re.sub(r"<[^>]+>", " ", html).lower()
+    assert "an initiative is a cockpit or a desk item" in text and " initiatives " not in text.replace("initiative is", ""), "his words: a goal holds components; an initiative is a seatable component, never the goal"
 
 
 def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_the_projects_and_its_thread():
@@ -70,13 +70,14 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
     assert "0 of 1 part done" in place and "1 waits on you &mdash; Send the Stanford package" in place and "the next deadline is <b>Oct 8</b>" in place and "no pace set" in place
     assert '<div class="k">Progress</div>' not in place, "the third copy of N of M is cut (Grok W2)"
     assert "nudge" not in place, "no promise W3 has not built"
-    assert 'data-pace="trusts">set a pace</span>' in place and 'data-tiersel="trusts"' in place and 'data-activate="trusts">make it active</button>' in place
+    assert 'data-pace="trusts">set a pace</span>' in place and 'data-tiersel="trusts"' in place and "data-activate" not in place, "seats come with the High Seat (W2b/W2c), not here"
     assert 'data-act="date" data-part="trusts-pkg"' in place and 'data-act="add" data-lane="trusts"' in place, "the workflow carries the parts' acts as the tile's body did"
     assert 'data-thread="trusts"' in place and "add a part: call the trustee" in place and "Added to The trusts" in place
     assert 'class="gsay" data-goal="trusts"' in place and 'class="send gsend" data-goal="trusts"' in place
     magi = html[html.index('id="place-magi"'):html.index('id="place-mba"')]
-    assert 'href="/project/p-magi"' in magi and "Chapter 2 scenes" in magi and "Its cockpits" in magi, "a project part is openable from the place"
-    assert "active &middot; <button class=\"linkish\" data-bench=\"magi\">bench it</button>" in magi and "the pace is <b>Dec 15</b>" in magi
+    assert 'href="/project/p-magi"' in magi and "Chapter 2 scenes" in magi and "Its components" in magi and '<span class="ck">cockpit</span>' in magi, "a project part is openable from the place, named for its kind"
+    assert "the pace is <b>Dec 15</b>" in magi and "bench it" not in magi
+    assert '<span class="ck">desk item</span> Send the Stanford package' in place
     assert "Nothing said about this goal yet" in magi
     assert 'class="istatus"' in magi, "the Status as the tile's body had it"
 
@@ -99,10 +100,11 @@ def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
 def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     js = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
     drag = js[js.index("var dragId"):js.index("// the goal's place")]
-    assert "act({ act: 'place', step: id, band: to, position: k })" in drag and "act({ act: 'place', step: id, band: to, position: 0 })" in drag and drag.count("act({") == 2, "one drop, one act: a position only inside Active"
+    assert "act({ act: 'place', step: id, band: to, position: 0 })" in drag and drag.count("act({") == 1, "one drop, one act: the tier only"
+    assert "data-band=\"active\"" not in drag and "#boneTog" in drag
     place = js[js.index("// the goal's place"):js.index("// the goal's conversation")]
     assert "act({ act: 'done_when', step: id, text: v })" in place and "act({ act: 'pace', step: id, when: inp.value || 'none' })" in place
-    assert "act({ act: 'activate', step: b.getAttribute('data-activate') })" in place and "act({ act: 'bench', step: b.getAttribute('data-bench') })" in place
+    assert "data-activate" not in place and "data-bench" not in place
     conv = js[js.index("// the goal's conversation"):js.index("// the tools")]
     assert "goal: goal" in conv and "'/api/steward/history?pid='" in conv and "location.reload" in conv and "No answer yet" in conv
     assert "window.prompt(" not in place and "window.prompt(" not in conv
