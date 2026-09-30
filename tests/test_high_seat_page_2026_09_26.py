@@ -89,7 +89,7 @@ def test_the_ruler_buckets_dates_by_the_weeks_of_the_page():
 
 def test_the_page_renders_from_facts_and_escapes_them():
     html = hsp.render_high_seat_html(_ctx())
-    assert "<title>Tip of the Hat</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-high-seat-hat.jpg?v=test"' in html   # the tab: the steward's icon and the seat's name
+    assert "<title>Tip of the Hat</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-high-seat-hat.png?v=test" type="image/png" sizes="128x128"' in html   # the tab: the steward's icon and the seat's name
     assert "high-seat-page.css" in html and "high-seat-page.js" in html
     assert html.index('class="mh-stew"') < html.index('class="mh-pill"') and 'id="stewBlock"' not in html   # the steward at the very top, beside the AI Cockpit pill
     assert "this week Sep 21–27" in html and "id='prefs-here'" in html

@@ -236,6 +236,19 @@ def ruler_markers(facts, today):
 
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
 
+def tab_icon_link(name, build):
+    """The page's tab icon (John, 2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
+    is too large for a browser tab, so the small PNG made from it stands in when it exists (vendor/brand/<stem>.png);
+    an SVG or a small image is linked as it is."""
+    from pathlib import Path as _P
+    base = str(name or "gwl-m-icon.svg")
+    stem, _, ext = base.rpartition(".")
+    if ext.lower() in ("jpg", "jpeg") and (_P(__file__).parent / "vendor" / "brand" / (stem + ".png")).is_file():
+        return '<link rel="icon" href="/vendor/brand/%s.png?v=%s" type="image/png" sizes="128x128">' % (esc(stem), esc(build))
+    ctype = "image/svg+xml" if ext.lower() == "svg" else ("image/png" if ext.lower() == "png" else "image/jpeg")
+    return '<link rel="icon" href="/vendor/brand/%s?v=%s" type="%s">' % (esc(base), esc(build), ctype)
+
+
 def _brand_img(build, name, cls=""):
     return '<img%s src="/vendor/brand/%s?v=%s" alt="" onerror="this.style.display=\'none\'">' % (
         (' class="%s"' % cls) if cls else "", esc(name), esc(build))
@@ -816,14 +829,14 @@ def render_high_seat_html(ctx) -> str:
              + _desk_line(ctx) + _ruler(ctx) + _workbench(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>%s</title><link rel="icon" href="/vendor/brand/%s?v=%s">'
+        '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, steward: "%s", stamp: "%s"};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["steward"]["high_seat_name"]), esc(ctx["steward"].get("high_seat") or "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false",
+    ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), _rail(ctx), _masthead(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))
     return page
