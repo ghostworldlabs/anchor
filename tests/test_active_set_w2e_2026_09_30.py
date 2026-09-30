@@ -104,7 +104,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     for s in ("function openTile(card, pid, dir)", "fetchPart(pid, 'brief', dir, false, true)", "function closeTile(card)", "function startTalk(card, pid, dir)", "function stopTalk(card)",
               "if (!card.classList.contains('open')) openTile(card, pid, dir);", "var det = $('.cdetail', card);",
-              "new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); })", "function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
+              "function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
               '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
               "if (e && e.auth) showLogin('This cockpit",
@@ -117,6 +117,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
     assert js.count("function stopTalk(card)") == 1 and "function doLogin()" not in js, "one stopTalk (Grok W2e-3 cut the dead one); the login script is the module's"
+    assert "=== 'busy') grow(card)" not in js and "card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir')" in js and "var f = $('.exfade', list); g.textContent = f ? f.textContent.trim()" in js, "Grok W2e-4: the strip opens on his acts only; Accept goes to the opened cockpit; the gist carries the list's one sentence"
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
     assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"

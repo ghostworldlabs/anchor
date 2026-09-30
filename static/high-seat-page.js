@@ -205,7 +205,7 @@
     var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate'), bar = $('#' + id + ' .dlg-bar');
     function gist() {   // the strip's context: the last turn, whoever said it
       var rows = $$('.exrow', list), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;
-      if (!last) { g.textContent = 'nothing said in this cockpit yet'; return; }
+      if (!last) { var f = $('.exfade', list); g.textContent = f ? f.textContent.trim() : 'nothing said in this cockpit yet'; return; }   // the list's one sentence (not logged in / nothing said / could not be read), as Grok read it
       var t = ($('.ext', last) || {}).textContent || '';
       g.textContent = (last.classList.contains('you') ? 'You: ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
     }
@@ -233,13 +233,13 @@
     var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '',
       onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); } }) : null;
     card._talk = dlg;
-    // a dialogue that starts — his send, or the steward at work — takes the tile
-    if (state && window.MutationObserver) { var mo = new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); }); mo.observe(state, { attributes: true, attributeFilter: ['data-state'] }); card._talkMo = mo; }
+    // the strip opens on HIS acts only (his click, send, talk about it, Accept) — never by itself when the steward turns
+    // busy: the chip and the gist already say so (Grok's read of W2e-4; his word 'expand with a click')
     function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, null); }
     sendBtn.addEventListener('click', go);
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
   }
-  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._talkMo) { card._talkMo.disconnect(); card._talkMo = null; } if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
+  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
@@ -296,7 +296,8 @@
   document.addEventListener('click', function (e) {
     var b = e.target.closest('.cb-accept'); if (!b) return;
     e.preventDefault(); e.stopPropagation();
-    var card = b.closest('.tile'), pid = card && card.getAttribute('data-tile'), dir = (card && card.getAttribute('data-dir')) || '';
+    // the acceptance goes to the cockpit the tile was OPENED on (an act may have opened it on another effort), never the card's own dir by default (Grok's read of W2e-4)
+    var card = b.closest('.tile'), pid = card && card.getAttribute('data-tile'), dir = card ? (card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir') : (card.getAttribute('data-dir') || '')) : '';
     if (!card || !pid) return;
     b.disabled = true; grow(card);
     fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || ''), question_id: b.getAttribute('data-qid') || null }) })
