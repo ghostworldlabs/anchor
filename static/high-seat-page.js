@@ -179,7 +179,8 @@
   }
   if (loginGo) loginGo.addEventListener('click', doLogin);
   if (loginTok) loginTok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
-  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token()) showLogin('');
+  // W2c-4 (his word, 2026-09-30): a browser the server already knows by its login cookie is logged in — no box, even with no token held here
+  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('');
   // a held token may be the OLD one (after a rotation): check it once on load; a refusal opens the box at once
   if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && token()) {
     login(token()).then(function (r) {
@@ -451,7 +452,9 @@
   (function () {
     var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
-    function typing() { var a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && (a.value || '').trim()); }
+    // W2c-4: never while he types — a key in the last ten seconds; a box that merely holds a draft no longer pins a stale page (the draft is put back after the reload)
+    var lastKey = 0; document.addEventListener('keydown', function () { lastKey = Date.now(); });
+    function typing() { return Date.now() - lastKey < 10000; }
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
         var v = d && d.version; if (!v || v === mine || typing()) return;

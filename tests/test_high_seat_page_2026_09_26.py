@@ -91,7 +91,7 @@ def test_the_page_renders_from_facts_and_escapes_them():
     html = hsp.render_high_seat_html(_ctx())
     assert "<title>Tip of the Hat</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-high-seat-hat.png?v=test" type="image/png" sizes="128x128"' in html   # the tab: the steward's icon and the seat's name
     assert "high-seat-page.css" in html and "high-seat-page.js" in html
-    assert html.index('class="mh-stew"') < html.index('class="mh-pill"') and 'id="stewBlock"' not in html   # the steward at the very top, beside the AI Cockpit pill
+    assert 'class="mh-stew"' in html and 'mh-pill' not in html and 'id="stewBlock"' not in html      # W2c-4: the AI Cockpit pill left the masthead on his word   # the steward at the very top, beside the AI Cockpit pill
     assert "this week Sep 21–27" in html and "id='prefs-here'" in html
     assert "Family &lt;Trusts&gt;" in html and "Family <Trusts>" not in html
     # the Campaign tile: the Tier 1 line, one tile with its parts and the broken reference named
@@ -112,7 +112,7 @@ def test_the_page_renders_from_facts_and_escapes_them():
 
 def test_the_page_boots_with_the_campaign_id_and_an_undo_on_its_receipt_line():
     html = hsp.render_high_seat_html(_ctx(campaign=True))
-    assert 'window.ANCHOR_BOOT = {build_id: "test", campaign_pid: "df56", auth_required: false, steward: "Jarvis", stamp: ""}' in html and 'id="undoBtn" hidden' in html      # W2c-2: the steward's label and the stamp ride the boot
+    assert 'window.ANCHOR_BOOT = {build_id: "test", campaign_pid: "df56", auth_required: false, logged_in: false, steward: "Jarvis", stamp: ""}' in html and 'id="undoBtn" hidden' in html      # W2c-2: the steward's label and the stamp ride the boot
     assert 'campaign_pid: ""' in hsp.render_high_seat_html(_ctx(campaign=False))
 
 

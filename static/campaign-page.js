@@ -283,7 +283,9 @@
   (function () {
     var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
-    function typing() { var a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && (a.value || '').trim()); }
+    // W2c-4: never while he types — a key in the last ten seconds; a box that merely holds a draft no longer pins a stale page (the draft is put back after the reload)
+    var lastKey = 0; document.addEventListener('keydown', function () { lastKey = Date.now(); });
+    function typing() { return Date.now() - lastKey < 10000; }
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
         var v = d && d.version; if (!v || v === mine || typing()) return;

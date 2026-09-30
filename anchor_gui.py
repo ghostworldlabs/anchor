@@ -8010,11 +8010,14 @@ def handle_high_seat_repair(handler, path, body):
     handler._send_json(answer, 200 if ok else 409)
 
 
-def render_high_seat_page() -> str:
-    """GET /high-seat — the steward's portfolio surface (W1b); an honest error page, never a blank."""
+def render_high_seat_page(logged_in=False) -> str:
+    """GET /high-seat — the steward's portfolio surface (W1b); an honest error page, never a blank. ``logged_in``: the
+    request carried a valid token or the login cookie (W2c-4: the page shows its login box only when it did not)."""
     try:
         import high_seat_page as _hsp
-        return _hsp.render_high_seat_html(_high_seat_context())
+        ctx = _high_seat_context()
+        ctx["logged_in"] = bool(logged_in)
+        return _hsp.render_high_seat_html(ctx)
     except Exception as e:
         return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
                 "<h1>The High Seat could not render</h1><p>%s</p><p><a href=\"/dashboard\" style=\"color:#8ab4f8\">the dashboard</a></p></body></html>"
@@ -22256,14 +22259,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # The High Seat IS the home (John, 2026-09-27: "show me the updated main dashboard"). The old
                 # dashboard stays at /?classic=1 and /dashboard until the writer switch retires its task list.
                 # Served REGARDLESS of the rest of the query so the cache-busting reload ("/?v=<build_id>") lands here.
-                self._send_html(render_high_seat_page())
+                self._send_html(render_high_seat_page(logged_in=self._term_token_ok()))
             elif _path_only == "/" or _path_only == "/dashboard":
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
             elif _path_only == "/high-seat":
                 # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
-                self._send_html(render_high_seat_page())
+                self._send_html(render_high_seat_page(logged_in=self._term_token_ok()))
             elif _path_only == "/doctor":
                 # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
                 # own style (render_doctor_page_html: real stats from

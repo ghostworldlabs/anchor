@@ -305,8 +305,9 @@ def _rail(ctx):
 
 
 def _masthead(ctx):
-    """The masthead every High Seat page shares: Anchor, the Ghost World Labs lockup, then — at the very top, beside the
-    AI Cockpit pill (John, 2026-09-27) — the steward: its High Seat image, the seat's name, who serves."""
+    """The masthead every High Seat page shares: Anchor, the Ghost World Labs lockup, then — at the very top — the
+    steward: its High Seat image, the seat's name, who serves. (The AI Cockpit pill left it on his word, 2026-09-30;
+    the footer keeps the tagline.)"""
     b = ctx["build"]
     st = ctx.get("steward") or {}
     stew = ('<div class="mh-stew" title="your steward">%s<div><b>The %s</b><span>%s &middot; your steward</span></div></div>' % (
@@ -314,9 +315,8 @@ def _masthead(ctx):
     return (
         '<div class="masthead"><div class="mh-title"><span class="a">&#9875;</span>Anchor</div><div class="mh-div"></div>'
         '<div class="mh-lock">%s<div><div class="mh-w1">Ghost World <span class="gwl-accent">Labs</span></div>'
-        '<div class="mh-w2">R&amp;D Mission Control</div></div></div><div class="mh-sp"></div>%s'
-        '<div class="mh-pill">AI Cockpit %s</div></div>'
-    ) % (_brand_img(b, "gwl-m-icon.svg", "mh-mark"), stew, _brand_img(b, "gwl-m-icon.svg"))
+        '<div class="mh-w2">R&amp;D Mission Control</div></div></div><div class="mh-sp"></div>%s</div>'
+    ) % (_brand_img(b, "gwl-m-icon.svg", "mh-mark"), stew)
 
 
 def _hdr(ctx):
@@ -839,12 +839,12 @@ def render_high_seat_html(ctx) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, steward: "%s", stamp: "%s"};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s"};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false",
+    ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), _rail(ctx), _masthead(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))
     return page
