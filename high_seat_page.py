@@ -129,19 +129,6 @@ def seated(initiatives, seat):
     return sorted(out, key=lambda t: (t[1].get("seat_order") if isinstance(t[1].get("seat_order"), int) else 999, t[0].get("tier") or 9, int(t[0].get("order") or 0), part_name(t[1]).lower()))
 
 
-def _active_set_legacy(initiatives):
-    """The initiatives he works on now, in the set's order (his order, then the tiers' as a tiebreak)."""
-    act = [i for i in initiatives or () if i.get("active")]
-    return sorted(act, key=lambda i: (i.get("active_order") if isinstance(i.get("active_order"), int) else 999, i.get("tier") or 9, i.get("order") or 0, str(i.get("name") or "")))
-
-
-def _bench_of_legacy(initiatives):
-    """The rest, by the nearest date he cares about — the pace, else the next deadline — then the tiers' order; an
-    undated initiative after every dated one."""
-    rest = [i for i in initiatives or () if not i.get("active")]
-    return sorted(rest, key=lambda i: (i.get("pace") or i.get("next_deadline") or "9999-99-99", i.get("tier") or 9, i.get("order") or 0, str(i.get("name") or "")))
-
-
 # ── an initiative's light, its one line, its status (the home's Campaign tile and the Campaign page share these) ──
 
 LIGHTS = {"needs": ("&#9873;", "needs you"), "working": ("&#9679;", "working"), "waiting": ("&#9679;", "waiting"), "idle": ("&#9675;", "idle")}

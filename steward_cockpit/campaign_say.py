@@ -296,6 +296,8 @@ def _apply(folder, c, today):
         seeds = [(s["id"], s["text"]) for s in read_seeds(folder)]
         hit, why = _find(seeds, a.get("seed"), "seed")
         if hit is None:
+            if not str(why or "").startswith("no seed"):
+                return _refuse(why, act)      # a near seed ("did you mean") or a tie is answered; nothing is written (Grok's read of W2b)
             # no seed by that name: a goal from his words (2026-09-30), at the tier and area he said
             return _answer(acts.new_goal(folder, a.get("seed"), a.get("tier"), a.get("area")), act)
         area = str(a.get("area") or "").lower() or None
@@ -322,6 +324,12 @@ def _apply(folder, c, today):
         g = next((c for c in inits if key and (_norm(c[1]) == key or _norm(c[0]) == key)), None)
         if g is not None:      # he named a goal by its whole name: a goal has no seat — the writer's refusal names its components
             return _answer(acts.seat(folder, g[0], "active"), act)
+        if key and not any(_norm(c[1]) == key or _norm(c[0]) == key for c in comps):
+            # the start of exactly one goal's name (the pace rule: "the trusts") is that goal, whatever its id — a
+            # goal has no seat; words that are one component's words still seat the component (Grok's read of W2b)
+            pre = [c for c in inits if _norm(c[1]).startswith(key + " ") or _norm(c[1]).startswith(key + ",")]
+            if len(pre) == 1:
+                return _answer(acts.seat(folder, pre[0][0], "active"), act)
         hit, why = _find(comps, a.get("initiative"), "initiative")
         if hit is None:
             return _refuse(why, act)

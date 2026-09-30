@@ -132,6 +132,14 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         from pathlib import Path as _P
         from urllib.parse import quote as _q
         eff = _P(folder) / p["sub"]
+        sub_ = str(p["sub"])
+        try:
+            inside = eff.resolve().parent == _P(folder).resolve()
+        except OSError:
+            inside = False
+        if sub_ in (".", "..") or "\\" in sub_ or "/" in sub_ or not inside:
+            out["gap"] = "an effort is one directory inside %s, not '%s'" % (out["name"], sub_)      # Grok's read of W2b: never a path out of the project
+            return out
         if not (eff / "ECGBERHT.md").is_file():
             out["gap"] = "no effort '%s' in %s" % (p["sub"], out["name"])
             return out

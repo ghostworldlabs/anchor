@@ -77,7 +77,7 @@ def test_the_head_reads_active_then_on_deck_then_the_tiers_and_the_pick_up_is_th
     inits = hsp.campaign_initiatives(_steps({"mba-ai": ("active", 0), "pkg": ("deck", 0)}), {k: v for k, v in RESOLVED.items() if k != "ft"} | {"ft": dict(RESOLVED["ft"], state="")})
     act = ha.head_act(inits, [], today=TODAY)
     assert act["kind"] == "deck" and act["part"] == "Send the Stanford package" and act["due"] == "" , "the package is dated Oct 8, not yet due"
-    assert ha.head_sentence(act).startswith("On deck · Send the Stanford package (The trusts and the holding company): Send the Stanford package — waiting on you.")
+    assert ha.head_sentence(act).startswith("On deck · Send the Stanford package (The trusts and the holding company) — waiting on you."), "a wait on John alone adds no middle (Grok: no restatement)"
     # nothing seated needs him: the tiers as before
     inits = hsp.campaign_initiatives(_steps({"mba-ai": ("active", 0)}), {k: v for k, v in RESOLVED.items() if k != "ft"} | {"ft": dict(RESOLVED["ft"], state="")})
     act = ha.head_act(inits, [], today=TODAY)
@@ -232,3 +232,80 @@ def test_the_place_shows_each_component_s_seat_with_its_buttons_and_the_face_mar
     assert 'Family Trusts <i>&#9873;</i><b class="seat active">active</b>' in trusts, "the face marks the seat"
     js = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
     assert "act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') })" in js and "act({ act: 'home', step: b.getAttribute('data-home') })" in js
+
+
+# ── Grok's read of W2b (2026-09-30, RABBIT-W2B): the holes it named ──────────────────────────────────────────────
+
+def _slug_steps(seats=None):
+    """The same record with the trusts goal under a slug id (Grok: 'make the trusts active' refused only because the id
+    was the word)."""
+    out = []
+    for s in _steps(seats):
+        s = json.loads(json.dumps(s))
+        if s["id"] == "trusts":
+            s["id"] = "g1"; s["navigation"]["path"] = ["g1"]; s["navigation"]["groups"][0]["id"] = "g1"
+        elif s["navigation"].get("path") == ["trusts"]:
+            s["navigation"]["path"] = ["g1"]
+        out.append(s)
+    return out
+
+
+def test_the_start_of_a_goal_s_name_refuses_the_seat_verbs_and_a_component_s_words_still_seat(tmp_path, monkeypatch):
+    d = tmp_path / "Campaign"; d.mkdir()
+    (d / "roadmap.json").write_text(json.dumps({"schema": "x", "roadmap_events": [], "roadmap_projection": _slug_steps()}), encoding="utf-8")
+    d = str(d); _fake_engine(tmp_path, monkeypatch)
+    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_activate", "args": {"initiative": "the trusts"}})
+    r = say.say_campaign(d, "make the trusts active", today=TODAY)
+    assert r and not r["ok"] and "a goal has no seat" in r["say"] and "Family Trusts (the project)" in r["say"], "the start of one goal's name (the pace rule) is the goal, whatever its id"
+    assert not acts._step(d, "ft").get("seat") and not acts._step(d, "hc").get("seat")
+    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_deck", "args": {"initiative": "holding company"}})
+    r = say.say_campaign(d, "put holding company on deck", today=TODAY)
+    assert r and r["ok"] and acts._step(d, "hc")["seat"] == "deck", "words inside a goal's name that are one component's words seat the component"
+
+
+def test_a_refused_close_up_still_carries_the_undo(tmp_path, monkeypatch):
+    d = _record(tmp_path, {"mba-ai": ("active", 0)})
+    _fake_engine(tmp_path, monkeypatch)
+    real = acts._cli
+
+    def failing_second(project, *args):
+        # the moved step lands; the close-up of the others is refused by the engine
+        sid = args[args.index("--step") + 1]
+        if sid != "ft" and "--seat-order" in args:
+            return {"ok": False, "error": "a fake refusal"}
+        return real(project, *args)
+    monkeypatch.setattr(acts, "_cli", failing_second)
+    r = acts.act(d, {"act": "seat", "step": "ft", "seat": "active", "position": 0})
+    assert not r["ok"] and "undo puts it back" in r["receipt"] and r["undo"] == {"act": "home", "step": "ft"}, "the seat landed; the refusal says so and carries the way back"
+    assert acts._step(d, "ft")["seat"] == "active"
+
+
+def test_a_near_seed_is_answered_and_nothing_is_written(tmp_path, monkeypatch):
+    d = _record(tmp_path)
+    _fake_engine(tmp_path, monkeypatch)
+    import steward_cockpit.campaign_seeds as seeds
+    monkeypatch.setattr(seeds, "read_seeds", lambda folder: [{"id": "s1", "text": "Get OpX code working again"}, {"id": "s2", "text": "Get OpX docs written"}])
+    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_promote_seed", "args": {"seed": "Get OpX", "tier": 2}})
+    n = len(acts._projection(d))
+    r = say.say_campaign(d, "make Get OpX a goal in tier 2", today=TODAY)
+    assert r and not r["ok"] and "could be" in r["say"] and "Get OpX code working again" in r["say"] and "Get OpX docs written" in r["say"], "a tie among the seeds is answered with the names"
+    assert len(acts._projection(d)) == n, "a near miss writes nothing; only 'no seed named' makes a goal from the words"
+    monkeypatch.setattr(say, "compile_utterance", lambda text, dialogue=None: {"ok": True, "campaign": True, "act": "campaign_promote_seed", "args": {"seed": "OpX cod", "tier": 2}})
+    r = say.say_campaign(d, "make OpX cod a goal in tier 2", today=TODAY)
+    assert r and not r["ok"] and "did you mean" in r["say"] and len(acts._projection(d)) == n, "a near seed is answered, not made a goal"
+
+
+def test_a_working_effort_stays_working_and_an_effort_is_one_directory_inside_its_project(tmp_path):
+    proj = tmp_path / "Magi"; eff = proj / "book-one"; (eff / ".ecgberht").mkdir(parents=True)
+    (proj / "roadmap.json").write_text(json.dumps({"roadmap_projection": []}), encoding="utf-8")
+    (eff / "ECGBERHT.md").write_text("# Book one\n", encoding="utf-8")
+    (eff / "roadmap.json").write_text(json.dumps({"roadmap_projection": []}), encoding="utf-8")
+    (eff / ".ecgberht" / "attention.json").write_text(json.dumps({"state": "working", "reason": "waiting on you to read chapter 2"}), encoding="utf-8")
+    lookup = lambda pid: {"id": "p-magi", "name": "Artificial Magi", "folder_path": str(proj)} if pid == "p-magi" else None
+    r = parts.resolve_ref("effort:p-magi/book-one", lookup=lookup)
+    assert r["state"].startswith("working") and not r.get("needs_you"), "a working flag with a stale sentence is not a wait"
+    # a sibling of the project, or the project itself, is not one of its efforts
+    other = tmp_path / "Other"; (other / ".ecgberht").mkdir(parents=True); (other / "ECGBERHT.md").write_text("# Other\n", encoding="utf-8")
+    for bad in ("effort:p-magi/..", "effort:p-magi/.", "effort:p-magi/..\\Other"):
+        rr = parts.resolve_ref(bad, lookup=lookup)
+        assert rr["broken"] and ("one directory inside" in rr["gap"] or "not a reference" in rr["gap"]), bad

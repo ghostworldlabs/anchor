@@ -7880,7 +7880,8 @@ def _campaign_context(entry):
         stamp = ""
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
-            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
+            "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log
+            "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
             "projects": projects, "tick_allowed": False, "working": working}
 
 

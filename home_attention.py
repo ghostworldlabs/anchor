@@ -304,6 +304,20 @@ def _part_open(p):
             and p.get("target_status") not in _PART_CLOSED)
 
 
+def _wait_reason(p):
+    """What a seated initiative waits for: the reason the tile line already reads ("waiting on you: <reason>"); empty
+    when the state is not a wait, when the reason only repeats the part's name, or when it only names him (Grok's
+    read of W2b: the sentence never restates its own head)."""
+    st = str(p.get("state") or "")
+    if not st.lower().startswith("waiting on you"):
+        return ""
+    reason = re.sub(r"^waiting on you[:\s]*", "", st, flags=re.I).strip(" .")
+    name = " ".join(str(p.get("target") or p.get("text") or "").lower().split())
+    if not reason or " ".join(reason.lower().split()) == name or reason.lower() in ("john", "you", "me"):
+        return ""
+    return reason
+
+
 def head_act(initiatives, facts, today=None):
     """THE HEAD — one act, never a list (W2 of the steward revision, 2026-09-28; the synthesis R2; his answer Q3).
     The SEATS read first (2026-09-30, his three levels): an ACTIVE initiative — a cockpit, an effort or a desk item
@@ -328,7 +342,7 @@ def head_act(initiatives, facts, today=None):
              "effort": "", "dir": None,
              # the seated act (2026-09-30): the initiative's own name and what it waits for, said as the sentence says them
              "part": str(p.get("target") or p.get("text") or ""),
-             "what": (re.sub(r"^waiting on you:\s*", "", str(p.get("state") or ""), flags=re.I).strip() or str(p.get("text") or "")) if str(p.get("state") or "").lower().startswith("waiting on you") else str(p.get("text") or "")}
+             "what": _wait_reason(p)}
         a.update(more)
         return a
 
@@ -451,7 +465,8 @@ def _head_core(act):
         # a seated initiative (2026-09-30): "Active · Family Trusts (The trusts): <what it waits for> — waiting on you."
         when = (", overdue since %s" % _short(act.get("due"))) if act.get("overdue") else (", due today" if act.get("due") else "")
         head = "Active" if act["kind"] == "active" else "On deck"
-        return "%s · %s (%s): %s — waiting on you%s%s.%s" % (head, act.get("part") or act["text"], act["initiative"], act.get("what") or act["text"], when, age_s, then)
+        what = str(act.get("what") or "")
+        return "%s · %s (%s)%s — waiting on you%s%s.%s" % (head, act.get("part") or act["text"], act["initiative"], (": " + what) if what else "", when, age_s, then)
     where = "%s%s" % (act.get("target") or "A project", (" · " + act["effort"]) if act.get("effort") else "")
     return "%s: %s%s.%s" % (where, act["text"], age_s, then)
 

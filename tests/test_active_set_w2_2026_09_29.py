@@ -102,13 +102,14 @@ def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():
     drag = js[js.index("var dragId"):js.index("// the goal's place")]
     assert "act({ act: 'place', step: id, band: to, position: 0 })" in drag and drag.count("act({") == 1, "one drop, one act: the tier only"
     assert "data-band=\"active\"" not in drag and "#boneTog" in drag
-    place = js[js.index("// the goal's place"):js.index("// W2b-1")]
+    place = js[js.index("// the goal's place"):js.index("// ── the dialogue")]
     assert "act({ act: 'done_when', step: id, text: v })" in place and "act({ act: 'pace', step: id, when: inp.value || 'none' })" in place
     assert "data-activate" not in place and "data-bench" not in place
-    conv = js[js.index("// W2b-1"):js.index("// the tools")]
+    conv = js[js.index("// ── the dialogue"):js.index("// the tools")]
     assert "'/api/steward/events?pid='" in conv and "ev.t === 'delta'" in conv and "ev.t === 'turn_end'" in conv and "goal: goal || undefined" in conv
-    assert "EventSource" not in js and "pollThread" not in js and "/api/steward/history" not in js, "one mechanism: the cockpit's event stream, long-polled"
-    assert conv.index("function pollLoop") > 0 and "pollLoop();" in conv[conv.index("function sendToSteward"):], "the poll starts with a send, never on a page view"
+    assert "EventSource" not in js and "pollThread" not in js, "one mechanism: the cockpit's event stream, long-polled"
+    assert js.count("/api/steward/history") == 1 and "function catchUp" in conv, "the log is read once, only for a turn that ended before the page saw its words"
+    assert conv.index("function pollLoop") > 0 and "primeSeq().then(pollLoop)" in conv, "the poll starts with the open (W2b-3): the cockpit's own soft start, never a fresh session from a view"
     assert "j.stamp !== BOOT_STAMP" in conv and "location.reload" in conv
     assert "window.prompt(" not in place and "window.prompt(" not in conv
     assert "openPlace(" in js and ".itile" not in js.replace("/* ", "").split("(function")[1]
