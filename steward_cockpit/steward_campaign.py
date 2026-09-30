@@ -365,6 +365,8 @@ def read_map(campaign_dir: str):
                 "ref": s.get("ref"),
                 "tier": s.get("tier"),
                 "area": s.get("area"),
+                "seat": s.get("seat"),
+                "seat_order": s.get("seat_order"),
                 "commissioned_as": s.get("commissioned_as"),
                 "part": part,
                 "gate": gate,
