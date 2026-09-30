@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import steward_campaign as campaign
 
-PARTS = ("status", "next", "deliverables", "plan")
+PARTS = ("status", "next", "deliverables", "plan", "brief")   # brief (W2e-2): the decision brief the tile opens to
 
 
 def esc(s) -> str:
@@ -148,6 +148,82 @@ def repairs_html(cdir, pid, rel=""):
             % (esc(pid_), esc(after_name), (" (%s)" % esc(pres)) if pres else "", n, "" if n == 1 else "s",
                "".join(_kind_in_words(c, names) for c in corrections) or "<li>an empty set</li>",
                esc(pid_), esc(pid), esc(rel), esc(pid_), esc(pid), esc(rel)))
+    return "".join(out)
+
+
+def _question(cdir, eng):
+    """The open question as the cockpit shows it: from the live engine's state when one is awake, else the persisted
+    question context; the fields the brief needs (question, recommendation, why, id, scope, reversible, undo)."""
+    q = None
+    try:
+        if eng is not None:
+            qs = (eng.state() or {}).get("pending_questions") or []
+            q = qs[0] if qs else None
+    except Exception:
+        q = None
+    if q is None:
+        try:
+            from .steward_engine import _read_state_entry
+            from .question_context import normalize_question_context
+            entry = _read_state_entry(str(cdir))
+            q = normalize_question_context(entry.get("question_context")) if entry.get("question_context") else None
+            if q is None and entry.get("open_question"):
+                q = {"question": str(entry.get("open_question"))}
+        except Exception:
+            q = None
+    return q if isinstance(q, dict) and q.get("question") else None
+
+
+def brief_html(cdir, pid, rel=""):
+    """W2e-2 (2026-09-30, his word): the decision brief the tile opens to — what waits on him, the decision with the
+    steward's recommendation and one Accept, the material to review as links (the question's members, the items
+    pinned for review), the next step. The key material, never hunted for."""
+    eng = _live_engine(cdir)
+    m = campaign.read_map(cdir)
+    hb = m.get("heartbeat") or {}
+    wait = ""
+    try:
+        wait = campaign._real_wait((hb.get("human_wait") or "").split("\u00b7")[0].strip()) or ""
+    except Exception:
+        wait = str(hb.get("human_wait") or "").strip()
+    q = _question(cdir, eng)
+    links = []
+    seen = set()
+    if q:
+        scope = q.get("authorization_scope") or q.get("scope") or {}
+        for mem in (scope.get("members") or []) if isinstance(scope, dict) else []:
+            path = str(mem.get("path") if isinstance(mem, dict) else mem or "").strip()
+            if path and path not in seen:
+                seen.add(path); links.append(_item_link({"path": path, "what": path.replace("\\", "/").rsplit("/", 1)[-1]}, pid))
+    try:
+        items = (campaign.read_deliverables(cdir) or {}).get("items") or []
+        for it in campaign.current_review_items(m, items) or []:
+            key = str(it.get("path") or it.get("route") or it.get("what") or "")
+            if key and key not in seen:
+                seen.add(key); links.append(_item_link(it, pid))
+    except Exception:
+        pass
+    nxt = str(hb.get("next_recommended") or hb.get("why_next") or "").strip()
+    out = ['<div class="cbrief">']
+    out.append('<div class="cb-wait%s">%s</div>' % (" on" if wait else "", ("&#9873; Needs you: " + esc(wait)) if wait else "Nothing waits on you here."))
+    if q:
+        rec = str(q.get("recommendation") or "").strip()
+        why = str(q.get("why") or "").strip()
+        out.append('<div class="cb-q"><span class="k">The decision</span>%s</div>' % esc(str(q.get("question") or "")[:400]))
+        if rec:
+            out.append('<div class="cb-rec"><button class="cb-accept" data-qid="%s" data-rec="%s">Accept the recommendation</button><span class="cb-rectext">%s%s</span></div>' % (
+                esc(str(q.get("id") or "")), esc(rec[:240]), esc(rec[:240]), (" &mdash; " + esc(why[:200])) if why else ""))
+            if q.get("reversible") is True and q.get("undo"):
+                out.append('<div class="cb-auth">Reversible &middot; proceeds on the recommendation after four hours of silence &middot; undo: %s</div>' % esc(str(q.get("undo"))[:120]))
+        else:
+            out.append('<div class="cb-rec dim">No recommendation given &mdash; answer in the dialogue below.</div>')
+        for alt in (q.get("alternatives") or [])[:3]:
+            out.append('<div class="cb-alt">or: %s</div>' % esc(str(alt)[:160]))
+    if links:
+        out.append('<div class="cb-mat"><span class="k">To review</span>%s</div>' % "".join('<span class="cb-link">%s</span>' % l for l in links[:6]))
+    if nxt:
+        out.append('<div class="cb-next"><span class="k">Next</span>%s</div>' % esc(nxt[:200]))
+    out.append('</div>')
     return "".join(out)
 
 
@@ -351,8 +427,8 @@ def card_part(pid, part, folder, name="", rel=""):
     if cdir is None:
         return {"ok": True, "pid": pid, "part": part, "html": _no_record(pid, name or pid[:8])}
     try:
-        fn = {"status": status_html, "next": next_html, "deliverables": deliverables_html, "plan": plan_html}[part]
-        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part == "status" else fn(cdir, pid)}
+        fn = {"status": status_html, "next": next_html, "deliverables": deliverables_html, "plan": plan_html, "brief": brief_html}[part]
+        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part in ("status", "brief") else fn(cdir, pid)}
     except Exception as e:  # never a blank on the page
         return {"ok": True, "pid": pid, "part": part,
                 "html": '<div class="cp-quiet">This part could not be read: %s</div>' % esc("%s: %s" % (type(e).__name__, e))}

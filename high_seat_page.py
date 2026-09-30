@@ -501,7 +501,7 @@ def _orphans_line(ctx):
             % (len(orphans), chips))
 
 
-_ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"), ("talk", "Talk"))   # Talk (W2e): the cockpit's own dialogue, in the card
+_ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))   # the opened tile always carries its brief and its dialogue (W2e-2); the acts add a detail
 LIGHT_WORDS = {"green": "working", "orange": "needs you", "red": "a problem", "gray": "idle"}
 
 

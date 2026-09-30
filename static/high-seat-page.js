@@ -210,20 +210,23 @@
   $$('.tile[data-ready]').forEach(function (c) { var tok = c.getAttribute('data-ready'), was = ''; try { was = localStorage.getItem('hs_seen_' + c.id) || ''; } catch (e) {} if (was !== tok) c.classList.add('ready'); });
   function tokenQ2() { var t = token(); return t ? ('&token=' + encodeURIComponent(t)) : ''; }
   function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
-  // W2e: Talk — the cockpit's own dialogue inside the card (the conversation with THAT cockpit's steward, live through
-  // the same dialogue module the page uses, and a box to interject); it stops when the card closes or another part opens
-  function openTalk(card, pid, dir, btn, key) {
-    var body = $('.t-body', card), id = 'talk-' + card.id;
-    card.setAttribute('data-open', key); card.classList.add('open'); body.hidden = false;
-    body.innerHTML = '<div class="cdlg" id="' + id + '"><div class="exhead"><h3>this cockpit\u2019s steward</h3><span class="exstate" data-state="">\u2026</span><span class="note"></span></div>'
+  // W2e-2 (2026-09-30, his word on the W2e preview): the tile OPENS to its decision brief — what waits on him, the
+  // decision with the recommendation and one Accept, the material to review, the next step — and its dialogue, a
+  // small window always there that grows to take the tile when a dialogue starts; the acts add a detail under the
+  // brief. The dialogue is the same module the pages use, on THAT cockpit's stream; it stops when the tile closes.
+  function talkHtml(id) {
+    return '<div class="cdlg" id="' + id + '"><div class="exhead"><h3>this cockpit\u2019s steward</h3><span class="exstate" data-state="">\u2026</span><span class="note"></span></div>'
       + '<div class="scroll"><ul class="ex"><li class="exfade">Reading the conversation\u2026</li></ul></div>'
       + '<div class="composer"><textarea rows="2" placeholder="Ask this cockpit\u2019s steward, or tell it what to do \u2014 it answers here as it writes"></textarea>'
       + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
-    var list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send');
+  }
+  function grow(card) { var d = $('.cdlg', card); if (d) d.classList.add('big'); card.classList.add('talking'); }
+  function startTalk(card, pid, dir) {
+    var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate');
     fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir) + tokenQ2(), { headers: headers() })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        var ts = ((j && j.turns) || []).slice(-12); list.innerHTML = '';
+        var ts = ((j && j.turns) || []).slice(-8); list.innerHTML = '';
         if (!ts.length) { list.innerHTML = '<li class="exfade">Nothing said in this cockpit yet.</li>'; return; }
         ts.forEach(function (t) {
           var you = ['john', 'you', 'user', 'human'].indexOf(String(t.role || '').toLowerCase()) >= 0;
@@ -237,26 +240,42 @@
       .catch(function () { list.innerHTML = '<li class="exfade">The conversation could not be read.</li>'; });
     var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '' }) : null;
     card._talk = dlg;
-    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; dlg.send(t, null, list, sendBtn, box, null); }
+    // a dialogue that starts — his send, or the steward at work — takes the tile
+    if (state && window.MutationObserver) { var mo = new MutationObserver(function () { if (state.getAttribute('data-state') === 'busy') grow(card); }); mo.observe(state, { attributes: true, attributeFilter: ['data-state'] }); card._talkMo = mo; }
+    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, null); }
     sendBtn.addEventListener('click', go);
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
   }
-  function openPart(card, pid, part, btn) {
+  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._talkMo) { card._talkMo.disconnect(); card._talkMo = null; } }
+  function openTile(card, pid, dir) {
     var body = $('.t-body', card);
+    if (card.classList.contains('open')) return;
+    card.classList.add('open'); card.classList.remove('talking'); body.hidden = false; seen(card);
+    body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id);
+    fetchPart(pid, 'brief', dir, false, true)
+      .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) b.innerHTML = html; })
+      .catch(function () { var b = $('.cbrief', card); if (b) b.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+    startTalk(card, pid, dir);
+  }
+  function closeTile(card) {
+    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open');
+    var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
+    $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
+  }
+  function openPart(card, pid, part, btn) {
     // W1/W2 (2026-09-28): a button may name ITS effort (another effort's wait; the head's pick) — its data-dir wins,
     // and the open state is keyed by part AND effort so the same part on another effort opens rather than closes
     var dir = (btn && btn.getAttribute && btn.getAttribute('data-dir') !== null) ? btn.getAttribute('data-dir') : (card.getAttribute('data-dir') || '');
     var key = part + '|' + dir;
+    if (!card.classList.contains('open')) openTile(card, pid, card.getAttribute('data-dir') || '');
+    var det = $('.cdetail', card);
     var same = card.getAttribute('data-open') === key;
     $$('.t-acts button, .t-eff-open', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
-    stopTalk(card); seen(card);
-    if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
-    if (part === 'talk') { openTalk(card, pid, dir, btn, key); return; }
-    card.setAttribute('data-open', key); card.classList.add('open');
-    body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
-    fetchPart(pid, part, dir, false, true)
-      .then(function (html) { if (card.getAttribute('data-open') === key) body.innerHTML = html; })
-      .catch(function () { body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+    if (same) { det.hidden = true; det.innerHTML = ''; card.removeAttribute('data-open'); return; }
+    card.setAttribute('data-open', key); det.hidden = false; det.innerHTML = '<div class="cp-quiet">Reading the record\u2026</div>';
+    fetchPart(pid, part, dir, false, false)
+      .then(function (html) { if (card.getAttribute('data-open') === key) det.innerHTML = html; })
+      .catch(function () { det.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
   }
   $$('.tile[data-tile]').forEach(function (card) {
     var pid = card.getAttribute('data-tile');
@@ -265,8 +284,20 @@
     });
     card.addEventListener('click', function (e) {
       if (e.target.closest('a, button, .t-body')) return;
-      openPart(card, pid, 'status', $('.t-acts [data-part="status"]', card));   // the acts' Status, never an effort's open (Grok W1)
+      if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
     });
+  });
+  // Accept in the brief: one click, the answer said to the steward as the cockpit says it, the dialogue takes the tile
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.cb-accept'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var card = b.closest('.tile'), pid = card && card.getAttribute('data-tile'), dir = (card && card.getAttribute('data-dir')) || '';
+    if (!card || !pid) return;
+    b.disabled = true; grow(card);
+    fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || ''), question_id: b.getAttribute('data-qid') || null }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j || j.ok === false) { b.disabled = false; receipt((j && (j.error || j.say)) || 'That did not go through.', true); return; } b.textContent = 'Accepted'; receipt('Accepted \u2014 the steward answers in the tile as it writes.'); })
+      .catch(function () { b.disabled = false; receipt('That did not go through.', true); });
   });
   // W2 (2026-09-28): the head's one act — "open" on the brief's lead opens THAT project's card on THAT effort
   document.addEventListener('click', function (e) {
@@ -293,8 +324,8 @@
         if (!(j && j.ok)) { $$('.t-repair', card || document).forEach(function (x) { x.disabled = false; }); return; }
         if (card) {
           if (j.open === 0) { var pl = $('.t-line.prop', card); if (pl) pl.remove(); }   // exactly none open; an omitted count keeps the chip (Grok W4)
-          var tb = $('.t-body', card);
-          if (tb) fetchPart(pid, 'status', dir).then(function (html) { tb.innerHTML = html; })
+          var tb = $('.cdetail', card) || $('.t-body', card);   // W2e-2: the detail, never the whole tile (its dialogue stays)
+          if (tb) fetchPart(pid, 'status', dir).then(function (html) { tb.hidden = false; tb.innerHTML = html; })
             .catch(function () { tb.innerHTML = '<div class="cp-quiet">The record changed, but this card did not refresh &mdash; reload the page.</div>'; });
         }
       })
