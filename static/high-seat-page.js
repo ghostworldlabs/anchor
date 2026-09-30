@@ -48,8 +48,8 @@
   });
 
   // the rail: each destination scrolls to its section and opens it
-  var DEST = { seat: '#brief', campaign: '#camp', needs: '#shNeeds', week: '#shDated', desk: '#deskline',
-               parked: '#shPark', calendar: '#cal', email: '#cal', bench: '#shBench' };
+  var DEST = { seat: '#brief', campaign: '#camp', active: '#shActive', week: '#shDated', desk: '#deskline',
+               deck: '#shDeck', calendar: '#cal', email: '#cal', bench: '#shBench' };
   $$('#railNav button').forEach(function (b) {
     b.addEventListener('click', function () {
       var key = b.getAttribute('data-rail'), sel = DEST[key], el = sel && $(sel);
@@ -61,19 +61,77 @@
     });
   });
 
-  // the Campaign tile: Show Tier 1 / Hide; a Tier 1 tile opens to its parts, one at a time
+  // W2c (2026-09-30, his three levels): the goals as a thin tile that expands (each goal a row that opens to its
+  // components); Active and On deck as shelves of initiative cards; a drag out of a goal, between the shelves, up and
+  // down inside one, or back onto the goals tile; the × sends one home; a registry project dropped on a goal becomes
+  // its component. Every move is ONE act on the Campaign record with one line and undo; the page reloads to the
+  // record as it stands, the receipt kept.
   var camp = $('#camp'), campTog = $('#campTog'), campHead = $('#campHead');
-  function setCamp(open) { if (!camp) return; camp.classList.toggle('open', open); if (campTog) campTog.textContent = open ? 'Hide' : 'Show Tier 1'; }
+  function setCamp(open) { if (!camp) return; camp.classList.toggle('open', open); if (campTog) campTog.textContent = open ? 'Collapse' : 'Expand'; }
   if (campTog) campTog.addEventListener('click', function (e) { e.stopPropagation(); setCamp(!camp.classList.contains('open')); });
   if (campHead) campHead.addEventListener('click', function (e) { if (e.target.closest('a')) return; setCamp(!camp.classList.contains('open')); });
-  $$('.ini-tile').forEach(function (tile) {
-    tile.addEventListener('click', function (e) {
-      if (e.target.closest('a')) return;
-      var was = tile.classList.contains('open');
-      $$('.ini-tile').forEach(function (t) { t.classList.remove('open'); });
-      if (!was) tile.classList.add('open');
+  $$('.grow .gh').forEach(function (h) { h.addEventListener('click', function (e) { if (e.target.closest('a, button')) return; h.parentNode.classList.toggle('open'); }); });
+  var CAMPAIGN = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.campaign_pid) || '';
+  var acting = false;
+  function act(body) {   // one act in flight; the receipt and its undo survive the reload
+    if (acting || !CAMPAIGN) return; acting = true; body.pid = CAMPAIGN;
+    fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
+      .then(function (r) { if (r.status === 401 || r.status === 403) { return { ok: false, receipt: NOT_LOGGED_IN }; } return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) {
+          acting = false;
+          if (j && j.undo) {   // the act landed in part and the writer refused the rest: the receipt says so and its undo is his
+            try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt || 'Refused.', bad: true, undo: j.undo })); } catch (e) {}
+            location.reload(); return;
+          }
+          receipt((j && j.receipt) || 'Nothing was done.', true); return;
+        }
+        try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt, undo: j.undo || null })); } catch (e) {}
+        location.reload();
+      })
+      .catch(function () { acting = false; receipt('That did not go through — nothing was done.', true); });
+  }
+  document.addEventListener('click', function (e) {
+    var s = e.target.closest('[data-seat][data-step]');
+    if (s) { e.preventDefault(); e.stopPropagation(); act({ act: 'seat', step: s.getAttribute('data-step'), seat: s.getAttribute('data-seat') }); return; }
+    var h = e.target.closest('[data-home]');
+    if (h) { e.preventDefault(); e.stopPropagation(); act({ act: 'home', step: h.getAttribute('data-home') }); }
+  });
+  // the drags: a card or a goal's initiative (data-step) onto a shelf — its place among the cards — or onto the goals
+  // tile (home); a registry project (data-proj) onto a goal's row (a component of that goal)
+  var drag = null;
+  $$('[draggable="true"][data-step], [draggable="true"][data-proj]').forEach(function (el) {
+    el.addEventListener('dragstart', function (e) {
+      drag = { step: el.getAttribute('data-step') || '', proj: el.getAttribute('data-proj') || '', name: (el.getAttribute('data-name') || el.textContent || '').trim() };
+      el.classList.add('dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag.step || drag.proj); } catch (_) {}
+    });
+    el.addEventListener('dragend', function () { el.classList.remove('dragging'); $$('.over').forEach(function (z) { z.classList.remove('over'); }); drag = null; });
+  });
+  $$('.zone[data-seat]').forEach(function (z) {
+    z.addEventListener('dragover', function (e) { if (!drag || !drag.step) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {} z.classList.add('over'); });
+    z.addEventListener('dragleave', function (e) { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
+    z.addEventListener('drop', function (e) {
+      e.preventDefault(); z.classList.remove('over'); if (!drag || !drag.step) return;
+      var cards = $$('.grid > .tile', z).filter(function (c) { return c.getAttribute('data-step') !== drag.step; }), k = cards.length;
+      for (var j = 0; j < cards.length; j++) { var b = cards[j].getBoundingClientRect(); if (e.clientY < b.top || (e.clientY <= b.bottom && e.clientX < b.left + b.width / 2)) { k = j; break; } }
+      act({ act: 'seat', step: drag.step, seat: z.getAttribute('data-seat'), position: k });
     });
   });
+  if (camp) {
+    function seatedSource() { return !!(drag && drag.step && $('.tile[data-step="' + drag.step + '"], .irow.seated[data-step="' + drag.step + '"]')); }
+    camp.addEventListener('dragover', function (e) {
+      if (!drag) return; var g = e.target.closest('.grow');
+      if (drag.proj ? !g : !seatedSource()) return;
+      e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {} (g || camp).classList.add('over');
+    });
+    camp.addEventListener('dragleave', function (e) { var g = e.target.closest('.grow'); if (g && !g.contains(e.relatedTarget)) g.classList.remove('over'); if (!camp.contains(e.relatedTarget)) camp.classList.remove('over'); });
+    camp.addEventListener('drop', function (e) {
+      e.preventDefault(); $$('.over').forEach(function (z) { z.classList.remove('over'); }); if (!drag) return;
+      var g = e.target.closest('.grow');
+      if (drag.proj) { if (g) act({ act: 'add', initiative: g.getAttribute('data-g'), kind: 'project', text: drag.name, project_id: drag.proj }); return; }
+      if (seatedSource()) act({ act: 'home', step: drag.step });
+    });
+  }
 
   // the Projects tile and its folders
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');

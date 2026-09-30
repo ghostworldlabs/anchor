@@ -64,7 +64,7 @@ def campaign_initiatives(steps, resolved=None):
                 parts.append({
                     "id": p.get("id"), "kind": kind, "text": r.get("what") or p.get("name") or "",
                     "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
-                    "pid": str(r.get("pid") or ""), "lead": str(r.get("lead") or ""),
+                    "pid": str(r.get("pid") or ""), "lead": str(r.get("lead") or ""), "dir": str(r.get("dir") or ""),
                     "href": r.get("href") or "", "status": str(p.get("status") or ""),
                     "target_status": str(r.get("target_status") or ""),
                     "broken": bool(r.get("broken")) if ref else False, "gap": r.get("gap") or "",
@@ -261,8 +261,8 @@ def _rail(ctx):
     st = ctx["steward"]
     counts = ctx.get("counts") or {}
     n_camp = len(ctx.get("initiatives") or [])
-    n_needs = sum(1 for f in ctx["facts"].values() if f.get("needs_you"))
-    n_park = len(ctx.get("parked") or [])
+    live_inits = [i for i in ctx.get("initiatives") or [] if i.get("status") not in ("done", "parked")]
+    n_active, n_deck = len(seated(live_inits, "active")), len(seated(live_inits, "deck"))     # W2c: the shelves
     n_bench = int(counts.get("running") or 0)
     cap_rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or ())
     return (
@@ -275,10 +275,10 @@ def _rail(ctx):
         '<ul class="nav" id="railNav">'
         '<li><button data-rail="seat"><span class="n">%s</span><span class="c">brief</span></button></li>'
         '<li><button data-rail="campaign"><span class="n">Campaign</span><span class="c">%s</span></button></li>'
-        '<li><button data-rail="needs"><span class="n"><span class="mark-wait">&#9873;</span> Needs you</span><span class="c">%d</span></button></li>'
+        '<li><button data-rail="active"><span class="n">Active</span><span class="c">%d</span></button></li>'
         '<li><button data-rail="week"><span class="n">This week</span><span class="c">%s</span></button></li>'
         '<li><button data-rail="desk"><span class="n">Desk</span><span class="c">%d</span></button></li>'
-        '<li><button data-rail="parked"><span class="n">Parked</span><span class="c">%d</span></button></li>'
+        '<li><button data-rail="deck"><span class="n">On deck</span><span class="c">%d</span></button></li>'
         '<li><button data-rail="calendar"><span class="n">Calendar</span><span class="c">not connected</span></button></li>'
         '<li><button data-rail="email"><span class="n">Email</span><span class="c">not connected</span></button></li>'
         '<li><button data-rail="bench"><span class="n">Workbench</span><span class="c">%d</span></button></li>'
@@ -287,8 +287,8 @@ def _rail(ctx):
         '</nav>'
     ) % (_brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
          _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
-         esc(st["high_seat_name"]), (str(n_camp) if ctx.get("campaign") else "not yet"), n_needs,
-         esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_park, n_bench, cap_rows)
+         esc(st["high_seat_name"]), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
+         esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
 
 
 def _masthead(ctx):
@@ -320,79 +320,133 @@ def _hdr(ctx):
          _brand_img(b, "skill-foundry-icon.jpg"), esc(ctx["today_str"]), esc(ctx["week"]))
 
 
+KIND_WORDS = {"project": "cockpit", "effort": "cockpit within", "task": "desk item", "step": "a step of a project", "deliverable": "deliverable", "calendar": "date"}
+SEAT_WORDS = {"active": "active", "deck": "on deck"}
+SEAT_NAMES = {"active": "Active", "deck": "On deck"}
+
+
+def _goal_rows(ctx, live, camp_pid):
+    """The goals expanded (W2c, 2026-09-30, his three levels): each goal a row that opens to its components. An
+    initiative in its goal (a cockpit, a cockpit within a project, a desk item) drags out to a shelf or takes a button;
+    a seated one is marked and comes back; an element (a step, a deliverable, a date) rides inside its goal."""
+    working = ctx.get("working") or set()
+    rows = []
+    for i in live:
+        comps = [p for p in i["parts"] if not p.get("closed")]
+        out = [p for p in comps if p.get("seat")]
+        home = [p for p in comps if is_initiative(p) and not p.get("seat") and not p.get("broken")]
+        light = initiative_light(i, working)
+        glyph, word = LIGHTS[light]
+
+        def irow(p):
+            kind = KIND_WORDS.get(p["kind"], p["kind"])
+            name = esc(part_name(p))
+            if p.get("broken"):
+                return '<div class="irow broken"><span class="kind">%s</span><span class="nm">%s</span><span class="el">broken reference: %s</span></div>' % (kind, esc(p.get("text") or name), esc(p.get("gap") or ""))
+            if not is_initiative(p):      # an element is named for what it is, its project as the suffix
+                where = (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p.get("target") else ""
+                return '<div class="irow el"><span class="kind">%s</span><span class="nm">%s%s</span><span class="el">rides inside &mdash; not pulled out on its own</span></div>' % (kind, esc(p.get("text") or name), where)
+            if p.get("seat"):
+                return ('<div class="irow seated" data-step="%s"><span class="kind">%s</span><span class="nm">%s</span><span class="seat %s">%s</span>'
+                        '<button class="mini" data-home="%s" title="back into this goal">back</button></div>') % (
+                    esc(p["id"]), kind, name, p["seat"], SEAT_WORDS[p["seat"]], esc(p["id"]))
+            need = ' <span class="need">&#9873; needs you</span>' if p.get("needs_you") else ""
+            return ('<div class="irow" draggable="true" data-step="%s" data-name="%s"><span class="kind">%s</span><span class="nm">%s%s</span>'
+                    '<span class="acts"><button class="mini" data-seat="deck" data-step="%s">&rarr; on deck</button><button class="mini" data-seat="active" data-step="%s">&rarr; active</button></span></div>') % (
+                esc(p["id"]), name, kind, name, need, esc(p["id"]), esc(p["id"]))
+        tier_word = ("tier %d" % i["tier"]) if i["tier"] in (1, 2) else "seed goal"
+        n_act, n_deck = sum(1 for p in out if p["seat"] == "active"), sum(1 for p in out if p["seat"] == "deck")
+        summary = "%d in the goal" % len(home) + ((" &middot; out: %s" % ", ".join(x for x in (("%d active" % n_act) if n_act else "", ("%d on deck" % n_deck) if n_deck else "") if x)) if out else "")
+        rows.append(
+            '<div class="grow%s" data-g="%s"><div class="gh"><b class="gn">%s</b><span class="t">%s</span><span class="ilight %s">%s %s</span><span class="c">%s</span>'
+            '<a class="gopen" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the Campaign page">its place &#8599;</a></div>'
+            '<div class="inits">%s</div></div>' % (
+                " needs" if i["needs"] else "", esc(i["id"]), esc(i["name"]), tier_word, light, glyph, word, summary,
+                esc(camp_pid), esc(i["id"]),
+                "".join(irow(p) for p in comps) or '<div class="irow el"><span class="el">no component yet &mdash; add one in its place on the Campaign page</span></div>'))
+    return "".join(rows)
+
+
 def _campaign_tile(ctx):
-    """The Campaign on the home: the Tier 1 initiatives as compact tiles behind the tile's head — closed by default,
-    the head toggles it (John, 2026-09-27 13:15); its line names the Tier 1 initiatives, the next deadline and the
-    seed count while closed. A tile is the name, its light, one line;
-    a tile opens in place to what it showed before (the area, done-looks-like, next, the deadline and counts), its
-    Status (each project part's own steward status) and its parts. Tiers 2 and 3 are counted; the Campaign page holds them."""
+    """The goals on the home (W2c, 2026-09-30, his lock of the three levels): ONE thin line — Tier 1 named, Tier 2 and
+    the seed goals counted, how many initiatives are out — that expands to the goals and their components (each goal a
+    row that opens). The tile is where a seated initiative is dropped to go home, and a goal's row is where a registry
+    project is dropped to become its component. Closed by default; the head toggles it."""
     camp = ctx.get("campaign")
     inits = ctx.get("initiatives") or []
     if not camp:
-        return ('<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
+        return ('<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Goals</span>'
                 '<span class="d">&middot; not stood up yet &mdash; the record arrives with the import, after your seed check</span>'
                 '<span class="sp"></span></div></section>')
-    t1 = [i for i in inits if i["tier"] == 1]
-    t2 = sum(1 for i in inits if i["tier"] == 2)
-    t3 = sum(1 for i in inits if i["tier"] == 3)
-    untiered = sum(1 for i in inits if i["tier"] is None)
-    t1_dates = sorted(i["next_deadline"] for i in t1 if i["next_deadline"])
-    nearest = ""
-    if t1_dates:
-        who = next(i for i in t1 if i["next_deadline"] == t1_dates[0])
-        nearest = "%s, %s" % (esc((who["next"] or {}).get("text") or who["name"]), esc(_short(t1_dates[0])))
-    line = ('&middot; your goals &middot; <b>Tier 1:</b> %s &middot; next deadline: <b>%s</b> &middot; <b>%d</b> seeds' % (
-        esc(", ".join(i["name"] for i in t1)) if t1 else "none yet", nearest or "none dated", int(ctx.get("seeds") or 0)))
-    working = ctx.get("working") or set()
-    tiles = []
-    for i in t1:
-        nxt = i["next"]
-        light = initiative_light(i, working)
-        glyph, word = LIGHTS[light]
-        one, kind = initiative_line(i)
-        def _part_row(p):
-            state = ("broken reference: " + p["gap"]) if p["broken"] else (p["state"] or p["status"])
-            crit = " crit" if (p["broken"] or p["needs_you"]) else ""
-            date = _hr.due_label(p["date"], ctx["today"]) if p["date"] else "no date"
-            return (
-                '<div class="ptr%s"><span class="pt-kind %s">%s</span><span class="pt-what">%s%s</span>'
-                '<span class="pt-state%s">%s</span><span class="pt-date%s">%s</span>%s</div>' % (
-                    " pdone" if p.get("done", p["status"] == "done") else "", esc(p["kind"]), esc(p["kind"]), esc(p["text"]),
-                    (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p["target"] and p["kind"] != "task" else "",
-                    crit, esc(state), " none" if not p["date"] else (" soon" if date.startswith(("due today", "overdue")) else ""), esc(date),
-                    (' <a class="pt-open" href="%s" target="_blank" rel="noopener">open the cockpit</a>' % esc(p["href"])) if p["href"] else ""))
-        rows = "".join(_part_row(p) for p in i["parts"])
-        tiles.append(
-            '<article class="ini-tile%s" data-ini="%d"><div class="it-top"><span class="it-no">%d</span>'
-            '<h4 class="it-name">%s</h4><span class="ilight %s" title="%s">%s %s</span></div>'
-            '<div class="it-line %s">%s</div>'
-            '<div class="it-more">%s'
-            '<div class="it-done"><span class="k">Done looks like</span>%s</div>'
-            '<div class="it-next"><span class="k">Next</span>%s</div>'
-            '<div class="it-foot"><span class="dl %s">%s</span><span class="cnt">%d parts &middot; %d part%s need%s you</span></div>%s</div>'
-            '<div class="it-parts">%s</div></article>' % (
-                " needs" if i["needs"] else "", i["number"], i["number"], esc(i["name"]),
-                light, "the light: needs you · working · waiting · idle, read from its parts", glyph, word,
-                kind, one,
-                ('<div class="it-area"><span>%s</span></div>' % esc(i["area"].title())) if i["area"] else "",
-                esc(i["done_when"]) or "not written yet &mdash; say what done looks like",
-                (esc(nxt["text"]) + ' <span class="dim">&middot; %s</span>' % esc(nxt["kind"])) if nxt else "nothing open",
-                "soon" if i["next_deadline"] else "none",
-                ("next deadline " + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline",
-                len(i["parts"]), len(i["needs"]), "" if len(i["needs"]) == 1 else "s", "s" if len(i["needs"]) == 1 else "", initiative_status_html(i), rows))
-    body = (
-        '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d goal%s</b> &middot; &#9873; %d goal%s need%s you</div>'
-        '<div class="t1grid">%s</div>'
-        '<div class="camp-tiers"><span><b>Tier 2</b> &middot; %d &middot; <b>Tier 3</b> &middot; %d%s &mdash; <span class="rest">open the Campaign for the rest</span></span></div>'
-    ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "" if sum(1 for i in t1 if i["needs"]) == 1 else "s", "s" if sum(1 for i in t1 if i["needs"]) == 1 else "",
-         "".join(tiles) or '<div class="camp-note">No Tier 1 goal yet.</div>', t2, t3,
-         (" &middot; <b>no tier yet</b> &middot; %d" % untiered) if untiered else "")
+    live = [i for i in inits if i["status"] not in ("done", "parked")]
+    t1 = [i for i in live if i["tier"] == 1]
+    t2 = [i for i in live if i["tier"] == 2]
+    seedy = [i for i in live if i["tier"] not in (1, 2)]
+    act = seated(live, "active")
+    deck = seated(live, "deck")
+    line = ('&middot; <b>Tier 1:</b> %s &middot; <b>Tier 2:</b> %d &middot; <b>seed goals:</b> %d &middot; %d seed%s &middot; <b>out:</b> %d active, %d on deck' % (
+        esc(" · ".join(i["name"] for i in t1)) if t1 else "none yet", len(t2), len(seedy), int(ctx.get("seeds") or 0), "" if int(ctx.get("seeds") or 0) == 1 else "s", len(act), len(deck)))
+    body = ('<div class="camp-note">Each goal opens to its components. Drag an initiative &mdash; a cockpit, a cockpit within a project, or a desk item &mdash; '
+            'onto <b>Active</b> or <b>On deck</b> below, or use its buttons; a seated one comes back with <b>back</b>, its &times;, or a drag onto this tile. '
+            'A step of a project, a deliverable or a date rides inside its goal. Every move is one line with undo.</div>'
+            '<div class="grows">%s</div>') % (_goal_rows(ctx, live, camp["pid"]) or '<div class="camp-note">No goal yet &mdash; the Campaign page makes one.</div>')
     return (
-        '<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
-        '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Show Tier 1</span>'
+        '<section class="camp" id="camp" data-drop="home"><div class="camp-h" id="campHead"><span class="k">Goals</span>'
+        '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Expand</span>'
         '<a class="camp-open" href="/project/%s" target="_blank" rel="noopener">Open the Campaign</a></div>'
         '<div class="camp-body" id="campBody">%s</div></section>'
     ) % (line, esc(camp["pid"]), body)
+
+
+def _desk_card(ctx, g, p):
+    """A desk item's card (W2c): the item, its goal, its state and date; the × sends it home; it is talked through at the
+    desk — the goal's place on the Campaign page, where its conversation is."""
+    if p.get("needs_you"):
+        line = '<div class="t-line wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(p.get("waiting_on") or p.get("state") or "")
+    else:
+        line = '<div class="t-line"><span class="k">State</span>%s</div>' % esc(p.get("state") or p.get("status") or "planned")
+    date = (' &middot; %s' % esc(_hr.due_label(p["date"], ctx["today"]))) if p.get("date") else ""
+    return (
+        '<article class="tile desk%s" id="card-%s" data-step="%s" data-name="%s" draggable="true"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span><span class="t-eff">at the desk%s</span></h3>'
+        '<button class="t-x" data-home="%s" title="back to its goal">&times;</button></div><div class="t-goal">in <b>%s</b></div>%s'
+        '<div class="t-acts"><a class="t-talk" href="/project/%s?open=%s" target="_blank" rel="noopener">talk to the desk &#8599;</a></div></article>'
+    ) % (" need" if p.get("needs_you") else "", esc(p["id"]), esc(p["id"]), esc(part_name(p)), esc(part_name(p)), date, esc(p["id"]), esc(g["name"]), line,
+         esc((ctx.get("campaign") or {}).get("pid") or ""), esc(g["id"]))
+
+
+def _zone(sid, seat, title, n, note, cards, empty):
+    return (
+        '<section class="shelf zone" id="%s" data-seat="%s"><div class="shelf-h"><h3>%s</h3><span class="c">%d</span><span class="rule"></span><span class="note">%s</span></div>'
+        '<div class="grid">%s</div></section>' % (sid, seat, title, n, note, cards or ('<div class="empty">%s</div>' % empty)))
+
+
+def _seat_shelves(ctx):
+    """ACTIVE and ON DECK (W2c): two shelves of initiative cards in his order — the project card as today (the light,
+    what needs him, Status · Next steps · Deliverables · Plan · Resume · the cockpit), a cockpit within a project on
+    its own effort, a desk item's card that talks to the desk — each naming its goal, each with a × that sends it home.
+    No cap: a wide Active is named, never refused."""
+    inits = [i for i in ctx.get("initiatives") or [] if i["status"] not in ("done", "parked")]
+    entries = {e.get("id"): e for e in ctx.get("entries") or []}
+    facts = ctx["facts"]
+
+    def cards(seat):
+        out = []
+        for g, p in seated(inits, seat):
+            if p["kind"] in ("project", "effort") and entries.get(p["pid"]):
+                e = entries[p["pid"]]
+                f = facts.get(p["pid"]) or {}
+                if p["kind"] == "effort":
+                    f = dict(f, effort=p.get("dir") or f.get("effort") or "")
+                out.append(_card(e, f, "", goal=g, step=p))
+            else:
+                out.append(_desk_card(ctx, g, p))
+        return "".join(out)
+    a, d = cards("active"), cards("deck")
+    n_a, n_d = len(seated(inits, "active")), len(seated(inits, "deck"))
+    return (
+        _zone("shActive", "active", "Active", n_a, "what you are working on now, in your order &mdash; drag an initiative here from a goal above or from On deck", a,
+              "nothing active &mdash; pull an initiative out of a goal above, or drag one up from On deck")
+        + _zone("shDeck", "deck", "On deck", n_d, "out of its goal, not active &mdash; needs attention; the pick-up reads from here", d, "nothing on deck"))
 
 
 def _projects_tile(ctx):
@@ -411,7 +465,7 @@ def _projects_tile(ctx):
         '<section class="ptile" id="ptile"><div class="ptile-line"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
         '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s%s</span><span class="sp"></span>'
         '<span class="tog" id="ptileTog">Show all</span></button>'
-        '<button type="button" class="tog np" id="apNew" title="the folder-creation dialog, in a small window">&#65291; New project</button></div>'
+        '<button type="button" class="tog np" id="apNew" title="the folder-creation dialog, in a small window">&#65291; New project</button></div>%s'
         '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4>'
         '<div class="addhint" id="apHint">Say it to the steward above (&ldquo;start a new project called &lt;name&gt; at &lt;folder&gt;&rdquo;) and confirm the card, '
         'or press New project: the dialog opens in a small window and puts it in a folder of your choosing.</div>'
@@ -419,7 +473,19 @@ def _projects_tile(ctx):
         '<div id="folders">%s</div></div></section>'
     ) % (n, "" if n == 1 else "s", len(groups), "" if len(groups) == 1 else "s",
          (" &middot; <b>%d</b> with no steward record yet" % quiet_n) if quiet_n else "",
-         group_opts, ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
+         _orphans_line(ctx), group_opts, ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
+
+
+def _orphans_line(ctx):
+    """W2c (fit 10): a registry project in no goal is visible here only; dragging it onto a goal above makes it a
+    component of that goal, and so an initiative he can seat."""
+    orphans = ctx.get("orphans") or []
+    if not ctx.get("campaign") or not orphans:
+        return ""
+    chips = "".join('<span class="orphan" draggable="true" data-proj="%s" data-name="%s" title="a registry project in no goal &mdash; drag it onto a goal above">%s</span>' % (
+        esc(e.get("id")), esc(e.get("name")), esc(e.get("name"))) for e in orphans)
+    return ('<div class="orphans"><span class="ok">In no goal &middot; %d</span>%s<span class="oh">drag one onto a goal above to make it a component of that goal</span></div>'
+            % (len(orphans), chips))
 
 
 _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))
@@ -439,7 +505,7 @@ def _resume_act(pid, rel, r):
             % (href, esc(r.get("step") or "where you were"), esc(r.get("ago") or r.get("at")), moved, esc(r.get("ago") or "")))
 
 
-def _card(e, f, cls):
+def _card(e, f, cls, goal=None, step=None):
     """A project's one card, compact (John, 2026-09-27: "the tiles still seem larger than needed"): the name with the
     effort it reads as a small suffix, ONE line — the Needs-you sentence when there is one, else the next step —
     clamped to two lines, and the acts on one line, Status first (his word: "there should also be a status option");
@@ -451,11 +517,17 @@ def _card(e, f, cls):
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
     name = esc(e.get("name"))
+    # W2c (2026-09-30): on a shelf the card is a seated initiative — it carries its step, drags, has its × and names
+    # its goal; a cockpit within a project is its own card on its own effort
+    cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
+    attr = (' data-step="%s" data-name="%s" draggable="true"' % (esc(step["id"]), name)) if step else ""
+    xbtn = ('<button class="t-x" data-home="%s" title="back to its goal">&times;</button>' % esc(step["id"])) if step else ""
+    goal_line = ('<div class="t-goal">in <b>%s</b> &middot; %s</div>' % (esc(goal["name"]), "a cockpit within the project" if step.get("kind") == "effort" else "the project&rsquo;s cockpit")) if (goal and step) else ""
     if not f.get("has_record"):
         return (
-            '<article class="tile quiet%s" id="card-%s" data-tile="%s"><div class="t-top"><h3 class="t-name">%s</h3></div>'
+            '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top"><h3 class="t-name">%s</h3>%s</div>%s'
             '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
-        ) % (cls, pid, pid, name, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
+        ) % (cls, cid, pid, attr, name, xbtn, goal_line, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
     wait = " ".join(str(f.get("needs_you") or "").split())[:160]
     nxt = esc((f.get("next") or "")[:160]) or "not stated"
     # W1 (2026-09-28): EVERY effort's wait, each opening its own record (the Status part on that effort) — a
@@ -500,12 +572,12 @@ def _card(e, f, cls):
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     acts += _resume_act(pid, rel, f.get("resume"))
     return (
-        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
-        '<a class="t-go" href="/project/%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a></div>'
+        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
+        '<a class="t-go" href="/project/%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div>%s'
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, pid, pid, rel, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", pid,
+    ) % (cls, cid, pid, rel, attr, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", pid, xbtn, goal_line,
          line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 
@@ -535,7 +607,7 @@ def _ruler(ctx):
     on_board = ctx.get("on_board") or set()
 
     def marker(m):
-        where = "&#9873; its card is on Needs you" if m["needs"] else ("its card is on Continuing" if m["project_id"] in on_board else "in the Projects tile")
+        where = ("&#9873; " if m["needs"] else "") + (("its card is on %s" % on_board[m["project_id"]]) if m["project_id"] in on_board else "in the Projects tile")      # W2c: the shelves are the seats
         return ('<a class="mkcard%s" href="/project/%s" target="_blank" rel="noopener"><span class="mk-date">%s</span><span class="mk-what">%s%s</span>'
                 '<span class="mk-proj">%s</span><span class="mk-where">%s</span></a>' % (
                     " late" if m["overdue"] else "", esc(m["project_id"]), esc(_short(m["date"])), esc(m["name"]),
@@ -703,36 +775,21 @@ def render_high_seat_html(ctx) -> str:
     facts = ctx["facts"]
     entries = ctx.get("entries") or []
     by_id = {e.get("id"): e for e in entries}
-    needs = [e for e in entries if (facts.get(e.get("id")) or {}).get("needs_you")]
     parked = ctx.get("parked") or []
     parked_ids = {e.get("id") for e in parked}
-    # the locked order (v2.2): needs-you first, then dated inside the five weeks soonest first, then the rest
-    horizon = (ctx["today"] + timedelta(days=35)).isoformat()
-
-    def _soon(e):
-        f = facts.get(e.get("id")) or {}
-        d = f.get("nearest_due") or ""
-        return d if d and d <= horizon else ""
-    dated = sorted([e for e in entries if e.get("id") not in parked_ids and e not in needs and _soon(e)], key=lambda e: (_soon(e), str(e.get("name") or "")))
-    rest = [e for e in entries if e.get("id") not in parked_ids and e not in needs and e not in dated
-            and (facts.get(e.get("id")) or {}).get("has_record")]           # a record with nothing open still has its card here ("Next: not stated")
-    cont = dated + rest
-    quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
-    ctx["quiet_n"] = len(quiet)          # his word (2026-09-27 17:05): the record-less projects are one line on the Projects tile, no shelf
-    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | parked_ids
-    board = (
-        '<div class="board">' + _campaign_tile(ctx) + _projects_tile(ctx)
-        + _shelf("shNeeds", "Needs you", "%d project%s" % (len(needs), "" if len(needs) == 1 else "s"),
-                 "A card opens in place &mdash; Status, Next steps, Deliverables, Plan; the &#8599; opens its cockpit.",
-                 "".join(_card(e, facts.get(e.get("id")) or {}, " need") for e in needs) or '<div class="ptile-note">Nothing waits on you.</div>')
-        + _desk_line(ctx) + _ruler(ctx)
-        + _shelf("shCont", "Continuing", "%d project%s" % (len(cont), "" if len(cont) == 1 else "s"),
-                 "Dated soonest first, then the rest. Moving shelves never makes a second card.",
-                 "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in cont) or '<div class="ptile-note">No project carries a next step yet.</div>',
-                 "")
-        + _shelf("shPark", "Parked", "%d project%s" % (len(parked), "" if len(parked) == 1 else "s"), "Off the shelves, still one card each.",
-                 "".join(_card(e, facts.get(e.get("id")) or {}, " parked") for e in parked) or '<div class="ptile-note">Nothing is parked.</div>')
-        + _workbench(ctx) + '</div>')
+    inits = ctx.get("initiatives") or []
+    live_inits = [i for i in inits if i.get("status") not in ("done", "parked")]
+    # W2c (2026-09-30, his three levels): the goals as a thin tile, then ACTIVE and ON DECK as shelves of initiative
+    # cards; the Projects tile (the registry) with its projects in no goal; the Desk, the ruler and the Workbench as
+    # before. The old shelves (Needs you · Continuing · Parked) are gone: a project is on a shelf because he seated
+    # it, and every project is in the Projects tile.
+    in_goal = {p["pid"] for i in inits for p in i.get("parts") or () if p.get("kind") in ("project", "effort") and p.get("pid")}
+    camp_pid = (ctx.get("campaign") or {}).get("pid")
+    ctx["orphans"] = [e for e in entries if e.get("id") and e["id"] not in in_goal and e["id"] != camp_pid and e["id"] not in parked_ids]
+    ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
+    ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("active", "deck") for g, p in seated(live_inits, seat) if p.get("pid")}
+    board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _projects_tile(ctx)
+             + _desk_line(ctx) + _ruler(ctx) + _workbench(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title><link rel="icon" href="/vendor/brand/%s?v=%s">'

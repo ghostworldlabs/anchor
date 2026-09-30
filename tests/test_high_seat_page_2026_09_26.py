@@ -97,14 +97,15 @@ def test_the_page_renders_from_facts_and_escapes_them():
     # the Campaign tile: the Tier 1 line, one tile with its parts and the broken reference named
     assert "<b>Tier 1:</b> MBA Teaching, Fall 2026" in html and 'href="/project/df56"' in html
     assert "broken reference: no step &#x27;lecture-99&#x27; in MBA Teaching AI" in html
-    assert "Tier 2</b> &middot; 1" in html
-    # the shelves: the waiting project on Needs you, the next one on Continuing; the record-less one is a line on the Projects tile (his word, 2026-09-27 17:05)
-    assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
-    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
+    assert "<b>Tier 2:</b> 1" in html      # W2c: the thin goals line
+    # the shelves (W2c, 2026-09-30): nothing is seated on this record, so both shelves are empty and say so; the project is a
+    # row in its goal, the trusts project is in no goal (a chip on the Projects tile), the record-less one is a line there (his word, 2026-09-27 17:05)
+    assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' not in html and 'data-step="mba-project"' in html and "nothing active &mdash; pull an initiative" in html
+    assert 'data-proj="9405abe0"' in html and 'id="card-9405abe0"' not in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
     assert "3 projects in 3 folders &middot; <b>1</b> with no steward record yet" in html
     # the ruler and the panel
     assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
-    assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html
+    assert "Later this week" in html and "what you are working on now, in your order" in html and "href=\"/project/__dashboard__?classic=1\"" in html
     assert "MBA Teaching AI is waiting on you" in html and "raised by: the steward&#x27;s record waits on you" in html
     assert "Sample data" not in html
 
@@ -178,19 +179,19 @@ def test_the_campaign_tile_shows_compact_initiatives_with_a_light_and_opens_to_a
     st = hsp.initiative_status_html(dict(mba, parts=[dict(mba["parts"][0], lead="Next: Lecture 3 — the interface lesson is final.")] + mba["parts"][1:]))
     assert "Status</span>" in st and "Next: Lecture 3" in st and "waiting on you" not in st and "parts" not in st   # the lead lines only (Grok R8)
     html = hsp.render_high_seat_html(_ctx(campaign=True))
-    camp = html[html.index('<section class="camp'):html.index('id="ptile"')]
-    assert 'class="camp" id="camp"' in camp and ">Show Tier 1<" in camp                 # closed by default; its head toggles it (13:15)
-    tile = camp[camp.index('class="ini-tile needs"'):camp.index("</article>")]
-    assert '<span class="ilight needs"' in tile and "needs you</span>" in tile
-    assert tile.index('class="it-line wait"') < tile.index('class="it-more"') < tile.index('class="istatus"') < tile.index('class="it-parts"')
-    assert "&#9873; approve the Lecture 3 AI supplement" in tile and "it-wait" not in tile and "pt-legend" not in tile   # the one line is the action; nothing said twice
+    camp = html[html.index('<section class="camp'):html.index('id="shActive"')]
+    assert 'class="camp" id="camp"' in camp and ">Expand<" in camp                 # closed by default; its head toggles it (13:15); W2c: the thin goals tile
+    row = camp[camp.index('class="grow needs" data-g="mba-teaching"'):camp.index('data-g="trusts"')]
+    assert '<span class="ilight needs"' in row and "needs you</span>" in row      # the goal's row carries the light
+    assert 'data-seat="active" data-step="mba-project"' in row and "rides inside" in row, "W2c: the project drags out or takes a button; a step of a project rides inside its goal"
+    assert "pt-legend" not in html and "ini-tile" not in html
 
 
 def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_closed(tmp_path, monkeypatch):
     """John, 2026-09-27: the Projects tile opens to the old dashboard's project list, same look, every folder closed.
     The page embeds the list it is handed; the list is the old renderer's, its folders collapsed, without the kebab."""
     html = hsp.render_high_seat_html(_ctx())
-    tile = html[html.index('id="ptile"'):html.index('id="shNeeds"')]
+    tile = html[html.index('id="ptile"'):html.index('id="deskline"')]      # W2c: the Desk line follows the Projects tile
     assert 'class="rnd-folder rnd-collapsed"' in tile and 'class="prow"' not in tile and "fold-h" not in tile
     assert "&middot; 3 projects in 3 folders" in tile and "The registry as it stands" not in tile       # the head says the noun; no lecture (Grok R8b)
     (tmp_path / "data").mkdir()

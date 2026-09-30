@@ -152,6 +152,7 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         except OSError:
             pass
         out["what"] = title
+        out["dir"] = sub_
         out["name"] = "%s · %s" % (out["name"], title)
         out["href"] = "/project/%s?dir=%s" % (out["pid"], _q(p["sub"]))
         try:
