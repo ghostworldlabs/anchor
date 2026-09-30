@@ -374,7 +374,7 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "pace", "done_when", "place", "seat", "home", "new_goal"}
+        "pace", "done_when", "place", "seat", "home", "new_goal", "guide"}
 
 
 # ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
@@ -592,6 +592,20 @@ def place(project, step, band, position=0, tier=None, tier_position=None):
     return _ok("%s moved to tier %d" % (s.get("name"), tier), undo={"act": "place", "step": step, "band": str(old_tier), "position": 0} if old_tier else None)
 
 
+def guide(project, step, text):
+    """W2d (2026-09-30): his revision of a goal's guide from its place. The steward writes the guide on his word in the
+    conversation; this is his own hand on the file - written whole with a dated History line, committed. No undo: the
+    History line and the Campaign's commits keep every version."""
+    s = _step(project, step)
+    if not s or not _own_group(s):
+        return _no("no such goal")
+    from .steward_campaign import write_guide
+    r = write_guide(project, step, text, who="John")
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "the guide was not written"))
+    return _ok("the guide of %s revised \u2014 %s" % (s.get("name"), r.get("note") or "written"), undo=None, updated=r.get("updated"))
+
+
 def act(project, body):
     """Dispatch one act from the page; every answer is a receipt sentence, ok or refused."""
     body = body if isinstance(body, dict) else {}
@@ -639,6 +653,8 @@ def act(project, body):
             return withdraw(project, body.get("step"), body.get("seed"))
         if a == "restore":
             return restore(project, body.get("step"), body.get("navigation"), body.get("seed"))
+        if a == "guide":
+            return guide(project, body.get("step"), body.get("text"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")

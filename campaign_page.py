@@ -173,6 +173,24 @@ def _thread(i, ctx):
         "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"][:900])) for t in turns[-12:])
 
 
+def _guide_block(i, ctx):
+    """W2d: the goal's guide in its place - the steward's writing rendered, when it is revised, the History folded, a
+    revise button (the raw markdown in a box; Save writes it whole with a dated History line); absent = one line saying
+    how it gets written (on his word, in the conversation below)."""
+    g = (ctx.get("guides") or {}).get(i["id"]) or {}
+    gid = esc(i["id"])
+    if not g.get("exists"):
+        return ('<div class="guide empty" data-guide="%s"><span class="dim">No guide yet &mdash; say &ldquo;write the guide&rdquo; below and the steward writes it from this conversation and the record.</span></div>' % gid)
+    from report_viewer import markdown_to_html
+    hist = g.get("history") or []
+    return ('<div class="guide" data-guide="%s" data-updated="%s"><div class="gbody">%s</div>'
+            '<div class="gfoot"><span class="gwhen">updated %s</span><button class="linkish" data-guide-edit="%s">revise</button>%s</div>'
+            '<textarea class="gsrc" hidden>%s</textarea></div>') % (
+        gid, esc(g.get("updated") or ""), markdown_to_html(g.get("text") or ""), esc(g.get("updated") or ""), gid,
+        ('<details class="ghist"><summary>history &middot; %d</summary><ul>%s</ul></details>' % (len(hist), "".join('<li>%s</li>' % esc(h) for h in hist[-12:]))) if hist else "",
+        esc(g.get("text") or ""))
+
+
 def _place(i, ctx):
     """The goal's place (fit 10): the goal to revise, where it stands, the pace and the deadlines, the workflow
     (the parts with their acts, as the tile's body had them), the projects and cockpits, and the goal's own
@@ -217,6 +235,7 @@ def _place(i, ctx):
         '<div class="k">Where it stands</div><div class="stand">%s</div>%s'
         '<div class="facts3"><div class="fact"><div class="k">Pace</div><span class="v click" data-pace="%s">%s</span></div>'
         '<div class="fact"><div class="k">Deadlines</div><span class="v">%s</span></div></div>'
+        '<div class="k">The guide <span class="h">(the steward writes it on your word &mdash; &ldquo;write the guide&rdquo; in the conversation &mdash; from what you dictate there and the record; revise it here; its history keeps every change)</span></div>%s'
         '<div class="obody"><div class="plist"><div class="pl-h"><h4>The plan &middot; the parts in order</h4><span class="c">%d &middot; %d dated%s</span>'
         '<span class="hint">Click a name to rename, a date to move it. A project or a step of one is read from its own record.</span></div>'
         '<ul class="rows">%s</ul>'
@@ -233,7 +252,7 @@ def _place(i, ctx):
         '<div class="composer gcomp"><label class="sr" for="gsay-%s">Tell the steward about this goal</label>'
         '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; inside this goal nothing needs its name &middot; the steward answers here as it writes</span><button class="send gsend" data-goal="%s">Send</button></div>'
-        '<div class="chips"><button data-say="summarize where this goal stands">summarize</button><button data-say="what is the next step?">what is the next step?</button><button data-say="what is starving here?">what is starving?</button></div></div></div>'
+        '<div class="chips"><button data-say="write the guide">write the guide</button><button data-say="update the guide">update the guide</button><button data-say="summarize where this goal stands">summarize</button><button data-say="what is the next step?">what is the next step?</button><button data-say="what is starving here?">what is starving?</button></div></div></div>'
         '</div></div></article>'
     ) % (esc(i["id"]), esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), esc(i["name"]),
          initiative_light(i, ctx.get("working") or set()), glyph, word, esc(i["area"].title() or "no area"), esc(i["id"]), tier_opts,
@@ -241,6 +260,7 @@ def _place(i, ctx):
          stands, initiative_status_html(i),
          esc(i["id"]), ("by " + esc(_short(i["pace"]))) if i.get("pace") else "set a pace",
          "<br>".join('<span class="%s">%s</span> %s' % ("over" if (_hr._iso(p["date"]) or today) < today else ("soon" if (_hr._iso(p["date"]) - today).days <= 7 else ""), esc(_short(p["date"])), esc(p["text"][:36]) + ("&hellip;" if len(p["text"]) > 36 else "")) for p in dated[:4]) or "none dated",
+         _guide_block(i, ctx),
          n, len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]),
          proj_html,

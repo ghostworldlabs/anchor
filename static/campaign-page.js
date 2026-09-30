@@ -215,6 +215,21 @@
       ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); g.querySelector('.save').click(); } if (e.key === 'Escape') g.querySelector('.mini').click(); });
     });
   });
+  // W2d (2026-09-30): the guide revised in the place - the raw markdown in a box; Save writes it whole with a dated
+  // history line (the act `guide`); the steward's own writing arrives by its word in the conversation and reloads the page
+  $$('.place [data-guide-edit]').forEach(function (b) {
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var box = b.closest('.guide'), src = box && box.querySelector('.gsrc'), body = box && box.querySelector('.gbody');
+      if (!box || !body || box.querySelector('.gedit')) return;
+      var ed = document.createElement('div'); ed.className = 'gedit';
+      ed.innerHTML = '<textarea rows="14"></textarea><div class="row2"><span class="hint">the whole guide, as markdown \u00b7 Save writes it with a dated history line \u00b7 Ctrl+Enter saves \u00b7 Esc cancels</span><button type="button" class="save">Save</button><button type="button" class="mini">cancel</button></div>';
+      var ta = ed.querySelector('textarea'); ta.value = src ? src.value : ''; body.hidden = true; box.insertBefore(ed, body); ta.focus();
+      ed.querySelector('.save').addEventListener('click', function (ev) { ev.stopPropagation(); if (!ta.value.trim()) { receipt('An empty guide is not written \u2014 say what the goal is.', true); return; } act({ act: 'guide', step: box.getAttribute('data-guide'), text: ta.value }); });
+      ed.querySelector('.mini').addEventListener('click', function (ev) { ev.stopPropagation(); ed.remove(); body.hidden = false; });
+      ta.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ed.querySelector('.save').click(); } if (ev.key === 'Escape') ed.querySelector('.mini').click(); });
+    });
+  });
   $$('.place [data-pace]').forEach(function (s) {
     s.addEventListener('click', function () {
       var id = s.getAttribute('data-pace'); var inp = document.createElement('input'); inp.type = 'date'; inp.title = 'the pace — the date you drive this goal toward; clear it to drop the pace';

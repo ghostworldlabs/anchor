@@ -2303,7 +2303,114 @@ def map_stamp(campaign_dir: str):
             stamp.append((root / rel).stat().st_mtime_ns)
         except OSError:
             stamp.append(0)
+    try:   # W2d: a guide the steward wrote reloads the page that shows it
+        for gp in sorted((root / "goals").glob("*/GUIDE.md")):
+            stamp.append(gp.stat().st_mtime_ns)
+    except OSError:
+        pass
     return "-".join(map(str, stamp))
+
+
+# ---------------------------------------------------------------------------
+# The goal's guide (W2d of the active set, 2026-09-30; PLAN v1.3.1 fit 11): the high-level planning guide of ONE goal
+# - goals/<goal id>/GUIDE.md under the Campaign - written by the Campaign's steward on his word in the goal's
+# conversation ("write the guide" / "update the guide") from what he dictated there and the record, never unasked;
+# revised by him in the goal's place (write_guide, his hand on it); its history a dated line per change under
+# "## History" and the Campaign repo's commits. The head, the nudges and the deliverables read it (the standing text).
+# ---------------------------------------------------------------------------
+
+GUIDE_SECTIONS = ("The goal", "The plan, at a high level", "Where we are", "Decisions", "Deliverables", "History")
+_GOAL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+
+
+def guide_rel(goal_id):
+    """The guide's path inside the Campaign for a goal id, or None for an id that is not one (never a path)."""
+    gid = str(goal_id or "").strip()
+    if not _GOAL_ID.match(gid) or ".." in gid:
+        return None
+    return "goals/%s/GUIDE.md" % gid
+
+
+def _guide_history(text):
+    lines, on = [], False
+    for ln in str(text or "").splitlines():
+        if ln.startswith("## "):
+            on = ln[3:].strip().lower() == "history"
+            continue
+        if on and ln.strip().startswith("- "):
+            lines.append(ln.strip()[2:].strip())
+    return lines
+
+
+def read_guide(campaign_dir, goal_id):
+    """{exists, text, updated, history, rel}; a missing guide is exists False, never an error."""
+    rel = guide_rel(goal_id)
+    out = {"exists": False, "text": "", "updated": "", "history": [], "rel": rel or ""}
+    if not rel:
+        return out
+    path = Path(campaign_dir) / rel
+    try:
+        text = path.read_text(encoding="utf-8")
+        st = path.stat()
+    except OSError:
+        return out
+    out.update(exists=True, text=text.replace("\r\n", "\n"), updated=time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)), history=_guide_history(text))
+    return out
+
+
+def _with_history_line(body, line):
+    """The line appended at the END of the History section (made last when absent), wherever that section sits."""
+    lines = body.split("\n")
+    start = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "## history"), None)
+    if start is None:
+        return body.rstrip("\n") + "\n\n## History\n" + line + "\n"
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    lines.insert(end, line)
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _commit_paths(campaign_dir, rels, message):
+    """The Campaign's own paths only, when the Campaign is a repo; git's word is the note, never a failure of the write."""
+    import subprocess
+    try:
+        probe = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=str(campaign_dir), capture_output=True, text=True, timeout=15)
+        if probe.returncode != 0 or probe.stdout.strip() != "true":
+            return "not committed (the Campaign is not a repo here)"
+        add = subprocess.run(["git", "add", "--", *rels], cwd=str(campaign_dir), capture_output=True, text=True, timeout=30)
+        if add.returncode != 0:
+            return "commit failed: " + ((add.stderr or add.stdout).strip().splitlines() or ["git add refused"])[-1]
+        c = subprocess.run(["git", "commit", "-q", "-m", message, "--", *rels], cwd=str(campaign_dir), capture_output=True, text=True, timeout=30)
+        if c.returncode != 0:
+            tail = (c.stderr or c.stdout).strip().splitlines()
+            return "commit failed: " + (tail[-1] if tail else "git exit %d" % c.returncode)
+        return "committed"
+    except Exception as e:
+        return "commit failed: " + str(e)
+
+
+def write_guide(campaign_dir, goal_id, text, who="John"):
+    """His revision from the goal's place: the whole file as he left it, one dated History line added, written whole
+    (a temp file then a replace), committed when the Campaign is a repo. {ok, rel, updated, history, note} or {ok, error}."""
+    rel = guide_rel(goal_id)
+    if not rel:
+        return {"ok": False, "error": "no such goal"}
+    body = str(text or "").replace("\r\n", "\n").strip("\n")
+    if not body.strip():
+        return {"ok": False, "error": "an empty guide is not written - say what the goal is"}
+    stamp = time.strftime("%Y-%m-%d %H:%M")
+    body = _with_history_line(body, "- %s \u2014 revised by %s in the goal\u2019s place" % (stamp, who))
+    path = Path(campaign_dir) / rel
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name("GUIDE.md.tmp")
+        tmp.write_text(body, encoding="utf-8", newline="\n")
+        os.replace(str(tmp), str(path))
+    except OSError as e:
+        return {"ok": False, "error": "the guide could not be written: %s" % e}
+    note = _commit_paths(campaign_dir, [rel], "guide of %s revised by %s in the goal's place" % (goal_id, who))
+    return {"ok": True, "rel": rel, "updated": stamp, "history": _guide_history(body), "note": note}
 
 
 # ---------------------------------------------------------------------------

@@ -7960,7 +7960,12 @@ def _campaign_context(entry):
         stamp = str(_map_stamp(folder))      # the cheap change detector the cockpit polls (W2b-1: a turn that changed the record reloads the board)
     except Exception:
         stamp = ""
-    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
+    try:   # W2d: each goal's guide, read from the Campaign's goals/<id>/GUIDE.md (absent = not written yet)
+        from steward_cockpit.steward_campaign import read_guide as _read_guide
+        guides = {i["id"]: _read_guide(folder, i["id"]) for i in initiatives}
+    except Exception:
+        guides = {}
+    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides,
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log
             "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
