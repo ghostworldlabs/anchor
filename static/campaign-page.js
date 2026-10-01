@@ -34,13 +34,13 @@
   function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }
   // W3b: the page renews itself when the record moves or a new build is live - never while he types or dictates
   // (his word, 2026-10-01); then, when he is quiet. The open goal keeps its place through the renewal (?open= in the address).
-  var pendingRenew = null, renewVersion = '';
-  var renewKey = '';
+  var pendingRenew = null, pendingKey = '', renewVersion = '';
   function renew(text, key) {
-    if (key) renewKey = String(key);
-    if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.'; return; }
-    pendingRenew = null;
-    try { if (renewKey) { if (sessionStorage.getItem('campaign_renewed_for') === renewKey) return; sessionStorage.setItem('campaign_renewed_for', renewKey); } } catch (e) {}   // once per stamp: never a loop
+    var k = key ? String(key) : '';
+    try { if (k && sessionStorage.getItem('campaign_renewed_for') === k) return; } catch (e) {}   // one renewal per STAMP (Grok W3b); a new build is never caught by this
+    if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.'; if (k) pendingKey = k; return; }
+    var stampKey = k || pendingKey; pendingRenew = null; pendingKey = '';
+    try { if (stampKey) sessionStorage.setItem('campaign_renewed_for', stampKey); } catch (e) {}
     try { if (renewVersion) sessionStorage.setItem('campaign_reloaded_for', renewVersion); } catch (e) {}
     try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: text || 'The record moved \u2014 the page is renewed.', bad: false, undo: null })); } catch (e) {}
     location.reload();

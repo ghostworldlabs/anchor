@@ -37,18 +37,24 @@
   // lost"): the page renews itself when the record moves or a new build is live - but NEVER under an open tile or his
   // typing. Then it takes the change in place (every card's lines and light, the open tile's brief and detail, the
   // brief's list and the nudge) and finishes the renewal when the tile closes and he is quiet.
-  var pendingRenew = null, renewSaid = false, renewVersion = '';
-  var renewKey = '';
+  var pendingRenew = null, pendingKey = '', renewVersion = '';
+  function heldLine(card) {   // said once per open card: the renewal waits for it (a card he switches to hears it too - Grok W3b)
+    if (!card || card._heldSaid || !card._talk || !card._talk.appendLine) return;
+    card._heldSaid = true; card._talk.appendLine('sys', 'the record moved \u2014 this page renews itself when you close the card', 'dim');
+  }
   function renew(text, key) {
-    if (key) renewKey = String(key);
+    var k = key ? String(key) : '';
+    // one renewal per STAMP (Grok W3b): a page whose boot stamp can never equal the stream's (a cached page, a fixed one) is
+    // renewed once for that stamp and then left alone - no line armed, nothing held; a new build is never caught by this
+    try { if (k && sessionStorage.getItem('highseat_renewed_for') === k) return; } catch (e) {}
     if (tileOpen() || typingNow()) {
-      pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.';
-      if (!renewSaid) { renewSaid = true; $$('.tile.open').forEach(function (c) { if (c._talk && c._talk.appendLine) c._talk.appendLine('sys', 'the record moved \u2014 this page renews itself when you close the card', 'dim'); }); }
-      var open = $$('.tile.open'); if (open.length) open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();
+      pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.'; if (k) pendingKey = k;
+      var open = $$('.tile.open'); open.forEach(heldLine);
+      if (open.length) open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();
       return;
     }
-    pendingRenew = null;
-    try { if (renewKey) { if (sessionStorage.getItem('highseat_renewed_for') === renewKey) return; sessionStorage.setItem('highseat_renewed_for', renewKey); } } catch (e) {}   // once per stamp: never a loop renewSaid = false;
+    var stampKey = k || pendingKey; pendingRenew = null; pendingKey = '';
+    try { if (stampKey) sessionStorage.setItem('highseat_renewed_for', stampKey); } catch (e) {}
     try { if (renewVersion) sessionStorage.setItem('highseat_reloaded_for', renewVersion); } catch (e) {}
     try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text || 'The record moved \u2014 the page is renewed.', undo: null })); } catch (e) {}
     location.reload();
@@ -274,6 +280,7 @@
         list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
       })
       .then(gist)
+      .then(function () { if (pendingRenew) heldLine(card); })
       .catch(function (e) {   // a refused read offers the page's box (Grok's read of W2e-3), as the stream's refusal does
         list.innerHTML = '<li class="exfade">' + (e && e.auth ? 'This browser is not logged in \u2014 log in below.' : 'The conversation could not be read.') + '</li>'; gist();
         if (e && e.auth) showLogin('This cockpit\u2019s conversation cannot reach this page until this browser is logged in.');
@@ -407,7 +414,7 @@
   function rememberTile(card, big) { try { if (!card.classList.contains('open')) return; sessionStorage.setItem('highseat_open_tile', JSON.stringify({ id: card.id, dir: openDir(card), big: !!big })); } catch (e) {} }
   function forgetTile() { try { sessionStorage.removeItem('highseat_open_tile'); } catch (e) {} }
   function closeTile(card, another) {
-    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile();
+    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile(); card._heldSaid = false;
     if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); } card._moved = false; card._homeNext = null; }
     var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
@@ -433,9 +440,6 @@
   }
   $$('.tile[data-tile]').forEach(function (card) {
     var pid = card.getAttribute('data-tile');
-    $$('[data-part]', card).forEach(function (b) {
-      b.addEventListener('click', function (e) { e.stopPropagation(); openPart(card, pid, b.getAttribute('data-part'), b); });
-    });
     card.addEventListener('click', function (e) {
       if (e.target.closest('a, button, .t-body')) return;
       if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
@@ -444,6 +448,12 @@
     card.addEventListener('dragover', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {} card.classList.add('dropping'); });
     card.addEventListener('dragleave', function (e) { if (!card.contains(e.relatedTarget)) card.classList.remove('dropping'); });
     card.addEventListener('drop', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); card.classList.remove('dropping'); dropFiles(card, pid, e.dataTransfer.files); });
+  });
+  // a card's act buttons and its wait line's open/see are delegated (W3b, Grok's read): a face re-rendered in place keeps them
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.tile[data-tile] [data-part]'); if (!b || b.classList.contains('h-open')) return;
+    var card = b.closest('.tile[data-tile]'); if (!card) return;
+    e.stopPropagation(); openPart(card, card.getAttribute('data-tile'), b.getAttribute('data-part'), b);
   });
   // W3b: the open tile survives a renewal of the page - opened again where it was, its conversation grown as it was,
   // his unsent words back in the box

@@ -43,18 +43,22 @@ def test_the_scripts_renew_only_when_no_tile_is_open_and_he_is_quiet_and_keep_th
     hs = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     # the one gate for the record's stamp and a new build
     assert "function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }" in hs
-    assert "function tileOpen() { return !!$('.tile.open'); }" in hs and "function renew(text, key) {\n    if (key) renewKey = String(key);\n    if (tileOpen() || typingNow()) {" in hs
-    assert "if (sessionStorage.getItem('highseat_renewed_for') === renewKey) return; sessionStorage.setItem('highseat_renewed_for', renewKey);" in hs, "once per stamp - never a loop (the look found 80 reloads in two seconds against a fixed page)"
+    assert "function tileOpen() { return !!$('.tile.open'); }" in hs and "function renew(text, key) {\n    var k = key ? String(key) : '';" in hs and "if (tileOpen() || typingNow()) {\n      pendingRenew = text || pendingRenew" in hs
+    # once per STAMP, judged per call and only for a stamp (Grok W3b): a new build and the close-the-card renewal are never swallowed
+    assert "try { if (k && sessionStorage.getItem('highseat_renewed_for') === k) return; } catch (e) {}" in hs and "var stampKey = k || pendingKey; pendingRenew = null; pendingKey = '';" in hs and "if (stampKey) sessionStorage.setItem('highseat_renewed_for', stampKey);" in hs
+    assert "renewKey" not in hs and "renewSaid" not in hs
+    assert "function heldLine(card) {" in hs and "card._heldSaid = true; card._talk.appendLine('sys', 'the record moved \\u2014 this page renews itself when you close the card', 'dim');" in hs and "open.forEach(heldLine);" in hs
+    assert ".then(function () { if (pendingRenew) heldLine(card); })" in hs and "card._heldSaid = false;" in hs, "a card he switches to hears the held line too, once"
     assert "document.addEventListener('input', markKey, true);" in hs, "dictated text counts as typing"
     assert "you: YOU, onStamp: function (st) { renew('The steward changed the record \\u2014 the page is renewed.', st); }" in hs, "the page's own dialogue renews through the gate"
     assert "renewVersion = String(v); renew('A new build is live \\u2014 the page is renewed.');" in hs and "function typing()" not in hs
     assert "setInterval(function () { if (pendingRenew && !tileOpen() && !typingNow()) renew(pendingRenew); }, 5000);" in hs, "a held renewal finishes when he is quiet"
     assert "if (!another && pendingRenew) renew(pendingRenew);   // the renewal the open tile held back" in hs and "closeTile(c, true); }" in hs
-    assert "c._talk.appendLine('sys', 'the record moved \\u2014 this page renews itself when you close the card', 'dim')" in hs, "said once in the open tile"
     # in place meanwhile: the open tile's brief and detail, every card's lines and light, the brief's list and the nudge
     assert "open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();" in hs
     assert "var b0 = $('#brief'), b1 = doc.getElementById('brief');" in hs and "if (b0 && b1 && !b0.contains(document.activeElement)) {" in hs
     assert "var b = e.target.closest('[data-nudge-act]'); if (!b) return;" in hs, "a nudge re-rendered in place keeps its click (delegated)"
+    assert "var b = e.target.closest('.tile[data-tile] [data-part]'); if (!b || b.classList.contains('h-open')) return;" in hs and "$$('[data-part]', card).forEach" not in hs, "a card's act buttons and its wait line's open/see survive a face re-rendered in place (Grok W3b)"
     # the open tile and his words survive a renewal
     assert "sessionStorage.setItem('highseat_open_tile', JSON.stringify({ id: card.id, dir: openDir(card), big: !!big }))" in hs and "function forgetTile()" in hs
     assert "openTile(card, card.getAttribute('data-tile'), kept.dir || '');\n    if (kept.big) grow(card);" in hs
@@ -63,7 +67,7 @@ def test_the_scripts_renew_only_when_no_tile_is_open_and_he_is_quiet_and_keep_th
     assert "if (comp) comp.scrollIntoView({ block: 'end', behavior: 'smooth' }); if (was && ta && document.activeElement !== ta) ta.focus({ preventScroll: true });" in hs
     assert "li.querySelector('.w').textContent = you ? YOU : 'The steward';" in hs and "(last.classList.contains('you') ? YOU + ': ' : 'The steward: ')" in hs
     cp = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
-    assert "function renew(text, key) {\n    if (key) renewKey = String(key);\n    if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \\u2014 the page is renewed.'; return; }" in cp and "sessionStorage.getItem('campaign_renewed_for') === renewKey) return;" in cp
+    assert "if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \\u2014 the page is renewed.'; if (k) pendingKey = k; return; }" in cp and "if (k && sessionStorage.getItem('campaign_renewed_for') === k) return;" in cp and "if (stampKey) sessionStorage.setItem('campaign_renewed_for', stampKey);" in cp and "renewKey" not in cp
     assert "you: YOU, onStamp: function (st) { renew('The steward changed the record \\u2014 the page is renewed.', st); }" in cp and "function typing()" not in cp
     assert "var b = e.target.closest('[data-nudge-act]'); if (!b) return;" in cp
     m = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
