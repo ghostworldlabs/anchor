@@ -282,20 +282,25 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cbrief.ask .cb-ask:hover .cb-line,.cbrief.ask .cb-ask.open .cb-line{text-decoration:underline;text-underline-offset:3px}
 /* W2e-4 (his word): the opened tile is a grid — the card's own lines and acts left, the red rectangle right at their level,
    an act's detail and the dialogue's thin strip under both */
-.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg" "mat mat";column-gap:18px;align-items:start}
+.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg" "mat mat" "drop drop";column-gap:18px;align-items:start}
 .tile.open>.t-top{grid-area:top}.tile.open>.t-face{grid-area:face}.tile.open>.t-acts{grid-area:acts;align-self:end}
 .tile.open>.t-body{display:contents}
 .tile.open .cbrief{grid-area:brief;margin-top:4px}
 .tile.open .cdetail{grid-area:detail;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .tile.open .cdlg{grid-area:dlg;margin-top:8px;border-top:1px solid var(--line);padding-top:3px;min-width:0}
 .tile.open .cmat{grid-area:mat}
+.tile.open .cdrop{grid-area:drop}
+.cdrop{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:11.5px;color:var(--text-dim)}
+.cdrop .k{display:inline-block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700}
+.cdrop .cd-note{color:var(--text-warm)}.cdrop .cd-note.bad{color:var(--amber-t)}
+.tile.open.dropping{outline:2px dashed var(--amber);outline-offset:-2px;background:var(--amber-wash)}.tile.open.dropping .cdrop{color:var(--amber-t);border-top-color:var(--amber-edge)}
 .cmat{margin-top:6px;padding-top:6px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px}
 .cdlg .dlg-bar{display:flex;align-items:baseline;gap:9px;width:100%;padding:3px 0;background:transparent;border:0;color:var(--text-dim);font:inherit;cursor:pointer;text-align:left}
 .cdlg .dlg-h{flex:none;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--text-dim2)}
 .cdlg .dlg-gist{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;color:var(--text-warm)}
 .cdlg .dlg-caret{flex:none;font-size:11px;color:var(--text-dim);transition:transform .15s}.cdlg.big .dlg-caret{transform:rotate(180deg)}
 .cdlg.thin .scroll,.cdlg.thin .composer{display:none}
-@media (max-width:1100px){.tile.open{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "face" "brief" "acts" "detail" "dlg" "mat"}}
+@media (max-width:1100px){.tile.open{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "face" "brief" "acts" "detail" "dlg" "mat" "drop"}}
 .cb-q{margin-top:5px;color:var(--text);font-weight:600}
 .cb-rec{margin-top:5px;display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
 .cb-accept{flex:none;background:var(--amber);color:#0b1220;border-radius:7px;padding:4px 11px;font-size:12px;font-weight:700;border:0}

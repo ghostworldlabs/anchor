@@ -240,12 +240,54 @@
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
   }
   function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
+  // W2e-6 (his ask, 19:0x): a file dropped on the OPEN tile lands in the folder of the cockpit the tile was opened on
+  // (the project's root, or the effort's directory), through the cockpit's own upload verb - never overwriting; the
+  // result is one line in the tile and in its dialogue. A file dropped anywhere else never navigates the page away.
+  function dropHtml() {
+    return '<div class="cdrop"><span class="k">Files</span><span class="cd-text">drop a file anywhere on this open card \u2014 it lands in this cockpit\u2019s folder, never overwriting</span><span class="cd-note"></span></div>';
+  }
+  function isFileDrag(e) { var t = e.dataTransfer && e.dataTransfer.types; if (!t) return false; for (var i = 0; i < t.length; i++) { if (t[i] === 'Files') return true; } return false; }
+  function openDir(card) { return card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir') : (card.getAttribute('data-dir') || ''); }
+  function dropNote(card, text, bad) {
+    var n = $('.cd-note', card); if (n) { n.textContent = text; n.classList.toggle('bad', !!bad); }
+    if (card._talk && card._talk.appendLine) card._talk.appendLine('sys', text, 'dim');
+  }
+  function dropFiles(card, pid, files) {
+    var dir = openDir(card), name = (card.getAttribute('data-name') || $('.t-nm', card).textContent || 'this cockpit').trim();
+    var list = Array.prototype.slice.call(files || []); if (!list.length) return;
+    (function next(i) {
+      if (i >= list.length) return;
+      var f = list[i];
+      if (f.size > 30000000) { dropNote(card, f.name + ' is over 30 MB \u2014 not loaded', true); next(i + 1); return; }
+      var r = new FileReader();
+      r.onerror = function () { dropNote(card, f.name + ' could not be read', true); next(i + 1); };
+      r.onload = function () {
+        var b64 = String(r.result).split(',')[1] || '';
+        fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })
+          .then(function (res) { return res.json().catch(function () { return {}; }); })
+          .then(function (j) {
+            if (j && j.ok) dropNote(card, 'loaded ' + f.name + ' into ' + name + (dir ? ' \u00b7 ' + dir : '') + ' \u2014 the cockpit\u2019s folder', false);
+            else if (j && j.exists) dropNote(card, f.name + ' is already there \u2014 nothing overwritten', true);
+            else dropNote(card, ((j && j.error) || 'not loaded') + ' (' + f.name + ')', true);
+          })
+          .catch(function () { dropNote(card, f.name + ' did not go through \u2014 not loaded', true); })
+          .then(function () { next(i + 1); });
+      };
+      r.readAsDataURL(f);
+    })(0);
+  }
+  document.addEventListener('dragover', function (e) { if (isFileDrag(e) && !drag) e.preventDefault(); });
+  document.addEventListener('drop', function (e) {
+    if (!isFileDrag(e) || drag) return;
+    e.preventDefault();
+    if (!e.target.closest('.tile.open')) receipt('Open a card first, then drop the file on it \u2014 it lands in that cockpit\u2019s folder.', true);
+  });
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });   // one tile open, one dialogue polling (Grok's read of W2e)
     card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
-    body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id);
+    body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id) + dropHtml();
     fetchPart(pid, 'brief', dir, false, true)
       .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; } })   // the served brief IS the rectangle (never one cbrief inside another)
       .catch(function () { var b = $('.cbrief', card); if (b) b.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
@@ -283,6 +325,10 @@
       if (e.target.closest('a, button, .t-body')) return;
       if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
     });
+    // W2e-6: the OPEN tile takes a file drop (a card drag in progress is never a file)
+    card.addEventListener('dragover', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {} card.classList.add('dropping'); });
+    card.addEventListener('dragleave', function (e) { if (!card.contains(e.relatedTarget)) card.classList.remove('dropping'); });
+    card.addEventListener('drop', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); card.classList.remove('dropping'); dropFiles(card, pid, e.dataTransfer.files); });
   });
   // W2e-3 (his word): the ask is a banner; a click opens the description and the recommendation; "talk about it" puts
   // the ask into the tile's dialogue and grows it

@@ -11,7 +11,9 @@ opened tile (15:2x): "you could just have that red banner with the top line requ
 description and recommendation, which can be clicked on or you can click on a talk about it link"; the banner "can be a
 tile/rectangle on the left of the top of the open tile"; then (16:0x) "up on the same level as the in, run and next
 section, but over on the right side … the cockpit steward dialogue should be able to expand with a click on a very thin
-tile, but I want the context of the first web page there first"."""
+tile, but I want the context of the first web page there first". W2e-6 (19:0x): "add the ability to drop in a file in an
+initiative tile (when it is opened, made large) so that it will end up in the associated project (like the AI Cockpit
+feature)" - the open tile takes a file drop through the cockpit's own upload verb into the opened cockpit's folder."""
 import json
 import os
 import subprocess
@@ -107,7 +109,8 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
               '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
-              "if (e && e.auth) showLogin('This cockpit",
+              "if (e && e.auth) showLogin('This cockpit", "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
+              "if (f.size > 30000000)", "card.classList.add('dropping')", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
@@ -127,7 +130,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     css = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
     for s in (".tlight.green{", ".tlight.orange{", ".tlight.red{", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
               '.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg"', ".tile.open>.t-face{grid-area:face}", ".tile.open>.t-body{display:contents}", ".tile.open .cbrief{grid-area:brief",
-              ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}", '"dlg dlg" "mat mat"', ".tile.open .cmat{grid-area:mat}",
+              ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}", '"dlg dlg" "mat mat" "drop drop"', ".tile.open .cmat{grid-area:mat}", ".tile.open .cdrop{grid-area:drop}", ".cdrop{", ".tile.open.dropping{outline:2px dashed",
               ".cdlg .scroll{max-height:20vh", ".cdlg.big .scroll{max-height:58vh}", ".tile.talking .cdetail{display:none}"):
         assert s in css, s
 
