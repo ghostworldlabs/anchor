@@ -25,6 +25,7 @@ def test_the_high_seat_has_a_login_box_and_no_browser_prompt():
     assert "loginBox({ receiptKey: 'campaign_receipt' })" in cjs and "function doLogin()" not in cjs, "the Campaign page calls the same script"
     css = open(os.path.join(ROOT, "static", "steward-dialogue.css"), encoding="utf-8").read()
     assert ".loginbox{" in css, "the box's look lives with the dialogue: both pages mount it (Grok's read of W2c-3)"
+    assert ".loginbox[hidden]{display:none!important}" in css and "[hidden]{display:none!important}" in css, "a hidden box is never painted (2026-10-01: display:flex had overridden the hidden attribute on both pages)"
     assert ".loginbox{" not in open(os.path.join(ROOT, "static", "high-seat-page.css"), encoding="utf-8").read(), "one copy"
 
 
