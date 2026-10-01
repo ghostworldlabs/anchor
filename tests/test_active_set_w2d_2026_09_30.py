@@ -44,7 +44,8 @@ def test_the_guide_is_read_from_the_goal_s_folder_with_its_history(tmp_path):
     assert g["exists"] and g["text"].startswith("# The trusts") and g["history"] == ["2026-09-30 10:00 \u2014 written from the goal's conversation"] and len(g["updated"]) == 16
     for bad in ("../trusts", "trusts/../x", "", "a b", "x" * 90):
         assert sc.guide_rel(bad) is None and sc.read_guide(str(c), bad)["exists"] is False, bad
-    assert sc.GUIDE_SECTIONS == ("The goal", "The plan, at a high level", "Where we are", "Decisions", "Deliverables", "History")
+    assert sc.guide_body(GUIDE).rstrip("\n").endswith("## Deliverables\n- the signed package") and "## History" not in sc.guide_body(GUIDE), "the body without its History section (the page shows the history once)"
+    assert sc.guide_body("# g\n\n## History\n- a\n\n## Deliverables\n- d\n") == "# g\n\n## Deliverables\n- d\n", "a History section in the middle is lifted out whole"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git")
@@ -68,11 +69,14 @@ def test_his_revision_writes_the_guide_whole_with_a_dated_history_line_and_commi
     assert sc.write_guide(str(c), "../trusts", "# x")["error"] == "no such goal"
 
 
-def test_a_campaign_that_is_not_a_repo_still_takes_the_revision_and_says_so(tmp_path):
+@pytest.mark.skipif(shutil.which("git") is None, reason="git")
+def test_a_campaign_inside_a_parent_repo_takes_the_revision_but_commits_nothing_there(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)      # the PARENT is a repo; the Campaign folder is not its root (Grok's read of W2d)
     c = _campaign(tmp_path)
     r = sc.write_guide(str(c), "trusts", "# g\n\n## The goal\nSettled.")
     assert r["ok"] and (c / "goals" / "trusts" / "GUIDE.md").is_file()
-    assert r["note"].startswith("not committed") or r["note"].startswith("commit failed"), r["note"]
+    assert r["note"] == "not committed (the Campaign is not a repo here)", r["note"]
+    assert subprocess.run(["git", "log", "--oneline"], cwd=str(tmp_path), capture_output=True, text=True).stdout.strip() == "", "nothing landed in the parent repo"
 
 
 def test_the_guide_act_is_his_hand_on_the_file_and_only_a_goal_takes_it(tmp_path, monkeypatch):
@@ -93,8 +97,13 @@ def test_the_place_shows_the_guide_revisable_with_its_history_and_the_chips_ask_
     place = html[html.index('id="place-trusts"'):html.index("</article>", html.index('id="place-trusts"'))]
     assert '<div class="k">The guide <span class="h">(the steward writes it on your word' in place
     assert '<div class="guide" data-guide="trusts" data-updated="2026-09-30 10:00"><div class="gbody">' in place and "<h2>The plan, at a high level</h2>" in place and "<li>Stanford&#x27;s package first</li>" in place, "the steward's writing, rendered"
+    body = place[place.index('<div class="gbody">'):place.index('<div class="gfoot">')]
+    assert "<h2>History</h2>" not in body and "written from the goal" not in body, "the history once on the page: folded, not in the body too (Grok W2d)"
     assert '<button class="linkish" data-guide-edit="trusts">revise</button>' in place and '<details class="ghist"><summary>history &middot; 1</summary><ul><li>2026-09-30 10:00 \u2014 written from the goal&#x27;s conversation</li></ul></details>' in place
-    assert '<textarea class="gsrc" hidden># The trusts and the holding company \u2014 the guide' in place, "the raw markdown for the editor"
+    assert '<textarea class="gsrc" hidden># The trusts and the holding company \u2014 the guide' in place and "## History" in place[place.index('<textarea class="gsrc"'):], "the raw markdown for the editor, History and all"
+    ctx["guides"]["trusts"]["history"] = ["line %d" % k for k in range(15)]
+    html15 = cpg.render_campaign_html(ctx, open_id="trusts")
+    assert "<summary>history &middot; the last 12 of 15</summary>" in html15 and "<li>line 3</li>" in html15 and "<li>line 2</li>" not in html15, "the count is of the lines shown"
     assert place.index('data-guide="trusts"') < place.index('<div class="obody">'), "the guide before the parts: the plan at a high level, then the parts in order"
     assert '<button data-say="write the guide">write the guide</button><button data-say="update the guide">update the guide</button>' in place, "his word, one click"
     other = html[html.index('id="place-magi"'):html.index("</article>", html.index('id="place-magi"'))] if 'id="place-magi"' in html else html

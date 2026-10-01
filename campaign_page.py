@@ -182,12 +182,15 @@ def _guide_block(i, ctx):
     if not g.get("exists"):
         return ('<div class="guide empty" data-guide="%s"><span class="dim">No guide yet &mdash; say &ldquo;write the guide&rdquo; below and the steward writes it from this conversation and the record.</span></div>' % gid)
     from report_viewer import markdown_to_html
+    from steward_cockpit.steward_campaign import guide_body
     hist = g.get("history") or []
+    shown = hist[-12:]      # the history ONCE on the page, folded: the body is rendered without its History section (Grok's read of W2d)
+    count = ("%d" % len(shown)) if len(shown) == len(hist) else ("the last %d of %d" % (len(shown), len(hist)))
     return ('<div class="guide" data-guide="%s" data-updated="%s"><div class="gbody">%s</div>'
             '<div class="gfoot"><span class="gwhen">updated %s</span><button class="linkish" data-guide-edit="%s">revise</button>%s</div>'
             '<textarea class="gsrc" hidden>%s</textarea></div>') % (
-        gid, esc(g.get("updated") or ""), markdown_to_html(g.get("text") or ""), esc(g.get("updated") or ""), gid,
-        ('<details class="ghist"><summary>history &middot; %d</summary><ul>%s</ul></details>' % (len(hist), "".join('<li>%s</li>' % esc(h) for h in hist[-12:]))) if hist else "",
+        gid, esc(g.get("updated") or ""), markdown_to_html(guide_body(g.get("text") or "")), esc(g.get("updated") or ""), gid,
+        ('<details class="ghist"><summary>history &middot; %s</summary><ul>%s</ul></details>' % (count, "".join('<li>%s</li>' % esc(h) for h in shown))) if hist else "",
         esc(g.get("text") or ""))
 
 

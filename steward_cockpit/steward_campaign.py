@@ -2319,8 +2319,7 @@ def map_stamp(campaign_dir: str):
 # "## History" and the Campaign repo's commits. The head, the nudges and the deliverables read it (the standing text).
 # ---------------------------------------------------------------------------
 
-GUIDE_SECTIONS = ("The goal", "The plan, at a high level", "Where we are", "Decisions", "Deliverables", "History")
-_GOAL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+_GOAL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")      # the sections are the standing text's (SKILL.md item 8), named once there
 
 
 def guide_rel(goal_id):
@@ -2329,6 +2328,19 @@ def guide_rel(goal_id):
     if not _GOAL_ID.match(gid) or ".." in gid:
         return None
     return "goals/%s/GUIDE.md" % gid
+
+
+def guide_body(text):
+    """The guide without its History section - the page shows the history once, folded (Grok's read of W2d)."""
+    out, skipping = [], False
+    for ln in str(text or "").splitlines():
+        if ln.startswith("## "):
+            skipping = ln[3:].strip().lower() == "history"
+            if skipping:
+                continue
+        if not skipping:
+            out.append(ln)
+    return "\n".join(out).rstrip("\n") + "\n"
 
 
 def _guide_history(text):
@@ -2372,11 +2384,14 @@ def _with_history_line(body, line):
 
 
 def _commit_paths(campaign_dir, rels, message):
-    """The Campaign's own paths only, when the Campaign is a repo; git's word is the note, never a failure of the write."""
+    """The Campaign's own paths only, and only when the Campaign folder IS a repo's root (a Campaign inside some parent
+    repo is left to that repo's owner - Grok's read of W2d); git's word is the note, never a failure of the write."""
     import subprocess
     try:
-        probe = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=str(campaign_dir), capture_output=True, text=True, timeout=15)
-        if probe.returncode != 0 or probe.stdout.strip() != "true":
+        probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(campaign_dir), capture_output=True, text=True, timeout=15)
+        top = probe.stdout.strip().replace("/", os.sep).rstrip(os.sep).lower() if probe.returncode == 0 else ""
+        here = os.path.normpath(os.path.realpath(str(campaign_dir))).rstrip(os.sep).lower()
+        if not top or os.path.normpath(os.path.realpath(top)).lower() != here:
             return "not committed (the Campaign is not a repo here)"
         add = subprocess.run(["git", "add", "--", *rels], cwd=str(campaign_dir), capture_output=True, text=True, timeout=30)
         if add.returncode != 0:
