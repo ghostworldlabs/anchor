@@ -259,7 +259,7 @@
     try { var keptT = localStorage.getItem(DK); if (keptT && keptT.trim() && box && !box.value.trim()) box.value = keptT; } catch (e) {}
     if (box) box.addEventListener('input', function () { clearTimeout(dkT); dkT = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
     function gist() {   // the strip's context: the last turn, whoever said it
-      var rows = $$('.exrow', list), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;
+      var rows = $$('.exrow', list).filter(function (r) { return !r.classList.contains('sysl'); }), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;   // the strip's gist is the last TURN, never a system line
       if (!last) { var f = $('.exfade', list); g.textContent = f ? f.textContent.trim() : 'nothing said in this cockpit yet'; return; }   // the list's one sentence (not logged in / nothing said / could not be read), as Grok read it
       var t = ($('.ext', last) || {}).textContent || '';
       g.textContent = (last.classList.contains('you') ? YOU + ': ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
