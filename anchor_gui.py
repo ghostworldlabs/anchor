@@ -7883,13 +7883,13 @@ def _high_seat_context():
             hs_turns, hs_stamp = [], ""
     nudge = None
     if campaign:
-        try:   # W3: ONE nudge at the page_open boundary, derived from the records; "not now" receipts honoured
-            from steward_cockpit import nudges as _nudges
+        def _derive_nudge():   # W3: ONE nudge at the page_open boundary, derived from the records; "not now" receipts honoured;
+            from steward_cockpit import nudges as _nudges     # a part the head's own sentence leads with is never nudged too
             cdir = str(_campaign_dir())
-            nudge = _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),
-                                   goal_last_at=_goal_last_at(cdir), dismissed=_nudges.read_dismissed(cdir), campaign_pid=str(campaign.get("pid") or ""))
-        except Exception:
-            nudge = None
+            return _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),
+                                  goal_last_at=_goal_last_at(cdir), dismissed=_nudges.read_dismissed(cdir), campaign_pid=str(campaign.get("pid") or ""),
+                                  head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""))
+        nudge = _nudge_or_log("high-seat", _derive_nudge)
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
@@ -7904,6 +7904,17 @@ def _high_seat_context():
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
         "lights": lights, "nudge": nudge,
     }
+
+
+def _nudge_or_log(where, fn):
+    """W3 (Grok's read, RC-G): the nudges are derived from the records and must never break a page - but a guard that
+    swallows the failure cannot see what it exists for (the first build's seed-count TypeError painted a quiet brief).
+    One line in the server log names the boundary and the error; the page goes on without a nudge."""
+    try:
+        return fn()
+    except Exception as e:
+        print("  [%s] NUDGE derive failed (%s): %r" % (datetime.now().strftime("%H:%M:%S"), where, e))
+        return None
 
 
 def _strip_ages(entries):
@@ -8037,12 +8048,11 @@ def _campaign_context(entry):
         guides = {i["id"]: _read_guide(folder, i["id"]) for i in initiatives}
     except Exception:
         guides = {}
-    try:   # W3: the one nudge for each goal's conversation (its dated parts, its deck waits, its starvation)
+    def _derive_nudges():   # W3: the one nudge for each goal's conversation (its dated parts, its deck waits, its starvation)
         from steward_cockpit import nudges as _nudges
         _dis = _nudges.read_dismissed(folder); _ages = _strip_ages(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False)); _last = _goal_last_at(folder)
-        nudges = {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"], campaign_pid=str(entry.get("id") or "")) for i in initiatives}
-    except Exception:
-        nudges = {}
+        return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"], campaign_pid=str(entry.get("id") or "")) for i in initiatives}
+    nudges = _nudge_or_log("campaign", _derive_nudges) or {}
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges,
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log

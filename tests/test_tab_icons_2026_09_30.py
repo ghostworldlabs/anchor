@@ -41,9 +41,12 @@ def test_the_pages_link_the_small_png_as_the_tab_icon():
 def test_the_two_page_icons_are_legible_at_tab_size():
     """John, 2026-10-01: "put the icons back up in the tabs of the web pages" - the pages linked the PNGs all along and
     the browsers fetched them, but the shrunken paintings read as dark squares on a dark tab bar. The icons are now
-    bright amber tiles with the steward's initial: 64 px square (the size the link declares) and bright at 16 px."""
+    bright amber tiles with the steward's initial: 64 px (the size the link declares) and bright at 16 px. The two tabs
+    are told apart by a mark that survives tab size (Grok W3): the High Seat's is a SQUARE tile (the hall), a project's
+    seal is a ROUND one - at 16 px the seal's corners are transparent and the tile's are not."""
     import pytest
     PIL = pytest.importorskip("PIL.Image")
+    corners = {}
     for stem in ("aladdin-high-seat-cave", "aladdin-seal-lamp"):
         im = PIL.open(os.path.join(BRAND, stem + ".png")).convert("RGBA")
         assert im.size == (64, 64), stem
@@ -51,4 +54,6 @@ def test_the_two_page_icons_are_legible_at_tab_size():
         px = [p for p in small.getdata() if p[3] > 0]
         lum = sum(0.299 * r + 0.587 * g + 0.114 * b for r, g, b, _a in px) / len(px)
         assert lum >= 100, "%s reads dark at tab size: %d" % (stem, lum)
+        corners[stem] = small.getpixel((0, 0))[3]
+    assert corners["aladdin-high-seat-cave"] > 128 and corners["aladdin-seal-lamp"] == 0, "the square tile and the round seal must read apart at 16 px: %r" % corners
     assert 'sizes="64x64"' in hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "b1")

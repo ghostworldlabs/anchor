@@ -73,6 +73,25 @@ def test_the_deck_wait_the_starving_goal_the_seed_and_the_free_moment_in_their_o
     assert N.derive(everything, {}, seeds, working=set(), today=TODAY, strip_ages={"p-paper": 15})["kind"] == "dated"
 
 
+def test_grok_w3_fold_the_head_s_lead_yields_the_open_goal_has_no_link_the_quoted_cockpit_is_offered():
+    deck = goal("mba", "MBA Teaching", 1, [part("hw", "retool homework 2", kind="project", pid="p-mba", seat="deck", seat_order=0, state="waiting on you: approve the plan", needs_you=True)])
+    # the head's own sentence already leads with this part (its pid, or its name): the nudge yields - no second mechanism saying it (RC-3)
+    assert N.derive([deck], {}, [], working=set(), today=TODAY, head_lead=("p-mba", "retool homework 2")) is None
+    assert N.derive([deck], {}, [], working=set(), today=TODAY, head_lead=("", "retool homework 2")) is None
+    assert N.derive([deck], {}, [], working=set(), today=TODAY, head_lead=("p-other", "something else"))["kind"] == "deck_wait"
+    free = goal("g", "G", 1, [part("d1", "Deck thing", kind="project", pid="p-d", seat="deck", seat_order=0)])
+    assert N.derive([free], {}, [], working=set(), today=TODAY, head_lead=("p-d", "")) is None, "the free moment yields to the head too"
+    # inside the goal's own place the goal is open on screen: a dated nudge links the cockpit, never the goal
+    dated = goal("trusts", "Family finances", 1, [part("mtg", "Trusts meeting", date="2026-10-02", pid="p-tr")])
+    n = N.derive([dated], {}, [], working=set(), today=TODAY, scope_goal="trusts", campaign_pid="c1")
+    assert n["kind"] == "dated" and n["acts"] == [{"act": "open", "href": "/project/p-tr", "label": "open the cockpit"}]
+    assert [a["label"] for a in N.derive([dated], {}, [], working=set(), today=TODAY, campaign_pid="c1")["acts"]] == ["open the cockpit", "open the goal"], "from the brief, both"
+    # the starving nudge offers the cockpit whose age it quoted when that one is unseated
+    starving = goal("tech", "Technical papers", 2, [part("p1", "Paper 1", kind="project", pid="p-one"), part("p2", "Paper 2", kind="project", pid="p-two")])
+    n2 = N.derive([starving], {}, [], working=set(), today=TODAY, strip_ages={"p-one": 3, "p-two": 20})
+    assert "untouched for 20 days" in n2["text"] and n2["acts"][0] == {"act": "seat", "step": "p2", "seat": "deck", "label": "put Paper 2 on deck"}
+
+
 def test_not_now_is_a_receipt_until_the_fact_changes_with_undo(tmp_path):
     c = tmp_path / "Campaign"; c.mkdir()
     deck = goal("mba", "MBA Teaching", 1, [part("hw", "retool homework 2", kind="project", pid="p-mba", seat="deck", state="waiting on you: approve the plan", needs_you=True)])
@@ -91,7 +110,7 @@ def test_not_now_is_a_receipt_until_the_fact_changes_with_undo(tmp_path):
     assert r2["ok"] and r2["receipt"].startswith("not now") and r2["undo"] == {"act": "nudge_again", "key": n["key"]}
     assert n["key"] in N.read_dismissed(str(c))
     r3 = acts.act(str(c), r2["undo"])
-    assert r3["ok"] and r3["undo"] == {"act": "not_now", "key": n["key"]} and n["key"] not in N.read_dismissed(str(c))
+    assert r3["ok"] and r3["undo"] == {"act": "not_now", "key": n["key"], "fact": n["fact"], "text": n["text"]} and n["key"] not in N.read_dismissed(str(c)), "the undo of the undo puts the receipt back whole (Grok W3)"
 
 
 def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_acts_and_its_fact():
@@ -122,11 +141,21 @@ def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_
         assert s in css, s
 
 
-def test_the_contexts_derive_the_nudge_and_the_standing_text_says_the_law():
+def test_the_contexts_derive_the_nudge_and_the_standing_text_says_the_law(capsys):
     src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
-    assert 'nudge = _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),' in src and '"lights": lights, "nudge": nudge,' in src
-    assert 'nudges = {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"]' in src and '"guides": guides, "nudges": nudges,' in src
+    assert 'return _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),' in src and '"lights": lights, "nudge": nudge,' in src
+    assert 'head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""))' in src and 'nudge = _nudge_or_log("high-seat", _derive_nudge)' in src
+    assert 'return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"]' in src and 'nudges = _nudge_or_log("campaign", _derive_nudges) or {}' in src and '"guides": guides, "nudges": nudges,' in src
     assert "def _strip_ages(entries):" in src and "def _goal_last_at(campaign_dir):" in src
+    # Grok W3 (RC-G): the guard logs the failure it exists for, and the page goes on without a nudge
+    import anchor_gui as ag
+
+    def boom():
+        raise TypeError("'int' object is not iterable")
+    assert ag._nudge_or_log("high-seat", boom) is None
+    out = capsys.readouterr().out
+    assert "NUDGE derive failed (high-seat): TypeError(" in out and "int" in out
+    assert ag._nudge_or_log("campaign", lambda: {"g": None}) == {"g": None} and capsys.readouterr().out == ""
     skill = open(r"C:\dev\Ecgberht\SKILL.md", encoding="utf-8").read() if os.path.exists(r"C:\dev\Ecgberht\SKILL.md") else ""
     if skill:
         assert "9. **The nudges" in skill and "`.ecgberht/nudges.json`" in skill and "never twice for the same fact; never more than one at a boundary" in skill and "W3 of the\n     active set and are written here then" not in skill

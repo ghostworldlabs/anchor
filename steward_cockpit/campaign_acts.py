@@ -618,10 +618,11 @@ def not_now(project, key, fact="", text=""):
 
 def nudge_again(project, key):
     from . import nudges as _n
+    was = (_n.read_dismissed(project) or {}).get(str(key)) or {}     # the receipt as it stood, so its undo puts it back whole (Grok W3)
     r = _n.undismiss(project, key)
     if not r.get("ok"):
         return _no(str(r.get("error") or "that did not go through"))
-    return _ok("the nudge may speak again", undo={"act": "not_now", "key": key})
+    return _ok("the nudge may speak again", undo={"act": "not_now", "key": key, "fact": str(was.get("fact") or ""), "text": str(was.get("text") or "")})
 
 
 def act(project, body):

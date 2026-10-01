@@ -69,10 +69,11 @@ def _goals_at_hand(initiatives, working):
 
 
 def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_ages=None, goal_last_at=None,
-           dismissed=None, scope_goal=None, campaign_pid=""):
+           dismissed=None, scope_goal=None, campaign_pid="", head_lead=None):
     """The one nudge for this boundary, or None. ``scope_goal`` narrows it to one goal's conversation (the Campaign
     page's place): only that goal's dated parts, deck waits and starvation; seeds and the free moment belong to the
-    High Seat's brief. ``dismissed`` is the receipts file read (``read_dismissed``)."""
+    High Seat's brief. ``dismissed`` is the receipts file read (``read_dismissed``). ``head_lead`` is (pid, part name)
+    of the brief's own lead sentence: a part the head already names is never nudged too (Grok W3, RC-3)."""
     today = today or date.today()
     inits = [i for i in initiatives or () if isinstance(i, dict) and i.get("status") not in ("done", "parked")]
     if scope_goal:
@@ -81,6 +82,11 @@ def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_
     working = working or set()
     seeds = [s for s in (seeds if isinstance(seeds, (list, tuple)) else ()) if isinstance(s, dict)]   # rows, never a count
     at_hand = _goals_at_hand(initiatives, working)
+    lead_pid, lead_part = (str(head_lead[0] or ""), str(head_lead[1] or "")) if isinstance(head_lead, (list, tuple)) and len(head_lead) == 2 else ("", "")
+
+    def _is_lead(p):
+        name = str(p.get("target") or p.get("text") or "")
+        return bool((lead_pid and p.get("pid") == lead_pid) or (lead_part and name == lead_part))
     cands = []
 
     def add(kind, subject, fact, text, why, acts, goal=None, rank=0):
@@ -105,17 +111,18 @@ def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_
     if best:
         d, i, p = best
         name = str(p.get("target") or p.get("text") or "a part")
-        opens = [{"act": "open", "href": "/project/%s?open=%s" % (campaign_pid, i["id"]), "label": "open the goal"}] if campaign_pid else []
+        # in the goal's own place the goal is already open on screen: no link to it (Grok W3)
+        opens = [{"act": "open", "href": "/project/%s?open=%s" % (campaign_pid, i["id"]), "label": "open the goal"}] if campaign_pid and not scope_goal else []
         if p.get("pid"):
             opens.insert(0, {"act": "open", "href": "/project/%s" % p["pid"], "label": "open the cockpit"})
         add("dated", p.get("id") or name, d.isoformat(),
             "Excuse me: %s is due %s (%s)." % (name, when_words(d, today), i.get("name") or "a goal"),
             "the part's date on the Campaign record: %s" % d.isoformat(), opens, goal=i["id"], rank=1)
 
-    # 2. an initiative that needs him and is only on deck
+    # 2. an initiative that needs him and is only on deck - unless the head's own sentence already leads with it
     for i in inits:
         for p in i.get("parts") or ():
-            if _open(p) and p.get("seat") == "deck" and p.get("needs_you"):
+            if _open(p) and p.get("seat") == "deck" and p.get("needs_you") and not _is_lead(p):
                 wait = re.sub(r"^waiting on you[:\s]*", "", str(p.get("state") or ""), flags=re.I).strip(" .") or "a wait"
                 name = str(p.get("target") or p.get("text") or "it")
                 add("deck_wait", p.get("id"), wait,
@@ -139,7 +146,10 @@ def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_
             except Exception:
                 age = 0
         if age >= STARVE_DAYS[tier]:
-            cockpit = next((p for p in i.get("parts") or () if _open(p) and p.get("kind") in ("project", "effort") and not p.get("seat")), None)
+            # the cockpit offered is the one whose age was quoted when it is unseated, else the first unseated (Grok W3)
+            unseated = [p for p in i.get("parts") or () if _open(p) and p.get("kind") in ("project", "effort") and not p.get("seat")]
+            unseated.sort(key=lambda p: -int((strip_ages or {}).get(p.get("pid"), 0) or 0))
+            cockpit = unseated[0] if unseated else None
             acts = ([{"act": "seat", "step": cockpit.get("id"), "seat": "deck", "label": "put %s on deck" % str(cockpit.get("target") or cockpit.get("text") or "it")[:40]}] if cockpit else [])
             if campaign_pid:
                 acts.append({"act": "open", "href": "/project/%s?open=%s" % (campaign_pid, i["id"]), "label": "open the goal"})
@@ -163,7 +173,7 @@ def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_
         # (that would be the same "make it active?" twice)
         put_off = {k.split(":", 2)[1] for k in dismissed if k.startswith("deck_wait:")}
         active = [p for i in inits for p in i.get("parts") or () if _open(p) and p.get("seat") == "active"]
-        deck = sorted([(i, p) for i in inits for p in i.get("parts") or () if _open(p) and p.get("seat") == "deck" and str(p.get("id"))[:40] not in put_off],
+        deck = sorted([(i, p) for i in inits for p in i.get("parts") or () if _open(p) and p.get("seat") == "deck" and str(p.get("id"))[:40] not in put_off and not _is_lead(p)],
                       key=lambda t: (t[1].get("seat_order") if isinstance(t[1].get("seat_order"), int) else 999))
         if not active and deck:
             i, p = deck[0]
