@@ -11758,15 +11758,16 @@ def _request_presented_token(handler, body):
     accepts the W9 auth cookie, so the login handler can echo the caller's
     already-validated token into the Set-Cookie value.
     """
-    provided = handler.headers.get("X-Anchor-Token")
-    if provided is None:
-        provided = _paths.token_from_authorization(
-            handler.headers.get("Authorization"))
-    if provided is None and isinstance(body, dict):
-        provided = body.get("token")
-    if provided is None:
-        provided = _paths.token_from_cookie(handler.headers.get("Cookie"))
-    return provided
+    # 2026-10-01 (Grok's independent review, the probe after the restart): a VALID credential wins when the request
+    # carries one, else the first it carried - the one rule the GET gate and the POST middleware use. Before, the
+    # first credential seen was answered, so a stale saved token in the header beside the valid pasted token in the
+    # body (or a valid cookie) made the login handler refuse what the middleware had just accepted.
+    cands = [handler.headers.get("X-Anchor-Token"),
+             _paths.token_from_authorization(handler.headers.get("Authorization")),
+             body.get("token") if isinstance(body, dict) else None,
+             _paths.token_from_cookie(handler.headers.get("Cookie"))]
+    cands = [t for t in cands if t]
+    return next((t for t in cands if _paths.auth_ok(t)), cands[0] if cands else None)
 
 
 def _local_browser(handler):
@@ -11804,7 +11805,6 @@ def _own_addresses():
     if _OWN_ADDRESSES is None:
         own = {"127.0.0.1", "::1", "localhost"}
         try:
-            import socket
             host = socket.gethostname()
             for fam in (socket.AF_INET, socket.AF_INET6):
                 try:

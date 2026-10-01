@@ -247,3 +247,16 @@ def test_the_post_gate_judges_every_credential_the_request_carries():
     assert '_paths.token_from_cookie(self.headers.get("Cookie"))]' in src and 'body.get("token") if isinstance(body, dict) else None,' in src
     assert '_project_authed = self._term_token_ok() or bool(_ck)' in src, "the project page takes the local browser's login too (its lock page never carried the cookie)"
     assert src.count("cookie=_ck)") >= 5, "every page send carries the local browser's cookie"
+
+
+def test_the_presented_token_is_the_valid_one_when_the_request_carries_several(monkeypatch):
+    import anchor_gui as ag
+    import paths as _paths
+    from types import SimpleNamespace
+    monkeypatch.setattr(_paths, "expected_token", lambda: "good-token")
+    h = SimpleNamespace(headers={"X-Anchor-Token": "stale", "Cookie": "anchor_auth=good-token"})
+    assert ag._request_presented_token(h, {}) == "good-token", "a stale saved token in the header beside a good cookie: the cookie"
+    assert ag._request_presented_token(SimpleNamespace(headers={"X-Anchor-Token": "stale"}), {"token": "good-token"}) == "good-token", "the pasted token in the body wins over the stale header"
+    assert ag._request_presented_token(SimpleNamespace(headers={"X-Anchor-Token": "stale"}), {}) == "stale", "nothing valid: the first carried, which the gate then refuses"
+    assert ag._request_presented_token(SimpleNamespace(headers={}), {}) is None
+
