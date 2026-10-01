@@ -195,9 +195,14 @@ def test_a_browser_on_this_machine_is_its_own_user_and_any_valid_credential_is_e
         return SimpleNamespace(headers=headers, client_address=(peer, 50000), path=path)
     local = req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate"})
     assert ag._local_browser(local) is True
-    assert ag._local_browser(req({"Host": "localhost:8777"})) is False, "no Sec-Fetch-Mode: a script or a probe, not a browser"
+    assert ag._local_browser(req({"Host": "localhost:8777"})) is False, "no browser sign at all: a script or a probe"
+    assert ag._local_browser(req({"Host": "localhost:8777", "User-Agent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1", "Accept": "text/html"})) is False, "PowerShell is not a browser"
+    assert ag._local_browser(req({"Host": "gwl-server:8777", "User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/130", "Accept": "text/html,application/xhtml+xml"})) is True, "a browser on this machine that typed the machine's name (no fetch metadata over plain HTTP to that name)"
+    monkeypatch.setattr(ag, "_OWN_ADDRESSES", {"127.0.0.1", "::1", "localhost", "192.168.1.20"})
+    assert ag._local_browser(req({"Host": "192.168.1.20:8777", "Sec-Fetch-Mode": "navigate"}, peer="192.168.1.20")) is True, "this machine's own LAN address as the peer: a browser on this machine"
+    assert ag._local_browser(req({"Host": "192.168.1.20:8777", "Sec-Fetch-Mode": "navigate"}, peer="192.168.1.21")) is False, "another LAN host"
     assert ag._local_browser(req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate", "X-Forwarded-Proto": "https", "X-Forwarded-For": "100.76.143.38"})) is False, "proxied in over the tailnet: not local"
-    assert ag._local_browser(req({"Host": "gwl-server.tailb49f65.ts.net", "Sec-Fetch-Mode": "navigate"})) is False, "the browser asked for the public name"
+    assert ag._local_browser(req({"Host": "gwl-server.tailb49f65.ts.net", "Sec-Fetch-Mode": "navigate", "X-Forwarded-For": "100.76.143.38"})) is False, "the tailnet's proxy declares itself"
     assert ag._local_browser(req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate"}, peer="100.76.143.38")) is False
     ok = ag.AnchorHandler._term_token_ok
     assert ok(local) is False, "the API gate stays strict: nothing carried is refused even from the machine's own browser (the page sets its cookie, and the next read carries it)"

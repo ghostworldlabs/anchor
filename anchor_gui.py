@@ -11777,19 +11777,45 @@ def _local_browser(handler):
     paste what the machine has."""
     try:
         addr = getattr(handler, "client_address", None)
-        peer = str((addr or ("",))[0] or "")
-        if peer not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
-            return False
+        peer = str((addr or ("",))[0] or "").lower()
+        if peer.startswith("::ffff:"):
+            peer = peer[7:]
+        if peer not in _own_addresses():
+            return False      # the request came from another machine (the laptop over the tailnet, a LAN host)
         for h in ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "Via"):
             if handler.headers.get(h):
-                return False
-        if not handler.headers.get("Sec-Fetch-Mode"):
-            return False      # a browser always sends it; a script, a test client or a probe does not
-        host = str(handler.headers.get("Host") or "").strip().lower()
-        bare = host[1:].split("]")[0] if host.startswith("[") else host.split(":")[0]
-        return bare in ("localhost", "127.0.0.1", "::1")
+                return False      # proxied in (Tailscale Serve connects over loopback and declares itself)
+        if handler.headers.get("Sec-Fetch-Mode"):
+            return True       # fetch metadata: only a browser sends it (Chrome sends it only to localhost over plain HTTP)
+        ua = str(handler.headers.get("User-Agent") or "")
+        accept = str(handler.headers.get("Accept") or "")
+        return ("text/html" in accept) and ("Mozilla/" in ua) and ("PowerShell" not in ua) and ("python" not in ua.lower())
     except Exception:
         return False
+
+
+_OWN_ADDRESSES = None
+
+
+def _own_addresses():
+    """Every address this machine answers on - loopback and the host's own interfaces - read once; a request whose peer
+    is one of them came from this machine itself."""
+    global _OWN_ADDRESSES
+    if _OWN_ADDRESSES is None:
+        own = {"127.0.0.1", "::1", "localhost"}
+        try:
+            import socket
+            host = socket.gethostname()
+            for fam in (socket.AF_INET, socket.AF_INET6):
+                try:
+                    for info in socket.getaddrinfo(host, None, fam):
+                        own.add(str(info[4][0]).split("%")[0].lower())
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        _OWN_ADDRESSES = own
+    return _OWN_ADDRESSES
 
 
 def _request_is_secure(handler):
