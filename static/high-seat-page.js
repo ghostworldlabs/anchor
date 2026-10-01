@@ -27,6 +27,33 @@
     if (!w || w === window) { receipt('The browser blocked the new window — allow popups and try again.', true); return; }
     try { w.opener = null; w.location.replace(url); w.focus(); } catch (e) { try { w.close(); } catch (_) {} }
   }
+  var YOU = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.you) || 'You';   // his name in a dialogue row, as the AI Cockpit says it (his word, 2026-10-01)
+  // what he is doing now: a key or dictated text in the last ten seconds, or a box he is in with words in it
+  var lastKey = 0; function markKey() { lastKey = Date.now(); }
+  document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);
+  function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }
+  function tileOpen() { return !!$('.tile.open'); }
+  // W3b (his word, 2026-10-01: dictating into an open tile, "the tile collapses down and whatever I was dictating gets
+  // lost"): the page renews itself when the record moves or a new build is live - but NEVER under an open tile or his
+  // typing. Then it takes the change in place (every card's lines and light, the open tile's brief and detail, the
+  // brief's list and the nudge) and finishes the renewal when the tile closes and he is quiet.
+  var pendingRenew = null, renewSaid = false, renewVersion = '';
+  var renewKey = '';
+  function renew(text, key) {
+    if (key) renewKey = String(key);
+    if (tileOpen() || typingNow()) {
+      pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.';
+      if (!renewSaid) { renewSaid = true; $$('.tile.open').forEach(function (c) { if (c._talk && c._talk.appendLine) c._talk.appendLine('sys', 'the record moved \u2014 this page renews itself when you close the card', 'dim'); }); }
+      var open = $$('.tile.open'); if (open.length) open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();
+      return;
+    }
+    pendingRenew = null;
+    try { if (renewKey) { if (sessionStorage.getItem('highseat_renewed_for') === renewKey) return; sessionStorage.setItem('highseat_renewed_for', renewKey); } } catch (e) {}   // once per stamp: never a loop renewSaid = false;
+    try { if (renewVersion) sessionStorage.setItem('highseat_reloaded_for', renewVersion); } catch (e) {}
+    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text || 'The record moved \u2014 the page is renewed.', undo: null })); } catch (e) {}
+    location.reload();
+  }
+  setInterval(function () { if (pendingRenew && !tileOpen() && !typingNow()) renew(pendingRenew); }, 5000);
   var lastUndo = null;
   function receipt(text, bad, undo) {
     var r = $('#receipt'), t = $('#receiptText'); if (!r || !t) return;
@@ -135,14 +162,13 @@
 
   // W3 (2026-10-01): the steward's nudge - one click is one act on the record (seat · promote · not now, with undo);
   // "open" is a plain link; nothing moves without the click
-  $$('[data-nudge-act]').forEach(function (b) {
-    b.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      var k = b.getAttribute('data-nudge-act');
-      if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
-      else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
-      else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
-    });
+  document.addEventListener('click', function (e) {   // delegated (W3b): a nudge re-rendered in place keeps its click
+    var b = e.target.closest('[data-nudge-act]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var k = b.getAttribute('data-nudge-act');
+    if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
+    else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
+    else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
   });
   // the Projects tile and its folders
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');
@@ -210,15 +236,27 @@
       + '<div class="composer"><textarea rows="2" placeholder="Ask this cockpit\u2019s steward, or tell it what to do \u2014 it answers here as it writes"></textarea>'
       + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
   }
-  function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'true'); } card.classList.add('talking'); }
-  function shrink(card) { var d = $('.cdlg', card); if (d) { d.classList.add('thin'); d.classList.remove('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'false'); } card.classList.remove('talking'); }
+  function grow(card) {
+    var d = $('.cdlg', card); if (!d) return; var was = d.classList.contains('thin');
+    d.classList.remove('thin'); d.classList.add('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'true'); card.classList.add('talking');
+    rememberTile(card, true);
+    // his word (2026-10-01): opening the conversation takes him to its FOOT - the latest turn and the box he talks in
+    var ul = $('.ex', d), sc = $('.scroll', d), comp = $('.composer', d), ta = $('textarea', d);
+    if (ul) ul.scrollTop = ul.scrollHeight; if (sc) sc.scrollTop = sc.scrollHeight;
+    setTimeout(function () { if (sc) sc.scrollTop = sc.scrollHeight; try { if (comp) comp.scrollIntoView({ block: 'end', behavior: 'smooth' }); if (was && ta && document.activeElement !== ta) ta.focus({ preventScroll: true }); } catch (e) {} }, 270);
+  }
+  function shrink(card) { var d = $('.cdlg', card); if (d) { d.classList.add('thin'); d.classList.remove('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'false'); } card.classList.remove('talking'); rememberTile(card, false); }
   function startTalk(card, pid, dir) {
     var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate'), bar = $('#' + id + ' .dlg-bar');
+    // the words he dictates into the tile are kept in this browser as he types and put back when the tile opens again
+    var DK = 'anchor:draft:tile:' + pid + ':' + (dir || ''), dkT = null;
+    try { var keptT = localStorage.getItem(DK); if (keptT && keptT.trim() && box && !box.value.trim()) box.value = keptT; } catch (e) {}
+    if (box) box.addEventListener('input', function () { clearTimeout(dkT); dkT = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
     function gist() {   // the strip's context: the last turn, whoever said it
       var rows = $$('.exrow', list), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;
       if (!last) { var f = $('.exfade', list); g.textContent = f ? f.textContent.trim() : 'nothing said in this cockpit yet'; return; }   // the list's one sentence (not logged in / nothing said / could not be read), as Grok read it
       var t = ($('.ext', last) || {}).textContent || '';
-      g.textContent = (last.classList.contains('you') ? 'You: ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
+      g.textContent = (last.classList.contains('you') ? YOU + ': ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
     }
     if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });
     fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
@@ -230,7 +268,7 @@
           var you = ['john', 'you', 'user', 'human'].indexOf(String(t.role || '').toLowerCase()) >= 0;
           var li = document.createElement('li'); li.className = 'exrow ' + (you ? 'you' : 'st');
           li.innerHTML = '<div class="exw ' + (you ? 'you' : 'st') + '"><span class="w"></span></div><div class="ext"></div>';
-          li.querySelector('.w').textContent = you ? 'You' : 'The steward'; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
+          li.querySelector('.w').textContent = you ? YOU : 'The steward'; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
           list.appendChild(li);
         });
         list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
@@ -241,13 +279,13 @@
         if (e && e.auth) showLogin('This cockpit\u2019s conversation cannot reach this page until this browser is logged in.');
       });
     if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
-    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '',
+    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', you: YOU, stamp: '',
       onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); },
       onStamp: function () { refreshTile(card, pid, dir); }, onState: function (st) { paintDot(card, st && st.light); } }) : null;
     card._talk = dlg;
     // the strip opens on HIS acts only (his click, send, talk about it, Accept) — never by itself when the steward turns
     // busy: the chip and the gist already say so (Grok's read of W2e-4; his word 'expand with a click')
-    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, null); }
+    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, DK); }
     sendBtn.addEventListener('click', go);
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
   }
@@ -339,6 +377,13 @@
           var l0 = $('.tlight', card), l1 = $('.tlight', fresh); if (l0 && l1) { l0.className = l1.className; l0.title = l1.title; }
           var r1 = fresh.getAttribute('data-ready'); if (r1) card.setAttribute('data-ready', r1); else card.removeAttribute('data-ready');
         });
+        // the brief's list and the steward's nudge follow the record too (W3b) - unless he is in that section
+        var b0 = $('#brief'), b1 = doc.getElementById('brief');
+        if (b0 && b1 && !b0.contains(document.activeElement)) {
+          var bl0 = $('.blist', b0), bl1 = $('.blist', b1); if (bl0 && bl1 && bl0.innerHTML !== bl1.innerHTML) bl0.innerHTML = bl1.innerHTML;
+          var n0 = $('.nudge', b0), n1 = $('.nudge', b1);
+          if (n0 && !n1) n0.remove(); else if (n1 && !n0 && bl0) bl0.insertAdjacentHTML('afterend', n1.outerHTML); else if (n0 && n1 && n0.outerHTML !== n1.outerHTML) n0.outerHTML = n1.outerHTML;
+        }
       })
       .catch(function () {})
       .then(function () { facesBusy = false; if (facesAgain) { facesAgain = false; refreshFaces(); } });
@@ -346,8 +391,9 @@
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
-    $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });   // one tile open, one dialogue polling (Grok's read of W2e)
+    $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });   // one tile open, one dialogue polling (Grok's read of W2e)
     card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
+    rememberTile(card, false);
     // the opened tile goes to the TOP of its shelf (his word, 2026-10-01) and comes back to its place on close
     var grid = card.parentNode;
     if (grid && grid.classList && grid.classList.contains('grid') && grid.firstElementChild !== card) { card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild); }
@@ -358,11 +404,14 @@
       .catch(function () { var b = $('.cbrief', card); if (b) b.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
     startTalk(card, pid, dir);
   }
-  function closeTile(card) {
-    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir');
+  function rememberTile(card, big) { try { if (!card.classList.contains('open')) return; sessionStorage.setItem('highseat_open_tile', JSON.stringify({ id: card.id, dir: openDir(card), big: !!big })); } catch (e) {} }
+  function forgetTile() { try { sessionStorage.removeItem('highseat_open_tile'); } catch (e) {} }
+  function closeTile(card, another) {
+    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile();
     if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); } card._moved = false; card._homeNext = null; }
     var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
+    if (!another && pendingRenew) renew(pendingRenew);   // the renewal the open tile held back
   }
   function openPart(card, pid, part, btn) {
     // W1/W2 (2026-09-28): a button may name ITS effort (another effort's wait; the head's pick) — its data-dir wins,
@@ -396,6 +445,16 @@
     card.addEventListener('dragleave', function (e) { if (!card.contains(e.relatedTarget)) card.classList.remove('dropping'); });
     card.addEventListener('drop', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); card.classList.remove('dropping'); dropFiles(card, pid, e.dataTransfer.files); });
   });
+  // W3b: the open tile survives a renewal of the page - opened again where it was, its conversation grown as it was,
+  // his unsent words back in the box
+  (function () {
+    var kept = null; try { kept = JSON.parse(sessionStorage.getItem('highseat_open_tile') || 'null'); } catch (e) { kept = null; }
+    if (!kept || !kept.id) return;
+    var card = document.getElementById(kept.id);
+    if (!card || !card.getAttribute('data-tile')) { forgetTile(); return; }
+    openTile(card, card.getAttribute('data-tile'), kept.dir || '');
+    if (kept.big) grow(card);
+  })();
   // W2e-3 (his word): the ask is a banner; a click opens the description and the recommendation; "talk about it" puts
   // the ask into the tile's dialogue and grows it
   document.addEventListener('click', function (e) {
@@ -616,7 +675,8 @@
     steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
     goalName: function (id) { var g = $('.grow[data-g="' + id + '"] .gn'); return (g && g.textContent.trim()) || id; },
     openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); },   // the goal's place, as the rendered chip opens it (Grok W2c-2)
-    onAuth: function () { showLogin('The steward’s words cannot reach this page until this browser is logged in.'); }
+    onAuth: function () { showLogin('The steward’s words cannot reach this page until this browser is logged in.'); },
+    you: YOU, onStamp: function (st) { renew('The steward changed the record \u2014 the page is renewed.', st); }   // W3b: never under an open tile or his typing
   }) : null;
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
@@ -644,14 +704,12 @@
   (function () {
     var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
-    // W2c-4: never while he types — a key in the last ten seconds; a box that merely holds a draft no longer pins a stale page (the draft is put back after the reload)
-    var lastKey = 0; document.addEventListener('keydown', function () { lastKey = Date.now(); });
-    function typing() { return Date.now() - lastKey < 10000; }
+    // W2c-4: never while he types; W3b: never under an open tile either - the renewal waits (renew), the draft and the open tile come back after it
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
-        var v = d && d.version; if (!v || v === mine || typing()) return;
-        try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; sessionStorage.setItem('highseat_reloaded_for', String(v)); } catch (e) {}
-        location.reload();
+        var v = d && d.version; if (!v || v === mine) return;
+        try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; } catch (e) {}
+        renewVersion = String(v); renew('A new build is live \u2014 the page is renewed.');
       }).catch(function () {});
     }, 30000);
   })();

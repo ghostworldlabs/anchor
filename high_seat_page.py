@@ -21,6 +21,9 @@ _OPEN = ("proposed", "planned", "active", "waiting")
 _TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
 
 
+HIS_NAME = "John"   # how a dialogue row names him on both pages, as the AI Cockpit does (his word, 2026-10-01)
+
+
 def esc(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=True)
 
@@ -744,7 +747,7 @@ def _dialogue(ctx):
             return ""
         return '<a class="gchip" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the Campaign page">about %s</a>' % (camp_pid, esc(g), esc(names.get(g) or g))
     ex = "".join('<li class="exrow %s"><div class="exw %s">%s%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
+        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
     note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
     return (
         '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
@@ -873,12 +876,12 @@ def render_high_seat_html(ctx) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s"};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s", you: "%s"};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script></body></html>'
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
-         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), _rail(ctx), _masthead(ctx), _hdr(ctx),
+         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))
     return page

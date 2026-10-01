@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import home_rows as _hr
-from high_seat_page import tab_icon_link
+from high_seat_page import tab_icon_link, HIS_NAME
 from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative, nudge_html
 import home_attention as _ha
 
@@ -170,7 +170,7 @@ def _thread(i, ctx):
     if not turns:
         return '<li class="exfade">Nothing said about this goal yet.</li>'
     return "".join('<li class="exrow %s"><div class="exw %s">%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"][:900])) for t in turns[-12:])
+        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"][:900])) for t in turns[-12:])
 
 
 def _guide_block(i, ctx):
@@ -474,7 +474,7 @@ def _panel(ctx):
             return ""
         return '<button class="gchip" data-open="%s" title="open this goal">about %s</button>' % (esc(g), esc(names.get(g) or g))
     ex = "".join('<li class="exrow %s"><div class="exw %s">%s%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", "You" if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
+        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
     note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
     return (
         '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
@@ -526,10 +526,10 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>The Campaign</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/campaign-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s"};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s", you: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every goal, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/campaign-page.js?v=%s"></script></body></html>'
-    ) % (tab_icon_link(st.get("seal"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
+    ) % (tab_icon_link(st.get("seal"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), esc(HIS_NAME), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
          _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))

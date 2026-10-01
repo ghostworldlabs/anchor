@@ -28,6 +28,24 @@
     lastUndo = undo || null; if (u) u.hidden = !undo;
   }
   // a receipt survives the reload that shows the changed board
+  var YOU = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.you) || 'You';   // his name in a dialogue row, as the AI Cockpit says it (his word, 2026-10-01)
+  var lastKey = 0; function markKey() { lastKey = Date.now(); }
+  document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);
+  function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }
+  // W3b: the page renews itself when the record moves or a new build is live - never while he types or dictates
+  // (his word, 2026-10-01); then, when he is quiet. The open goal keeps its place through the renewal (?open= in the address).
+  var pendingRenew = null, renewVersion = '';
+  var renewKey = '';
+  function renew(text, key) {
+    if (key) renewKey = String(key);
+    if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.'; return; }
+    pendingRenew = null;
+    try { if (renewKey) { if (sessionStorage.getItem('campaign_renewed_for') === renewKey) return; sessionStorage.setItem('campaign_renewed_for', renewKey); } } catch (e) {}   // once per stamp: never a loop
+    try { if (renewVersion) sessionStorage.setItem('campaign_reloaded_for', renewVersion); } catch (e) {}
+    try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: text || 'The record moved \u2014 the page is renewed.', bad: false, undo: null })); } catch (e) {}
+    location.reload();
+  }
+  setInterval(function () { if (pendingRenew && !typingNow()) renew(pendingRenew); }, 5000);
   try { var kept = sessionStorage.getItem('campaign_receipt'); if (kept) { var k = JSON.parse(kept); receipt(k.text, k.bad, k.undo); sessionStorage.removeItem('campaign_receipt'); } } catch (e) {}
 
   // one act in flight at a time: a second click while the first is on its way is ignored until the reload
@@ -219,14 +237,13 @@
   // history line (the act `guide`); the steward's own writing arrives by its word in the conversation and reloads the page
   // W3 (2026-10-01): the steward's nudge - one click is one act on the record (seat · promote · not now, with undo);
   // "open" is a plain link; nothing moves without the click
-  $$('[data-nudge-act]').forEach(function (b) {
-    b.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      var k = b.getAttribute('data-nudge-act');
-      if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
-      else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
-      else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
-    });
+  document.addEventListener('click', function (e) {   // delegated (W3b): a nudge re-rendered in place keeps its click
+    var b = e.target.closest('[data-nudge-act]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var k = b.getAttribute('data-nudge-act');
+    if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
+    else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
+    else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
   });
   $$('.place [data-guide-edit]').forEach(function (b) {
     b.addEventListener('click', function (e) {
@@ -265,7 +282,8 @@
     pid: PID, dir: '', headers: headers, receipt: receipt, receiptKey: 'campaign_receipt',
     steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
     goalName: function (id) { var n = $('#place-' + id + ' .pname'); return (n && n.textContent.trim()) || id; }, openGoal: function (id) { openPlace(id); },
-    onAuth: function () { showLogin('The steward\u2019s words cannot reach this page until this browser is logged in.'); }
+    onAuth: function () { showLogin('The steward\u2019s words cannot reach this page until this browser is logged in.'); },
+    you: YOU, onStamp: function (st) { renew('The steward changed the record \u2014 the page is renewed.', st); }   // W3b: never while he types
   }) : null;
   function sendToSteward(text, goal, list, btn, box, DK) { if (dlg) dlg.send(text, goal, list, btn, box, DK); else receipt('The dialogue script did not load \u2014 reload the page.', true); }
   $$('.place .gsay').forEach(function (box) {
@@ -314,14 +332,12 @@
   (function () {
     var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
-    // W2c-4: never while he types — a key in the last ten seconds; a box that merely holds a draft no longer pins a stale page (the draft is put back after the reload)
-    var lastKey = 0; document.addEventListener('keydown', function () { lastKey = Date.now(); });
-    function typing() { return Date.now() - lastKey < 10000; }
+    // W2c-4: never while he types; W3b: the renewal waits (renew) and the draft comes back after it
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
-        var v = d && d.version; if (!v || v === mine || typing()) return;
-        try { if (sessionStorage.getItem('campaign_reloaded_for') === String(v)) return; sessionStorage.setItem('campaign_reloaded_for', String(v)); } catch (e) {}
-        location.reload();
+        var v = d && d.version; if (!v || v === mine) return;
+        try { if (sessionStorage.getItem('campaign_reloaded_for') === String(v)) return; } catch (e) {}
+        renewVersion = String(v); renew('A new build is live \u2014 the page is renewed.');
       }).catch(function () {});
     }, 30000);
   })();

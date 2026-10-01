@@ -124,9 +124,9 @@ def test_the_decision_brief_is_the_key_material_in_one_place(tmp_path, monkeypat
 
 def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_grows():
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
-    for s in ("function openTile(card, pid, dir)", "fetchPart(pid, 'brief', dir, false, true)", "function closeTile(card)", "function startTalk(card, pid, dir)", "function stopTalk(card)",
+    for s in ("function openTile(card, pid, dir)", "fetchPart(pid, 'brief', dir, false, true)", "function closeTile(card, another)", "function startTalk(card, pid, dir)", "function stopTalk(card)",
               "if (!card.classList.contains('open')) openTile(card, pid, dir);", "var det = $('.cdetail', card);",
-              "function grow(card) { var d = $('.cdlg', card); if (d) { d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
+              "function grow(card) {\n    var d = $('.cdlg', card); if (!d) return; var was = d.classList.contains('thin');\n    d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
               '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
               "if (e && e.auth) showLogin('This cockpit", "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
@@ -138,7 +138,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
               "c.classList.add('ready')", "localStorage.setItem('hs_seen_' + card.id, tok)",
               "var a = e.target.closest('.cb-ask');", "var t = e.target.closest('.cb-talk');", "box.value = 'About: ' + (t.getAttribute('data-ask') || '')",
-              "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });", "window.StewardDialogue.authHeaders(headers())"):
+              "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });", "window.StewardDialogue.authHeaders(headers())"):
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
     assert js.count("function stopTalk(card)") == 1 and "function doLogin()" not in js, "one stopTalk (Grok W2e-3 cut the dead one); the login script is the module's"

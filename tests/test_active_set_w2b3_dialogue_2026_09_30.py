@@ -47,7 +47,7 @@ def test_the_script_is_live_from_the_open_watches_the_build_and_says_a_refusal()
     page = open(os.path.join(W, "static", "campaign-page.js"), encoding="utf-8").read()
     js = open(os.path.join(W, "static", "steward-dialogue.js"), encoding="utf-8").read()      # W2c-2: the one mechanism, shared with the High Seat
     assert "primeSeq().then(function () { if (!refused) pollLoop(); })" in js, "the stream is polled from the moment the page opens; a refused poll stops (W2c-3)"
-    assert "'/api/version'" in page and "campaign_reloaded_for" in page and "typing()" in page, "a new build reloads the page once, never while he types"
+    assert "'/api/version'" in page and "campaign_reloaded_for" in page and "typingNow()" in page, "a new build reloads the page once, never while he types (W3b: nor while he dictates; the renewal waits)"
     assert "'build-mismatch'" in js and "renewed" in js, "a send from a stale tab renews the page and keeps the draft"
     assert "function catchUp" in js and "/api/steward/history" in js, "a turn that ended before the page saw its words is read from the log"
     assert "showState(j.state)" in js and "parked" in js and "listening" in js, "the steward's state from the same poll"

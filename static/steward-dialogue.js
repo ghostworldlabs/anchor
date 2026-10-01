@@ -12,7 +12,7 @@
     var $ = function (s, r) { return (r || document).querySelector(s); };
     var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
     var PID = o.pid || '', DIR = o.dir || '', headers = o.headers, receipt = o.receipt || function () {};
-    var STEWARD = o.steward || 'The steward', BOOT_STAMP = o.stamp || '', KEY = o.receiptKey || 'steward_receipt';
+    var STEWARD = o.steward || 'The steward', BOOT_STAMP = o.stamp || '', KEY = o.receiptKey || 'steward_receipt', YOU = o.you || 'You';
     var goalName = o.goalName || function (id) { return id; }, openGoal = o.openGoal || null;
     var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '', stopped: false };
     function keep(text, bad, undo) { try { sessionStorage.setItem(KEY, JSON.stringify({ text: text, bad: !!bad, undo: undo || null })); } catch (e) {} }
@@ -21,7 +21,7 @@
       var li = document.createElement('li');
       li.className = 'exrow ' + (who === 'you' ? 'you' : (who === 'st' ? 'st' : 'sysl')) + (cls ? ' ' + cls : '');
       li.innerHTML = '<div class="exw ' + (who === 'you' ? 'you' : 'st') + '"><span class="w"></span><span class="t"></span></div><div class="ext"></div>';
-      li.querySelector('.w').textContent = who === 'you' ? 'You' : (who === 'st' ? STEWARD : '');
+      li.querySelector('.w').textContent = who === 'you' ? YOU : (who === 'st' ? STEWARD : '');
       if (goal) {
         var c = document.createElement('button'); c.className = 'gchip'; c.title = 'this goal'; c.textContent = 'about ' + goalName(goal);
         li.querySelector('.exw').insertBefore(c, li.querySelector('.t'));
@@ -149,6 +149,8 @@
     }
     // live from the open: the ring's top first (so the log shown below is not replayed), then the stream
     if (PID && mainList()) primeSeq().then(function () { if (!refused) pollLoop(); });
+    // the dialogue opens at its latest turn, never its first (his word, 2026-10-01: "you should be at the bottom of that, not the top")
+    (function () { var ml = mainList(); if (!ml) return; settle(ml); setTimeout(function () { settle(ml); }, 300); })();
     function stop() { live.stopped = true; }
     return { send: send, appendLine: appendLine, mainList: mainList, stop: stop };
   }

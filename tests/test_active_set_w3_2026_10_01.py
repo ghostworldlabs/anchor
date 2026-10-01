@@ -134,7 +134,7 @@ def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_
     assert 'class="nudge' not in chtml[chtml.index('id="place-magi"'):chtml.index("</article>", chtml.index('id="place-magi"'))] if 'id="place-magi"' in chtml else True
     for f in ("high-seat-page.js", "campaign-page.js"):
         js = open(os.path.join(HERE, "static", f), encoding="utf-8").read()
-        assert "$$('[data-nudge-act]').forEach(function (b) {" in js and "act({ act: 'not_now', key: b.getAttribute('data-key')" in js and "act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') })" in js and "act({ act: 'promote', seed: b.getAttribute('data-seed')" in js, f
+        assert "var b = e.target.closest('[data-nudge-act]'); if (!b) return;" in js and "act({ act: 'not_now', key: b.getAttribute('data-key')" in js and "act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') })" in js and "act({ act: 'promote', seed: b.getAttribute('data-seed')" in js, f
         assert subprocess.run(["node", "--check", os.path.join(HERE, "static", f)], capture_output=True, text=True).returncode == 0
     css = open(os.path.join(HERE, "static", "steward-dialogue.css"), encoding="utf-8").read()
     for s in (".nudge{", ".nudge .nk{", ".nudge .nacts .mini{", ".nudge .nwhy{", ".nudge.goal{"):

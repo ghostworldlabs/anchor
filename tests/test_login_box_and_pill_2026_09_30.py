@@ -41,5 +41,6 @@ def test_the_ai_cockpit_pill_left_the_masthead_and_the_footer_keeps_the_tagline(
 def test_a_draft_never_pins_a_stale_page():
     for f in ("high-seat-page.js", "campaign-page.js"):
         js = open(os.path.join(HERE, "static", f), encoding="utf-8").read()
-        assert "function typing() { return Date.now() - lastKey < 10000; }" in js and "document.addEventListener('keydown', function () { lastKey = Date.now(); });" in js, f
-        assert "(a.value || '').trim()" not in js, "the old rule (a box holding text) is gone: it pinned a tab with a draft to the old build"
+        # W3b (2026-10-01): one gate - a key or dictated text in the last ten seconds, or a box he is IN with words in it; a box that merely holds a forgotten draft never pins the page
+        assert "function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }" in js and "document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);" in js, f
+        assert "(a.value || '').trim()" not in js and "function typing()" not in js, "the old rule (any box holding text) is gone: it pinned a tab with a draft to the old build"
