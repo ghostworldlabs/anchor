@@ -231,7 +231,8 @@
       });
     if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
     var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '',
-      onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); } }) : null;
+      onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); },
+      onStamp: function () { refreshTile(card, pid, dir); } }) : null;
     card._talk = dlg;
     // the strip opens on HIS acts only (his click, send, talk about it, Accept) — never by itself when the steward turns
     // busy: the chip and the gist already say so (Grok's read of W2e-4; his word 'expand with a click')
@@ -282,6 +283,44 @@
     e.preventDefault();
     if (!e.target.closest('.tile.open')) receipt('Open a card first, then drop the file on it \u2014 it lands in that cockpit\u2019s folder.', true);
   });
+  // W2e-8 (his word, 19:2x: "status for the expanded tile is not keeping up"): when the cockpit's record moves (the stamp
+  // the stream carries - the same signal the cockpit page repaints on), the open tile re-reads itself in place: the brief
+  // (the ask, the To review line), the open act's detail, and every card's own lines and light from ONE fresh render of
+  // the page. Never a page reload: the conversation and the open tile stay as they are.
+  function refreshTile(card, pid, dir) {
+    if (!card.classList.contains('open')) return;
+    var body0 = $('.cb-body', card), wasOpen = !!(body0 && !body0.hidden);
+    fetchPart(pid, 'brief', dir, false, false).then(function (html) {
+      if (!card.classList.contains('open')) return;
+      var b = $('.cbrief', card), m = $('.cmat', card); if (m) m.remove();
+      if (b) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; }
+      if (wasOpen) { var a = $('.cb-ask', card), bd = $('.cb-body', card); if (a && bd) { bd.hidden = false; a.setAttribute('aria-expanded', 'true'); a.classList.add('open'); } }
+    }).catch(function () {});
+    var key = card.getAttribute('data-open');
+    if (key) {
+      var part = key.split('|')[0], pdir = key.split('|').slice(1).join('|');
+      fetchPart(pid, part, pdir, false, false).then(function (html) { var det = $('.cdetail', card); if (det && card.getAttribute('data-open') === key) det.innerHTML = html; }).catch(function () {});
+    }
+    refreshFaces();
+  }
+  var facesBusy = false;
+  function refreshFaces() {
+    if (facesBusy) return; facesBusy = true;
+    fetch('/high-seat', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (html) {
+        if (!html) return;
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        $$('.tile[data-tile]').forEach(function (card) {
+          var fresh = doc.getElementById(card.id); if (!fresh) return;
+          var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
+          var l0 = $('.tlight', card), l1 = $('.tlight', fresh); if (l0 && l1) { l0.className = l1.className; l0.title = l1.title; }
+          var r1 = fresh.getAttribute('data-ready'); if (r1) card.setAttribute('data-ready', r1); else card.removeAttribute('data-ready');
+        });
+      })
+      .catch(function () {})
+      .then(function () { facesBusy = false; });
+  }
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open

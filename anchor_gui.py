@@ -7691,56 +7691,79 @@ def _working_pids(entries, sessions):
     return out
 
 
-def _project_lights(entries, facts, working):
-    """W2e (2026-09-30, his words): every card's light — green working · orange needs you · red a problem · gray idle —
-    read from the record (the attention flag, the wait the facts already carry) and from the live steward when one is
-    up in this process. The word and the reason ride with it. Read-only; never raises."""
-    out = {}
+def _engine_light(cdir):
+    """The cockpit's OWN light for one effort directory - the same source the cockpit page shows (green working ·
+    orange needs an answer · quiet idle · red broken or stuck) - read from its engine object as the cockpit's state
+    route does (no wake; a parked cockpit answers from its record). {light, question}; empty when unreadable."""
     try:
-        from steward_cockpit.steward_routes import ENGINES as _engines
-        engines = dict(_engines)
+        from steward_cockpit.steward_routes import get_engine as _get
+        eng = _get(str(cdir), False, None)
+        if eng is None:
+            return {"light": "", "question": ""}
+        return {"light": str(eng.light() or ""), "question": " ".join(str(getattr(eng, "open_question", "") or "").split())}
     except Exception:
-        engines = {}
-    for e in entries or ():
-        pid = str((e or {}).get("id") or "")
-        if not pid:
+        return {"light": "", "question": ""}
+
+
+def _attention_of(cdir):
+    try:
+        ap = Path(str(cdir)) / ".ecgberht" / "attention.json"
+        att = json.loads(ap.read_text(encoding="utf-8")) if cdir and ap.is_file() else {}
+        return att if isinstance(att, dict) else {}
+    except Exception:
+        return {}
+
+
+def _light_words(cdir, f, working_here, with_engine):
+    """One card's light in his words. The cockpit's light leads (W2e-7, his word: the cockpit's convention); the
+    record's wait still makes orange so the dot never contradicts the card's own Needs-you line; red ahead of orange
+    ahead of green; quiet and nothing else = gray idle."""
+    att = _attention_of(cdir)
+    state = str(att.get("state") or "").lower()
+    el = _engine_light(cdir) if with_engine else {"light": "", "question": ""}
+    if el["light"] == "red":
+        light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
+    elif el["light"] == "orange" or (f or {}).get("needs_you") or state in ("needs_you", "deliverable_ready", "blocked"):
+        light, word, why = "orange", "needs you", str((f or {}).get("needs_you") or el["question"] or att.get("reason") or "")
+    elif el["light"] == "green" or working_here or state == "working":
+        light, word, why = "green", "working", str(att.get("reason") or "")
+    else:
+        light, word, why = "gray", "idle", ""
+    return {"light": light, "word": word, "why": " ".join(why.split())[:160]}
+
+
+def _project_lights(entries, facts, working, seats=()):
+    """W2e (2026-09-30, his words): every card's light - green working · orange needs you · red a problem · gray idle.
+    W2e-7 (his word, 19:1x): a SEATED card - a project's or an effort's - takes its own cockpit's light (``seats`` =
+    (pid, dir) pairs; an effort's light is keyed ``pid|dir``), the record's wait and the working set still read; the
+    other projects keep the record-only rule (no engine object built for a card nobody sees). Read-only; never raises."""
+    out = {}
+    by_id = {str((e or {}).get("id") or ""): e for e in entries or () if (e or {}).get("id")}
+    seated = set()
+    for pid, d in seats or ():
+        pid = str(pid or ""); d = str(d or "")
+        e = by_id.get(pid)
+        if not e:
+            continue
+        folder = str(e.get("folder_path") or "")
+        cdir = str(Path(folder) / d) if d else folder
+        if not cdir:
             continue
         f = (facts or {}).get(pid) or {}
+        key = pid + "|" + d if d else pid
+        try:
+            out[key] = _light_words(cdir, {} if d else f, (pid in (working or set())) and not d, True)
+        except Exception:
+            out[key] = {"light": "gray", "word": "idle", "why": ""}
+        seated.add(key)
+    for pid, e in by_id.items():
+        if pid in seated:
+            continue
         folder = str(e.get("folder_path") or "")
-        att = {}
         try:
-            ap = Path(folder) / ".ecgberht" / "attention.json"
-            if folder and ap.is_file():
-                att = json.loads(ap.read_text(encoding="utf-8")) or {}
+            out[pid] = _light_words(folder, (facts or {}).get(pid) or {}, pid in (working or set()), False)
         except Exception:
-            att = {}
-        if not isinstance(att, dict):
-            att = {}
-        state = str(att.get("state") or "").lower()
-        # the live light: every steward awake under this project's folder — the root or an effort — as the working
-        # rule finds them (Grok's read of W2e); red ahead of orange ahead of green
-        elights = []
-        try:
-            root = Path(folder).resolve() if folder else None
-            for cdir, eng in engines.items():
-                try:
-                    c = Path(str(cdir)).resolve()
-                    if root is not None and (c == root or root in c.parents):
-                        elights.append(str(eng.light() or ""))
-                except Exception:
-                    continue
-        except Exception:
-            elights = []
-        elight = "red" if "red" in elights else ("orange" if "orange" in elights else ("green" if "green" in elights else ""))
-        if elight == "red" or state == "blocked":
-            light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
-        elif f.get("needs_you") or state in ("needs_you", "deliverable_ready") or elight == "orange":
-            light, word, why = "orange", "needs you", str(f.get("needs_you") or att.get("reason") or "")
-        elif pid in (working or set()) or state == "working" or elight == "green":
-            light, word, why = "green", "working", str(att.get("reason") or "")
-        else:
-            light, word, why = "gray", "idle", ""
-        out[pid] = {"light": light, "word": word, "why": " ".join(why.split())[:160]}
+            out[pid] = {"light": "gray", "word": "idle", "why": ""}
     return out
 
 
@@ -7839,7 +7862,8 @@ def _high_seat_context():
     capacity = _capacity_rows()
     week = _hr.week_in_words(today)
     try:
-        lights = _project_lights(everything, facts, working)      # W2e: every card's light in his words
+        seats = [(p.get("pid"), p.get("dir") or "") for _g, p in (_hsp.seated(initiatives, "active") + _hsp.seated(initiatives, "deck")) if p.get("kind") in ("project", "effort") and p.get("pid")]
+        lights = _project_lights(everything, facts, working, seats=seats)      # W2e: every card's light in his words; W2e-7: a seated card's from its own cockpit
     except Exception:
         lights = {}
     hs_turns, hs_stamp = [], ""

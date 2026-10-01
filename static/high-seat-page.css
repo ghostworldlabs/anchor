@@ -261,9 +261,11 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* W2e (2026-09-30, his words): the light on a card — green working · orange needs you · red a problem · gray idle;
    the pulsing edge of a card that is ready for him; the cockpit's dialogue inside the card */
 .tlight{flex:none;width:9px;height:9px;border-radius:50%;background:#5b6170;margin:5px 7px 0 0;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
-.tlight.green{background:#3fbf7f;box-shadow:0 0 6px rgba(63,191,127,.7)}
-.tlight.orange{background:var(--amber);box-shadow:0 0 6px rgba(226,169,63,.7)}
-.tlight.red{background:#e0524f;box-shadow:0 0 6px rgba(224,82,79,.7)}
+.tlight{background:#8995a7}   /* W2e-7: the cockpit's own light colours (shared.css .light): quiet gray · green running · orange · red */
+.tlight.green{background:#4ade80;box-shadow:0 0 7px #4ade80}
+.tlight.orange{background:#fbbf24;box-shadow:0 0 6px rgba(251,191,36,.6)}
+.tlight.red{background:#e05f5f;box-shadow:0 0 7px #e05f5f}
+.tlight.gray{background:#8995a7;box-shadow:none}
 .tile.ready{animation:readyedge 2.4s ease-in-out infinite}
 @keyframes readyedge{0%,100%{box-shadow:0 0 0 1px var(--amber-edge)}50%{box-shadow:0 0 0 2px var(--amber),0 0 14px rgba(226,169,63,.5)}}
 .cbrief{margin-top:6px;padding:8px 10px;border:1px solid var(--amber-edge);border-radius:8px;background:linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--surface);font-size:12.5px;line-height:1.45}
@@ -317,7 +319,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cdlg.big .scroll{max-height:58vh}
 .tile.talking .cdetail{display:none}
 .cdlg .composer{margin-top:2px}
-.cdlg .exrow .ext{font-size:12.5px}
+.cdlg .exrow .ext{font-size:14px}   /* the cockpit's body is 15 px; the tile a step smaller */
 
 /* ═════════ the Desk line ═════════ */
 .deskline{border:1px solid var(--border);border-radius:7px;background:var(--surface);margin:0 0 20px;

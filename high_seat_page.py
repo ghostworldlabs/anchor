@@ -451,17 +451,8 @@ def _seat_shelves(ctx):
                     wait = re.sub(r"^waiting on you[:\s]*", "", st_, flags=re.I).strip(" .") if st_.lower().startswith("waiting on you") else ""
                     f = dict(f, effort=p.get("dir") or f.get("effort") or "", needs_you=wait or ("" if st_ else f.get("needs_you") or ""), needs_you_effort="", other_waits=[],
                              wait_age_days=None, next=p.get("lead") or p.get("text") or f.get("next") or "", repair_proposals=[], efforts_gap="")
-                lt = (ctx.get("lights") or {}).get(p["pid"])
-                if p["kind"] == "effort" and p.get("state"):      # an effort's card takes ITS effort's flag (Grok's read of W2e): the resolver read it into the part's state
-                    st_ = str(p.get("state") or "").lower()
-                    if st_.startswith("blocked"):
-                        lt = {"light": "red", "word": "a problem", "why": st_}
-                    elif st_.startswith("waiting on you") or st_.startswith("needs you") or st_.startswith("deliverable ready"):
-                        lt = {"light": "orange", "word": "needs you", "why": re.sub(r"^(waiting on you|needs you)[:\s]*", "", str(p.get("state") or ""), flags=re.I)}
-                    elif st_.startswith("working") or st_ == "active":
-                        lt = {"light": "green", "word": "working", "why": re.sub(r"^working[:\s]*", "", str(p.get("state") or ""), flags=re.I)}
-                    else:
-                        lt = {"light": "gray", "word": "idle", "why": ""}
+                lights = ctx.get("lights") or {}
+                lt = lights.get(p["pid"] + "|" + str(p.get("dir") or "")) if p["kind"] == "effort" else lights.get(p["pid"])      # W2e-7: the card's OWN cockpit's light, an effort's keyed by its directory
                 out.append(_card(e, f, "", goal=g, step=p, light=lt))
             else:
                 out.append(_desk_card(ctx, g, p))

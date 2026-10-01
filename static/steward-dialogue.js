@@ -103,9 +103,12 @@
             else if (ep !== undefined) live.epoch = ep;
             showState(j.state);
             (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); handleEvent(ev); });
+            // W2e-8: a dialogue inside a tile learns the record's stamp from the stream and, when it moves, tells the
+            // tile to re-read itself in place (o.onStamp); the pages' own dialogues keep the reload with the receipt
+            if (j.stamp && !BOOT_STAMP && o.onStamp) BOOT_STAMP = j.stamp;
             if (j.stamp && BOOT_STAMP && j.stamp !== BOOT_STAMP && !live.line) {
-              keep('The steward changed the record — the page is reloaded.', false, null);
-              location.reload(); return;
+              if (o.onStamp) { BOOT_STAMP = j.stamp; try { o.onStamp(j.stamp); } catch (err) {} }
+              else { keep('The steward changed the record — the page is reloaded.', false, null); location.reload(); return; }
             }
             if (!live.stopped) setTimeout(step, 250);
           })

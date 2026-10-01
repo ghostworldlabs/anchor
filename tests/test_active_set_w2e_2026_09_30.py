@@ -13,7 +13,10 @@ tile/rectangle on the left of the top of the open tile"; then (16:0x) "up on the
 section, but over on the right side … the cockpit steward dialogue should be able to expand with a click on a very thin
 tile, but I want the context of the first web page there first". W2e-6 (19:0x): "add the ability to drop in a file in an
 initiative tile (when it is opened, made large) so that it will end up in the associated project (like the AI Cockpit
-feature)" - the open tile takes a file drop through the cockpit's own upload verb into the opened cockpit's folder."""
+feature)" - the open tile takes a file drop through the cockpit's own upload verb into the opened cockpit's folder.
+W2e-7 (19:1x): the dots mapped wrong (two busy cockpits gray, an open question gray) - a seated card's dot is its OWN
+cockpit's light, the cockpit's source and palette; the dialogue rows take the cockpit's colours. W2e-8 (19:2x): "status
+for the expanded tile is not keeping up" - the open tile re-reads itself when the record's stamp moves."""
 import json
 import os
 import subprocess
@@ -29,7 +32,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MBA = "6765ece4b3bc43b0b0b0907b92b17280"
 
 
-def test_every_project_has_a_light_in_his_words(tmp_path):
+def test_every_project_has_a_light_in_his_words(tmp_path, monkeypatch):
     import anchor_gui as ag
     folders = {}
     for name, state in (("a", "working"), ("b", "needs_you"), ("c", "blocked"), ("d", "")):
@@ -41,14 +44,29 @@ def test_every_project_has_a_light_in_his_words(tmp_path):
     lights = ag._project_lights(entries, facts, working={"e"})
     assert lights["a"] == {"light": "green", "word": "working", "why": "the reason for a"}
     assert lights["b"] == {"light": "orange", "word": "needs you", "why": "the reason for b"}
-    assert lights["c"]["light"] == "red" and lights["c"]["word"] == "a problem"
+    assert lights["c"] == {"light": "orange", "word": "needs you", "why": "the reason for c"}, "blocked = waiting on an answer: orange, as the cockpit says it (W2e-7)"
     assert lights["d"] == {"light": "orange", "word": "needs you", "why": "approve the draft"}, "the wait the facts carry is the orange"
     assert lights["e"] == {"light": "green", "word": "working", "why": ""}, "a running session is working; no record file is fine"
+    # W2e-7 (his word: the dots did not map): a SEATED card takes its own cockpit's light - the cockpit's source, by directory
+    (tmp_path / "a" / "lec").mkdir()
+    seen = []
+    def fake_engine_light(cdir):
+        seen.append(str(cdir)); base = os.path.basename(str(cdir))
+        return {"a": {"light": "green", "question": ""}, "lec": {"light": "quiet", "question": ""}, "d": {"light": "quiet", "question": ""}, "c": {"light": "red", "question": ""}, "b": {"light": "orange", "question": "Accept the draft?"}}.get(base, {"light": "", "question": ""})
+    monkeypatch.setattr(ag, "_engine_light", fake_engine_light)
+    lights = ag._project_lights(entries, facts, working=set(), seats=[("a", ""), ("a", "lec"), ("c", ""), ("d", ""), ("b", "")])
+    assert lights["a"] == {"light": "green", "word": "working", "why": "the reason for a"}, "the engine says working: green even with no session in the working set"
+    assert lights["a|lec"] == {"light": "gray", "word": "idle", "why": ""}, "the effort's OWN cockpit is quiet: gray, whatever the project's flag says"
+    assert lights["c"] == {"light": "red", "word": "a problem", "why": "the reason for c"}, "the engine's red leads"
+    assert lights["d"] == {"light": "orange", "word": "needs you", "why": "approve the draft"}, "quiet engine, but the record carries a wait: the dot never contradicts the card's line"
+    assert lights["b"] == {"light": "orange", "word": "needs you", "why": "Accept the draft?"}, "the cockpit's open question is the reason, as the cockpit shows it"
+    assert sorted(os.path.basename(x) for x in seen) == ["a", "b", "c", "d", "lec"], "the engine asked once per seated card, never for the unseated"
+    assert lights["e"]["light"] == "gray", "an unseated project keeps the record-only rule"
 
 
 def test_the_card_carries_its_light_and_the_ready_mark_and_the_acts_are_the_details():
     ctx = w2c._ctx()
-    ctx["lights"] = {MBA: {"light": "orange", "word": "needs you", "why": "approve the Lecture 3 AI supplement"}}
+    ctx["lights"] = {MBA: {"light": "orange", "word": "needs you", "why": "approve the Lecture 3 AI supplement"}, MBA + "|lectures": {"light": "green", "word": "working", "why": "lecture 4"}}
     html = hsp.render_high_seat_html(ctx)
     active = html[html.index('id="shActive"'):html.index('id="shDeck"')]
     card = active[active.index('id="card-%s"' % MBA):active.index("</article>")]
@@ -57,7 +75,7 @@ def test_the_card_carries_its_light_and_the_ready_mark_and_the_acts_are_the_deta
     assert 'data-part="talk"' not in card and 'data-part="plan"' in card, "the dialogue is always in the opened tile (W2e-2); the acts are the details"
     assert '</div><div class="t-face"><div class="t-goal">' in card and '</div></div><div class="t-acts">' in card, "the card's own lines wrapped, so the opened tile lays the rectangle beside them (W2e-4)"
     eff = active[active.index('id="card-%s-mba-lectures"' % MBA):]
-    assert 'data-part="plan" data-pid="%s" data-dir="lectures"' % MBA in eff and 'class="tlight green" title="working: lecture 4"' in eff, "an effort's card takes ITS effort's flag (Grok W2e): working, not the project's wait"
+    assert 'data-part="plan" data-pid="%s" data-dir="lectures"' % MBA in eff and 'class="tlight green" title="working: lecture 4"' in eff, "an effort's card takes ITS OWN cockpit's light, keyed by its directory (W2e-7), not the project's wait"
     deck = html[html.index('id="shDeck"'):html.index('id="ptile"')]
     assert '<article class="tile desk" id="card-hw" data-step="hw" data-name="retool homework 2" draggable="true"><div class="t-top"><span class="tlight gray" title="idle"></span>' in deck, "a desk card has a light too (Grok W2e)"
     ctx["lights"] = {MBA: {"light": "green", "word": "working", "why": ""}}
@@ -110,7 +128,8 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
               "if (e && e.auth) showLogin('This cockpit", "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
-              "if (f.size > 30000000)", "card.classList.add('dropping')", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
+              "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)", "onStamp: function () { refreshTile(card, pid, dir); }",
+              "new DOMParser().parseFromString(html, 'text/html')", "if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
@@ -124,11 +143,15 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
     assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
+    assert "if (j.stamp && !BOOT_STAMP && o.onStamp) BOOT_STAMP = j.stamp;" in dlg and "if (o.onStamp) { BOOT_STAMP = j.stamp; try { o.onStamp(j.stamp); } catch (err) {} }" in dlg, "a tile's dialogue learns the stamp and calls back; the pages keep the reload (W2e-8)"
+    dcss = open(os.path.join(HERE, "static", "steward-dialogue.css"), encoding="utf-8").read()
+    for s in (".exw.you{color:#e8c268}", ".exw.st{color:#6c9cfc}", ".ext{font-size:15px", '.exstate[data-state="busy"]{color:#4ade80}', '.exstate[data-state="idle"]{color:#8995a7}'):
+        assert s in dcss, s + " - the cockpit's palette (W2e-7)"
     for f in ("high-seat-page.js", "steward-dialogue.js"):
         r = subprocess.run(["node", "--check", os.path.join(HERE, "static", f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
     css = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
-    for s in (".tlight.green{", ".tlight.orange{", ".tlight.red{", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
+    for s in (".tlight.green{background:#4ade80", ".tlight.orange{background:#fbbf24", ".tlight.red{background:#e05f5f", ".tlight.gray{background:#8995a7", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
               '.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg"', ".tile.open>.t-face{grid-area:face}", ".tile.open>.t-body{display:contents}", ".tile.open .cbrief{grid-area:brief",
               ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}", '"dlg dlg" "mat mat" "drop drop"', ".tile.open .cmat{grid-area:mat}", ".tile.open .cdrop{grid-area:drop}", ".cdrop{", ".tile.open.dropping{outline:2px dashed",
               ".cdlg .scroll{max-height:20vh", ".cdlg.big .scroll{max-height:58vh}", ".tile.talking .cdetail{display:none}"):

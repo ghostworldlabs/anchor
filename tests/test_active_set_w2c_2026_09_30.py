@@ -40,6 +40,7 @@ def _resolved():
 
 def _ctx():
     ctx = base._ctx(campaign=True)
+    ctx.setdefault("lights", {})[MBA + "|lectures"] = {"light": "green", "word": "working", "why": "lecture 4"}      # W2e-7: an effort card's light is its own cockpit's, keyed by its directory
     ctx["initiatives"] = hsp.campaign_initiatives(_steps(), _resolved())
     ctx["seeds"] = 2
     return ctx
