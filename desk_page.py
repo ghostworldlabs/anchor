@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import home_rows as _hr
 from campaign_page import _needs
-from high_seat_page import esc, _brand_img, _masthead, capacity_row_html
+from high_seat_page import esc, _brand_img, _masthead, capacity_row_html, tab_icon_link
 
 GROUPS = ("today", "week", "later", "parked", "done")
 
@@ -291,12 +291,12 @@ def render_desk_html(ctx) -> str:
          _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["pid"]), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>The Desk</title><link rel="icon" href="/vendor/brand/%s?v=%s">'
+        '<title>The Desk</title>%s'
         '<link rel="stylesheet" href="/static/desk-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", today: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="cockpit">%s%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every task, date and count on this page is read from the Campaign record; Calendar and Email are not connected, and say so.</span></div></div>'
         '<script src="/static/desk-page.js?v=%s"></script></body></html>'
-    ) % (esc((ctx.get("steward") or {}).get("seal") or "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
+    ) % (tab_icon_link((ctx.get("steward") or {}).get("seal"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
          _tasks_col(ctx), _steward_col(ctx), _right_col(ctx, tasks), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))

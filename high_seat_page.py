@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import re
 from datetime import date, timedelta
+from pathlib import Path
 
 import home_rows as _hr
 
@@ -240,31 +241,80 @@ def ruler_markers(facts, today):
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
 
 ANCHOR_ICON_SIZES = "16x16 32x32 48x48 64x64 128x128 256x256"   # the sizes inside his anchor-icon.ico
+ANCHOR_TAB_SIZES = "16x16 32x32 48x48"                           # the sizes inside anchor-tab.ico, the tab drawing
+BRAND_DIR = Path(__file__).parent / "vendor" / "brand"
+
+
+def anchor_tab_stem(brand=None):
+    """Which anchor a browser tab wears. His export (anchor-icon.*) is a dark painting: scaled to 16 px on a dark tab
+    strip it read as no icon at all (his tab strip, captured 2026-10-01: "where are my icons in Chrome tabs?"). When the
+    tab drawing of the same anchor is there (anchor-tab.ico + its 32 and 16 px PNGs - his painting redrawn for the small
+    sizes) the tab wears that; his export stays the large icon (the touch icon, the desktop, the app). None = no anchor."""
+    brand = brand or BRAND_DIR
+    if all((brand / f).is_file() for f in ("anchor-tab.ico", "anchor-tab-32.png", "anchor-tab-16.png")):
+        return "anchor-tab"
+    if (brand / "anchor-icon.ico").is_file() and (brand / "anchor-icon-32.png").is_file():
+        return "anchor-icon"
+    return None
 
 
 def tab_icon_link(name, build, anchor=None):
     """The page's tab icon. 2026-10-01 13:3x, his word: "there is a new anchor icon that I want you to find and use" -
     the set he dropped into vendor/brand at 13:12 (the multi-size .ico Chrome favours, the 32 and 16 px PNGs, the 180 px
-    touch icon) is every page's tab icon when it is there (``anchor`` None = when the files exist; False = never).
+    touch icon) is every page's tab icon when it is there (``anchor`` None = when the files exist; False = never); its
+    small sizes come from the tab drawing when that is there (``anchor_tab_stem``).
     Without it, the earlier rule (2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
     is too large for a browser tab, so the small PNG beside it stands in when it exists (vendor/brand/<stem>.png - a
     bright tile with the steward's initial, legible at 16 px); an SVG or a small image is linked as it is."""
-    from pathlib import Path as _P
-    brand = _P(__file__).parent / "vendor" / "brand"
+    stem = anchor_tab_stem() if anchor is None or anchor else None
     if anchor is None:
-        anchor = (brand / "anchor-icon.ico").is_file() and (brand / "anchor-icon-32.png").is_file()
+        anchor = bool(stem)
     if anchor:
-        v = esc(build)
-        return ('<link rel="icon" href="/vendor/brand/anchor-icon.ico?v=%s" sizes="%s">'
-                '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/anchor-icon-32.png?v=%s">'
-                '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/anchor-icon-16.png?v=%s">'
-                '<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=%s">' % (v, ANCHOR_ICON_SIZES, v, v, v))
+        v, stem = esc(build), stem or "anchor-icon"
+        touch = ('<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=%s">' % v)
+        return ('<link rel="icon" href="/vendor/brand/%s.ico?v=%s" sizes="%s">'
+                '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/%s-32.png?v=%s">'
+                '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/%s-16.png?v=%s">'
+                % (stem, v, ANCHOR_TAB_SIZES if stem == "anchor-tab" else ANCHOR_ICON_SIZES, stem, v, stem, v)) + touch
     base = str(name or "gwl-m-icon.svg")
     stem, _, ext = base.rpartition(".")
-    if ext.lower() in ("jpg", "jpeg") and (_P(__file__).parent / "vendor" / "brand" / (stem + ".png")).is_file():
+    if ext.lower() in ("jpg", "jpeg") and (BRAND_DIR / (stem + ".png")).is_file():
         return '<link rel="icon" href="/vendor/brand/%s.png?v=%s" type="image/png" sizes="64x64">' % (esc(stem), esc(build))
     ctype = "image/svg+xml" if ext.lower() == "svg" else ("image/png" if ext.lower() == "png" else "image/jpeg")
     return '<link rel="icon" href="/vendor/brand/%s?v=%s" type="%s">' % (esc(base), esc(build), ctype)
+
+
+_ANY_ICON_LINK = re.compile(r'<link\b[^>]*\brel=["\'](?:shortcut icon|icon)["\'][^>]*>', re.I)
+_OLD_ANCHOR_LINK = re.compile(r'<link\b[^>]*\brel=["\'](?:shortcut icon|icon|apple-touch-icon)["\'][^>]*\bhref=["\']/anchor(?:-touch)?\.(?:ico|png)[^"\']*["\'][^>]*>\s*', re.I)
+_HEAD_OPEN = re.compile(r"<head\b[^>]*>", re.I)
+
+
+def with_tab_icon(html_text, build):
+    """Every page the server sends wears his anchor in its tab (2026-10-01, his fourth ask: "where are my icons in
+    Chrome tabs?"). What his tab strip showed: the Desk still linked the lamp painting, the cockpit linked the old
+    /anchor.ico with no version (Chrome keeps a tab icon it has seen for a week, whatever the cache header says), and a
+    page with no link at all waited on /favicon.ico. One rule at the one door (``_send_html``): a page that already
+    links the anchor set is left; the old /anchor.ico and /anchor.png links become the set, with the build in the
+    address so a new icon is a new address; a page with no icon gets the set; a page with a mark of its own (a tool's)
+    keeps it. Only the head is read."""
+    try:
+        m = _HEAD_OPEN.search(html_text[:4096])
+        if not m:
+            return html_text
+        end = html_text.find("</head", m.end())
+        end = len(html_text) if end < 0 else end
+        head = html_text[m.end():end]
+        if "/vendor/brand/anchor-icon.ico" in head or "/vendor/brand/anchor-tab.ico" in head:
+            return html_text
+        link = tab_icon_link(None, build)
+        if "/vendor/brand/anchor-" not in link:
+            return html_text                                   # no anchor on disk: the page as it is
+        bare = _OLD_ANCHOR_LINK.sub("", head)
+        if _ANY_ICON_LINK.search(bare):
+            return html_text                                   # a mark of its own
+        return html_text[:m.end()] + link + bare + html_text[end:]
+    except Exception:
+        return html_text
 
 
 def _brand_img(build, name, cls=""):

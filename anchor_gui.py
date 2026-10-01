@@ -21746,6 +21746,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
             raise
 
     def _send_html(self, html_text, cookie=None):
+        try:
+            from high_seat_page import with_tab_icon as _with_tab_icon
+            html_text = _with_tab_icon(html_text, BUILD_ID)   # every page wears his anchor in its tab (2026-10-01)
+        except Exception:
+            pass
         body = html_text.encode("utf-8")
         try:
             self.send_response(200)
@@ -22561,6 +22566,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
                 ico_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon.ico"   # his new anchor icon (2026-10-01) for every page's default favicon
+                _tab_ico = ANCHOR_DIR / "vendor" / "brand" / "anchor-tab.ico"    # its tab drawing, when it is there: legible at 16 px
+                if _tab_ico.exists():
+                    ico_path = _tab_ico
                 if not ico_path.exists():
                     ico_path = ANCHOR_DIR / "anchor.ico"
                 if ico_path.exists():

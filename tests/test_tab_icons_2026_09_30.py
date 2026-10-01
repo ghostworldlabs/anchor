@@ -26,10 +26,16 @@ def test_every_steward_s_two_images_have_a_small_png_beside_them():
             assert f.read(8) == b"\x89PNG\r\n\x1a\n", stem
 
 
-ANCHOR_SET = ('<link rel="icon" href="/vendor/brand/anchor-icon.ico?v=test" sizes="16x16 32x32 48x48 64x64 128x128 256x256">'
-              '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/anchor-icon-32.png?v=test">'
-              '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/anchor-icon-16.png?v=test">'
-              '<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=test">')
+def anchor_set(stem, build="test"):
+    # the links a tab wears: the small sizes from ``stem`` (his export, or its tab drawing), the touch icon always his
+    sizes = "16x16 32x32 48x48" if stem == "anchor-tab" else "16x16 32x32 48x48 64x64 128x128 256x256"
+    return ('<link rel="icon" href="/vendor/brand/%s.ico?v=%s" sizes="%s">'
+            '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/%s-32.png?v=%s">'
+            '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/%s-16.png?v=%s">'
+            '<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=%s">' % (stem, build, sizes, stem, build, stem, build, build))
+
+
+ANCHOR_SET = anchor_set(hsp.anchor_tab_stem() or "anchor-icon")
 
 
 def test_his_anchor_icon_is_every_page_s_tab_icon_and_the_default_favicon():
