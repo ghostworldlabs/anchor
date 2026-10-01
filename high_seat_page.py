@@ -237,14 +237,16 @@ def ruler_markers(facts, today):
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
 
 def tab_icon_link(name, build):
-    """The page's tab icon (John, 2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
-    is too large for a browser tab, so the small PNG made from it stands in when it exists (vendor/brand/<stem>.png);
-    an SVG or a small image is linked as it is."""
+    """The page's tab icon (John, 2026-09-30: "the icons in the web page tabs are missing"; 2026-10-01: "put the icons
+    back up in the tabs"): a steward's 1024-px JPEG is too large for a browser tab, so the small PNG beside it stands
+    in when it exists (vendor/brand/<stem>.png - a bright amber tile with the steward's initial, legible at 16 px,
+    where the shrunken painting read as a dark square); the link declares the PNG's true size. An SVG or a small image
+    is linked as it is."""
     from pathlib import Path as _P
     base = str(name or "gwl-m-icon.svg")
     stem, _, ext = base.rpartition(".")
     if ext.lower() in ("jpg", "jpeg") and (_P(__file__).parent / "vendor" / "brand" / (stem + ".png")).is_file():
-        return '<link rel="icon" href="/vendor/brand/%s.png?v=%s" type="image/png" sizes="128x128">' % (esc(stem), esc(build))
+        return '<link rel="icon" href="/vendor/brand/%s.png?v=%s" type="image/png" sizes="64x64">' % (esc(stem), esc(build))
     ctype = "image/svg+xml" if ext.lower() == "svg" else ("image/png" if ext.lower() == "png" else "image/jpeg")
     return '<link rel="icon" href="/vendor/brand/%s?v=%s" type="%s">' % (esc(base), esc(build), ctype)
 
@@ -750,13 +752,33 @@ def _dialogue(ctx):
     ) % (esc(st["label"]), note, ex, "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign page and its cockpit.</li>')
 
 
+def nudge_html(n, where="brief"):
+    """W3 (2026-10-01, fits 8-9): the steward stepping in - ONE line in his words with its reason, the fact it read (the
+    receipt), and the acts in one click: make it active · put it on deck · make it a goal · open · not now. Nothing
+    moves without the click; 'not now' is a receipt with undo."""
+    if not n:
+        return ""
+    acts = []
+    for a in n.get("acts") or []:
+        if a.get("act") == "open" and a.get("href"):
+            acts.append('<a class="mini" href="%s">%s</a>' % (esc(a["href"]), esc(a.get("label") or "open")))
+        elif a.get("act") == "seat":
+            acts.append('<button class="mini" data-nudge-act="seat" data-step="%s" data-seat="%s">%s</button>' % (esc(a.get("step") or ""), esc(a.get("seat") or ""), esc(a.get("label") or "seat")))
+        elif a.get("act") == "promote":
+            acts.append('<button class="mini" data-nudge-act="promote" data-seed="%s" data-tier="%s" data-done-when="%s">%s</button>' % (esc(a.get("seed") or ""), esc(str(a.get("tier") or 2)), esc(a.get("done_when") or ""), esc(a.get("label") or "make it a goal")))
+    acts.append('<button class="mini" data-nudge-act="not_now" data-key="%s" data-fact="%s" data-text="%s">not now</button>' % (esc(n.get("key") or ""), esc(n.get("fact") or ""), esc((n.get("text") or "")[:200])))
+    return ('<div class="nudge %s" data-nudge="%s" data-kind="%s"><span class="nk">&#9873; the steward</span><span class="ntext">%s</span>'
+            '<span class="nacts">%s</span><span class="nwhy">read from %s</span></div>') % (
+        esc(where), esc(n.get("key") or ""), esc(n.get("kind") or ""), esc(n.get("text") or ""), "".join(acts), esc(n.get("why") or "the record"))
+
+
 def _panel(ctx):
     st = ctx["steward"]
     bullets = _head_li(ctx)
     seeds = int(ctx.get("seeds") or 0)
     return (
         '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn" aria-expanded="false" aria-controls="seedPanel"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>%s'
-        '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
+        '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul>%s</section>'
         # R14 (2026-09-29): the token is pasted INTO the page — a browser pop-up (window.prompt) is what his desktop
         # browser suppressed ("I click that button and nothing happens"); the box is hidden until it is needed
         '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
@@ -768,7 +790,7 @@ def _panel(ctx):
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Campaign steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
     ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
-         esc(ctx["brief_when"]), bullets, _dialogue(ctx), esc(st["label"]))
+         esc(ctx["brief_when"]), bullets, nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]))
 
 
 def _today_block(ctx):

@@ -15,7 +15,7 @@ from datetime import timedelta
 
 import home_rows as _hr
 from high_seat_page import tab_icon_link
-from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative
+from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative, nudge_html
 import home_attention as _ha
 
 TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
@@ -251,7 +251,7 @@ def _place(i, ctx):
         '<div class="k">Its components <span class="h">(a cockpit, a desk item, a step of a project, a deliverable, a date; a cockpit or a desk item can be put on deck or made active &mdash; then it sits on the High Seat)</span></div>%s'
         '</div><div>'
         '<div class="k" style="margin-top:0">Brainstorm with the steward <span class="h">(dictate here &mdash; it is logged to this goal; a verb acts on the goal; the steward answers here as it writes)</span></div>'
-        '<div class="gconv"><ul class="ex gthread" data-thread="%s">%s</ul>'
+        '<div class="gconv">%s<ul class="ex gthread" data-thread="%s">%s</ul>'
         '<div class="composer gcomp"><label class="sr" for="gsay-%s">Tell the steward about this goal</label>'
         '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; inside this goal nothing needs its name &middot; the steward answers here as it writes</span><button class="send gsend" data-goal="%s">Send</button></div>'
@@ -267,7 +267,7 @@ def _place(i, ctx):
          n, len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]),
          proj_html,
-         esc(i["id"]), _thread(i, ctx), esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["id"]))
+         nudge_html((ctx.get("nudges") or {}).get(i["id"]), "goal"), esc(i["id"]), _thread(i, ctx), esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["id"]))
 
 
 def _places(ctx):

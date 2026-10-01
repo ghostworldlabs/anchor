@@ -374,7 +374,7 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "pace", "done_when", "place", "seat", "home", "new_goal", "guide"}
+        "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again"}
 
 
 # ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
@@ -606,6 +606,24 @@ def guide(project, step, text):
     return _ok("the guide of %s revised \u2014 %s" % (s.get("name"), r.get("note") or "written"), undo=None, updated=r.get("updated"))
 
 
+def not_now(project, key, fact="", text=""):
+    """W3 (2026-10-01): his 'not now' on a nudge - a receipt in the Campaign's folder that silences THAT nudge until its
+    fact changes; the undo drops the receipt. Nothing on the record moves."""
+    from . import nudges as _n
+    r = _n.dismiss(project, key, fact, text)
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "that did not go through"))
+    return _ok("not now \u2014 that nudge stays quiet until its fact changes", undo={"act": "nudge_again", "key": key})
+
+
+def nudge_again(project, key):
+    from . import nudges as _n
+    r = _n.undismiss(project, key)
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "that did not go through"))
+    return _ok("the nudge may speak again", undo={"act": "not_now", "key": key})
+
+
 def act(project, body):
     """Dispatch one act from the page; every answer is a receipt sentence, ok or refused."""
     body = body if isinstance(body, dict) else {}
@@ -655,6 +673,10 @@ def act(project, body):
             return restore(project, body.get("step"), body.get("navigation"), body.get("seed"))
         if a == "guide":
             return guide(project, body.get("step"), body.get("text"))
+        if a == "not_now":
+            return not_now(project, body.get("key"), body.get("fact"), body.get("text"))
+        if a == "nudge_again":
+            return nudge_again(project, body.get("key"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")

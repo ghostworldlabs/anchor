@@ -133,6 +133,17 @@
     });
   }
 
+  // W3 (2026-10-01): the steward's nudge - one click is one act on the record (seat · promote · not now, with undo);
+  // "open" is a plain link; nothing moves without the click
+  $$('[data-nudge-act]').forEach(function (b) {
+    b.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var k = b.getAttribute('data-nudge-act');
+      if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
+      else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
+      else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
+    });
+  });
   // the Projects tile and its folders
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');
   function setPtile(open) { if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all'; }

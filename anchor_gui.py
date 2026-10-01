@@ -7881,6 +7881,15 @@ def _high_seat_context():
             hs_stamp = str(_map_stamp(str(_campaign_dir())))
         except Exception:
             hs_turns, hs_stamp = [], ""
+    nudge = None
+    if campaign:
+        try:   # W3: ONE nudge at the page_open boundary, derived from the records; "not now" receipts honoured
+            from steward_cockpit import nudges as _nudges
+            cdir = str(_campaign_dir())
+            nudge = _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),
+                                   goal_last_at=_goal_last_at(cdir), dismissed=_nudges.read_dismissed(cdir), campaign_pid=str(campaign.get("pid") or ""))
+        except Exception:
+            nudge = None
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
@@ -7893,8 +7902,40 @@ def _high_seat_context():
         "projects_html": _high_seat_projects_html(groups, facts),
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
-        "lights": lights,
+        "lights": lights, "nudge": nudge,
     }
+
+
+def _strip_ages(entries):
+    """Each project's anti_starvation_age_days from its strip (the steward's own starvation measure); 0 when unknown."""
+    out = {}
+    for e in entries or ():
+        try:
+            pid = str((e or {}).get("id") or ""); folder = str((e or {}).get("folder_path") or "")
+            sp = Path(folder) / "strip.json"
+            if pid and folder and sp.is_file():
+                v = (json.loads(sp.read_text(encoding="utf-8")) or {}).get("anti_starvation_age_days")
+                out[pid] = int(v) if isinstance(v, (int, float)) else 0
+        except Exception:
+            continue
+    return out
+
+
+def _goal_last_at(campaign_dir):
+    """The date of the last turn tagged with each goal in the Campaign's one conversation log; a goal nobody has
+    spoken about has no entry."""
+    out = {}
+    try:
+        from steward_cockpit.conversation_history import read_history_document as _read_hist
+        doc = _read_hist(str(campaign_dir)) or {}
+        for t in doc.get("turns") or []:
+            g = str((t or {}).get("goal") or "")
+            at = str((t or {}).get("at") or "")[:10]
+            if g and at:
+                out[g] = max(out.get(g, ""), at)
+    except Exception:
+        return {}
+    return out
 
 
 def _high_seat_projects_html(groups, facts):
@@ -7996,7 +8037,13 @@ def _campaign_context(entry):
         guides = {i["id"]: _read_guide(folder, i["id"]) for i in initiatives}
     except Exception:
         guides = {}
-    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides,
+    try:   # W3: the one nudge for each goal's conversation (its dated parts, its deck waits, its starvation)
+        from steward_cockpit import nudges as _nudges
+        _dis = _nudges.read_dismissed(folder); _ages = _strip_ages(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False)); _last = _goal_last_at(folder)
+        nudges = {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"], campaign_pid=str(entry.get("id") or "")) for i in initiatives}
+    except Exception:
+        nudges = {}
+    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges,
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log
             "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
