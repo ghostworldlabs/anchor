@@ -43,7 +43,7 @@ def _ctx(steps=None):
             "build": "test", "steward": {"key": "jarvis", "label": "Jarvis", "high_seat": "jarvis-high-seat-hat.jpg", "seal": "jarvis-seal-salver.jpg", "high_seat_name": "Tip of the Hat", "seal_name": "Server"},
             "prefs_html": "<span id='prefs-here'></span>", "initiatives": inits, "seeds": [], "turns": [{"you": True, "text": "what needs me today?", "at": "19:40"}],
             "projects": [], "tick_allowed": False,
-            "status": {"lead": "Next: the receipts folder — both expense piles wait on it.", "at": "2026-09-26 19:40", "facts": [("Summary", "6 tasks on the Desk"), ("Blocker", "")], "stale": True, "live": False},
+            "status": {"lead": "Next: the receipts folder — both expense piles wait on it.", "at": "2026-09-26 19:40", "facts": [("Summary", "6 tasks on the Desk"), ("Blocker", "")], "stale": False, "live": False, "last_run_at": "2026-09-26 19:40"},
             "capacity": [{"name": "ChatGPT", "state": "not measured yet", "note": "nothing is guessed"}]}
 
 
@@ -82,7 +82,7 @@ def test_the_brief_calendar_email_status_and_capacity_say_what_they_know():
     assert "The 1 mark shown is the Campaign&rsquo;s own dated task, not an event." in html
     assert 'data-label="October 2026"' in html and "&#9679; pay the Delaware tax bill" in html
     assert "0 messages" in html and "Connect an account" in html
-    assert "Next: the receipts folder" in html and "<dt>Blocker</dt><dd><i>nothing recorded</i></dd>" in html and "the record, not a live run" in html
+    assert "Next: the receipts folder" in html and "<dt>Blocker</dt><dd><i>nothing recorded</i></dd>" in html and "the record now; the last run 2026-09-26 19:40" in html
     assert "not measured yet" in html and "what needs me today?" in html
     failed = _ctx(); failed["status"] = {"lead": "The status could not be read: OSError: boom", "at": "", "facts": [], "failed": True}
     h3 = dp.render_desk_html(failed)

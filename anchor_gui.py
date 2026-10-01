@@ -22560,18 +22560,22 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # /api/version migrated to route_table (handle_version, W7 batch 1) —
             # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
-                ico_path = ANCHOR_DIR / "anchor.ico"
+                ico_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon.ico"   # his new anchor icon (2026-10-01) for every page's default favicon
+                if not ico_path.exists():
+                    ico_path = ANCHOR_DIR / "anchor.ico"
                 if ico_path.exists():
                     self.send_response(200)
                     self.send_header("Content-Type", "image/x-icon")
-                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.send_header("Cache-Control", "no-cache")   # a new icon reaches the tab on the next load, not in a day
                     self.end_headers()
                     self.wfile.write(ico_path.read_bytes())
                 else:
                     self.send_response(404)
                     self.end_headers()
             elif self.path.startswith("/anchor.png"):
-                png_path = ANCHOR_DIR / "anchor.png"
+                png_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon-256.png"   # his new anchor icon (2026-10-01)
+                if not png_path.exists():
+                    png_path = ANCHOR_DIR / "anchor.png"
                 if png_path.exists():
                     self.send_response(200)
                     self.send_header("Content-Type", "image/png")

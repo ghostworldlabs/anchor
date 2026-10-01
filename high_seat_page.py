@@ -239,13 +239,26 @@ def ruler_markers(facts, today):
 
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
 
-def tab_icon_link(name, build):
-    """The page's tab icon (John, 2026-09-30: "the icons in the web page tabs are missing"; 2026-10-01: "put the icons
-    back up in the tabs"): a steward's 1024-px JPEG is too large for a browser tab, so the small PNG beside it stands
-    in when it exists (vendor/brand/<stem>.png - a bright amber tile with the steward's initial, legible at 16 px,
-    where the shrunken painting read as a dark square); the link declares the PNG's true size. An SVG or a small image
-    is linked as it is."""
+ANCHOR_ICON_SIZES = "16x16 32x32 48x48 64x64 128x128 256x256"   # the sizes inside his anchor-icon.ico
+
+
+def tab_icon_link(name, build, anchor=None):
+    """The page's tab icon. 2026-10-01 13:3x, his word: "there is a new anchor icon that I want you to find and use" -
+    the set he dropped into vendor/brand at 13:12 (the multi-size .ico Chrome favours, the 32 and 16 px PNGs, the 180 px
+    touch icon) is every page's tab icon when it is there (``anchor`` None = when the files exist; False = never).
+    Without it, the earlier rule (2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
+    is too large for a browser tab, so the small PNG beside it stands in when it exists (vendor/brand/<stem>.png - a
+    bright tile with the steward's initial, legible at 16 px); an SVG or a small image is linked as it is."""
     from pathlib import Path as _P
+    brand = _P(__file__).parent / "vendor" / "brand"
+    if anchor is None:
+        anchor = (brand / "anchor-icon.ico").is_file() and (brand / "anchor-icon-32.png").is_file()
+    if anchor:
+        v = esc(build)
+        return ('<link rel="icon" href="/vendor/brand/anchor-icon.ico?v=%s" sizes="%s">'
+                '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/anchor-icon-32.png?v=%s">'
+                '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/anchor-icon-16.png?v=%s">'
+                '<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=%s">' % (v, ANCHOR_ICON_SIZES, v, v, v))
     base = str(name or "gwl-m-icon.svg")
     stem, _, ext = base.rpartition(".")
     if ext.lower() in ("jpg", "jpeg") and (_P(__file__).parent / "vendor" / "brand" / (stem + ".png")).is_file():

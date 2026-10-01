@@ -36,19 +36,19 @@ def test_a_parked_cockpit_s_status_is_the_record_now_with_the_last_run_s_receipt
     f = _facts(d)
     assert d["lead_line"] == "Next: Decide on the frozen three-branch verification." and f["To do"] == "Decide on the frozen three-branch verification." and f["Summary"] == "the summary", "the record NOW, never the plan as it stood at the last run"
     assert f["Doing"] == "nothing running - waiting on you \u00b7 the last run 2026-09-04 19:39", "a run that ended is not 'mid-turn'"
-    assert f["Journal"] == "0015-stalls-and-embedding-preview: Two stop mechanisms (the last run, 2026-09-04 19:39)" and f["Tests"] == "Passed \u2014 Source PDF identity (exit 0) (the last run, 2026-09-04 19:39)", "the receipts only a run can give are carried, stamped"
-    assert f["ETA"].startswith("Unavailable") and f["Procs"] == "none", "nothing carried where the last run had nothing either"
-    assert d["last_run_at"] == "2026-09-04 19:39" and d["carried"] == ["Tests", "Journal"] and not d.get("stale") and d["at"] == "2026-10-01 13:15"
+    # Grok W3c (RC-3): nothing from the old summary is grafted into the fresh table - the last run is named once, by its date
+    assert f["Journal"].startswith("Unavailable") and f["Tests"].startswith("Unavailable") and f["ETA"].startswith("Unavailable") and f["Procs"] == "none"
+    assert d["last_run_at"] == "2026-09-04 19:39" and d["from_record"] is True and "carried" not in d and not d.get("stale") and d["at"] == "2026-10-01 13:15"
     # no persisted summary: the record now, plain
     monkeypatch.setattr(sc, "read_last_status", lambda d: None)
     d2 = sc.status_for_pane("C:/x", None, live=False)
-    assert "last_run_at" not in d2 and _facts(d2)["Doing"] == "nothing running - waiting on you"
+    assert "last_run_at" not in d2 and d2["from_record"] is True and _facts(d2)["Doing"] == "nothing running - waiting on you"
     # a live engine: composed fresh from the map and its state, as before - the persisted summary never consulted
     calls = []
     monkeypatch.setattr(sc, "compose_status", lambda d, st=None: (calls.append(st), dict(fresh))[1])
     monkeypatch.setattr(sc, "read_last_status", lambda d: (_ for _ in ()).throw(AssertionError("read")))
     d3 = sc.status_for_pane("C:/x", {"busy": True}, live=True)
-    assert calls == [{"busy": True}] and d3["lead_line"] == fresh["lead_line"]
+    assert calls == [{"busy": True}] and d3["lead_line"] == fresh["lead_line"] and "from_record" not in d3
 
 
 def test_the_three_panes_share_the_one_rule():
@@ -60,6 +60,8 @@ def test_the_three_panes_share_the_one_rule():
     assert "return campaign.status_for_pane(cdir, eng.state() if eng else None, live=eng is not None), 200" in blk and "read_last_status" not in blk, "the cockpit's status verb (the printable brief keeps its own last-status read)"
     gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
     assert "data = _sc.status_for_pane(folder, eng.state() if eng is not None else None, live=eng is not None)" in gui
-    assert sc.CARRIED_FACTS == ("Journal", "Tests", "Procs", "ETA")
+    assert not hasattr(sc, "CARRIED_FACTS")
     desk = open(os.path.join(HERE, "desk_page.py"), encoding="utf-8").read()
-    assert '" &middot; the record now; the last run %s" % esc(s["last_run_at"])' in desk and '"last_run_at": str(data.get("last_run_at") or "")[-16:]' in gui, "the Desk says the same"
+    assert '" &middot; the record now; the last run %s" % esc(s["last_run_at"])' in desk and '" &middot; the record now; no run yet" if s.get("lead") else ""' in desk and "the record, not a live run" not in desk and '"last_run_at": str(data.get("last_run_at") or "")[-16:]' in gui, "the Desk says the same, with no dead branch"
+    shared = open(os.path.join(HERE, "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
+    assert 'else if (stat.from_record) who.appendChild(el("span", "stale",' in shared and 'stat.last_run_at ? " · the record now; the last run " + String(stat.last_run_at).slice(-16) : " · the record now; no run yet"' in shared, "the cockpit's own header says the clause (Grok W3c)"

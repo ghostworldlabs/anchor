@@ -446,6 +446,8 @@ const Proto = (() => {
     who.lastChild.dataset.liveActivity = "1";
     if (stat.stale) who.appendChild(el("span", "stale",
       " · last update on record — nothing has run since"));
+    else if (stat.from_record) who.appendChild(el("span", "stale",   // W3c (2026-10-01): the record now, the last run named by its date - the tile's and the Desk's clause
+      stat.last_run_at ? " · the record now; the last run " + String(stat.last_run_at).slice(-16) : " · the record now; no run yet"));
     b.appendChild(who);
     const body = el("div", "body");
     const p = stat.plan || {};

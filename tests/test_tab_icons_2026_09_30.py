@@ -26,16 +26,34 @@ def test_every_steward_s_two_images_have_a_small_png_beside_them():
             assert f.read(8) == b"\x89PNG\r\n\x1a\n", stem
 
 
-def test_the_pages_link_the_small_png_as_the_tab_icon():
-    assert hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "b1") == '<link rel="icon" href="/vendor/brand/aladdin-high-seat-cave.png?v=b1" type="image/png" sizes="64x64">'
-    assert hsp.tab_icon_link("gwl-m-icon.svg", "b1") == '<link rel="icon" href="/vendor/brand/gwl-m-icon.svg?v=b1" type="image/svg+xml">'
-    assert hsp.tab_icon_link("no-such-image.jpg", "b1") == '<link rel="icon" href="/vendor/brand/no-such-image.jpg?v=b1" type="image/jpeg">', "no PNG: the image as it is"
-    assert hsp.tab_icon_link(None, "b1").startswith('<link rel="icon" href="/vendor/brand/gwl-m-icon.svg')
-    html = hsp.render_high_seat_html(base._ctx())
-    assert '<link rel="icon" href="/vendor/brand/jarvis-high-seat-hat.png?v=test" type="image/png" sizes="64x64">' in html
+ANCHOR_SET = ('<link rel="icon" href="/vendor/brand/anchor-icon.ico?v=test" sizes="16x16 32x32 48x48 64x64 128x128 256x256">'
+              '<link rel="icon" type="image/png" sizes="32x32" href="/vendor/brand/anchor-icon-32.png?v=test">'
+              '<link rel="icon" type="image/png" sizes="16x16" href="/vendor/brand/anchor-icon-16.png?v=test">'
+              '<link rel="apple-touch-icon" sizes="180x180" href="/vendor/brand/anchor-icon-180.png?v=test">')
+
+
+def test_his_anchor_icon_is_every_page_s_tab_icon_and_the_default_favicon():
+    """2026-10-01 13:3x, his word: "there is a new anchor icon that I want you to find and use" - the set he dropped into
+    vendor/brand at 13:12 (anchor-icon.ico with six sizes; 16-1024 px PNGs)."""
+    for stem in ("anchor-icon.ico", "anchor-icon-16.png", "anchor-icon-32.png", "anchor-icon-180.png", "anchor-icon-256.png"):
+        assert os.path.isfile(os.path.join(BRAND, stem)), stem
+    with open(os.path.join(BRAND, "anchor-icon.ico"), "rb") as f:
+        assert f.read(4) == b"\x00\x00\x01\x00", "an ICO"
+    assert hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "test") == ANCHOR_SET and hsp.tab_icon_link("jarvis-seal-salver.jpg", "test") == ANCHOR_SET, "the anchor on every page, whoever the steward"
+    assert ANCHOR_SET in hsp.render_high_seat_html(base._ctx())
     ctx = w2._ctx(w1._steps()); ctx["steward"] = dict(ctx["steward"], seal="aladdin-seal-lamp.jpg")
     html = cpg.render_campaign_html(ctx)
-    assert '<link rel="icon" href="/vendor/brand/aladdin-seal-lamp.png?v=' in html and ".jpg?v=" not in html[:html.index("<body")]
+    assert ANCHOR_SET in html and ".jpg?v=" not in html[:html.index("<body")]
+    gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
+    assert 'ico_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon.ico"' in gui and 'png_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon-256.png"' in gui, "the default favicon and the old dashboard's icon are the anchor too"
+    assert 'self.send_header("Cache-Control", "no-cache")   # a new icon reaches the tab on the next load, not in a day' in gui
+
+
+def test_without_the_anchor_set_the_steward_s_small_png_stands_in():
+    assert hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "b1", anchor=False) == '<link rel="icon" href="/vendor/brand/aladdin-high-seat-cave.png?v=b1" type="image/png" sizes="64x64">'
+    assert hsp.tab_icon_link("gwl-m-icon.svg", "b1", anchor=False) == '<link rel="icon" href="/vendor/brand/gwl-m-icon.svg?v=b1" type="image/svg+xml">'
+    assert hsp.tab_icon_link("no-such-image.jpg", "b1", anchor=False) == '<link rel="icon" href="/vendor/brand/no-such-image.jpg?v=b1" type="image/jpeg">', "no PNG: the image as it is"
+    assert hsp.tab_icon_link(None, "b1", anchor=False).startswith('<link rel="icon" href="/vendor/brand/gwl-m-icon.svg')
 
 
 def test_the_two_page_icons_are_legible_at_tab_size():
@@ -56,4 +74,4 @@ def test_the_two_page_icons_are_legible_at_tab_size():
         assert lum >= 100, "%s reads dark at tab size: %d" % (stem, lum)
         corners[stem] = small.getpixel((0, 0))[3]
     assert corners["aladdin-high-seat-cave"] > 128 and corners["aladdin-seal-lamp"] == 0, "the square tile and the round seal must read apart at 16 px: %r" % corners
-    assert 'sizes="64x64"' in hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "b1")
+    assert 'sizes="64x64"' in hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "b1", anchor=False)

@@ -54,7 +54,7 @@ def _ctx():
 
 def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record():
     html = cpg.render_campaign_html(_ctx())
-    assert "<title>The Campaign</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-seal-salver.png?v=test" type="image/png" sizes="64x64"' in html   # the tab: the steward's seal
+    assert "<title>The Campaign</title>" in html and 'rel="icon" href="/vendor/brand/anchor-icon.ico?v=test"' in html   # the tab: the steward's seal
     assert "campaign-page.css" in html and "campaign-page.js" in html and 'class="mh-stew"' in html
     # the goal board (W2 v2 of the active set, 2026-09-29): bands Active then the tiers, Tier 1 first; each goal a
     # compact tile — its light and one line — and its place (the area and tier, the Status, the parts) rendered apart

@@ -259,7 +259,7 @@ def _status(ctx):
     rows = "".join('<div class="srow"><dt>%s</dt><dd>%s</dd></div>' % (esc(l), esc(v) if v else "<i>nothing recorded</i>") for l, v in facts)
     stamp = esc(s.get("at") or ("read failed" if s.get("failed") else "no report yet"))
     lead = esc(s.get("lead") or "No status recorded on the Campaign yet &mdash; the steward writes one on its first turn.")
-    kind = " &middot; live" if s.get("live") else ((" &middot; the record now; the last run %s" % esc(s["last_run_at"])) if s.get("last_run_at") else (" &middot; the record, not a live run" if s.get("stale") else ""))   # W3c: one rule with the tile and the cockpit
+    kind = " &middot; live" if s.get("live") else ((" &middot; the record now; the last run %s" % esc(s["last_run_at"])) if s.get("last_run_at") else (" &middot; the record now; no run yet" if s.get("lead") else ""))   # W3c: the tile's sentences; nothing read says nothing
     return ('<section class="status"><div class="st-h">Status &mdash; the Campaign&rsquo;s latest report<span class="stamp">%s%s</span></div><p class="st-lead" id="stLead">%s</p><dl id="stRows">%s</dl>'
             '<p class="st-fine">%s</p></section>' % (stamp, kind, lead, rows or '<div class="srow"><dt>Status</dt><dd>nothing recorded</dd></div>',
                                                     "The rows are the cockpit&rsquo;s own status facts; a row with nothing in it says so." if facts else (
