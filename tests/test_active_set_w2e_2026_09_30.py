@@ -58,10 +58,12 @@ def test_every_project_has_a_light_in_his_words(tmp_path, monkeypatch):
     assert lights["a"] == {"light": "green", "word": "working", "why": "the reason for a"}, "the engine says working: green even with no session in the working set"
     assert lights["a|lec"] == {"light": "gray", "word": "idle", "why": ""}, "the effort's OWN cockpit is quiet: gray, whatever the project's flag says"
     assert lights["c"] == {"light": "red", "word": "a problem", "why": "the reason for c"}, "the engine's red leads"
-    assert lights["d"] == {"light": "orange", "word": "needs you", "why": "approve the draft"}, "quiet engine, but the record carries a wait: the dot never contradicts the card's line"
+    assert lights["d"] == {"light": "gray", "word": "idle", "why": ""}, "the cockpit answered quiet: the dot is the cockpit's, whatever the record's strip says (Grok W2e-7: one boss)"
     assert lights["b"] == {"light": "orange", "word": "needs you", "why": "Accept the draft?"}, "the cockpit's open question is the reason, as the cockpit shows it"
     assert sorted(os.path.basename(x) for x in seen) == ["a", "b", "c", "d", "lec"], "the engine asked once per seated card, never for the unseated"
     assert lights["e"]["light"] == "gray", "an unseated project keeps the record-only rule"
+    lights = ag._project_lights(entries, facts, working=set(), seats=[("e", "")])
+    assert lights["e"] == {"light": "gray", "word": "idle", "why": ""}, "no engine answer (the folder is not there) and no record: gray"
 
 
 def test_the_card_carries_its_light_and_the_ready_mark_and_the_acts_are_the_details():
@@ -129,7 +131,8 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
               "if (e && e.auth) showLogin('This cockpit", "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
               "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)", "onStamp: function () { refreshTile(card, pid, dir); }",
-              "new DOMParser().parseFromString(html, 'text/html')", "if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
+              "new DOMParser().parseFromString(html, 'text/html')", "function paintDot(card, light)", "onState: function (st) { paintDot(card, st && st.light); }", "if (facesBusy) { facesAgain = true; return; }",
+              "the record moved, but the brief could not be re-read", "if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
               "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
@@ -143,7 +146,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
     assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
-    assert "if (j.stamp && !BOOT_STAMP && o.onStamp) BOOT_STAMP = j.stamp;" in dlg and "if (o.onStamp) { BOOT_STAMP = j.stamp; try { o.onStamp(j.stamp); } catch (err) {} }" in dlg, "a tile's dialogue learns the stamp and calls back; the pages keep the reload (W2e-8)"
+    assert "if (j.stamp && !BOOT_STAMP) BOOT_STAMP = j.stamp;" in dlg and "if (s && o.onState) { try { o.onState(s); } catch (err) {} }" in dlg and "if (o.onStamp) { BOOT_STAMP = j.stamp; try { o.onStamp(j.stamp); } catch (err) {} }" in dlg, "a tile's dialogue learns the stamp and calls back; the pages keep the reload (W2e-8)"
     dcss = open(os.path.join(HERE, "static", "steward-dialogue.css"), encoding="utf-8").read()
     for s in (".exw.you{color:#e8c268}", ".exw.st{color:#6c9cfc}", ".ext{font-size:15px", '.exstate[data-state="busy"]{color:#4ade80}', '.exstate[data-state="idle"]{color:#8995a7}'):
         assert s in dcss, s + " - the cockpit's palette (W2e-7)"

@@ -47,7 +47,7 @@
       if (!s.alive) return s.queued ? 'parked — ' + s.queued + ' of yours waits for it to wake' : 'parked — it wakes on your word';
       return s.queued ? 'listening · ' + s.queued + ' queued' : 'listening';
     }
-    function showState(s) { var el = $(o.state || '#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
+    function showState(s) { if (s && o.onState) { try { o.onState(s); } catch (err) {} } var el = $(o.state || '#exState'); if (!el || !s) return; el.textContent = stateText(s); el.setAttribute('data-state', s.busy ? 'busy' : (s.alive ? 'idle' : 'parked')); }
     // a GET on these pages carries the token in the standard Authorization header (the gate reads it; the X-Anchor-Token
     // header it does not) — his polls were refused with the page's header alone and asked again three times a second
     // (W2c-3); the token never rides the request line of a poll (Grok's read of W2c-3)
@@ -105,7 +105,7 @@
             (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); handleEvent(ev); });
             // W2e-8: a dialogue inside a tile learns the record's stamp from the stream and, when it moves, tells the
             // tile to re-read itself in place (o.onStamp); the pages' own dialogues keep the reload with the receipt
-            if (j.stamp && !BOOT_STAMP && o.onStamp) BOOT_STAMP = j.stamp;
+            if (j.stamp && !BOOT_STAMP) BOOT_STAMP = j.stamp;   // learned on any page with no boot stamp (Grok's read of W2e-8)
             if (j.stamp && BOOT_STAMP && j.stamp !== BOOT_STAMP && !live.line) {
               if (o.onStamp) { BOOT_STAMP = j.stamp; try { o.onStamp(j.stamp); } catch (err) {} }
               else { keep('The steward changed the record — the page is reloaded.', false, null); location.reload(); return; }

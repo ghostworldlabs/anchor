@@ -232,7 +232,7 @@
     if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
     var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', stamp: '',
       onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); },
-      onStamp: function () { refreshTile(card, pid, dir); } }) : null;
+      onStamp: function () { refreshTile(card, pid, dir); }, onState: function (st) { paintDot(card, st && st.light); } }) : null;
     card._talk = dlg;
     // the strip opens on HIS acts only (his click, send, talk about it, Accept) — never by itself when the steward turns
     // busy: the chip and the gist already say so (Grok's read of W2e-4; his word 'expand with a click')
@@ -295,17 +295,28 @@
       var b = $('.cbrief', card), m = $('.cmat', card); if (m) m.remove();
       if (b) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; }
       if (wasOpen) { var a = $('.cb-ask', card), bd = $('.cb-body', card); if (a && bd) { bd.hidden = false; a.setAttribute('aria-expanded', 'true'); a.classList.add('open'); } }
-    }).catch(function () {});
+    }).catch(function () { if (card._talk && card._talk.appendLine) card._talk.appendLine('sys', 'the record moved, but the brief could not be re-read \u2014 close and open the card', 'dim'); });   // a failed re-read is said (Grok W2e-8)
     var key = card.getAttribute('data-open');
     if (key) {
       var part = key.split('|')[0], pdir = key.split('|').slice(1).join('|');
-      fetchPart(pid, part, pdir, false, false).then(function (html) { var det = $('.cdetail', card); if (det && card.getAttribute('data-open') === key) det.innerHTML = html; }).catch(function () {});
+      fetchPart(pid, part, pdir, false, false).then(function (html) { var det = $('.cdetail', card); if (det && card.getAttribute('data-open') === key) det.innerHTML = html; })
+        .catch(function () { if (card._talk && card._talk.appendLine) card._talk.appendLine('sys', 'the record moved, but the ' + part + ' detail could not be re-read', 'dim'); });
     }
     refreshFaces();
   }
-  var facesBusy = false;
+  // the open tile's OWN dot, from the poll's state on every answer (Grok's read of W2e-8): a steward that turns busy is
+  // green at once, with no record change; the cockpit's words for its light
+  var DOT_WORDS = { green: 'working', orange: 'needs you', red: 'a problem', quiet: 'idle', gray: 'idle' };
+  function paintDot(card, light) {
+    var l = $('.tlight', card); if (!l || !light) return;
+    var cls = light === 'quiet' ? 'gray' : light; if (!DOT_WORDS[cls]) return;
+    var why = (l.title || '').indexOf(': ') > 0 && cls === (l.className.replace('tlight ', '')) ? l.title.split(': ').slice(1).join(': ') : '';
+    l.className = 'tlight ' + cls; l.title = DOT_WORDS[cls] + (why ? ': ' + why : '');
+  }
+  var facesBusy = false, facesAgain = false;
   function refreshFaces() {
-    if (facesBusy) return; facesBusy = true;
+    if (facesBusy) { facesAgain = true; return; }   // a stamp that lands mid-fetch runs one more fetch after (Grok W2e-8)
+    facesBusy = true;
     fetch('/high-seat', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (html) {
@@ -319,7 +330,7 @@
         });
       })
       .catch(function () {})
-      .then(function () { facesBusy = false; });
+      .then(function () { facesBusy = false; if (facesAgain) { facesAgain = false; refreshFaces(); } });
   }
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);

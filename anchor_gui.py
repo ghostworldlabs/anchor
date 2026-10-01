@@ -7721,11 +7721,18 @@ def _light_words(cdir, f, working_here, with_engine):
     att = _attention_of(cdir)
     state = str(att.get("state") or "").lower()
     el = _engine_light(cdir) if with_engine else {"light": "", "question": ""}
-    if el["light"] == "red":
-        light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
-    elif el["light"] == "orange" or (f or {}).get("needs_you") or state in ("needs_you", "deliverable_ready", "blocked"):
-        light, word, why = "orange", "needs you", str((f or {}).get("needs_you") or el["question"] or att.get("reason") or "")
-    elif el["light"] == "green" or working_here or state == "working":
+    if el["light"] in ("red", "orange", "green", "quiet"):
+        # the cockpit answered: its light IS the dot (Grok's read of W2e-7: the engine already folds the attention flag in
+        # the cockpit's order; a second boss painted orange over a green cockpit)
+        light, word, why = {"red": ("red", "a problem", str(att.get("reason") or "the steward is stuck or broken")),
+                            "orange": ("orange", "needs you", str(el["question"] or (f or {}).get("needs_you") or att.get("reason") or "")),
+                            "green": ("green", "working", str(att.get("reason") or "")),
+                            "quiet": ("gray", "idle", "")}[el["light"]]
+    elif state == "blocked" and not (f or {}).get("needs_you"):
+        light, word, why = "orange", "needs you", str(att.get("reason") or "")
+    elif (f or {}).get("needs_you") or state in ("needs_you", "deliverable_ready"):
+        light, word, why = "orange", "needs you", str((f or {}).get("needs_you") or att.get("reason") or "")
+    elif working_here or state == "working":
         light, word, why = "green", "working", str(att.get("reason") or "")
     else:
         light, word, why = "gray", "idle", ""
