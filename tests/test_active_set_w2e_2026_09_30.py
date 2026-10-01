@@ -179,3 +179,57 @@ def test_a_send_that_cannot_reach_the_steward_is_kept_and_goes_when_it_wakes(tmp
     monkeypatch.setattr(eng, "_attention", lambda: {})
     monkeypatch.setattr(eng, "_send_locked", lambda *a, **k: False)
     assert eng.say("and the tables") == {"ok": False, "error": "delivery failed - your text was not sent"}
+
+
+def test_a_browser_on_this_machine_is_its_own_user_and_any_valid_credential_is_enough(monkeypatch):
+    """2026-10-01, his word after a reboot: the machine holds the token; its own browser is not asked to paste it. A
+    direct loopback request with no proxy headers is a local browser; one Tailscale Serve proxied in (loopback peer,
+    X-Forwarded-* set) is not. The GET gate judges every credential carried, so a stale header never refuses a good
+    cookie. The cookie lasts thirty days."""
+    import anchor_gui as ag
+    import paths as _paths
+    from types import SimpleNamespace
+    monkeypatch.setattr(_paths, "expected_token", lambda: "good-token")
+
+    def req(headers, peer="127.0.0.1", path="/api/steward/state?pid=x"):
+        return SimpleNamespace(headers=headers, client_address=(peer, 50000), path=path)
+    local = req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate"})
+    assert ag._local_browser(local) is True
+    assert ag._local_browser(req({"Host": "localhost:8777"})) is False, "no Sec-Fetch-Mode: a script or a probe, not a browser"
+    assert ag._local_browser(req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate", "X-Forwarded-Proto": "https", "X-Forwarded-For": "100.76.143.38"})) is False, "proxied in over the tailnet: not local"
+    assert ag._local_browser(req({"Host": "gwl-server.tailb49f65.ts.net", "Sec-Fetch-Mode": "navigate"})) is False, "the browser asked for the public name"
+    assert ag._local_browser(req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate"}, peer="100.76.143.38")) is False
+    ok = ag.AnchorHandler._term_token_ok
+    assert ok(local) is False, "the API gate stays strict: nothing carried is refused even from the machine's own browser (the page sets its cookie, and the next read carries it)"
+    assert ok(req({"Host": "localhost:8777"}, peer="100.76.143.38")) is False, "nothing carried from the tailnet: refused"
+    assert ok(req({"Host": "x", "Authorization": "Bearer stale", "Cookie": "anchor_auth=good-token"}, peer="100.76.143.38")) is True, "a stale header beside a good cookie: the cookie counts"
+    assert ok(req({"Host": "x", "Authorization": "Bearer stale"}, peer="100.76.143.38")) is False
+    assert ok(req({"Host": "x"}, peer="100.76.143.38", path="/api/steward/state?pid=x&token=good-token")) is True
+    c = ag.AnchorHandler._local_login_cookie(local)
+    assert c and c.startswith("anchor_auth=good-token; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict"), "the page sets the local browser's cookie, thirty days"
+    assert ag.AnchorHandler._local_login_cookie(req({"Host": "localhost:8777", "Sec-Fetch-Mode": "navigate", "Cookie": "anchor_auth=good-token"})) is None, "a good cookie already: nothing to set"
+    assert ag.AnchorHandler._local_login_cookie(req({"Host": "x"}, peer="100.76.143.38")) is None, "never for the tailnet"
+    assert "Max-Age=2592000" in _paths.build_auth_cookie("t") and "Max-Age=0" in _paths.build_auth_cookie(None, clear=True)
+
+
+def test_an_effort_card_s_material_links_carry_its_directory():
+    """2026-10-01, his "start here" / "review" errors: the links of an effort card looked for the file at the project's
+    root. The link names the effort's directory, URL-encoded, from the part being rendered."""
+    from steward_cockpit import high_seat_card as hc
+    assert 'href="/api/steward/deliverable-file?pid=p1&amp;dir=MIT%20Lectures&amp;path=transformers/refinement-2/BRIEF.html"' in hc._item_link({"path": "transformers/refinement-2/BRIEF.html", "what": "BRIEF"}, "p1", "MIT Lectures")
+    hc._TL.rel = "Book 1"
+    try:
+        assert "dir=Book%201&amp;" in hc._item_link({"path": "a.md", "what": "a"}, "p1")
+    finally:
+        hc._TL.rel = ""
+    assert "dir=&amp;path=a.md" in hc._item_link({"path": "a.md", "what": "a"}, "p1", "")
+    assert hc._item_link({"route": "/report/p1/x", "what": "r"}, "p1", "Book 1") == '<a href="/report/p1/x" target="_blank" rel="noopener">r</a>'
+
+
+def test_the_opened_tile_goes_to_the_top_of_its_shelf_and_comes_back():
+    js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
+    for s in ("card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild);",
+              "if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); }",
+              "headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })\n      .then(function (r) {\n        if (r.status === 401"):
+        assert s in js, s
+

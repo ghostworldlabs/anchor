@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import html
 import re
+import threading
+from urllib.parse import quote as _quote
 from pathlib import Path
 
 from . import steward_campaign as campaign
@@ -291,16 +293,22 @@ def status_html(cdir, pid, rel=""):
                repairs_html(cdir, pid, rel), esc(pid)))
 
 
-def _item_link(it, pid):
+_TL = threading.local()      # the effort directory the part being rendered belongs to (card_part sets it; the links read it)
+
+
+def _item_link(it, pid, rel=None):
     """The cockpit's own link for a register row: a route stays a route; an openable path goes through the
-    deliverable-file route; anything else is text."""
+    deliverable-file route IN THE EFFORT'S OWN DIRECTORY (2026-10-01, his "start here" and "review" errors: an effort
+    card's links had dropped the directory, so the file was looked for at the project's root); anything else is text."""
     what = esc(it.get("what") or it.get("path") or "")
     route = str(it.get("route") or "")
     path = str(it.get("path") or "")
+    d = str(rel if rel is not None else (getattr(_TL, "rel", "") or ""))
     if route.startswith("/"):
         return '<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(route), what)
     if path and it.get("openable", True) and not path.startswith(("http://", "https://")):
-        return '<a href="/api/steward/deliverable-file?pid=%s&amp;dir=&amp;path=%s" target="_blank" rel="noopener">%s</a>' % (esc(pid), esc(path), what)
+        return '<a href="/api/steward/deliverable-file?pid=%s&amp;dir=%s&amp;path=%s" target="_blank" rel="noopener">%s</a>' % (
+            esc(pid), esc(_quote(d, safe="")), esc(_quote(path, safe="/")), what)
     return what
 
 
@@ -471,6 +479,7 @@ def card_part(pid, part, folder, name="", rel=""):
     cdir = _effort_dir(folder, rel)
     if cdir is None:
         return {"ok": True, "pid": pid, "part": part, "html": _no_record(pid, name or pid[:8])}
+    _TL.rel = str(rel or "")      # every link this part builds names the effort's directory
     try:
         fn = {"status": status_html, "next": next_html, "deliverables": deliverables_html, "plan": plan_html, "brief": brief_html}[part]
         return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part in ("status", "brief") else fn(cdir, pid)}

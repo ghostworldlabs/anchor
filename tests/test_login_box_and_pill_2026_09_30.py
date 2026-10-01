@@ -24,7 +24,7 @@ def test_the_boot_says_whether_this_request_was_logged_in_and_the_box_follows_it
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('');" in js, "the box only when the server did not know this browser"
     src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
-    assert src.count("render_high_seat_page(logged_in=self._term_token_ok())") == 2, "both routes tell the page (the same gate the reads use: query token, Authorization, the cookie)"
+    assert src.count("render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok())") == 2, "both routes tell the page (the same gate the reads use: query token, Authorization, the cookie)"
     assert 'ctx["logged_in"] = bool(logged_in)' in src
 
 

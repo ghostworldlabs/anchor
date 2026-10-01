@@ -504,7 +504,9 @@ def build_auth_cookie(token, *, secure=False, clear=False,
         attrs = [f"{cookie_name}=", "Path=/", "Max-Age=0",
                  "HttpOnly", "SameSite=Strict"]
     else:
-        attrs = [f"{cookie_name}={token}", "Path=/",
+        # 2026-10-01 (John, after a reboot asked him for the token again): the cookie outlives the browser session -
+        # thirty days - so a browser that logged in once stays logged in across restarts and reboots
+        attrs = [f"{cookie_name}={token}", "Path=/", "Max-Age=2592000",
                  "HttpOnly", "SameSite=Strict"]
     if secure:
         attrs.append("Secure")

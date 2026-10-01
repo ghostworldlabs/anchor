@@ -173,7 +173,7 @@
   function notLoggedIn() { return '<div class="cp-quiet cp-auth">' + NOT_LOGGED_IN + ' <button class="mini" data-login>paste the token</button></div>'; }
   function fetchPart(pid, part, dir, retried, open) {
     // W0 (2026-09-28): `open=1` only when a card's BODY opens — the presence writer's signal; a balloon's glance sends none
-    return fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(dir || '') + (open ? '&open=1' : ''), { headers: headers() })
+    return fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(dir || '') + (open ? '&open=1' : ''), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) {
         if (r.status === 401 || r.status === 403) {
           if (retried || askedOnce) return notLoggedIn();
@@ -337,6 +337,10 @@
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c); });   // one tile open, one dialogue polling (Grok's read of W2e)
     card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
+    // the opened tile goes to the TOP of its shelf (his word, 2026-10-01) and comes back to its place on close
+    var grid = card.parentNode;
+    if (grid && grid.classList && grid.classList.contains('grid') && grid.firstElementChild !== card) { card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild); }
+    try { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (err) {}
     body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id) + dropHtml();
     fetchPart(pid, 'brief', dir, false, true)
       .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; } })   // the served brief IS the rectangle (never one cbrief inside another)
@@ -345,6 +349,7 @@
   }
   function closeTile(card) {
     stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir');
+    if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); } card._moved = false; card._homeNext = null; }
     var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
   }

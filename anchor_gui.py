@@ -11769,6 +11769,29 @@ def _request_presented_token(handler, body):
     return provided
 
 
+def _local_browser(handler):
+    """True iff this request came from a browser ON THIS MACHINE: the TCP peer is loopback, no proxy forwarded it
+    (Tailscale Serve proxies the tailnet in over loopback too, but declares itself with X-Forwarded-* headers), and
+    the browser asked for the machine's own address. Such a browser is this machine's own user, who holds the token
+    in the service's registry already (John, 2026-10-01: "this computer has the token set up") - it is not asked to
+    paste what the machine has."""
+    try:
+        addr = getattr(handler, "client_address", None)
+        peer = str((addr or ("",))[0] or "")
+        if peer not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return False
+        for h in ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "Via"):
+            if handler.headers.get(h):
+                return False
+        if not handler.headers.get("Sec-Fetch-Mode"):
+            return False      # a browser always sends it; a script, a test client or a probe does not
+        host = str(handler.headers.get("Host") or "").strip().lower()
+        bare = host[1:].split("]")[0] if host.startswith("[") else host.split(":")[0]
+        return bare in ("localhost", "127.0.0.1", "::1")
+    except Exception:
+        return False
+
+
 def _request_is_secure(handler):
     """True iff the request reached us over HTTPS (so the cookie gets ``Secure``).
 
@@ -21639,7 +21662,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 return
             raise
 
-    def _send_html(self, html_text):
+    def _send_html(self, html_text, cookie=None):
         body = html_text.encode("utf-8")
         try:
             self.send_response(200)
@@ -21648,6 +21671,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
+            if cookie:
+                self.send_header("Set-Cookie", cookie)      # the local browser's login, set by the page itself (2026-10-01)
             self.end_headers()
             self.wfile.write(body)
         except Exception as exc:
@@ -21825,20 +21850,33 @@ class AnchorHandler(BaseHTTPRequestHandler):
         demand it. Also accepts a token carried in the
         ``Sec-WebSocket-Protocol`` header (for WS clients).
         """
+        # 2026-10-01: ANY valid credential this request carries is enough - the query token, the Authorization
+        # header, the WS subprotocol, or the HttpOnly auth cookie (rearch W9). Before, the first one seen was the
+        # only one judged, so a stale saved token in a header refused a browser whose cookie was good.
         q = parse_qs(urlparse(self.path).query)
-        provided = (q.get("token", [None])[0])
-        if provided is None:
-            provided = _paths.token_from_authorization(
-                self.headers.get("Authorization"))
-        if provided is None:
-            # WS clients may smuggle the token via the subprotocol header.
-            provided = self.headers.get("Sec-WebSocket-Protocol")
-        if provided is None:
-            # rearch W9: browser page navigation (and the desktop term_ws
-            # upgrade — cookie-through-WS spike proven) authenticates off the
-            # HttpOnly auth cookie, so no token rides in a page URL.
-            provided = _paths.token_from_cookie(self.headers.get("Cookie"))
-        return _paths.auth_ok(provided)
+        presented = [q.get("token", [None])[0],
+                     _paths.token_from_authorization(self.headers.get("Authorization")),
+                     self.headers.get("Sec-WebSocket-Protocol"),
+                     _paths.token_from_cookie(self.headers.get("Cookie"))]
+        presented = [t for t in presented if t]
+        if not presented:
+            return _paths.auth_ok(None)      # nothing carried: the configured policy answers (allowed only when no token is set)
+        return any(_paths.auth_ok(t) for t in presented)
+
+    def _local_login_cookie(self):
+        """A Set-Cookie value for a PAGE served to this machine's own browser (see _local_browser) that carries no
+        valid cookie yet, so its later reads and sends ride the cookie (thirty days) with nothing pasted; None
+        otherwise. The page is the only place that trusts the local browser; every API gate stays strict."""
+        try:
+            want = _paths.expected_token()
+            if not want or not _local_browser(self):
+                return None
+            have = _paths.token_from_cookie(self.headers.get("Cookie"))
+            if have and _paths.auth_ok(have):
+                return None
+            return _paths.build_auth_cookie(want, secure=_request_is_secure(self))
+        except Exception:
+            return None
 
     # ── Strangler dispatch (rearch W7 / C2) ─────────────────────────────────
     def _route_auth_ok(self, route):
@@ -22353,14 +22391,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # The High Seat IS the home (John, 2026-09-27: "show me the updated main dashboard"). The old
                 # dashboard stays at /?classic=1 and /dashboard until the writer switch retires its task list.
                 # Served REGARDLESS of the rest of the query so the cache-busting reload ("/?v=<build_id>") lands here.
-                self._send_html(render_high_seat_page(logged_in=self._term_token_ok()))
+                _ck = self._local_login_cookie()
+                self._send_html(render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/" or _path_only == "/dashboard":
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
             elif _path_only == "/high-seat":
                 # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
-                self._send_html(render_high_seat_page(logged_in=self._term_token_ok()))
+                _ck = self._local_login_cookie()
+                self._send_html(render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/doctor":
                 # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
                 # own style (render_doctor_page_html: real stats from
@@ -22786,7 +22826,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if (_qp.get("view", [""])[0] or "") == "desk":      # W3b: the Desk view of the same record
                         self._send_html(render_desk_page(_camp))
                         return
-                    self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)))
+                    self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)), cookie=self._local_login_cookie())
                     return
                 if _classic:
                     self._send_html(render_project_window_html(pid))
