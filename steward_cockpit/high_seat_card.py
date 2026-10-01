@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import html
 import re
-import threading
 from urllib.parse import quote as _quote
 from pathlib import Path
 
@@ -223,13 +222,13 @@ def brief_html(cdir, pid, rel=""):
         for mem in (scope.get("members") or []) if isinstance(scope, dict) else []:
             path = str(mem.get("path") if isinstance(mem, dict) else mem or "").strip()
             if path and path not in seen:
-                seen.add(path); links.append(_item_link({"path": path, "what": path.replace("\\", "/").rsplit("/", 1)[-1]}, pid))
+                seen.add(path); links.append(_item_link({"path": path, "what": path.replace("\\", "/").rsplit("/", 1)[-1]}, pid, rel))
     try:
         items = (campaign.read_deliverables(cdir) or {}).get("items") or []
         for it in campaign.current_review_items(m, items) or []:
             key = str(it.get("path") or it.get("route") or it.get("what") or "")
             if key and key not in seen:
-                seen.add(key); links.append(_item_link(it, pid))
+                seen.add(key); links.append(_item_link(it, pid, rel))
     except Exception:
         pass
     nxt = str(hb.get("next_recommended") or hb.get("why_next") or "").strip()
@@ -293,26 +292,25 @@ def status_html(cdir, pid, rel=""):
                repairs_html(cdir, pid, rel), esc(pid)))
 
 
-_TL = threading.local()      # the effort directory the part being rendered belongs to (card_part sets it; the links read it)
-
-
-def _item_link(it, pid, rel=None):
+def _item_link(it, pid, rel=""):
     """The cockpit's own link for a register row: a route stays a route; an openable path goes through the
     deliverable-file route IN THE EFFORT'S OWN DIRECTORY (2026-10-01, his "start here" and "review" errors: an effort
-    card's links had dropped the directory, so the file was looked for at the project's root); anything else is text."""
+    card's links had dropped the directory, so the file was looked for at the project's root) - ``rel`` rides the call
+    from the part being rendered (Grok's review: never a thread-local); an office file opens the cockpit's preview
+    (view=1); anything else is text."""
     what = esc(it.get("what") or it.get("path") or "")
     route = str(it.get("route") or "")
     path = str(it.get("path") or "")
-    d = str(rel if rel is not None else (getattr(_TL, "rel", "") or ""))
     if route.startswith("/"):
         return '<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(route), what)
     if path and it.get("openable", True) and not path.startswith(("http://", "https://")):
-        return '<a href="/api/steward/deliverable-file?pid=%s&amp;dir=%s&amp;path=%s" target="_blank" rel="noopener">%s</a>' % (
-            esc(pid), esc(_quote(d, safe="")), esc(_quote(path, safe="/")), what)
+        view = "&amp;view=1" if path.lower().endswith((".docx", ".pptx", ".xlsx")) else ""
+        return '<a href="/api/steward/deliverable-file?pid=%s&amp;dir=%s&amp;path=%s%s" target="_blank" rel="noopener">%s</a>' % (
+            esc(pid), esc(_quote(str(rel or ""), safe="")), esc(_quote(path, safe="/")), view, what)
     return what
 
 
-def next_html(cdir, pid):
+def next_html(cdir, pid, rel=""):
     m = campaign.read_map(cdir)
     d = _decision(cdir)
     question, rec = d["question"], d["recommendation"]
@@ -336,12 +334,12 @@ def next_html(cdir, pid):
             ('<div class="cp-rec"><span class="k">Recommended</span>%s</div>' % esc(" ".join(str(rec).split())[:240])) if rec else ""))
         if d["depends_on"]:
             out.append('<div class="cp-dep"><span class="k">Depends on</span>%s</div>' % " &middot; ".join(
-                _item_link(by_what.get(n.lower()) or {"what": n, "route": "", "path": ""}, pid) for n in d["depends_on"]))
+                _item_link(by_what.get(n.lower()) or {"what": n, "route": "", "path": ""}, pid, rel) for n in d["depends_on"]))
     elif not acts:
         out.append('<div class="cp-quiet">Nothing waits on your word here%s.</div>' % ("" if d["found"] else " &mdash; no decision record for this effort"))
     if acts:
         out.append('<div class="cp-acts"><span class="k">Acts</span>%s</div>' % "".join(
-            '<div class="cp-act"><b>%s</b> %s</div>' % (esc(a.get("act")), _item_link(a.get("item"), pid) if a.get("item") else esc(a.get("label")))
+            '<div class="cp-act"><b>%s</b> %s</div>' % (esc(a.get("act")), _item_link(a.get("item"), pid, rel) if a.get("item") else esc(a.get("label")))
             for a in acts[:6]))
     if plan:
         out.append('<div class="cp-plan"><span class="k">Next in the plan</span>%s</div>' % "".join(
@@ -351,24 +349,24 @@ def next_html(cdir, pid):
     return "".join(out)
 
 
-def _node_html(node, pid, depth=0, current_ids=()):
+def _node_html(node, pid, depth=0, current_ids=(), rel=""):
     """One work-stream node as the cockpit's Deliverables panel groups it: its mark, its label, its items (each openable
     through the deliverable-file route), then its children; a node whose work is all done folds closed."""
     mark = node.get("mark") or {}
     items = [it for it in node.get("items") or [] if it]
     rows = "".join('<div class="cp-deliv%s">%s<span class="dim">%s%s</span></div>' % (
-        " current" if id(it) in current_ids or it.get("is_current") else "", _item_link(it, pid),
+        " current" if id(it) in current_ids or it.get("is_current") else "", _item_link(it, pid, rel),
         (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "",
         " &middot; awaiting your review" if (id(it) in current_ids or it.get("is_current")) else "") for it in items)
     more = ""
-    kids = "".join(_node_html(c, pid, depth + 1, current_ids) for c in node.get("children") or [])
+    kids = "".join(_node_html(c, pid, depth + 1, current_ids, rel) for c in node.get("children") or [])
     done = mark.get("cls") == "done"
     return ('<details class="cp-node d%d %s"%s><summary><span class="mk %s">%s</span>%s<span class="dim"> &middot; %d</span></summary>%s%s%s</details>' % (
         depth, esc(mark.get("cls") or "todo"), "" if done else " open", esc(mark.get("cls") or "todo"), esc(mark.get("glyph") or "&#9655;"),
         esc(node.get("label") or node.get("id") or "work"), len(items), rows or ('<div class="dim">nothing registered here yet</div>' if not kids else ""), more, kids))
 
 
-def deliverables_html(cdir, pid):
+def deliverables_html(cdir, pid, rel=""):
     """The cockpit's Deliverables organisation (John, 2026-09-11): current work and review first, a folded Approved list
     below it, then the whole work hierarchy by domain — the same view the cockpit's panel paints
     (steward_campaign.effort_deliverable_view)."""
@@ -384,16 +382,16 @@ def deliverables_html(cdir, pid):
     out = ['<div class="cp-delivs">']
     out.append('<div class="cp-sec"><span class="k">Current work and review &middot; %d</span>%s</div>' % (
         len(current), "".join('<div class="cp-deliv current">%s<span class="dim">%s &middot; awaiting your review</span></div>' % (
-            _item_link(it, pid), (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "") for it in current)
+            _item_link(it, pid, rel), (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "") for it in current)
         or '<div class="dim">Nothing is pinned for your review.</div>'))
     approved = view.get("approved") or []
     out.append('<details class="cp-fold"><summary><span class="k">Approved &middot; %d</span></summary>%s</details>' % (
         len(approved), "".join('<div class="cp-deliv">%s<span class="dim">%s</span></div>' % (
-            _item_link(it, pid), (" &middot; " + esc(it.get("date"))) if it.get("date") else "") for it in approved)
+            _item_link(it, pid, rel), (" &middot; " + esc(it.get("date"))) if it.get("date") else "") for it in approved)
         or '<div class="dim">Nothing accepted yet.</div>'))
     streams = view.get("streams") or []
     out.append('<div class="cp-sec"><span class="k">All the work, by domain</span>%s</div>' % (
-        "".join(_node_html(n, pid, 0, cur_ids) for n in streams) or '<div class="dim">The plan has no domains yet.</div>'))
+        "".join(_node_html(n, pid, 0, cur_ids, rel) for n in streams) or '<div class="dim">The plan has no domains yet.</div>'))
     out.append('<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open the register in the cockpit</a></div></div>' % esc(pid))
     return "".join(out)
 
@@ -479,10 +477,9 @@ def card_part(pid, part, folder, name="", rel=""):
     cdir = _effort_dir(folder, rel)
     if cdir is None:
         return {"ok": True, "pid": pid, "part": part, "html": _no_record(pid, name or pid[:8])}
-    _TL.rel = str(rel or "")      # every link this part builds names the effort's directory
     try:
         fn = {"status": status_html, "next": next_html, "deliverables": deliverables_html, "plan": plan_html, "brief": brief_html}[part]
-        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part in ("status", "brief") else fn(cdir, pid)}
+        return {"ok": True, "pid": pid, "part": part, "html": fn(cdir, pid, rel) if part in ("status", "brief", "next", "deliverables") else fn(cdir, pid)}
     except Exception as e:  # never a blank on the page
         return {"ok": True, "pid": pid, "part": part,
                 "html": '<div class="cp-quiet">This part could not be read: %s</div>' % esc("%s: %s" % (type(e).__name__, e))}

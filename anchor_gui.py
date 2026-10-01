@@ -21889,6 +21889,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
             return _paths.auth_ok(None)      # nothing carried: the configured policy answers (allowed only when no token is set)
         return any(_paths.auth_ok(t) for t in presented)
 
+    def _auth_shape(self):
+        """One line saying what this request carried for the gate - never a value (2026-10-01, the box that stayed on
+        his screen while every probe passed): peer, Host, cookie none/valid/stale, Authorization none/valid/stale, query
+        token none/valid/stale, fetch-metadata mode, the user agent's head, and whether the local-browser rule held."""
+        try:
+            def judge(t):
+                return "none" if not t else ("valid" if _paths.auth_ok(t) else "stale")
+            q = parse_qs(urlparse(self.path).query)
+            addr = getattr(self, "client_address", None)
+            ua = str(self.headers.get("User-Agent") or "")[:60].replace(" ", "_")
+            return ("peer=%s host=%s cookie=%s auth=%s qtoken=%s sfm=%s fwd=%s local=%s ua=%s" % (
+                (addr or ("?",))[0], str(self.headers.get("Host") or "-"), judge(_paths.token_from_cookie(self.headers.get("Cookie"))),
+                judge(_paths.token_from_authorization(self.headers.get("Authorization"))), judge(q.get("token", [None])[0]),
+                str(self.headers.get("Sec-Fetch-Mode") or "-"), "yes" if (self.headers.get("X-Forwarded-For") or self.headers.get("X-Forwarded-Proto")) else "no",
+                _local_browser(self), ua))
+        except Exception as e:
+            return "auth-shape unreadable: %s" % e
+
     def _local_login_cookie(self):
         """A Set-Cookie value for a PAGE served to this machine's own browser (see _local_browser) that carries no
         valid cookie yet, so its later reads and sends ride the cookie (thirty days) with nothing pasted; None
@@ -22410,6 +22428,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 return
             if _path_only.startswith("/api/steward/"):
                 if not self._term_token_ok():
+                    print("  [%s] REFUSED GET %s %s" % (datetime.now().strftime("%H:%M:%S"), _path_only, self._auth_shape()))      # 2026-10-01: a refusal is visible in the log
                     self._send_json({"error": "unauthorized"}, code=401); return
                 self._steward_api("GET", _path_only[len("/api/steward/"):])
                 return
@@ -22418,6 +22437,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # dashboard stays at /?classic=1 and /dashboard until the writer switch retires its task list.
                 # Served REGARDLESS of the rest of the query so the cache-busting reload ("/?v=<build_id>") lands here.
                 _ck = self._local_login_cookie()
+                print("  [%s] PAGE / %s set-cookie=%s" % (datetime.now().strftime("%H:%M:%S"), self._auth_shape(), "yes" if _ck else "no"))
                 self._send_html(render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/" or _path_only == "/dashboard":
                 projects, tasks, inbox = gather_all()
@@ -22426,6 +22446,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
             elif _path_only == "/high-seat":
                 # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
                 _ck = self._local_login_cookie()
+                print("  [%s] PAGE /high-seat %s set-cookie=%s" % (datetime.now().strftime("%H:%M:%S"), self._auth_shape(), "yes" if _ck else "no"))
                 self._send_html(render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/doctor":
                 # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
@@ -22821,7 +22842,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # Authenticate BEFORE any scan/bootstrap mutation, then use a
                 # per-project singleflight worker so repeated page opens cannot
                 # fan out an unbounded set of directory scans.
-                _project_authed = self._term_token_ok()
+                _ck = self._local_login_cookie()      # 2026-10-01: a browser on this machine is logged in by the page, which sets its cookie
+                _project_authed = self._term_token_ok() or bool(_ck)
                 _start_project_open_discovery(
                     pid, authorized=_project_authed)
                 if _project_authed and pid and not _unsafe_path_seg(pid):
@@ -22852,10 +22874,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if (_qp.get("view", [""])[0] or "") == "desk":      # W3b: the Desk view of the same record
                         self._send_html(render_desk_page(_camp))
                         return
-                    self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)), cookie=self._local_login_cookie())
+                    print("  [%s] PAGE /project/<campaign> %s set-cookie=%s" % (datetime.now().strftime("%H:%M:%S"), self._auth_shape(), "yes" if _ck else "no"))
+                    self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)), cookie=_ck)
                     return
                 if _classic:
-                    self._send_html(render_project_window_html(pid))
+                    self._send_html(render_project_window_html(pid), cookie=_ck)
                 elif not _project_authed:
                     # (2026-08-15, security audit P0) The steward transcript
                     # is private; the /project/ row is historically open.
@@ -22866,14 +22889,15 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     # viewer never sees the conversation.
                     self._send_html(render_chamber_lock_document(pid))
                 elif _chamber:
-                    self._send_html(render_chamber_page_document(pid))
+                    self._send_html(render_chamber_page_document(pid), cookie=_ck)
                 else:
                     # Token-gated: the doc is a shell, data rides the
                     # token-checked /api/steward routes.
                     from steward_cockpit import steward_routes as _scr
                     _scr.CONFIG["steward"] = (_steward_ui().get("label") or "Ecgberht")
                     _scr.CONFIG["build"] = BUILD_ID   # shim self-heal probe
-                    self._send_html(_scr.serve_cockpit_doc(pid))
+                    print("  [%s] PAGE /project/<cockpit> %s set-cookie=%s" % (datetime.now().strftime("%H:%M:%S"), self._auth_shape(), "yes" if _ck else "no"))
+                    self._send_html(_scr.serve_cockpit_doc(pid), cookie=_ck)
             # /api/rnd/term_sessions migrated to route_table (handle_term_sessions) — served by the strangler above.
             # /api/rnd/chain migrated to route_table (handle_chain) — served by
             # the strangler above.
@@ -22979,12 +23003,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # (Bearer <token> or a bare token — the rearch-W2 path every
         # non-browser consumer uses), or a "token" field in the JSON body.
         # Read endpoints are not gated.
-        provided = self.headers.get("X-Anchor-Token")
-        if provided is None:
-            provided = _paths.token_from_authorization(
-                self.headers.get("Authorization"))
-        if provided is None and isinstance(body, dict):
-            provided = body.get("token")
+        # 2026-10-01 (Grok's independent review): ONE rule with the GET gate - any valid credential this POST carries
+        # counts, the auth cookie included. Before, the first one seen was the only one judged, so a browser whose
+        # SAVED token had gone stale sent it in X-Anchor-Token on every POST and was refused - the login after a
+        # paste among them - while its reads rode a good cookie, and the box stayed.
+        _cands = [self.headers.get("X-Anchor-Token"),
+                  _paths.token_from_authorization(self.headers.get("Authorization")),
+                  body.get("token") if isinstance(body, dict) else None,
+                  _paths.token_from_cookie(self.headers.get("Cookie"))]
+        _cands = [t for t in _cands if t]
+        provided = next((t for t in _cands if _paths.auth_ok(t)), _cands[0] if _cands else None)
         # Default-deny by construction, driven by the declared route table (W7):
         # a POST is gated UNLESS its row explicitly declares ``auth == open``. No
         # POST is open today, so behavior is unchanged — but the middleware now

@@ -159,15 +159,15 @@
   function login(t) { return loginUi ? loginUi.login(t) : Promise.resolve(null); }
   function showLogin(text) { if (loginUi) loginUi.show(text); }
   // W2c-4 (his word, 2026-09-30): a browser the server already knows by its login cookie is logged in — no box, even with no token held here
-  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('');
+  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('No login found in this browser at load: no cookie came with the page and no token is saved here.');   // the box says which check raised it (2026-10-01)
   // a held token may be the OLD one (after a rotation): check it once on load; a refusal opens the box at once
   if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && token()) {
     login(token()).then(function (r) {
-      if (r && r.status === 401) { try { localStorage.removeItem('anchor_token'); } catch (e) {} showLogin('Your saved token is out of date — paste the current one.'); }
+      if (r && r.status === 401) { try { localStorage.removeItem('anchor_token'); } catch (e) {} if (!(window.ANCHOR_BOOT && window.ANCHOR_BOOT.logged_in)) showLogin('Your saved token is out of date — paste the current one.'); }   // a page already logged in by its cookie drops the stale token and says nothing (Grok's review)
     });
   }
   function askToken() {
-    showLogin('');
+    showLogin('A read of the record was refused: this browser is not logged in.');
     return Promise.resolve(false);
   }
   function notLoggedIn() { return '<div class="cp-quiet cp-auth">' + NOT_LOGGED_IN + ' <button class="mini" data-login>paste the token</button></div>'; }

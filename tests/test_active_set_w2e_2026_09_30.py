@@ -222,19 +222,28 @@ def test_an_effort_card_s_material_links_carry_its_directory():
     root. The link names the effort's directory, URL-encoded, from the part being rendered."""
     from steward_cockpit import high_seat_card as hc
     assert 'href="/api/steward/deliverable-file?pid=p1&amp;dir=MIT%20Lectures&amp;path=transformers/refinement-2/BRIEF.html"' in hc._item_link({"path": "transformers/refinement-2/BRIEF.html", "what": "BRIEF"}, "p1", "MIT Lectures")
-    hc._TL.rel = "Book 1"
-    try:
-        assert "dir=Book%201&amp;" in hc._item_link({"path": "a.md", "what": "a"}, "p1")
-    finally:
-        hc._TL.rel = ""
+    assert "dir=Book%201&amp;path=a.md" in hc._item_link({"path": "a.md", "what": "a"}, "p1", "Book 1")
     assert "dir=&amp;path=a.md" in hc._item_link({"path": "a.md", "what": "a"}, "p1", "")
+    assert "dir=&amp;path=a.md" in hc._item_link({"path": "a.md", "what": "a"}, "p1"), "no directory given: the project's root"
+    assert 'path=deliverables/Homework%202.docx&amp;view=1"' in hc._item_link({"path": "deliverables/Homework 2.docx", "what": "hw"}, "p1", ""), "an office file opens the cockpit's preview (Grok's review)"
+    assert not hasattr(hc, "_TL"), "the directory rides the call, never a thread-local (Grok's review)"
     assert hc._item_link({"route": "/report/p1/x", "what": "r"}, "p1", "Book 1") == '<a href="/report/p1/x" target="_blank" rel="noopener">r</a>'
 
 
 def test_the_opened_tile_goes_to_the_top_of_its_shelf_and_comes_back():
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     for s in ("card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild);",
+              "if (!(window.ANCHOR_BOOT && window.ANCHOR_BOOT.logged_in)) showLogin('Your saved token is out of date",
               "if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); }",
               "headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })\n      .then(function (r) {\n        if (r.status === 401"):
         assert s in js, s
 
+
+def test_the_post_gate_judges_every_credential_the_request_carries():
+    """Grok's independent review (2026-10-01): the POST gate had judged only the first credential it saw, so a stale saved
+    token in X-Anchor-Token refused every POST while the reads rode a good cookie - the login after a paste among them."""
+    src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
+    assert 'provided = next((t for t in _cands if _paths.auth_ok(t)), _cands[0] if _cands else None)' in src
+    assert '_paths.token_from_cookie(self.headers.get("Cookie"))]' in src and 'body.get("token") if isinstance(body, dict) else None,' in src
+    assert '_project_authed = self._term_token_ok() or bool(_ck)' in src, "the project page takes the local browser's login too (its lock page never carried the cookie)"
+    assert src.count("cookie=_ck)") >= 5, "every page send carries the local browser's cookie"
