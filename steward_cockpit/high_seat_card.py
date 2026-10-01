@@ -275,16 +275,14 @@ def brief_html(cdir, pid, rel=""):
 
 def status_html(cdir, pid, rel=""):
     eng = _live_engine(cdir)
-    if eng is not None:
-        data = campaign.compose_status(cdir, eng.state())
-    else:
-        data = campaign.read_last_status(cdir) or campaign.compose_status(cdir, None)
+    data = campaign.status_for_pane(cdir, eng.state() if eng is not None else None, live=eng is not None)   # W3c: the record NOW when no run is live
     facts = ((data.get("compact") or {}).get("facts") if isinstance(data.get("compact"), dict) else None) or []
     rows = "".join('<tr><th>%s</th><td>%s</td></tr>' % (esc(f.get("label")), esc(f.get("value")))
                    for f in facts if isinstance(f, dict) and f.get("label"))
     lead = data.get("lead_line") or campaign.lead_line(data.get("plan"))
     at = str(data.get("at") or "")
-    stale = " &middot; the record, not a live run" if data.get("stale") else (" &middot; live" if eng is not None else "")
+    stale = (" &middot; live" if eng is not None else
+             ((" &middot; the record now; the last run %s" % esc(str(data.get("last_run_at"))[-16:])) if data.get("last_run_at") else " &middot; the record now; no run yet"))
     return ('<div class="cp-status"><div class="cp-lead">%s</div><div class="cp-when">last update %s%s</div>'
             '<table class="cp-facts">%s</table>%s'
             '<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></div>'

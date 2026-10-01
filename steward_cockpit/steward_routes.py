@@ -1062,13 +1062,10 @@ def handle_get(cdir, verb, qs):
         # (2026-09-03, John): an effort with NO live engine shows its LAST
         # recorded update, stamped, rather than a fresh "nothing running" —
         # ``stale: true`` tells the pane it is looking at the record.
+        # W3c (2026-10-01, his word on the tile's Status reading old): with no live engine the pane shows the record
+        # as it is NOW with the last run's receipts and stamp carried - one rule with the High Seat's tile and the Desk
         eng = ENGINES.get(cdir)
-        if eng is None:
-            last = campaign.read_last_status(cdir)
-            if last is not None:
-                return last, 200
-        return campaign.compose_status(
-            cdir, eng.state() if eng else None), 200
+        return campaign.status_for_pane(cdir, eng.state() if eng else None, live=eng is not None), 200
     if verb == "grass":
         return {"grass": campaign.read_grass(cdir)}, 200
     if verb == "boneyard":

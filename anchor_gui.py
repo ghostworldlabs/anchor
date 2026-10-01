@@ -8081,11 +8081,11 @@ def _desk_context(entry):
         from steward_cockpit import steward_campaign as _sc
         from steward_cockpit.high_seat_card import _live_engine
         eng = _live_engine(folder)
-        data = _sc.compose_status(folder, eng.state()) if eng is not None else (_sc.read_last_status(folder) or _sc.compose_status(folder, None))
+        data = _sc.status_for_pane(folder, eng.state() if eng is not None else None, live=eng is not None)   # W3c: one rule with the tile and the cockpit
         facts = ((data.get("compact") or {}).get("facts") if isinstance(data.get("compact"), dict) else None) or []
         status = {"lead": data.get("lead_line") or _sc.lead_line(data.get("plan")), "at": str(data.get("at") or "")[-16:],
                   "facts": [(f.get("label"), f.get("value")) for f in facts if isinstance(f, dict) and f.get("label")],
-                  "stale": bool(data.get("stale")), "live": eng is not None}
+                  "stale": bool(data.get("stale")), "live": eng is not None, "last_run_at": str(data.get("last_run_at") or "")[-16:]}
     except Exception as e:      # a failed read is named; the Desk still renders (the Rabbit's W3b trim)
         status = {"lead": "The status could not be read: %s" % html_lib.escape("%s: %s" % (type(e).__name__, e)), "at": "", "facts": [],
                   "stale": False, "live": False, "failed": True}

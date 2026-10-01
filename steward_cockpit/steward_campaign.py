@@ -1660,6 +1660,41 @@ def read_last_status(campaign_dir: str):
         return None
 
 
+CARRIED_FACTS = ("Journal", "Tests", "Procs", "ETA")   # receipts only a run can give; the record now has none
+
+
+def status_for_pane(campaign_dir: str, engine_state=None, live: bool = False):
+    """What a status pane shows - the cockpit's pane, the High Seat's tile, the Desk: ONE rule (2026-10-01, his word:
+    the Status in an expanded tile "looks dated/old"). A LIVE engine: composed fresh from the map and its state. No
+    live engine: composed fresh from the RECORD as it is now (the summary, the status, the next bullets, the lead),
+    with the last run's receipts (journal, tests, procs, ETA) and its stamp carried from the persisted summary where
+    the record now has none - never the persisted summary alone, whose "Doing" was a run that ended and whose plan
+    may have moved since (the 2026-09-03 rule showed that summary whole; his eye read it as old). ``last_run_at`` is
+    the carried stamp; ``carried`` names the facts taken from it; nothing is marked stale - it is the record now."""
+    if live:
+        return compose_status(campaign_dir, engine_state)
+    fresh = compose_status(campaign_dir, None)
+    last = read_last_status(campaign_dir)
+    if not isinstance(last, dict) or not last.get("at"):
+        return fresh
+    stamp = str(last["at"])[-16:]
+    fresh["last_run_at"] = str(last["at"])
+    lf = {f.get("label"): f for f in ((last.get("compact") or {}).get("facts") or []) if isinstance(f, dict) and f.get("label")}
+    carried = []
+    for f in ((fresh.get("compact") or {}).get("facts") or []):
+        if not isinstance(f, dict):
+            continue
+        lab = f.get("label")
+        if lab == "Doing":
+            f["value"] = "%s \u00b7 the last run %s" % (f.get("value") or "nothing running", stamp)
+        elif lab in CARRIED_FACTS and str(f.get("value") or "").startswith("Unavailable") and lab in lf \
+                and not str(lf[lab].get("value") or "").startswith("Unavailable") and str(lf[lab].get("value") or "").strip() not in ("", "none", "\u2014"):
+            f["value"] = "%s (the last run, %s)" % (lf[lab]["value"], stamp)
+            carried.append(lab)
+    fresh["carried"] = carried
+    return fresh
+
+
 def _safe_route_seg(seg: str) -> bool:
     """The same safe class ``anchor_gui._unsafe_path_seg`` enforces (mirrored
     here so this zero-import reader stays standalone): a non-empty segment with

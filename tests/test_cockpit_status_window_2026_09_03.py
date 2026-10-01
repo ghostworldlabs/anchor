@@ -116,9 +116,11 @@ class StatusWindowTest(unittest.TestCase):
     def test_status_verb_prefers_the_record_when_no_engine_is_live(self):
         src = (REPO / "steward_cockpit" / "steward_routes.py").read_text(encoding="utf-8")
         blk = src.split('if verb == "status":')[1].split('if verb == "grass":')[0]
-        self.assertIn("campaign.read_last_status(cdir)", blk)
-        self.assertIn("if eng is None:", blk)
-        self.assertIn("campaign.compose_status(", blk)   # a live engine still composes fresh
+        # W3c (2026-10-01, his word: the tile's Status read old): ONE rule - the record NOW with the last run's receipts and
+        # stamp carried (status_for_pane); a live engine still composes fresh inside it
+        self.assertIn("campaign.status_for_pane(cdir, eng.state() if eng else None, live=eng is not None)", blk)
+        self.assertIn("eng = ENGINES.get(cdir)", blk)
+        self.assertNotIn("read_last_status", blk)
 
 
 def test_status_facts_keep_every_category_in_one_line():
