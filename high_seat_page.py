@@ -379,7 +379,7 @@ def anchor_mark(build, px=26):
     are some anchor icons embedded in the cave of wonder page upper left hand side that need to be updated. Same with
     the Campaign page"): the tab drawing at ``px``, the page's own size for it."""
     return ('<img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png?v=%s" alt="" width="%d" height="%d" '
-            'style="border-radius:%dpx;vertical-align:middle;flex:none" onerror="this.style.display=\'none\'">'
+            'style="border-radius:%dpx;vertical-align:middle;flex:none">'
             % (esc(build), px, px, max(4, px // 4)))
 
 

@@ -73,13 +73,18 @@ def test_the_pages_draw_his_anchor_where_the_old_glyph_stood():
     """18:5x: "there are some anchor icons embedded in the cave of wonder page upper left hand side that need to be
     updated. Same with the Campaign page." The glyph beside the word Anchor is his anchor now, on every masthead."""
     mark = hsp.anchor_mark("test")
-    assert 'src="/vendor/brand/anchor-tab-48.png?v=test"' in mark and 'width="26"' in mark
+    assert 'src="/vendor/brand/anchor-tab-48.png?v=test"' in mark and 'width="26"' in mark and "onerror" not in mark, "a missing mark shows as missing"
     ctx = w2._ctx(w1._steps())
     for html in (hsp.render_high_seat_html(base._ctx()), cpg.render_campaign_html(ctx), dpg.render_desk_html(desk._ctx())):
         assert '<div class="mh-title">' + mark + 'Anchor</div>' in html and "&#9875;" not in html and "⚓" not in html
     assert hsp.anchor_mark("test", 18) + " The " in hsp.render_high_seat_html(base._ctx()), "the rail's seat line too"
     gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
-    assert "&#9875;" not in gui and gui.count('class="anchor-mark" src="/vendor/brand/anchor-tab-48.png') == 3, "the old dashboard's two and the Doctor's"
+    assert "&#9875;" not in gui and "anchor-tab-48.png" not in gui, "no page pastes its own mark"
+    assert gui.count("{_anchor_mark(") == 2 and '("__ANCHOR_MARK__", _anchor_mark(26)),' in gui and "__ANCHOR_MARK__ Anchor" in gui, "the old dashboard's two and the Doctor's, through the one helper (Grok W5)"
+    import anchor_gui as ag
+    assert ag._anchor_mark(28) == hsp.anchor_mark(ag.BUILD_ID, 28)
+    doctor = ag.render_doctor_page_html()
+    assert hsp.anchor_mark(ag.BUILD_ID, 26) + " Anchor" in doctor and "__ANCHOR_MARK__" not in doctor, "the Doctor's mark carries the build"
 
 
 def test_the_tab_drawing_is_worn_only_when_whole_and_his_export_otherwise(tmp_path):

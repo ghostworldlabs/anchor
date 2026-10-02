@@ -71,8 +71,9 @@ REASSERT = (
 # "when I start up the session, I need some context"). The deterministic
 # pickup lines (_emit_resume_pickup) land instantly from the record; this
 # turn adds the model's own two-sentence orientation in plain words.
-RESUME_CONTINUITY = (
-    "Read the complete durable history and give a brief pickup. Continue agreed "
+_CONTINUITY_PICKUP = "Read the complete durable history and give a brief pickup. "
+_CONTINUITY_RULES = (
+    "Continue agreed "
     "work under explicit, still-current authorization across session or provider "
     "changes; do not require renewed approval solely for the pickup. Honor later "
     "pauses, unresolved decisions, scope limits, and budgets. Ask only for "
@@ -83,19 +84,23 @@ RESUME_CONTINUITY = (
     "outstanding authorized task exists, ask John what to do next; do not invent "
     "work or treat the pickup as a new effort."
 )
+RESUME_CONTINUITY = _CONTINUITY_PICKUP + _CONTINUITY_RULES
 
-RESUME_BRIEF = (
-    "(engine resume - not John) You are Ecgberht, waking from a parked "
-    "session. Silently re-read ECGBERHT.md, roadmap.json, strip.json, "
+_RESUME_REREAD = (
+    "Silently re-read ECGBERHT.md, roadmap.json, strip.json, "
     "DELIVERABLES.md (the register of things worth opening - keep it current "
     "per its standing rule, and answer any 'what have we produced?' from it) "
-    "and the complete durable history in .ecgberht/conversation-log.json, then give John a SHORT "
+    "and the complete durable history in .ecgberht/conversation-log.json, "
+)
+_RESUME_PICKUP_ASK = (
+    "then give John a SHORT "
     "pickup - two or three plain sentences: where the campaign stands, the "
     "last thing that happened, and what comes next. If a question is waiting "
     "on him, restate it as the LAST line with enough context that he can "
     "answer from your words alone. "
-    + RESUME_CONTINUITY
-    + " ATTENTION FLAG (2026-08-25, John saw 'waiting on you' during a live "
+)
+_RESUME_ATTENTION = (
+    " ATTENTION FLAG (2026-08-25, John saw 'waiting on you' during a live "
     "run): whenever you commission or observe background work - a "
     "researchPrime/Foreman/Gandalf run, a long build - write "
     ".ecgberht/attention.json {\"state\": \"working\", \"reason\": <what is "
@@ -104,21 +109,32 @@ RESUME_BRIEF = (
     "refinement-update exclusively owns human wait; never stamp needs_you or "
     "Face/Strip human_wait. Legacy unmanaged campaigns retain their wait flag."
 )
+RESUME_BRIEF = (
+    "(engine resume - not John) You are Ecgberht, waking from a parked "
+    "session. " + _RESUME_REREAD + _RESUME_PICKUP_ASK + RESUME_CONTINUITY + _RESUME_ATTENTION
+)
 
 # W5 of the active set (John, 2026-10-01: "is there some type of reset for the
 # steward conversation in Cave of Wonders and Campaign? That should not be the
 # case"; his call: stay awake AND wake silently). The Campaign's own steward
 # holds ONE conversation on the two pages: its wake puts no greeting in the
 # dialogue and asks the model for no pickup - the record is re-read in silence
-# and his message is answered as the conversation's next turn. Everything
-# after the pickup sentence is RESUME_BRIEF's own text.
-_PICKUP_ASK = RESUME_BRIEF[RESUME_BRIEF.index("then give John a SHORT"):RESUME_BRIEF.index("Continue agreed")]
-RESUME_QUIET = RESUME_BRIEF.replace("waking from a parked session", "resuming the same conversation after a pause in the process").replace(
-    _PICKUP_ASK,
+# and his message is answered as the conversation's next turn. The same named
+# pieces as RESUME_BRIEF, the pickup asks left out (Grok W5: no slicing). A
+# question that waits on him stays on the PAGE (the wake's one Open line),
+# never in the model's mouth.
+_RESUME_QUIET_ASK = (
     "then answer John's message as the next turn of the one conversation he "
     "sees: no pickup, no recap, no re-introduction, and never re-ask what the "
-    "record answers. A question still waiting on him is restated only when his "
-    "message does not answer it, as the LAST line. ")
+    "record answers. "
+)
+RESUME_QUIET = (
+    "(engine resume - not John) You are Ecgberht, resuming the same "
+    "conversation after a pause in the process. "
+    + _RESUME_REREAD + _RESUME_QUIET_ASK + _CONTINUITY_RULES + _RESUME_ATTENTION
+)
+JOIN_PICKUP = "\n\nJOHN SAYS (give the short pickup first, then answer this):\n"
+JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\n"
 
 CONTRACT = (
     "Before framing a substantial new plan, use adaptive discovery: ask one load-bearing "
@@ -572,7 +588,8 @@ def _is_campaign_dir(folder):
     try:
         from steward_cockpit.campaign_say import is_campaign_folder
         return bool(is_campaign_folder(folder))
-    except Exception:
+    except Exception as e:      # the Campaign's steward would silently keep the reset: say it once in the log
+        print("  [%s] ONE CONVERSATION check failed for %s: %r" % (time.strftime("%H:%M:%S"), folder, e))
         return False
 
 
@@ -1234,7 +1251,7 @@ class Engine:
                 self._emit({"t": "sys", "text":
                             "stored session could not resume - starting fresh"})
                 if not self.general:
-                    self._emit_resume_pickup(entry)
+                    self._emit_resume_pickup(entry, open_only=self.one_conversation)
                 return self._wake_locked(fresh=True, seed=seed)
         # kept on self so stop() can JOIN it: the reader's EOF handler writes
         # the durable record, and an unjoined write can trail past stop() into
@@ -1257,10 +1274,10 @@ class Engine:
             # (RESUME_BRIEF also re-asserts the role - audit gap #1 - so the
             # deep campaign-memory discipline can't have drifted away).
             # The Campaign's steward (W5, 2026-10-01) wakes with neither: one
-            # conversation, no greeting in the dialogue, no pickup asked.
+            # conversation, no greeting in the dialogue, no pickup asked - only
+            # a question that waits on him is said, on the page (Grok W5).
             if not self.general:
-                if not self.one_conversation:
-                    self._emit_resume_pickup(entry)
+                self._emit_resume_pickup(entry, open_only=self.one_conversation)
                 # Wave 1.2: no autonomous resume turn. The brief rides on his
                 # next message (human-first); an interrupted turn is reconciled
                 # in the same breath.
@@ -1319,9 +1336,11 @@ class Engine:
             self._deliver_next_queued_locked()
         return True, "awake"
 
-    def _emit_resume_pickup(self, entry):
+    def _emit_resume_pickup(self, entry, open_only=False):
         """Deterministic context on wake — Last / Plan / Goal / Open, before
-        any model turn. Zero-model, from the durable record."""
+        any model turn. Zero-model, from the durable record. ``open_only``
+        (the Campaign's one conversation): only a question that is actually
+        waiting on him, nothing else."""
         last = (entry.get("last_text") or "").strip()
         when = (entry.get("last_used") or "").strip()
         if last:
@@ -1356,6 +1375,10 @@ class Engine:
         q = ((wait.get("pending_request") or {}).get("purpose", "")
              if wait.get("managed_refinement") else (self.open_question or "")).strip()
         open_line = ("waiting on you: " + q) if q else "nothing waiting on you"
+        if open_only:
+            if q:
+                self._emit({"t": "sys", "text": "Open: " + open_line})
+            return
         self._emit({"t": "sys", "text": "Last time: " + outcome})
         self._emit({"t": "sys", "text": "Plan: " + plan})
         self._emit({"t": "sys", "text": "Goal: " + goal_line})
@@ -1779,7 +1802,7 @@ class Engine:
         human_text = text  # the durability identity: his words, never the wrapper
         if origin == "human" and self._resume_prefix:
             text = (self._resume_prefix
-                    + "\n\nJOHN SAYS (give the short pickup first, then answer this):\n" + text)
+                    + (JOIN_QUIET if self._resume_prefix.startswith(RESUME_QUIET) else JOIN_PICKUP) + text)
             self._resume_prefix = None
         if not (self.fake or os.environ.get("STEWARD_COCKPIT_FAKE")):
             try:
@@ -2878,6 +2901,11 @@ class Engine:
         # commit-on-idle-close is a real mechanism, not a prompt
         self._commit_if_dirty("steward idle checkpoint" if self.one_conversation
                               else "steward auto-sleep checkpoint")
+        if self.one_conversation:
+            # it stays up: no leave receipt against an open conversation (Grok
+            # W5) - the explicit project switch remains the leave
+            self._idle_marked = quiet_since
+            return False
         # W0 of the steward revision (2026-09-28): the FALLBACK leave receipt — only when
         # presence still says he is on this project (he never switched away); the explicit
         # switch on the High Seat or another cockpit is the trigger, this is the safety net.
@@ -2887,9 +2915,6 @@ class Engine:
                 self.dir, lambda _pid, at: _pres.run_leave(self.dir, at))
         except Exception:
             pass
-        if self.one_conversation:
-            self._idle_marked = quiet_since
-            return False
         self._emit({"t": "sys", "text":
                     f"steward asleep after {IDLE_SLEEP_SECONDS // 60} "
                     "quiet minutes - everything saved; your next message wakes it"})

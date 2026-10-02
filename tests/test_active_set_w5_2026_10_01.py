@@ -64,6 +64,57 @@ class OneConversationTest(unittest.TestCase):
             self.assertNotIn(line, said)
         self.assertEqual(e._resume_prefix, eng_mod.RESUME_QUIET)
 
+    def test_a_question_that_waits_on_him_stays_on_the_page_and_nothing_else_is_said(self):
+        """Grok W5: Last time / Plan / Goal and the awake line are the reset; Open is his unanswered question."""
+        eng_mod._update_state(self.camp, {"open_question": "Which date works for the attorney?"})
+        e = self._parked(self.camp)
+        ok, why = e.wake()
+        self.assertTrue(ok, why)
+        said = [str(ev.get("text", "")) for ev in e.events if ev.get("t") == "sys"]
+        self.assertIn("Open: waiting on you: Which date works for the attorney?", said)
+        for line in ("resuming the last session", "Last time:", "Plan:", "Goal:"):
+            self.assertNotIn(line, " | ".join(said))
+
+    def test_what_reaches_the_model_with_his_first_words_after_a_wake(self):
+        """Grok W5: the joiner sat closer to his words than the brief and still ordered a pickup. The bytes written to
+        the steward's stdin are the pin, for the Campaign and for a cockpit."""
+        import json
+
+        class Pipe:
+            def __init__(self):
+                self.lines = []
+
+            def write(self, s):
+                self.lines.append(s)
+
+            def flush(self):
+                pass
+
+            def close(self):
+                pass
+
+        for cdir, quiet in ((self.camp, True), (self.other, False)):
+            e = self._parked(cdir)
+            ok, why = e.wake()
+            self.assertTrue(ok, why)
+            real, pipe = e.proc.stdin, Pipe()
+            e.proc.stdin = pipe
+            try:
+                with e._lock:
+                    self.assertTrue(e._send_locked("what is next on the trusts?", origin="human"))
+            finally:
+                e.proc.stdin = real
+            text = json.loads(pipe.lines[0])["message"]["content"][0]["text"]
+            self.assertIn("what is next on the trusts?", text)
+            if quiet:
+                self.assertTrue(text.startswith(eng_mod.RESUME_QUIET + eng_mod.JOIN_QUIET))
+                self.assertIn("JOHN SAYS (answer this as the next turn of the conversation):", text)
+                for ask in ("give the short pickup first", "give John a SHORT pickup", "give a brief pickup", "restate it as the LAST line"):
+                    self.assertNotIn(ask, text)
+            else:
+                self.assertTrue(text.startswith(eng_mod.RESUME_BRIEF + eng_mod.JOIN_PICKUP))
+            self.assertIsNone(e._resume_prefix, "said once")
+
     def test_another_cockpit_keeps_its_wake_summary(self):
         e = self._parked(self.other)
         ok, why = e.wake()
@@ -78,7 +129,9 @@ class OneConversationTest(unittest.TestCase):
         self.assertIn("give John a SHORT pickup", b)
         self.assertNotIn("give John a SHORT pickup", q)
         self.assertNotIn("give a brief pickup", q)
-        self.assertIn("no pickup, no recap, no re-introduction", q)
+        self.assertNotIn("LAST line", q)
+        self.assertIn("no pickup, no recap, no re-introduction, and never re-ask what the record answers. Continue agreed work", q)
+        self.assertEqual(b, "(engine resume - not John) You are Ecgberht, waking from a parked session. " + eng_mod._RESUME_REREAD + eng_mod._RESUME_PICKUP_ASK + eng_mod.RESUME_CONTINUITY + eng_mod._RESUME_ATTENTION)
         for kept in ("Silently re-read ECGBERHT.md, roadmap.json, strip.json", ".ecgberht/conversation-log.json", "Continue agreed work under explicit, still-current authorization", "ATTENTION FLAG"):
             self.assertIn(kept, q)
 
@@ -90,6 +143,10 @@ class OneConversationTest(unittest.TestCase):
             self.assertTrue(ok, why)
             commits = []
             e._commit_if_dirty = lambda msg, _c=commits: _c.append(msg)
+            leaves = []
+            from steward_cockpit import presence as _pres
+            _old_leave, _pres.leave_if_still_here = _pres.leave_if_still_here, lambda d, fn, _l=leaves: _l.append(d)
+            self.addCleanup(setattr, _pres, "leave_if_still_here", _old_leave)
             now = e.woke_at + 30
             self.assertFalse(e._idle_tick(now), "not quiet long enough")
             self.assertTrue(e.alive() and not commits)
@@ -98,9 +155,11 @@ class OneConversationTest(unittest.TestCase):
             self.assertEqual(e.alive(), not parks)
             if parks:
                 self.assertEqual(commits[0], "steward auto-sleep checkpoint")
+                self.assertEqual(leaves, [cdir], "a cockpit that parks records the fallback leave")
                 self.assertIn("steward asleep after 1 quiet minutes", " | ".join(str(ev.get("text", "")) for ev in e.events))
                 continue
             self.assertEqual(commits, ["steward idle checkpoint"])
+            self.assertEqual(leaves, [], "a steward that stays up records no leave against an open conversation (Grok W5)")
             self.assertFalse(e._idle_tick(now + 300) or e._idle_tick(now + 3000))
             self.assertEqual(len(commits), 1, "once per quiet spell")
             e.last_say = now + 3000                       # he speaks; a new quiet spell begins

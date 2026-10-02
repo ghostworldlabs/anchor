@@ -7906,6 +7906,12 @@ def _high_seat_context():
     }
 
 
+def _anchor_mark(px=26):
+    """His anchor where a page drew the old anchor glyph (2026-10-01): one helper for every page, the build in its address."""
+    from high_seat_page import anchor_mark
+    return anchor_mark(BUILD_ID, px)
+
+
 def _nudge_or_log(where, fn):
     """W3 (Grok's read, RC-G): the nudges are derived from the records and must never break a page - but a guard that
     swallows the failure cannot see what it exists for (the first build's seed-count TypeError painted a quiet brief).
@@ -9580,7 +9586,7 @@ body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; m
       <div class="gwl-wordmark">Ghost World <span class="gwl-accent">Labs</span></div>
     </div>
     <div class="gwl-badge">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
-    <h1><img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png?v={BUILD_ID}" alt="" width="28" height="28" style="border-radius:7px;vertical-align:middle"> Anchor</h1>
+    <h1>{_anchor_mark(28)} Anchor</h1>
     <div class="subtitle">J.C. Liechty — Life Dashboard</div>
     <!-- r3 (2026-09-03): the steward owns the rail — the move today, due
          today, coming up, project counts, workbench. The old Views/Domains/
@@ -9598,7 +9604,7 @@ body.only-new-project #newProjectModal .modal {{ width: 100%; max-width: 100%; m
     <!-- v4 Wave 8 — Option B masthead lockup (Anchor · divider · GWL mark +
          wordmark · NextGen Nuclear pill). Single vendored brand mark. -->
     <div class="masthead">
-      <div class="mh-title"><img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png?v={BUILD_ID}" alt="" width="26" height="26" style="border-radius:6px;vertical-align:middle">Anchor</div>
+      <div class="mh-title">{_anchor_mark(26)}Anchor</div>
       <div class="mh-vdiv"></div>
       <div class="mh-lock">
         <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
@@ -17709,7 +17715,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 <body>
 <div class="wrap">
   <div class="masthead">
-    <div class="mh-title"><img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png" alt="" width="26" height="26" style="border-radius:6px;vertical-align:middle"> Anchor <span class="mh-doctor">Doctor</span></div>
+    <div class="mh-title">__ANCHOR_MARK__ Anchor <span class="mh-doctor">Doctor</span></div>
     <div class="mh-sub">honest diagnostics &mdash; every number real or absent</div>
     <div class="mh-spacer"></div>
     <a class="backlink" href="/">&larr; Dashboard</a>
@@ -18253,6 +18259,7 @@ def render_doctor_page_html():
         ("__REPORTS_LIST__", reports_html),
         ("__ISSUES_BLOCK__", _doctor_issues_block_html(s)),
         ("__ISSUES_JSON__", json.dumps(s.get("issues") or [])),
+        ("__ANCHOR_MARK__", _anchor_mark(26)),
     ):
         page = page.replace(key, value)
     return page
