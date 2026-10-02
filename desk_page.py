@@ -286,9 +286,9 @@ def render_desk_html(ctx) -> str:
     hdr = (
         '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>Desk</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
-        '<a class="tool" href="/project/%s" title="the Campaign, this record in tiers">the Campaign</a><a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(st["high_seat_name"]),
-         _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["pid"]), esc(ctx["today_str"]))
+        '<a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
+    ) % (esc(st["high_seat_name"]),   # "the Campaign" link removed on his word (2026-10-02): the Cave's rail and tile open it
+         _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>The Desk</title>%s'

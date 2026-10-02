@@ -346,13 +346,13 @@ def _rail(ctx):
     n_camp = len(ctx.get("initiatives") or [])
     live_inits = [i for i in ctx.get("initiatives") or [] if i.get("status") not in ("done", "parked")]
     n_active, n_deck = len(seated(live_inits, "active")), len(seated(live_inits, "deck"))     # W2c: the shelves
-    n_bench = int(counts.get("running") or 0)
+    n_bench = int(ctx.get("terms_open") or 0)      # the Cave's plain terminals open now (the Workbench retired 2026-10-02)
     cap_rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or ())
     return (
         '<nav class="rail">'
         '<div class="lockup">%s<div class="wordmark">Ghost World <span class="gwl-accent">Labs</span></div></div>'
         '<div class="gwl-badge">Powered by NextGen Nuclear %s</div>'
-        '<div class="railseat">%s<h1>%s The %s</h1></div>'
+        '<div class="railseat">%s<h1>The %s</h1></div>'   # the Cave's picture alone (his word 2026-10-02); the anchor stays by the word Anchor
         '<div class="sub">Anchor &middot; the whole portfolio, ranked</div>'
         '<div class="navk">Destinations</div>'
         '<ul class="nav" id="railNav">'
@@ -364,12 +364,12 @@ def _rail(ctx):
         '<li><button data-rail="deck"><span class="n">On deck</span><span class="c">%d</span></button></li>'
         '<li><button data-rail="calendar"><span class="n">Calendar</span><span class="c">not connected</span></button></li>'
         '<li><button data-rail="email"><span class="n">Email</span><span class="c">not connected</span></button></li>'
-        '<li><button data-rail="bench"><span class="n">Workbench</span><span class="c">%d</span></button></li>'
+        '<li><button data-rail="term"><span class="n">Terminal</span><span class="c" id="railTerm">%d</span></button></li>'
         '</ul>'
         '<div class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div></div>'
         '</nav>'
     ) % (_brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
-         _brand_img(ctx["build"], st["high_seat"], ""), anchor_mark(ctx["build"], 18), esc(st["high_seat_name"]),
+         _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
          esc(st["high_seat_name"]), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
          esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
 
@@ -398,6 +398,22 @@ def _masthead(ctx):
     ) % (anchor_mark(b), _brand_img(b, "gwl-m-icon.svg", "mh-mark"), stew)
 
 
+def _health_banner(ctx):
+    """The health banner along the top (his word, 2026-10-02: "the health banner got removed from the Cave of Wonders
+    ... I'd like you to have something that shows the health banner so I can do the Anchor Doctor, use Zombie Hunter").
+    Shown only when the morning's self-test found issues; the Doctor and the Zombie Hunter one click away."""
+    rows = [r for r in ctx.get("rows") or () if r.get("rule") == "health"]
+    if not rows:
+        return ""
+    r = rows[0]
+    href = str(r.get("href") or "/doctor")
+    return ('<div class="healthbar" role="alert"><span class="hb-mark">&#9888;</span><span class="hb-t"><b>%s</b> &middot; %s</span>'
+            '<a class="tool" href="%s" target="_blank" rel="noopener">Diagnose</a>'
+            '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button>'
+            '<button class="tool" data-tool="zombie">%sZombie Hunter</button></div>') % (
+        esc(r.get("text") or "Health check found issues"), esc(r.get("why") or ""), esc(href), _brand_img(ctx["build"], "zombie-hunter-radar.jpg"))
+
+
 def _hdr(ctx):
     st = ctx["steward"]
     b = ctx["build"]
@@ -406,7 +422,6 @@ def _hdr(ctx):
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button>'
         '<button class="tool" data-tool="zombie">%sZombie Hunter</button>'
         '<button class="tool" data-tool="foundry">%sSkill Foundry</button>'
-        '<a class="tool" href="/dashboard" title="the dashboard as it was">the old dashboard</a>'
         '<div class="date">%s &middot; %s</div></div>'
     ) % (esc(st["high_seat_name"]), esc(st["label"]), _brand_img(b, "zombie-hunter-radar.jpg"),
          _brand_img(b, "skill-foundry-icon.jpg"), esc(ctx["today_str"]), esc(ctx["week"]))
@@ -737,24 +752,29 @@ def _ruler(ctx):
     ) % (total, "" if total == 1 else "s", head, "".join(cols), late)
 
 
-def _workbench(ctx):
-    live = ctx.get("live") or []
-    n = len(live)
-    items = "".join('<span class="live">&#9679; live</span><span>%s</span>' % esc(l.get("text")) for l in live[:3])
-    # health and failed rows belong to this line and the Doctor, not to Today (fit line 2)
-    sys_rows = [r for r in ctx.get("rows") or () if r.get("rule") in ("health", "failed")]
+TERM_ENGINES = (("claude", "Claude"), ("chatgpt", "ChatGPT"), ("grok", "Grok"), ("gemini", "Gemini"), ("shell", "Shell"))
+
+
+def _terminal(ctx):
+    """The Terminal at the foot of the board (2026-10-02, his word: the Workbench "seems old and not very useful ...
+    we'll replace it with just simply a terminal ... you can choose which engine ... the default of the terminal
+    engine ... it will open to dev ... more than one terminal opened, kind of like VS Code ... it just doesn't have the
+    steward skill running in it ... at the bottom of the Cave of Wonders so it doesn't open a new window"). Tabs of
+    plain engine terminals in the workspace root (static/cave-terminal.js, POST /api/cave/terminal). The health and
+    failed rows the Workbench carried stay here, under it."""
+    dflt = str(ctx.get("default_cli") or "claude")
+    opts = "".join('<option value="%s"%s>%s</option>' % (k, " selected" if k == dflt else "", esc(v)) for k, v in TERM_ENGINES)
+    sys_rows = [r for r in ctx.get("rows") or () if r.get("rule") == "failed"]     # the health row is the banner at the top
     sys_html = "".join('<a class="bench-row %s" href="%s"%s>%s <span class="dim">&middot; %s</span></a>' % (
         esc(r.get("severity")), esc(r.get("href")), ' target="_blank" rel="noopener"' if str(r.get("href", "")).startswith("/") else "",
         esc(r.get("text")), esc(r.get("why"))) for r in sys_rows[:4])
-    if not live and not sys_rows:
-        # W5 (2026-09-28): nothing running and nothing failed — one line, not a box saying so (fit contract 7)
-        return ('<section class="shelf" id="shBench"><div class="shelf-h"><h3>Workbench</h3><span class="c">nothing running</span><span class="rule"></span>'
-                '<a class="dbtn cockpit" href="/project/__dashboard__?classic=1" target="_blank" rel="noopener">Open cockpit</a></div></section>')
     return (
-        '<section class="shelf" id="shBench"><div class="shelf-h"><h3>Workbench</h3><span class="c">%d running</span><span class="rule"></span></div>'
-        '<div class="bench" id="bench">%s<span class="dim">Terminals, runs and registers stay in the cockpit. This board does not repeat them.</span>'
-        '<span style="flex:1"></span><a class="dbtn cockpit" href="/project/__dashboard__?classic=1" target="_blank" rel="noopener">Open cockpit</a></div>%s</section>'
-    ) % (n, items or '<span class="dim">nothing running</span>', ('<div class="bench-sys">%s</div>' % sys_html) if sys_html else "")
+        '<section class="shelf" id="shTerm"><div class="shelf-h"><h3>Terminal</h3><span class="c" id="termCount">none open</span><span class="rule"></span>'
+        '<label class="sr" for="termEngine">Engine</label><select class="term-eng" id="termEngine" title="the engine the new terminal runs - the Terminal seat by default">%s</select>'
+        '<button class="dbtn" id="termNew" title="a plain terminal in C:/dev - no steward">+ Terminal</button></div>'
+        '<div class="termdock" id="termDock" hidden><div class="termtabs" id="termTabs" role="tablist"></div>'
+        '<div class="termbody" id="termBody"></div></div>%s</section>'
+    ) % (opts, ('<div class="bench-sys">%s</div>' % sys_html) if sys_html else "")
 
 
 def _seed_panel(ctx):
@@ -870,62 +890,6 @@ def _panel(ctx):
          esc(ctx["brief_when"]), bullets, nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]))
 
 
-def _today_block(ctx):
-    """Today and Later this week (W2c-3: moved under the board so the right column is the brief and the dialogue,
-    'more real estate on the right hand side' — his word)."""
-    facts = ctx["facts"]
-    rows = ctx.get("rows") or []
-
-    def trow(r):
-        href = r.get("href") or ""
-        proj = facts.get(r.get("project_id")) or {}
-        meta = []
-        if proj.get("name"):
-            meta.append('<a class="src" href="/project/%s" target="_blank" rel="noopener">%s</a>' % (esc(r.get("project_id")), esc(proj["name"])))
-        if r.get("rule") in ("overdue", "due-today", "due-soon"):
-            meta.append('<span class="due soon">%s</span>' % esc(r.get("why")))
-        elif r.get("why"):
-            meta.append('<span class="st">%s</span>' % esc(r.get("why")[:120]))
-        if r.get("rule") == "needs-you":
-            meta.append('<span class="wm">&#9873; needs you</span>')
-        meta.append('<span class="st">raised by: %s</span>' % esc(r.get("rule_label")))
-        return '<li class="trow"><span class="tb"><span class="tt">%s</span><span class="tm">%s</span></span></li>' % (
-            ('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), esc(r.get("text")))) if href.startswith("/") else esc(r.get("text")), "".join(meta))
-    today_rows = "".join(trow(r) for r in rows if r.get("rule") not in ("health", "failed"))
-    n_today = sum(1 for r in rows if r.get("rule") not in ("health", "failed"))
-    # Later this week: dated open steps after today, through Sunday
-    today = ctx["today"]
-    week_end = today + timedelta(days=6 - today.weekday())
-    later = []
-    for f in facts.values():
-        for stp in f.get("dated") or ():
-            d = _hr._iso(stp.get("due"))
-            if d is not None and today < d <= week_end:
-                later.append((d, stp, f))
-    later.sort(key=lambda x: (x[0], x[1].get("name", "")))
-    later_html = "".join('<li class="trow"><span class="tb"><span class="tt"><a href="/project/%s" target="_blank" rel="noopener">%s</a></span>'
-                         '<span class="tm"><span class="src">%s</span><span class="due soon">due %s</span></span></span></li>' % (
-                             esc(f.get("id")), esc(stp.get("name")), esc(f.get("name")), esc(_short(stp.get("due")))) for d, stp, f in later[:6])
-    nearest = None
-    for f in facts.values():
-        for stp in f.get("dated") or ():
-            d = _hr._iso(stp.get("due"))
-            if d is not None and d > week_end and (nearest is None or d < nearest[0]):
-                nearest = (d, stp, f)
-    span_start = today + timedelta(days=1)
-    span = _short(span_start.isoformat()) if span_start >= week_end else "%s&ndash;%s" % (esc(_short(span_start.isoformat())), esc(_short(week_end.isoformat())))
-    later_block = ('<div class="blockk">Later this week &middot; %s</div>%s' % (
-        span if span_start <= week_end else "the week is over",
-        ('<ul class="tlist">%s</ul>' % later_html) if later_html else
-        ('<p class="emptyline"><b>Nothing is dated inside the rest of this week.</b>%s</p>' % (
-            (" The next dated step is %s (%s, %s)." % (esc(nearest[1].get("name")), esc(_short(nearest[1].get("due"))), esc(nearest[2].get("name")))) if nearest else ""))))
-    return (
-        '<section class="today" id="todayBlock"><div class="today-h"><h3>Today</h3><span class="c">%d raised</span></div>'
-        '<div class="today-sub">What needs you, and what is due soonest &mdash; every row a fact from a record, each saying what raised it.</div>'
-        '<ul class="tlist">%s</ul>%s</section>'
-    ) % (n_today, today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>', later_block)
-
-
 def render_high_seat_html(ctx) -> str:
     """The whole page from the context dict (see the module docstring)."""
     facts = ctx["facts"]
@@ -945,17 +909,18 @@ def render_high_seat_html(ctx) -> str:
     ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
     ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("deck", "active") for g, p in seated(live_inits, seat) if p.get("pid")}      # Active wins when a project has cards on both (Grok's read of W2c)
     board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _projects_tile(ctx)
-             + _desk_line(ctx) + _ruler(ctx) + _today_block(ctx) + _workbench(ctx) + '</div>')
+             + _desk_line(ctx) + _ruler(ctx) + _terminal(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s", you: "%s"};</script></head>'
-        '<body><div class="app">%s<div class="main">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
+        '<body><div class="app">%s<div class="main">%s%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
-        '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script></body></html>'
+        '<link rel="stylesheet" href="/vendor/xterm/xterm.css"><script src="/vendor/xterm/xterm.js"></script>'
+        '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script><script src="/static/cave-terminal.js?v=%s"></script></body></html>'
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
-         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _hdr(ctx),
-         ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))
+         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
+         ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
     return page

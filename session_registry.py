@@ -621,6 +621,9 @@ def _normalize(record: dict) -> dict:
         # (never a reattach claim). Everything else — record, chain, summary,
         # finalized cost — survives (the session stays MEASURED). Back-compat:
         # absent → False/None.
+        # the Cave's plain terminals (2026-10-02): an engine in the live workspace, no seed, nothing written back.
+        # Back-compat: absent -> False.
+        "plain": bool(record.get("plain", False)),
         "evicted": bool(record.get("evicted", False)),
         "evicted_at": _coerce_float_or_none(record.get("evicted_at")),
         # ``pending_paste_since``: when a paste was recorded UNSENT, so the
@@ -725,7 +728,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      effort_id=None, effort_managed=False,
                      pid=None, proc_create_time=None, crypt_token="",
                       engine_session_uuid="", doctor_mode="",
-                      doctor_posture="", step_id=None) -> dict:
+                      doctor_posture="", step_id=None, plain=False) -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     W0 of the steward revision (2026-09-28): ``step_id`` binds the session to
@@ -776,6 +779,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             # Doctor session reuse requires an exact mode/backend/posture tuple.
             "doctor_mode": doctor_mode or "",
             "doctor_posture": doctor_posture or "",
+            "plain": bool(plain),      # the Cave's plain terminals (2026-10-02), set on the first write (Grok)
             # W0 (2026-09-28): the step this session performs ("" = unknown).
             "step_id": str(step_id) if step_id else "",
         })
@@ -967,6 +971,8 @@ def update_session(session_id: str, **fields) -> dict:
     """
     allowed = {"project_id", "lane", "backend", "worktree_path", "branch",
                "status", "label", "seeded", "seed_text",
+               # the Cave's plain terminals (2026-10-02): an engine in the live workspace, no seed, nothing written back
+               "plain",
                "parent_session_id", "chain_id",
                # v10 Wave 1: paste-NOT-submit handoff bookkeeping.
                "pending_paste", "paste_flushed",

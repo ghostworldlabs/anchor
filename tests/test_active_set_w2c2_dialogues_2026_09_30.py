@@ -33,7 +33,7 @@ def test_the_high_seat_shows_the_one_conversation_under_the_composer_and_boots_t
     html = hsp.render_high_seat_html(ctx)
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
     assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"') and 'id="todayBlock"' not in panel, "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape); Today is under the board"
-    assert html.index('id="ruler"') < html.index('id="todayBlock"') < html.index('<aside class="panel"'), "Today and Later this week under the board, after the ruler"
+    assert 'id="todayBlock"' not in html and "raised by:" not in html, "his word 2026-10-02: the dated deliveries are enough - no Today block"
     assert panel.count('class="exrow') == 3 and "3 turns" in panel and 'id="exState"' in panel and 'id="exList"' in panel
     assert 'class="gchip" href="/project/df56?open=trusts"' in panel and "about The trusts" in panel, "a turn said from a goal's place carries the goal's chip, to its place"
     assert 'steward: "Jarvis", stamp: "s9"' in html, "the boot carries the steward's label and the record's stamp for the live lines"

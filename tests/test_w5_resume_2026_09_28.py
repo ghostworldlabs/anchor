@@ -85,11 +85,9 @@ def test_lint_the_cockpit_reads_the_step_parameter_and_opens_the_fold_above_the_
 
 
 def test_the_folds_a_quiet_workbench_is_one_line_and_the_desk_lists_nothing_unconnected():
-    quiet = hsp._workbench({"live": [], "rows": []})
-    assert "nothing running" in quiet and 'class="bench"' not in quiet and "Open cockpit" in quiet
-    busy = hsp._workbench({"live": [{"text": "a run"}], "rows": []})
-    assert "1 running" in busy and 'class="bench"' in busy
-    failed = hsp._workbench({"live": [], "rows": [{"rule": "failed", "severity": "bad", "href": "/x", "text": "a failed run", "why": "exit 1"}]})
-    assert 'class="bench"' in failed and "a failed run" in failed
+    # the Workbench retired 2026-10-02 (his word): the Terminal stands in its place and keeps its failed rows
+    assert not hasattr(hsp, "_workbench")
+    failed = hsp._terminal({"rows": [{"rule": "failed", "severity": "bad", "href": "/x", "text": "a failed run", "why": "exit 1"}]})
+    assert "a failed run" in failed and 'id="termNew"' in failed
     desk = hsp._desk_line({"tasks_open": 3, "campaign": {"pid": "c"}})
     assert 'data-desk="cal"' not in desk and 'data-desk="mail"' not in desk and 'data-desk="tasks"' in desk

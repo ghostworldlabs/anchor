@@ -32,7 +32,7 @@
   var lastKey = 0; function markKey() { lastKey = Date.now(); }
   document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);
   function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }
-  function tileOpen() { return !!$('.tile.open'); }
+  function tileOpen() { return !!$('.tile.open'); }   // an open terminal does not hold it: its tabs re-attach after the reload (Grok, 2026-10-02); typingNow covers his keys in it
   // W3b (his word, 2026-10-01: dictating into an open tile, "the tile collapses down and whatever I was dictating gets
   // lost"): the page renews itself when the record moves or a new build is live - but NEVER under an open tile or his
   // typing. Then it takes the change in place (every card's lines and light, the open tile's brief and detail, the
@@ -82,7 +82,7 @@
 
   // the rail: each destination scrolls to its section and opens it
   var DEST = { seat: '#brief', campaign: '#camp', active: '#shActive', week: '#shDated', desk: '#deskline',
-               deck: '#shDeck', calendar: '#cal', email: '#cal', bench: '#shBench' };
+               deck: '#shDeck', calendar: '#cal', email: '#cal', term: '#shTerm' };
   $$('#railNav button').forEach(function (b) {
     b.addEventListener('click', function () {
       var key = b.getAttribute('data-rail'), sel = DEST[key], el = sel && $(sel);
@@ -236,10 +236,12 @@
   // brief. The dialogue is the same module the pages use, on THAT cockpit's stream; it stops when the tile closes.
   // W2e-4 (his word, 16:0x): the dialogue is a THIN strip under the card and the rectangle \u2014 the steward's state and the
   // last turn's gist (the context first) \u2014 that expands on a click, his send, "talk about it", Accept, or the steward at work
+  // the persona driving it, by name (his word 2026-10-02: "Aladdin or Jarvis depending on which one is driving it")
+  var STEWARD_NAME = String((window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward').replace(/[<>&"']/g, '');
   function talkHtml(id) {
-    return '<div class="cdlg thin" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="false" title="open the conversation"><span class="dlg-h">this cockpit\u2019s steward</span><span class="exstate" data-state="">\u2026</span><span class="dlg-gist">reading the conversation\u2026</span><span class="dlg-caret">&#9662;</span></button>'
+    return '<div class="cdlg thin" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="false" title="open the conversation"><span class="dlg-h">' + STEWARD_NAME + ' \u2014 this cockpit</span><span class="exstate" data-state="">\u2026</span><span class="dlg-gist">reading the conversation\u2026</span><span class="dlg-caret">&#9662;</span></button>'
       + '<div class="scroll"><ul class="ex"><li class="exfade">Reading the conversation\u2026</li></ul></div>'
-      + '<div class="composer"><textarea rows="2" placeholder="Ask this cockpit\u2019s steward, or tell it what to do \u2014 it answers here as it writes"></textarea>'
+      + '<div class="composer"><textarea rows="2" placeholder="Ask ' + STEWARD_NAME + ' about this cockpit, or tell it what to do \u2014 it answers here as it writes"></textarea>'
       + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
   }
   function grow(card) {
@@ -262,7 +264,7 @@
       var rows = $$('.exrow', list).filter(function (r) { return !r.classList.contains('sysl'); }), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;   // the strip's gist is the last TURN, never a system line
       if (!last) { var f = $('.exfade', list); g.textContent = f ? f.textContent.trim() : 'nothing said in this cockpit yet'; return; }   // the list's one sentence (not logged in / nothing said / could not be read), as Grok read it
       var t = ($('.ext', last) || {}).textContent || '';
-      g.textContent = (last.classList.contains('you') ? YOU + ': ' : 'The steward: ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
+      g.textContent = (last.classList.contains('you') ? YOU + ': ' : STEWARD_NAME + ': ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
     }
     if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });
     fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
@@ -274,7 +276,7 @@
           var you = ['john', 'you', 'user', 'human'].indexOf(String(t.role || '').toLowerCase()) >= 0;
           var li = document.createElement('li'); li.className = 'exrow ' + (you ? 'you' : 'st');
           li.innerHTML = '<div class="exw ' + (you ? 'you' : 'st') + '"><span class="w"></span></div><div class="ext"></div>';
-          li.querySelector('.w').textContent = you ? YOU : 'The steward'; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
+          li.querySelector('.w').textContent = you ? YOU : STEWARD_NAME; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
           list.appendChild(li);
         });
         list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
@@ -286,7 +288,7 @@
         if (e && e.auth) showLogin('This cockpit\u2019s conversation cannot reach this page until this browser is logged in.');
       });
     if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
-    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: 'The steward', you: YOU, stamp: '',
+    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: STEWARD_NAME, you: YOU, stamp: '',
       onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); },
       onStamp: function () { refreshTile(card, pid, dir); }, onState: function (st) { paintDot(card, st && st.light); } }) : null;
     card._talk = dlg;
@@ -295,6 +297,16 @@
     function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, DK); }
     sendBtn.addEventListener('click', go);
     box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
+    // his word (2026-10-02): dictating into an open tile gave "a little tiny window" - the box grows with what he says, up to a
+    // third of the window, the conversation scrolled to its end above it; after Send it is small again
+    function growBox() {
+      box.style.height = 'auto';
+      box.style.height = Math.min(Math.max(42, box.scrollHeight), Math.round(window.innerHeight / 3)) + 'px';
+      box.style.overflowY = box.scrollHeight > box.clientHeight ? 'auto' : 'hidden';
+      var sc = list && list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
+      try { box.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    }
+    box.addEventListener('input', growBox);
   }
   function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
   // W2e-6 (his ask, 19:0x): a file dropped on the OPEN tile lands in the folder of the cockpit the tile was opened on
@@ -688,6 +700,30 @@
     onAuth: function () { showLogin('The steward’s words cannot reach this page until this browser is logged in.'); },
     you: YOU, onStamp: function (st) { renew('The steward changed the record \u2014 the page is renewed.', st); }   // W3b: never under an open tile or his typing
   }) : null;
+  // the box he types into is always in view (his word, 2026-10-02): the column ends at the window's foot wherever the
+  // page is scrolled (sticky alone left the composer ~150 px below the fold until he scrolled), and the box grows with
+  // his dictation up to a third of the window - the conversation above gives way, shifted up, never the box
+  (function () {
+    var panel = document.querySelector('.panel');
+    function fit() {
+      if (!panel) return;
+      if (getComputedStyle(panel).position !== 'sticky') { panel.style.height = ''; return; }   // narrow screens: one column, no pin
+      var top = Math.max(12, panel.getBoundingClientRect().top);
+      panel.style.height = Math.max(320, window.innerHeight - top - 12) + 'px';
+    }
+    function grow() {
+      if (!say) return;
+      say.style.height = 'auto';
+      say.style.height = Math.min(Math.max(42, say.scrollHeight), Math.round(window.innerHeight / 3)) + 'px';
+      say.style.overflowY = say.scrollHeight > say.clientHeight ? 'auto' : 'hidden';
+      var ex = document.getElementById('exScroll'); if (ex) ex.scrollTop = ex.scrollHeight;
+    }
+    fit(); grow();
+    window.addEventListener('scroll', fit, { passive: true });
+    window.addEventListener('resize', function () { fit(); grow(); });
+    if (say) { say.addEventListener('input', grow); say.addEventListener('focus', fit); }
+    setTimeout(fit, 400);
+  })();
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
     send.disabled = true; send.textContent = 'Thinking…';
@@ -697,7 +733,7 @@
         send.disabled = false; send.textContent = 'Send';
         if (j && j.ok && j.talk && dlg) { dlg.send(text, null, dlg.mainList(), send, say, DRAFT_KEY); return; }   // not a verb: the steward, in the dialogue
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
-        say.value = ''; clearDraft(); receipt(j.say || '…', false, j.undo || null);
+        say.value = ''; say.dispatchEvent(new Event('input')); clearDraft(); receipt(j.say || '…', false, j.undo || null);
         if (j.campaign_act && !j.read_only) {   // the Campaign tile shows the change after the reload; the line and its undo survive it
           try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
           setTimeout(function () { location.reload(); }, 900); return;

@@ -117,9 +117,11 @@ def _is_shell_record(rec):
     close-snapshot / status emitter) must no-op for it, or it would mkdir/write
     ``general/RESTART.md`` + transcripts into the real tree and may git-commit
     them into MAIN."""
+    # The Cave's PLAIN terminals (2026-10-02, his word: "just a terminal ... it doesn't have the steward skill running
+    # in it") run an engine in the live workspace (C:/dev) with no worktree, so every guard below holds for them too.
     return (isinstance(rec, dict) and
-            (rec.get("backend") or "") == getattr(_reg, "BACKEND_SHELL",
-                                                  "shell"))
+            ((rec.get("backend") or "") == getattr(_reg, "BACKEND_SHELL",
+                                                   "shell") or bool(rec.get("plain"))))
 
 
 def _default_engine() -> str:
@@ -672,7 +674,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   effort_id=None, effort_managed=False, actor=None,
                   extra_cli_args=None, lean_worktree=False,
                   doctor_mode="", doctor_posture="", cwd=None,
-                  doctor_brief=False):
+                  doctor_brief=False, plain=False):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -852,7 +854,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # under ANY circumstance (not even the ANCHOR_TERMINAL_SEED env override) —
     # seeded stays False, there is no greet, and the pending paste flushes on
     # first output instead (reports-links W3).
-    if is_shell:
+    if is_shell or plain:     # a plain terminal is "just a terminal" (his word 2026-10-02): no seed, env or not (Grok)
         seed_text = None
     elif doctor_brief and (seed_context or "").strip():
         seed_text = seed_context.strip()
@@ -941,6 +943,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                 engine_session_uuid=stored_engine_uuid,
                 doctor_mode=doctor_mode,
                 doctor_posture=doctor_posture,
+                plain=bool(plain),
             ),
             correlation_id=(chain_id or sid),
             folder_path=proj.get("folder_path", ""),
@@ -1008,7 +1011,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # W12 Status Emitter (reports-links W3 amendment: NOT for a shell runner —
     # its worktree_path is the LIVE tree, and there is no wave/budget to narrate
     # into the user's own shell prompt).
-    if not is_shell:
+    if not is_shell and not plain:
         _start_status_emitter(project_id, sid, worktree_path)
     # (wired into the first read_since/attach). Recorded with paste_flushed=False
     # so the flush guard knows it is still pending. With no paste_prompt this is
@@ -1050,7 +1053,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # this project defaults to it. Best-effort (never fails a live session).
     # A SHELL runner is not an engine choice — it must never become the default
     # the next engine session inherits (reports-links W3).
-    if not is_shell:
+    if not is_shell and not plain:
         set_last_engine_for_project(project_id, backend)
     return record
 
@@ -3294,8 +3297,10 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
     except KeyError:
         pass
 
-    # Remove the per-session worktree (safety-checked, tolerant of already-gone).
-    wt_out = _wt.remove_worktree(session_id, project_id=project_id)
+    # Remove the per-session worktree (safety-checked, tolerant of already-gone). A shell or plain session has none - its
+    # path is a live tree - so no prune and no branch delete run in that repo for it (Grok, 2026-10-02).
+    wt_out = ({"ok": True, "removed": False, "reason": "live-tree"} if _is_shell_record(record)
+              else _wt.remove_worktree(session_id, project_id=project_id))
 
     # v10 Wave 6 — Boneyard capture (D3 source "killed"). A hard-kill is the
     # deliberate "I'm done / discarding" action; if this session PRODUCED material
@@ -3363,7 +3368,9 @@ def _teardown_owned_jobs(session_id, record=None, *, project_id=None):
 
     # (2) Worktree-shared LIVE swarm jobs (the real orphan-swarm).
     wt = (rec or {}).get("worktree_path") if isinstance(rec, dict) else None
-    if wt:
+    # a shell or plain session works IN a live tree (a plain terminal's is C:/dev itself): every swarm job running there
+    # is someone else's, never this session's to cancel (Grok, 2026-10-02)
+    if wt and not _is_shell_record(rec):
         try:
             wt_norm = str(Path(wt))
         except (TypeError, ValueError):

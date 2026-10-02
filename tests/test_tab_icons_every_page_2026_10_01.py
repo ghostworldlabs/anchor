@@ -77,7 +77,7 @@ def test_the_pages_draw_his_anchor_where_the_old_glyph_stood():
     ctx = w2._ctx(w1._steps())
     for html in (hsp.render_high_seat_html(base._ctx()), cpg.render_campaign_html(ctx), dpg.render_desk_html(desk._ctx())):
         assert '<div class="mh-title">' + mark + 'Anchor</div>' in html and "&#9875;" not in html and "⚓" not in html
-    assert hsp.anchor_mark("test", 18) + " The " in hsp.render_high_seat_html(base._ctx()), "the rail's seat line too"
+    assert hsp.anchor_mark("test", 18) not in hsp.render_high_seat_html(base._ctx()), "his word 2026-10-02: the rail's seat line wears the Cave's picture alone"
     gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
     assert "&#9875;" not in gui and "anchor-tab-48.png" not in gui, "no page pastes its own mark"
     assert gui.count("{_anchor_mark(") == 2 and '("__ANCHOR_MARK__", _anchor_mark(26)),' in gui and "__ANCHOR_MARK__ Anchor" in gui, "the old dashboard's two and the Doctor's, through the one helper (Grok W5)"

@@ -104,9 +104,9 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert 'data-proj="9405abe0"' in html and 'id="card-9405abe0"' not in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
     assert "3 projects in 3 folders &middot; <b>1</b> with no steward record yet" in html
     # the ruler and the panel
-    assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
-    assert "Later this week" in html and "what you are working on now, in your order" in html and "href=\"/project/__dashboard__?classic=1\"" in html
-    assert "MBA Teaching AI is waiting on you" in html and "raised by: the steward&#x27;s record waits on you" in html
+    assert "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
+    assert "what you are working on now, in your order" in html and 'id="shTerm"' in html and "Workbench" not in html   # the Workbench retired 2026-10-02
+    assert "Later this week" not in html and "raised by:" not in html, "his word 2026-10-02: the dated deliveries are enough - no Today block"
     assert "Sample data" not in html
 
 

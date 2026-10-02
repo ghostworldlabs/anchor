@@ -65,7 +65,7 @@ def test_the_scripts_renew_only_when_no_tile_is_open_and_he_is_quiet_and_keep_th
     assert "var DK = 'anchor:draft:tile:' + pid + ':' + (dir || ''), dkT = null;" in hs and "dlg.send(t, null, list, sendBtn, box, DK); }" in hs
     # opening the conversation takes him to its foot; his name in the tile's rows
     assert "if (comp) comp.scrollIntoView({ block: 'end', behavior: 'smooth' }); if (was && ta && document.activeElement !== ta) ta.focus({ preventScroll: true });" in hs
-    assert "li.querySelector('.w').textContent = you ? YOU : 'The steward';" in hs and "(last.classList.contains('you') ? YOU + ': ' : 'The steward: ')" in hs
+    assert "li.querySelector('.w').textContent = you ? YOU : STEWARD_NAME;" in hs and "(last.classList.contains('you') ? YOU + ': ' : STEWARD_NAME + ': ')" in hs   # by name (2026-10-02)
     assert "var rows = $$('.exrow', list).filter(function (r) { return !r.classList.contains('sysl'); })" in hs, "the strip's gist is the last turn, never the held line"
     cp = open(os.path.join(HERE, "static", "campaign-page.js"), encoding="utf-8").read()
     assert "if (typingNow()) { pendingRenew = text || pendingRenew || 'The record moved \\u2014 the page is renewed.'; if (k) pendingKey = k; return; }" in cp and "if (k && sessionStorage.getItem('campaign_renewed_for') === k) return;" in cp and "if (stampKey) sessionStorage.setItem('campaign_renewed_for', stampKey);" in cp and "renewKey" not in cp

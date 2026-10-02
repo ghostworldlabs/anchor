@@ -360,6 +360,11 @@ ROUTES = [
     # W4 (steward revision, 2026-09-28): his word on a proposed correction set (accept applies it; dismiss closes it)
     _r("POST", "/api/high-seat/repair", AUTH_TOKEN,
        handler="handle_high_seat_repair", migrated=True),
+    # the Cave's plain terminals (2026-10-02, his word): the Workbench retired, a terminal in its place
+    _r("POST", "/api/cave/terminal", AUTH_TOKEN,
+       handler="handle_cave_terminal", migrated=True),
+    _r("GET", "/api/cave/terminals", AUTH_TOKEN,
+       handler="handle_cave_terminals", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

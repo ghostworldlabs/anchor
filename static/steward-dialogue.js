@@ -14,7 +14,7 @@
     var PID = o.pid || '', DIR = o.dir || '', headers = o.headers, receipt = o.receipt || function () {};
     var STEWARD = o.steward || 'The steward', BOOT_STAMP = o.stamp || '', KEY = o.receiptKey || 'steward_receipt', YOU = o.you || 'You';
     var goalName = o.goalName || function (id) { return id; }, openGoal = o.openGoal || null;
-    var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '', stopped: false };
+    var live = { seq: 0, polling: false, target: null, goal: null, line: null, epoch: null, skipJohn: '', stopped: false, sent: false };
     function keep(text, bad, undo) { try { sessionStorage.setItem(KEY, JSON.stringify({ text: text, bad: !!bad, undo: undo || null })); } catch (e) {} }
     function mainList() { return $(o.list || '#exList'); }
     function exLi(who, text, cls, goal) {
@@ -63,15 +63,15 @@
     }
     function asJson(r) { if (r.status === 401 || r.status === 403) { var e = new Error('auth'); e.auth = true; throw e; } return r.json(); }
     // a turn that ended before this page saw its words (it was mid-turn when the page opened): the log has it
-    function catchUp() {
+    var SILENT = 'Done — no reply (it answered with nothing to say, or acted quietly on the record).';
+    function catchUp(mine) {
       fetch('/api/steward/history' + q(), { headers: getHeaders() })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var ts = (j && j.turns) || [], last = null;
           for (var i = ts.length - 1; i >= 0; i--) { var role = String(ts[i].role || '').toLowerCase(); if (ts[i].text && role !== 'john' && role !== 'you' && role !== 'user' && role !== 'human') { last = ts[i]; break; } }
-          if (!last) return;
-          var main = mainList(), rows = main ? $$('.exrow.st .ext', main) : [], txt = String(last.text).replace(/\s+/g, ' ').trim();
-          if (rows.length && rows[rows.length - 1].textContent.replace(/\s+/g, ' ').trim() === txt) return;
+          var main = mainList(), rows = main ? $$('.exrow.st .ext', main) : [], txt = last ? String(last.text).replace(/\s+/g, ' ').trim() : '';
+          if (!last || (rows.length && rows[rows.length - 1].textContent.replace(/\s+/g, ' ').trim() === txt)) { if (mine) appendLine('st', SILENT, 'dim'); return; }
           live.goal = last.goal || null; live.target = null; appendLine('st', txt, ''); live.goal = null;
         })
         .catch(function () {});
@@ -79,7 +79,21 @@
     function handleEvent(ev) {
       if (!ev || ev.tick) return;
       if (ev.t === 'delta') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { li.querySelector('.ext').textContent += (ev.text || ''); settle(li.parentNode); }); return; }
-      if (ev.t === 'turn_end') { if (live.line) { each(live.line, function (li) { li.classList.remove('live'); }); live.line = null; } else catchUp(); live.target = null; live.goal = null; return; }
+      if (ev.t === 'turn_end') {
+        // a turn that ends without words is said, never left blank (his word, 2026-10-02: he asked for no reply and
+        // the page showed nothing - he could not tell the dialogue worked); a row left at "working…" is closed the same way
+        var mine = live.sent; live.sent = false;
+        if (live.line) {
+          each(live.line, function (li) {
+            li.classList.remove('live');
+            if (li.querySelector('.ext').textContent.trim()) return;
+            if (mine) { li.querySelector('.ext').textContent = SILENT; li.classList.add('dim'); var w = li.querySelector('.exw .t'); if (w) w.textContent = ''; }
+            else li.remove();      // a wordless turn this page did not send leaves no row (Grok, 2026-10-02)
+          });
+          live.line = null;
+        } else catchUp(mine);
+        live.target = null; live.goal = null; return;
+      }
       if (ev.t === 'john') { var t = String(ev.text || ''); if (live.skipJohn && t === live.skipJohn) { live.skipJohn = ''; return; } live.target = null; live.goal = null; appendLine('you', t, ''); return; }
       if (ev.t === 'sys' && ev.text) { appendLine('sys', ev.text, 'dim'); return; }
       if (ev.t === 'tool') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { var w = li.querySelector('.exw .t'); if (w) w.textContent = 'working…'; }); return; }
@@ -137,8 +151,8 @@
             keep(j.say, false, j.undo || null);
             location.reload(); return;
           }
-          box.value = '';
-          live.target = list; live.goal = goal || null; live.line = null; live.skipJohn = text;
+          box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {}
+          live.target = list; live.goal = goal || null; live.line = null; live.skipJohn = text; live.sent = true;
           appendLine('you', text);
           if (j.kept) appendLine('sys', 'the steward could not wake just now — your text is kept and goes when it wakes', 'dim');
           else if (j.queued) appendLine('sys', 'queued — the steward is mid-turn; yours goes next', 'dim');

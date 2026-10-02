@@ -2143,8 +2143,8 @@ def _trigger_session_summary_on_finish(project_id, lane, session_id):
             _rec = _sessreg.get_session(session_id)
         except Exception:
             _rec = None
-        if _rec is not None and (_rec.get("backend") or "") == \
-                getattr(_sessreg, "BACKEND_SHELL", "shell"):
+        if _rec is not None and ((_rec.get("backend") or "") == \
+                getattr(_sessreg, "BACKEND_SHELL", "shell") or _rec.get("plain")):
             return
         proj = _rnd.get_project(project_id)
         if proj is None:
@@ -7802,6 +7802,11 @@ def _high_seat_context():
     names = {e.get("id"): e.get("name") or "" for e in entries}
     rows = _ha.build_attention(tasks=[], sessions=sessions, health=(hr[0], hr[1]) if hr else None,
                                today=today, now=now, project_names=names, projects=facts_list, limit=12)
+    try:   # the Cave's Terminal (2026-10-02): the Terminal seat's engine as the default, the plain terminals open now
+        default_cli = _aset.get_default_cli()
+    except Exception:
+        default_cli = "claude"
+    terms_open = sum(1 for r in sessions if r.get("plain") and r.get("status") == _sessreg.STATUS_RUNNING)
     stew = _steward_ui()
     bullets = _ha.brief_bullets(rows, facts_list, today=today, seat_name=stew["high_seat_name"])
     counts = _ha.rail_counts(sessions, rows, folders=len(groups), open_projects=len(entries))
@@ -7897,6 +7902,7 @@ def _high_seat_context():
         "auth_required": bool(_paths.expected_token()),     # R14: the page shows its login box when a token is required and none is held
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head, "overnight": overnight,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
+        "default_cli": default_cli, "terms_open": terms_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": working, "pickup": pickup,
         "projects_html": _high_seat_projects_html(groups, facts),
@@ -8133,6 +8139,51 @@ def handle_high_seat_campaign(handler, path, body):
     from steward_cockpit.campaign_acts import act as _act
     out = _act(entry.get("folder_path"), b)
     handler._send_json(out, 200 if out.get("ok") else 400)
+
+
+_CAVE_TERM_ENGINES = ("claude", "chatgpt", "grok", "gemini", "shell")
+
+
+def _cave_term_row(r):
+    """A plain terminal as the Cave's tab bar needs it - never a path."""
+    return {"session_id": r.get("session_id"), "backend": r.get("backend"), "label": r.get("label") or "",
+            "status": r.get("status"), "created_at": r.get("created_at")}
+
+
+def handle_cave_terminal(handler, path, body):
+    """POST /api/cave/terminal {backend} - a PLAIN terminal on the Cave of Wonders (his word, 2026-10-02: "just a
+    terminal ... you can choose which engine ... the default of the terminal engine ... it will open to dev ... it
+    just doesn't have the steward skill running in it"). The engine's own interactive CLI in the workspace root (the
+    __dashboard__ project's folder, C:/dev): no worktree, no seed, nothing written back into the tree (plain=True
+    holds every shell guard), never the project's remembered engine. The Workbench it replaces is retired."""
+    backend = str((body or {}).get("backend") or "").strip() or _aset.get_default_cli()
+    if backend not in _CAVE_TERM_ENGINES:
+        handler._send_json({"ok": False, "error": "unknown engine"}, 400)
+        return
+    try:
+        n = 1 + sum(1 for r in _sessreg.list_sessions() if r.get("plain") and r.get("status") == _sessreg.STATUS_RUNNING)
+    except Exception:
+        n = 1
+    try:
+        rec = _termsess.start_session("__dashboard__", "general", backend=backend,
+                                      label="Terminal %d" % n, plain=True)
+    except _termsess.TerminalSessionError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        return
+    except Exception as exc:       # e.g. the spawn cap: said, never a hang
+        handler._send_json({"ok": False, "error": str(exc) or exc.__class__.__name__}, 409)
+        return
+    handler._send_json({"ok": True, "session": _cave_term_row(rec)})
+
+
+def handle_cave_terminals(handler, path, body):
+    """GET /api/cave/terminals - the Cave's plain terminals still running, oldest first (the tab bar after a reload)."""
+    try:
+        rows = [r for r in _sessreg.list_sessions() if r.get("plain") and r.get("status") == _sessreg.STATUS_RUNNING]
+    except Exception:
+        rows = []
+    rows.sort(key=lambda r: float(r.get("created_at") or 0))
+    handler._send_json({"ok": True, "sessions": [_cave_term_row(r) for r in rows]})
 
 
 def handle_high_seat_repair(handler, path, body):
@@ -21366,6 +21417,8 @@ def handle_foundry_sleep_rollback(handler, path, body):
 _MIGRATED_HANDLERS = {
     "handle_high_seat_campaign": handle_high_seat_campaign,
     "handle_high_seat_repair": handle_high_seat_repair,
+    "handle_cave_terminal": handle_cave_terminal,
+    "handle_cave_terminals": handle_cave_terminals,
     "handle_version": handle_version,
     "handle_status": handle_status,
     "handle_routes": handle_routes,

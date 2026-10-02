@@ -814,6 +814,12 @@
    "pattern": "/api/foundry/sleep_session/rollback",
    "match": "exact",
    "auth": "token"
+  },
+  {
+   "method": "POST",
+   "pattern": "/api/cave/terminal",
+   "match": "exact",
+   "auth": "token"
   }
  ],
  "ecgberht_bridges": {

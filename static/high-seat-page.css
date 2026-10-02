@@ -851,3 +851,22 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .brief-more ul{margin:4px 0 0 16px;padding:0}
 .t-age{color:var(--text-dim);font-size:11px;white-space:nowrap}
 /* the login box's look lives with the dialogue (static/steward-dialogue.css): both pages mount it */
+
+/* the Terminal (2026-10-02, his word): plain engine terminals in tabs at the foot of the board, VS Code's panel */
+.term-eng{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-size:12px;margin-right:6px}
+#termCount.bad{color:#f0a0a0}
+.termdock{border:1px solid var(--border);border-radius:11px;background:#0a0c11;overflow:hidden;margin-top:6px}
+.termtabs{display:flex;gap:2px;flex-wrap:wrap;background:#0d1016;border-bottom:1px solid var(--border);padding:4px 6px 0}
+.ttab{display:flex;align-items:center;gap:6px;padding:5px 8px 5px 11px;border-radius:7px 7px 0 0;font-size:12px;color:var(--text-dim);cursor:pointer;border:1px solid transparent;border-bottom:0}
+.ttab.on{background:#0a0c11;color:var(--text);border-color:var(--border)}
+.ttab .tx{background:none;border:0;color:var(--text-dim2);font-size:15px;line-height:1;padding:0 2px;cursor:pointer}
+.ttab .tx:hover{color:#f0a0a0}
+.termbody{height:46vh;min-height:220px;resize:vertical;overflow:hidden;padding:6px 4px 4px 8px}
+.termhost{width:100%;height:100%}
+.termhost[hidden]{display:none}
+
+/* the health banner along the top (2026-10-02, his word): the morning self-test found issues; the Doctor and the Zombie Hunter here */
+.healthbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 2px;padding:9px 13px;border:1px solid #7a2e2e;border-radius:11px;background:rgba(190,60,60,.12);color:#f3c4c4;font-size:13px}
+.healthbar .hb-mark{font-size:16px;color:#f08080}
+.healthbar .hb-t{flex:1;min-width:200px}
+.healthbar .hb-t b{color:#ffd9d9}
