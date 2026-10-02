@@ -159,3 +159,26 @@ def test_an_unreadable_or_empty_store_is_never_cached(sr, monkeypatch):
     _settle(sr)
     assert sr.list_sessions() == [] and sr.list_sessions() == []
     assert len(reads) == 4, "an empty registry is not worth caching either"
+
+
+def test_a_reader_s_copy_is_its_own_all_the_way_down(sr):
+    """Grok's read: the stage writers edit stage entries in place; ``dict(rec)`` alone would hand every reader the
+    cache's own stage_history, job ids and summary refs - a nested write would stick for as long as the file stood."""
+    a = sr.register_session("p1", "research", status=sr.STATUS_RUNNING, effort_managed=True)
+    sr.set_current_stage(a["session_id"], "research", "research", "abc123")
+    sr.claim_job(a["session_id"], "job-1")
+    _settle(sr)
+    before = sr.get_session(a["session_id"])
+    assert before["stage_history"] and before["owned_job_ids"] == ["job-1"]
+    for rec in (sr.get_session(a["session_id"]), sr.list_sessions()[0], sr.chain_members(sr.chain_for(a["session_id"]))[0]):
+        rec["stage_history"].append({"stage": "scribbled"})
+        rec["stage_history"][0]["stage"] = "scribbled"
+        rec["stage_history"][0]["new"] = {"deep": 1}
+        rec["owned_job_ids"].append("scribbled")
+        for k, v in list(rec.items()):
+            if isinstance(v, list):
+                v.append("scribbled")
+            elif isinstance(v, dict):
+                v["scribbled"] = 1
+    assert sr.get_session(a["session_id"]) == before, "the next reader sees the store, not the last reader's edits"
+    assert sr.list_sessions()[0] == before

@@ -304,7 +304,10 @@ def load_sessions() -> dict:
 #   * a write by this process drops the cache at once;
 #   * an empty read (a missing, unreadable or corrupt store) is never cached;
 #   * MUTATORS never use it: every read-modify-write calls ``load_sessions``,
-#     which always reads the file; readers get their own copy of each record.
+#     which always reads the file; readers get their own copy of each record,
+#     nested values included (``_reader_copy`` - stage entries are edited in
+#     place by the stage writers, and an alias into the cache would outlive
+#     the page that made it: Grok's read).
 _CACHE_MIN_AGE_S = 0.25
 _READ_CACHE = {"key": None, "reg": None}
 _READ_CACHE_LOCK = threading.Lock()
@@ -343,6 +346,20 @@ def _read_sessions() -> dict:
             _READ_CACHE["key"] = key
             _READ_CACHE["reg"] = reg
     return reg
+
+
+def _own(v):
+    if isinstance(v, dict):
+        return {k: _own(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_own(x) for x in v]
+    return v
+
+
+def _reader_copy(rec: dict) -> dict:
+    """A record a reader may do anything to: its own dict, its own stage
+    entries, job ids and every other nested value (the store is JSON)."""
+    return {k: (_own(v) if isinstance(v, (dict, list)) else v) for k, v in rec.items()}
 
 
 def _coerce_float_or_none(v):
@@ -770,7 +787,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
 def get_session(session_id: str):
     """Return the record for ``session_id`` or ``None``."""
     rec = _read_sessions().get(session_id)
-    return dict(rec) if rec is not None else None
+    return _reader_copy(rec) if rec is not None else None
 
 
 def list_sessions(project_id=None, status=None) -> list:
@@ -788,7 +805,7 @@ def list_sessions(project_id=None, status=None) -> list:
             continue
         if status is not None and rec.get("status") != status:
             continue
-        out.append(dict(rec))       # the caller's own copy: the readers' cache is shared
+        out.append(_reader_copy(rec))   # the caller's own copy: the readers' cache is shared
     out.sort(key=lambda r: (r.get("created_at") is None,
                             -(r.get("created_at") or 0.0)))
     return out
@@ -829,7 +846,7 @@ def chain_members(chain_id: str) -> list:
     if not chain_id:
         return []
     reg = _read_sessions()
-    members = [dict(rec) for rec in reg.values()
+    members = [_reader_copy(rec) for rec in reg.values()
                if (rec.get("chain_id") or rec.get("session_id")) == chain_id]
     members.sort(key=lambda r: (
         _CHAIN_LANE_ORDER.get(r.get("lane", ""), _CHAIN_LANE_DEFAULT),
