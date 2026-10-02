@@ -33,6 +33,7 @@ Stdlib only. No third-party imports.
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -282,6 +283,66 @@ def load_sessions() -> dict:
                 if e.get("session_id"):
                     out[e["session_id"]] = _normalize(e)
     return out
+
+
+# ── The readers' cache (2026-10-01) ─────────────────────────────────────────
+#
+# The Cave of Wonders page took about 14 s to answer every load (the morning
+# health check had flagged the home page slow for a week). Its project tiles
+# call ``list_sessions`` three times each - 76 calls a page - and every call
+# re-read the 2.6 MB store and re-normalized its 2,012 records. READERS now
+# share one parsed registry for as long as the store's file is unchanged.
+#
+# What keeps it honest:
+#   * the key is the file itself (path, mtime, size): a write by this process,
+#     the CLI or anything else moves it;
+#   * a read is cached only when the file was last written more than
+#     ``_CACHE_MIN_AGE_S`` ago - Windows stamps files with the system clock's
+#     tick, so two writes inside one tick can share a timestamp (and a size:
+#     "done" and "idle" are both four letters); a store that fresh is simply
+#     read again;
+#   * a write by this process drops the cache at once;
+#   * an empty read (a missing, unreadable or corrupt store) is never cached;
+#   * MUTATORS never use it: every read-modify-write calls ``load_sessions``,
+#     which always reads the file; readers get their own copy of each record.
+_CACHE_MIN_AGE_S = 0.25
+_READ_CACHE = {"key": None, "reg": None}
+_READ_CACHE_LOCK = threading.Lock()
+
+
+def _store_key(p):
+    """(path, mtime_ns, size) of the store, or None when it cannot be stat'ed."""
+    try:
+        st = os.stat(p)
+        return (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _drop_read_cache() -> None:
+    with _READ_CACHE_LOCK:
+        _READ_CACHE["key"] = None
+        _READ_CACHE["reg"] = None
+
+
+def _read_sessions() -> dict:
+    """The registry for READERS: ``load_sessions``'s answer, shared while the
+    store's file is unchanged. The returned dict and its records are SHARED -
+    a caller copies what it hands out and never writes through it."""
+    p = sessions_path()
+    key = _store_key(p)
+    if key is None:
+        return load_sessions()
+    with _READ_CACHE_LOCK:
+        if _READ_CACHE["key"] == key and _READ_CACHE["reg"] is not None:
+            return _READ_CACHE["reg"]
+    reg = load_sessions()
+    settled = time.time() - key[1] / 1e9 >= _CACHE_MIN_AGE_S
+    if reg and settled and _store_key(p) == key:
+        with _READ_CACHE_LOCK:
+            _READ_CACHE["key"] = key
+            _READ_CACHE["reg"] = reg
+    return reg
 
 
 def _coerce_float_or_none(v):
@@ -615,6 +676,7 @@ def _write_sessions_locked(reg: dict) -> None:
         f.flush()
         os.fsync(f.fileno())
     _atomic_replace(str(tmp), str(target))
+    _drop_read_cache()      # this process wrote: no reader is served the store as it was
 
 
 def _save_sessions(reg: dict, *, _locked: bool = False) -> None:
@@ -707,7 +769,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
 
 def get_session(session_id: str):
     """Return the record for ``session_id`` or ``None``."""
-    return load_sessions().get(session_id)
+    rec = _read_sessions().get(session_id)
+    return dict(rec) if rec is not None else None
 
 
 def list_sessions(project_id=None, status=None) -> list:
@@ -718,14 +781,14 @@ def list_sessions(project_id=None, status=None) -> list:
 
     Sorted newest-first by ``created_at`` (records with no timestamp sort last).
     """
-    reg = load_sessions()
+    reg = _read_sessions()
     out = []
     for rec in reg.values():
         if project_id is not None and rec.get("project_id") != project_id:
             continue
         if status is not None and rec.get("status") != status:
             continue
-        out.append(rec)
+        out.append(dict(rec))       # the caller's own copy: the readers' cache is shared
     out.sort(key=lambda r: (r.get("created_at") is None,
                             -(r.get("created_at") or 0.0)))
     return out
@@ -750,7 +813,7 @@ _CHAIN_LANE_DEFAULT = 9  # unknown lanes sort after the known trio order
 
 def chain_for(session_id: str):
     """Return the ``chain_id`` of ``session_id``, or ``None`` if unknown."""
-    rec = load_sessions().get(session_id)
+    rec = _read_sessions().get(session_id)
     if rec is None:
         return None
     return rec.get("chain_id") or rec.get("session_id")
@@ -765,8 +828,8 @@ def chain_members(chain_id: str) -> list:
     """
     if not chain_id:
         return []
-    reg = load_sessions()
-    members = [rec for rec in reg.values()
+    reg = _read_sessions()
+    members = [dict(rec) for rec in reg.values()
                if (rec.get("chain_id") or rec.get("session_id")) == chain_id]
     members.sort(key=lambda r: (
         _CHAIN_LANE_ORDER.get(r.get("lane", ""), _CHAIN_LANE_DEFAULT),
@@ -800,7 +863,7 @@ def effort_root(session_id: str):
     continuation). For a pre-v12 record it normalizes to the record's own
     session_id. Returns ``None`` for an unknown session.
     """
-    rec = load_sessions().get(session_id)
+    rec = _read_sessions().get(session_id)
     if rec is None:
         return None
     return rec.get("effort_id") or rec.get("session_id")
