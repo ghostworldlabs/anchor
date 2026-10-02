@@ -214,27 +214,66 @@ def _refinement_fingerprint(root):
     return tuple(result)
 
 
-def read_refinement(campaign_dir: str):
+def read_refinement(campaign_dir: str, stale_ok: bool = False):
     """Coalesce dashboard reads; the spine remains the lifecycle authority.
 
     Source changes invalidate immediately. A two-second maximum age also
     rechecks external artifact damage that does not alter the ledger/index.
     Mutations still use the writer's sequence and exact-byte checks.
+
+    stale_ok (the pages' reads, 2026-10-02): past the two seconds, while the
+    sources are unchanged, the last good result answers at once and ONE
+    background read rechecks it for the next load - a page waits for the
+    spine only when the record itself changed (the Cave of Wonders paid a
+    full spine read on every load, its loads being more than 2 s apart).
     """
     root = Path(campaign_dir).resolve()
     key = os.path.normcase(str(root))
     with _REFINEMENT_READ_LOCK:
         slot = _REFINEMENT_READ_SLOTS.setdefault(key, {'lock': threading.Lock()})
+    if stale_ok:
+        with _REFINEMENT_READ_LOCK:
+            cached = slot.get('result') if slot.get('fingerprint') == _refinement_fingerprint(root) else None
+            fresh = cached is not None and time.monotonic() < slot.get('until', 0)
+            if cached is not None and cached.get('ok') and not fresh and not slot.get('refreshing'):
+                try:
+                    threading.Thread(target=_refresh_refinement_slot, args=(str(root), slot),
+                                     name='refinement-recheck', daemon=True).start()
+                    slot['refreshing'] = True
+                except RuntimeError:
+                    cached = None       # no thread: this load reads synchronously
+        if cached is not None and cached.get('ok'):
+            return deepcopy(cached)
     with slot['lock']:
-        fingerprint = _refinement_fingerprint(root)
-        if (slot.get('fingerprint') == fingerprint and
-                time.monotonic() < slot.get('until', 0)):
-            return deepcopy(slot['result'])
-        result = _read_refinement_uncached(str(root))
-        if _refinement_fingerprint(root) == fingerprint:
-            slot.update(fingerprint=fingerprint, result=deepcopy(result),
-                        until=time.monotonic() + (2.0 if result and result.get('ok') else .25))
-        return result
+        return _read_refinement_slot(root, slot)
+
+
+def _read_refinement_slot(root, slot):
+    """The slot's read under its lock: answer from the slot while fresh, else read and store."""
+    fingerprint = _refinement_fingerprint(root)
+    if (slot.get('fingerprint') == fingerprint and
+            time.monotonic() < slot.get('until', 0)):
+        return deepcopy(slot['result'])
+    result = _read_refinement_uncached(str(root))
+    if _refinement_fingerprint(root) == fingerprint:
+        slot.update(fingerprint=fingerprint, result=deepcopy(result),
+                    until=time.monotonic() + (2.0 if result and result.get('ok') else .25))
+    return result
+
+
+def _refresh_refinement_slot(campaign_dir, slot):
+    # A recheck that raises drops the good answer it was guarding: the next page read is synchronous and shows the
+    # failure, never the old result standing in for it (Grok, 2026-10-02). A non-ok read is stored by the slot read
+    # itself, and a page never answers stale from a non-ok result.
+    try:
+        with slot['lock']:
+            _read_refinement_slot(Path(campaign_dir), slot)
+    except Exception:
+        with slot['lock']:
+            slot.pop('result', None); slot.pop('fingerprint', None); slot['until'] = 0
+    finally:
+        with _REFINEMENT_READ_LOCK:
+            slot['refreshing'] = False
 
 
 def _read_refinement_uncached(campaign_dir: str):
@@ -483,7 +522,7 @@ def read_map(campaign_dir: str):
         gaps.append("North Star changed since its last re-read (goal_flip at " + str(last_flip.get("at") or "?")
                     + " read revision " + flip_revision + ", now " + goal_revision + ")")
 
-    refinement = read_refinement(campaign_dir)
+    refinement = read_refinement(campaign_dir, stale_ok=True)
     if refinement is not None:
         # Managed wait has one authority. These are read-time projections,
         # never a second attention/Face/Strip writer.
@@ -1823,7 +1862,7 @@ def _read_deliverables(campaign_dir: str):
                           # name fragment; the map embeds the link there
                           "step": cells[3].strip() if len(cells) > 3 else "",
                           "openable": openable})
-        refinement = read_refinement(campaign_dir)
+        refinement = read_refinement(campaign_dir, stale_ok=True)
         if refinement is not None:
             if not refinement.get("ok"):
                 return {"exists": True, "items": items, "error": refinement.get("error")}

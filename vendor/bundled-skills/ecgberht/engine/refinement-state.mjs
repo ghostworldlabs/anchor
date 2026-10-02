@@ -305,8 +305,32 @@ function validateHandoffPresentedOutputs(handoff, slice, presentation, reconcili
   }
 }
 
+// A captured dispatch context is written once (cloned at the handoff) and only read after, so its
+// field digests are kept with it; a slice's digests are taken once per refresh, not once per handoff.
+// The fold refreshes after every event, so without this the read re-hashed every pending handoff's
+// context on every event (the MBA record: 717 events, ~6 s a read).
+const capturedDigests = new WeakMap();
+
+function capturedDigest(dispatch, field) {
+  let digests = capturedDigests.get(dispatch);
+  if (!digests) capturedDigests.set(dispatch, digests = new Map());
+  if (!digests.has(field)) {
+    digests.set(field, refinementDigest(field === 'depends_on' ? producerDependencyPins(dispatch[field]) : dispatch[field]));
+  }
+  return digests.get(field);
+}
+
 function refreshProducerHandoffs(state) {
   const fields = ['step_id', 'round', 'requirements', 'candidate', 'depends_on'];
+  const currentDigests = new Map();
+  const currentDigest = (slice, field) => {
+    let digests = currentDigests.get(slice);
+    if (!digests) currentDigests.set(slice, digests = new Map());
+    if (!digests.has(field)) {
+      digests.set(field, refinementDigest(field === 'depends_on' ? producerDependencyPins(slice[field]) : slice[field]));
+    }
+    return digests.get(field);
+  };
   for (const handoff of Object.values(state.producer_handoffs)) {
     if (handoff.status !== 'pending_steward_review') continue;
     const slice = handoff.step_id === null ? null : getSlice(state, handoff.step_id);
@@ -323,9 +347,7 @@ function refreshProducerHandoffs(state) {
     if (slice && object(dispatch)) {
       for (const field of fields) {
         if (Object.hasOwn(dispatch, field)) {
-          const captured = field === 'depends_on' ? producerDependencyPins(dispatch[field]) : dispatch[field];
-          const current = field === 'depends_on' ? producerDependencyPins(slice[field]) : slice[field];
-          if (refinementDigest(captured) !== refinementDigest(current)) changed.push(field);
+          if (capturedDigest(dispatch, field) !== currentDigest(slice, field)) changed.push(field);
         }
       }
     }

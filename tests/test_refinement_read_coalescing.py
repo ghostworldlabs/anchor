@@ -58,3 +58,44 @@ def test_failures_are_retried_after_short_ttl(tmp_path,monkeypatch):
     clock[0]+=.26
     campaign.read_refinement(str(tmp_path))
     assert len(calls)==2
+
+
+def test_page_reads_answer_stale_and_recheck_once_in_the_background(tmp_path,monkeypatch):
+    # 2026-10-02: a page past the two seconds is answered from the last good read while the
+    # sources are unchanged; ONE background read rechecks it; a changed record is read at once
+    (tmp_path/'roadmap.json').write_text('{}');clock=[1.0];calls=[];release=threading.Event()
+    monkeypatch.setattr(campaign.time,'monotonic',lambda:clock[0])
+    def read(root):
+        calls.append(root)
+        if len(calls)==2: assert release.wait(5)
+        return {'ok':True,'state':{'reads':len(calls)}}
+    monkeypatch.setattr(campaign,'_read_refinement_uncached',read)
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==1
+    clock[0]+=5
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==1
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==1
+    release.set()
+    for t in [t for t in threading.enumerate() if t.name=='refinement-recheck']: t.join(5)
+    assert len(calls)==2
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==2
+    (tmp_path/'roadmap.json').write_text('{"new_event":true}')
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==3
+    # an act never takes the stale answer
+    clock[0]+=5
+    assert campaign.read_refinement(str(tmp_path))['state']['reads']==4
+
+
+def test_a_recheck_that_raises_drops_the_stale_answer(tmp_path,monkeypatch):
+    # Grok 2026-10-02: the recheck guards damage the fingerprint cannot see; when it fails the page reads at once
+    (tmp_path/'roadmap.json').write_text('{}');clock=[1.0];calls=[]
+    monkeypatch.setattr(campaign.time,'monotonic',lambda:clock[0])
+    def read(root):
+        calls.append(root)
+        if len(calls)==2: raise RuntimeError('spine down')
+        return {'ok':True,'state':{'reads':len(calls)}}
+    monkeypatch.setattr(campaign,'_read_refinement_uncached',read)
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==1
+    clock[0]+=5
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==1
+    for t in [t for t in threading.enumerate() if t.name=='refinement-recheck']: t.join(5)
+    assert campaign.read_refinement(str(tmp_path),stale_ok=True)['state']['reads']==3
