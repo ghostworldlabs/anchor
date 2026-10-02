@@ -67,7 +67,9 @@
       if (url) t.side.url = url;
       t.side.title = titleOf(win, "Deliverable");
       t.side.label.textContent = t.side.title;
-      if (url && isPage(new URL(url).pathname)) promoteSide(t);   // a blank pane that became a page gets its own tile
+      // a blank pane that NAVIGATED to a page gets its own tile; a page written into it by its caller
+      // (document.open gives it the caller's address - Tidy-Idy's progress page) stays where it is
+      if (url && url !== t.side.writer && isPage(new URL(url).pathname)) promoteSide(t);
     } else {
       if (url) t.url = url;
       if (t.kind !== "cave") t.title = titleOf(win, t.title || "Page");
@@ -133,25 +135,33 @@
       if (name) {                                               // a named window is reused
         for (var i = 0; i < tiles.length; i++) {
           var t = tiles[i];
-          if (t.side && t.side.name === name) { if (!r.blank) t.side.frame.src = r.url; focus(t.id); return t.side.frame.contentWindow; }
+          if (t.side && t.side.name === name) { if (!r.blank) t.side.frame.src = r.url; focus(t.id, true); return t.side.frame.contentWindow; }
           if (t.name === name && t.kind !== "cave") {
             if (!t.frame) t.frame = newFrame("");
             if (!r.blank) t.frame.src = r.url;
-            focus(t.id); return t.frame.contentWindow;
+            focus(t.id, true); return t.frame.contentWindow;
           }
         }
       }
       var caller = tileOfWindow(fromWin);
       if (caller && caller.tile.kind !== "cave" && !caller.side && (r.blank || !isPage(r.path))) {
-        return openSide(caller.tile, r, name);                  // beside the page that asked
+        return openSide(caller.tile, r, name, fromWin);         // beside the page that asked
       }
       var tile = { id: "t" + (++seq), kind: "page", url: r.blank ? "" : r.url, title: r.blank ? "Opening…" : labelFor(r),
                    name: name, opener: fromWin || null, frame: null, side: null };
       tiles.push(tile);
       tile.frame = newFrame(r.blank ? "" : r.url);
       if (r.blank) guardBlank(tile.frame, function () { closeTile(tile.id); });
-      focus(tile.id);
+      focus(tile.id, true);
       return tile.frame.contentWindow;
+    },
+    download: function (u, fromWin) {
+      var r = resolve(u, fromWin);
+      if (!r || r.blank || !isDownload(r)) return false;
+      var a = document.createElement("a");
+      a.href = r.url; a.download = ""; a.hidden = true;
+      document.body.appendChild(a); a.click(); a.remove();
+      return true;
     },
     openerOf: function (win) {
       var hit = tileOfWindow(win);
@@ -178,7 +188,7 @@
   }
 
   // ---------- the pane beside the dialogue ----------
-  function openSide(tile, r, name) {
+  function openSide(tile, r, name, fromWin) {
     if (!tile.side) {
       var box = document.createElement("section");
       box.className = "side";
@@ -195,6 +205,7 @@
       tile.side = { box: box, frame: f, label: label, url: "", title: "", name: name };
     }
     tile.side.name = name || tile.side.name;
+    tile.side.writer = addressOf(fromWin);
     tile.side.title = r.blank ? "Opening…" : labelFor(r);
     tile.side.label.textContent = tile.side.title;
     if (r.blank) {
@@ -209,7 +220,7 @@
       tile.side.url = r.url;
       tile.side.frame.src = r.url;
     }
-    if (tile.id !== focusId) focus(tile.id); else layout();
+    if (tile.id !== focusId) focus(tile.id, true); else layout();
     return tile.side.frame.contentWindow;
   }
 
@@ -228,7 +239,8 @@
   }
 
   // ---------- focus ----------
-  function focus(id) {
+  // fromCall: inside a page's window.open - the drop waits for the new frame's load (or the timer), never now
+  function focus(id, fromCall) {
     var next = byId(id);
     if (!next) return;
     var prev = byId(focusId);
@@ -243,7 +255,7 @@
     if (!next.frame) next.frame = newFrame(next.url || CAVE_URL);   // a dropped tile comes back from its address
     layout();
     render();
-    if (frameReady(next.frame)) settle();
+    if (!fromCall && frameReady(next.frame)) settle();
     clearTimeout(dropTimer);
     dropTimer = setTimeout(settle, DROP_AFTER_MS);
   }

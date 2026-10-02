@@ -38,6 +38,7 @@ PAGES = {
 <a id="dl" href="/api/steward/deliverable-file?pid=p1&path=Deck.pptx&download=1" target="_blank">download</a>
 <a id="named" href="/report/x" target="anchor_report_window">named</a>
 <a id="p3" href="/project/p3" target="_blank">other cockpit</a>
+<button id="tidy" onclick="var w=window.open('','tidy_status');w.document.open();w.document.write('<title>Tidy run</title><p id=n>0</p>');w.document.close();window.__tick=setInterval(function(){var n=w.document.getElementById('n');n.textContent=+n.textContent+1;},100);">tidy</button>
 <iframe id="v1" src="/steward/v1?pid=p1" style="width:300px;height:80px"></iframe>
 </body></html>""",
     "/project/p2": "<!doctype html><html><head><title>Artificial Magi</title></head><body>" + SHIM + "<p>magi</p></body></html>",
@@ -322,3 +323,17 @@ def test_phone_a_deliverable_stacks_under_the_dialogue(phone):
     side = phone.evaluate("(() => { const r = document.querySelector('.side').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
     assert side[1] >= main[1] + main[3] - 1          # below the dialogue, not beside it
     assert abs(side[2] - main[2]) < 2 and main[2] > 380   # both full width
+
+
+
+def test_a_page_written_into_a_blank_pane_stays_beside_its_caller_which_keeps_updating_it(page):
+    """Tidy-Idy (project-window.js / tidy-idy-run.js): the cockpit writes its progress page into a blank window and
+    polls it. document.open gives that page the caller's address - it must NOT be promoted to a tile of its own."""
+    p1 = _open_p1(page)
+    p1.locator("#tidy").click()
+    page.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
+    page.wait_for_timeout(1200)
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
+    n = page.evaluate("+document.querySelector('.side iframe').contentDocument.getElementById('n').textContent")
+    assert n >= 5                                       # the caller is alive and still writing into it
+    assert page.locator(".side .name").text_content() == "Tidy run"

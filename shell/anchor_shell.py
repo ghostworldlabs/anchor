@@ -25,8 +25,12 @@ ROOT = Path(__file__).resolve().parent.parent
 ICON = ROOT / "vendor" / "brand" / "anchor-icon.ico"
 PROFILE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "anchor-shell" / "profile"
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+user32.SendMessageW.restype = wintypes.LPARAM
+user32.LoadImageW.restype = wintypes.HANDLE
+user32.FindWindowW.restype = wintypes.HWND
 ERROR_ALREADY_EXISTS = 183
 
 
@@ -34,7 +38,8 @@ def bring_forward_existing():
     """A second launch: find the open Anchor window, restore it and bring it to the front."""
     hwnd = user32.FindWindowW(None, TITLE)
     if hwnd:
-        user32.ShowWindow(hwnd, 9)                      # SW_RESTORE
+        if user32.IsIconic(hwnd):                       # restore only a minimised window; a maximised one stays
+            user32.ShowWindow(hwnd, 9)                  # SW_RESTORE
         user32.SetForegroundWindow(hwnd)
     return bool(hwnd)
 
@@ -42,11 +47,10 @@ def bring_forward_existing():
 def set_window_icon(hwnd, path):
     """WM_SETICON with the anchor (the window frame and Alt+Tab); the taskbar uses the shortcut's icon."""
     LR_LOADFROMFILE, IMAGE_ICON, WM_SETICON = 0x10, 1, 0x0080
-    user32.LoadImageW.restype = wintypes.HANDLE
     for which, size in ((1, 256), (0, 32)):             # ICON_BIG, ICON_SMALL
         h = user32.LoadImageW(None, str(path), IMAGE_ICON, size, size, LR_LOADFROMFILE)
         if h:
-            user32.SendMessageW(wintypes.HWND(hwnd), WM_SETICON, which, h)
+            user32.SendMessageW(hwnd, WM_SETICON, which, h)
 
 
 def main(argv=None):
@@ -55,7 +59,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     mutex = kernel32.CreateMutexW(None, False, "Local\\" + APP_ID)
-    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         bring_forward_existing()
         return 0
 

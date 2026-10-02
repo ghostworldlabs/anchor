@@ -35,6 +35,7 @@
     var a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
     if (!a || a.hasAttribute("download")) return;
     var href = a.getAttribute("href") || "";
+    try { if (app.download(a.href, window)) { ev.preventDefault(); return; } } catch (e) { /* the link goes as it was */ }
     if (/^(ms-\w+|mailto|tel|file):/i.test(href)) {          // an app link: Windows opens it, never the frame
       ev.preventDefault(); nativeOpen.call(window, href, "_blank"); return;
     }
@@ -49,5 +50,7 @@
     var opener = app.openerOf(window);
     if (opener) Object.defineProperty(window, "opener", { configurable: true, get: function () { return opener; } });
   } catch (e) { /* the page keeps its own opener */ }
-  window.close = function () { try { app.closeWindow(window); } catch (e) { /* nothing to close */ } };
+  if (window.parent === window.top) {
+    window.close = function () { try { app.closeWindow(window); } catch (e) { /* nothing to close */ } };
+  }
 })();

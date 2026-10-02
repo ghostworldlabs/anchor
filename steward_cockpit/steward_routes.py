@@ -227,9 +227,14 @@ window.STEWARD_BUILD = %s;
   // probe. Loop guard: at most one reload per server version.
   // Never mid-dictation (the Anchor app, 2026-10-02): a reload waits while a box holds unsent words or
   // took input in the last ten seconds; the next check (30 s) tries again.
+  // The say box lives in the chamber (v1/v3), a frame inside the cockpit: a focused frame asks its own guard.
   var _lastIn=0;document.addEventListener('input',function(){_lastIn=Date.now();},true);
   function _busy(){var ae=document.activeElement;
-    return Date.now()-_lastIn<10000||!!(ae&&/^(TEXTAREA|INPUT)$/.test(ae.tagName)&&ae.value);}
+    if(Date.now()-_lastIn<10000)return true;
+    if(!ae)return false;
+    if(ae.tagName==='IFRAME'){try{var b=ae.contentWindow.__stewardBusy;return !!(b&&b());}catch(_){return false;}}
+    return !!((ae.tagName==='TEXTAREA'||(ae.tagName==='INPUT'&&/^(text|search|)$/i.test(ae.type||'')))&&ae.value);}
+  window.__stewardBusy=_busy;
   if (window.STEWARD_BUILD) setInterval(function(){
     _f('/api/version', {cache:'no-store'}).then(function(r){return r.json();})
       .then(function(j){
