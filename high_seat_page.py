@@ -352,7 +352,7 @@ def _rail(ctx):
         '<nav class="rail">'
         '<div class="lockup">%s<div class="wordmark">Ghost World <span class="gwl-accent">Labs</span></div></div>'
         '<div class="gwl-badge">Powered by NextGen Nuclear %s</div>'
-        '<div class="railseat">%s<h1><span class="a">&#9875;</span> The %s</h1></div>'
+        '<div class="railseat">%s<h1>%s The %s</h1></div>'
         '<div class="sub">Anchor &middot; the whole portfolio, ranked</div>'
         '<div class="navk">Destinations</div>'
         '<ul class="nav" id="railNav">'
@@ -369,9 +369,18 @@ def _rail(ctx):
         '<div class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div></div>'
         '</nav>'
     ) % (_brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
-         _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
+         _brand_img(ctx["build"], st["high_seat"], ""), anchor_mark(ctx["build"], 18), esc(st["high_seat_name"]),
          esc(st["high_seat_name"]), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
          esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
+
+
+def anchor_mark(build, px=26):
+    """His anchor wherever a page drew the old anchor glyph beside the word Anchor (his word, 2026-10-01 18:5x: "there
+    are some anchor icons embedded in the cave of wonder page upper left hand side that need to be updated. Same with
+    the Campaign page"): the tab drawing at ``px``, the page's own size for it."""
+    return ('<img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png?v=%s" alt="" width="%d" height="%d" '
+            'style="border-radius:%dpx;vertical-align:middle;flex:none" onerror="this.style.display=\'none\'">'
+            % (esc(build), px, px, max(4, px // 4)))
 
 
 def _masthead(ctx):
@@ -383,10 +392,10 @@ def _masthead(ctx):
     stew = ('<div class="mh-stew" title="your steward">%s<div><b>The %s</b><span>%s &middot; your steward</span></div></div>' % (
         _brand_img(b, st.get("high_seat") or "", "mh-seat"), esc(st.get("high_seat_name") or "High Seat"), esc(st.get("label") or "the steward"))) if st else ""
     return (
-        '<div class="masthead"><div class="mh-title"><span class="a">&#9875;</span>Anchor</div><div class="mh-div"></div>'
+        '<div class="masthead"><div class="mh-title">%sAnchor</div><div class="mh-div"></div>'
         '<div class="mh-lock">%s<div><div class="mh-w1">Ghost World <span class="gwl-accent">Labs</span></div>'
         '<div class="mh-w2">R&amp;D Mission Control</div></div></div><div class="mh-sp"></div>%s</div>'
-    ) % (_brand_img(b, "gwl-m-icon.svg", "mh-mark"), stew)
+    ) % (anchor_mark(b), _brand_img(b, "gwl-m-icon.svg", "mh-mark"), stew)
 
 
 def _hdr(ctx):

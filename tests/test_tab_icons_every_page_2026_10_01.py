@@ -58,6 +58,30 @@ def test_the_tab_drawing_is_installed_and_reads_at_tab_size():
     assert sorted(ico.info["sizes"]) == [(16, 16), (32, 32), (48, 48)] and hsp.ANCHOR_TAB_SIZES == "16x16 32x32 48x48"
 
 
+def test_the_tab_drawing_sits_on_the_cave_s_tones_not_on_green():
+    """His word on his pick (18:5x): "why is the background for the new anchor green. I would prefer something more
+    consistent with the background of the cave of wonders." The tile is umber rising to the amber of the cave's glow."""
+    PIL = pytest.importorskip("PIL.Image")
+    for n in (16, 32, 48):
+        im = PIL.open(os.path.join(BRAND, "anchor-tab-%d.png" % n)).convert("RGBA")
+        px = [p for p in im.getdata() if p[3] > 0]
+        r, g, b = (sum(p[i] for p in px) / len(px) for i in range(3))
+        assert r > g > b and r - b >= 30, "the %d px tile is not warm: %d %d %d" % (n, r, g, b)
+
+
+def test_the_pages_draw_his_anchor_where_the_old_glyph_stood():
+    """18:5x: "there are some anchor icons embedded in the cave of wonder page upper left hand side that need to be
+    updated. Same with the Campaign page." The glyph beside the word Anchor is his anchor now, on every masthead."""
+    mark = hsp.anchor_mark("test")
+    assert 'src="/vendor/brand/anchor-tab-48.png?v=test"' in mark and 'width="26"' in mark
+    ctx = w2._ctx(w1._steps())
+    for html in (hsp.render_high_seat_html(base._ctx()), cpg.render_campaign_html(ctx), dpg.render_desk_html(desk._ctx())):
+        assert '<div class="mh-title">' + mark + 'Anchor</div>' in html and "&#9875;" not in html and "⚓" not in html
+    assert hsp.anchor_mark("test", 18) + " The " in hsp.render_high_seat_html(base._ctx()), "the rail's seat line too"
+    gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
+    assert "&#9875;" not in gui and gui.count('class="anchor-mark" src="/vendor/brand/anchor-tab-48.png') == 3, "the old dashboard's two and the Doctor's"
+
+
 def test_the_tab_drawing_is_worn_only_when_whole_and_his_export_otherwise(tmp_path):
     for f in ("anchor-icon.ico", "anchor-icon-32.png"):
         (tmp_path / f).write_bytes(b"x")
