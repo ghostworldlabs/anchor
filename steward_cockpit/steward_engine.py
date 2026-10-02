@@ -105,6 +105,21 @@ RESUME_BRIEF = (
     "Face/Strip human_wait. Legacy unmanaged campaigns retain their wait flag."
 )
 
+# W5 of the active set (John, 2026-10-01: "is there some type of reset for the
+# steward conversation in Cave of Wonders and Campaign? That should not be the
+# case"; his call: stay awake AND wake silently). The Campaign's own steward
+# holds ONE conversation on the two pages: its wake puts no greeting in the
+# dialogue and asks the model for no pickup - the record is re-read in silence
+# and his message is answered as the conversation's next turn. Everything
+# after the pickup sentence is RESUME_BRIEF's own text.
+_PICKUP_ASK = RESUME_BRIEF[RESUME_BRIEF.index("then give John a SHORT"):RESUME_BRIEF.index("Continue agreed")]
+RESUME_QUIET = RESUME_BRIEF.replace("waking from a parked session", "resuming the same conversation after a pause in the process").replace(
+    _PICKUP_ASK,
+    "then answer John's message as the next turn of the one conversation he "
+    "sees: no pickup, no recap, no re-introduction, and never re-ask what the "
+    "record answers. A question still waiting on him is restated only when his "
+    "message does not answer it, as the LAST line. ")
+
 CONTRACT = (
     "Before framing a substantial new plan, use adaptive discovery: ask one load-bearing "
     "question at a time with context and an explicit recommendation. Usually three or four "
@@ -552,6 +567,15 @@ def _cli_cmd(cli="claude"):
     return [exe]
 
 
+def _is_campaign_dir(folder):
+    """Is this the Campaign's own folder (the steward that talks on the Cave of Wonders and the Campaign page)?"""
+    try:
+        from steward_cockpit.campaign_say import is_campaign_folder
+        return bool(is_campaign_folder(folder))
+    except Exception:
+        return False
+
+
 class Engine:
     def __init__(self, campaign_dir, permission_mode="bypassPermissions",
                  fake=False, model=None, steward="Ecgberht", general=False,
@@ -563,6 +587,11 @@ class Engine:
         self.steward = steward
         self.general = general      # workbench terminal: no steward duties
         self.tid = tid              # terminal id (general sessions only)
+        # W5 of the active set: the Campaign's own steward holds ONE
+        # conversation (it does not park on a quiet half hour; its wake is
+        # silent) - see RESUME_QUIET.
+        self.one_conversation = (not general) and _is_campaign_dir(self.dir)
+        self._idle_marked = 0.0     # the quiet spell whose checkpoint is already taken
         _key = self.dir + (f"||general||{tid or 1}" if general else "")
         stored_entry = _read_state_entry(_key)
         pending_handoffs = stored_entry.get("pending_refinement_handoffs")
@@ -1220,18 +1249,22 @@ class Engine:
         # must be _send_locked - calling _send would re-acquire and deadlock
         initial_prompt = None
         if resuming:
-            self._emit({"t": "sys", "text": ("terminal" if self.general else "steward")
-                        + " awake - resuming the last session"})
+            if not self.one_conversation:
+                self._emit({"t": "sys", "text": ("terminal" if self.general else "steward")
+                            + " awake - resuming the last session"})
             # context on wake (John, 2026-08-25): instant deterministic pickup
             # from the durable record, then the model's own brief orientation
             # (RESUME_BRIEF also re-asserts the role - audit gap #1 - so the
             # deep campaign-memory discipline can't have drifted away).
+            # The Campaign's steward (W5, 2026-10-01) wakes with neither: one
+            # conversation, no greeting in the dialogue, no pickup asked.
             if not self.general:
-                self._emit_resume_pickup(entry)
+                if not self.one_conversation:
+                    self._emit_resume_pickup(entry)
                 # Wave 1.2: no autonomous resume turn. The brief rides on his
                 # next message (human-first); an interrupted turn is reconciled
                 # in the same breath.
-                prefix = RESUME_BRIEF
+                prefix = RESUME_QUIET if self.one_conversation else RESUME_BRIEF
                 interrupted = entry.get("interrupted") if isinstance(entry.get("interrupted"), dict) else self._interrupted
                 if interrupted:
                     when = time.strftime("%H:%M", time.localtime(interrupted.get("at") or time.time()))
@@ -2829,6 +2862,40 @@ class Engine:
         except Exception as e:
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    def _idle_tick(self, now):
+        """Automatic sleep: quiet (no talk, no work, nothing queued) for
+        IDLE_SLEEP_SECONDS -> park the process; resume is seamless. A
+        commissioned/background run COUNTS AS WORK: the engine stays awake so
+        the 10-minute status keeps flowing while it runs. The Campaign's own
+        steward (W5, 2026-10-01: one conversation) takes the same checkpoint
+        once per quiet spell and stays awake. True = parked."""
+        quiet_since = max(self.last_say, self.last_output, self.woke_at)
+        if (self.busy or self.queue or now - quiet_since <= IDLE_SLEEP_SECONDS
+                or self._working_bg()):
+            return False
+        if self.one_conversation and self._idle_marked == quiet_since:
+            return False
+        # commit-on-idle-close is a real mechanism, not a prompt
+        self._commit_if_dirty("steward idle checkpoint" if self.one_conversation
+                              else "steward auto-sleep checkpoint")
+        # W0 of the steward revision (2026-09-28): the FALLBACK leave receipt — only when
+        # presence still says he is on this project (he never switched away); the explicit
+        # switch on the High Seat or another cockpit is the trigger, this is the safety net.
+        try:
+            from . import presence as _pres
+            _pres.leave_if_still_here(
+                self.dir, lambda _pid, at: _pres.run_leave(self.dir, at))
+        except Exception:
+            pass
+        if self.one_conversation:
+            self._idle_marked = quiet_since
+            return False
+        self._emit({"t": "sys", "text":
+                    f"steward asleep after {IDLE_SLEEP_SECONDS // 60} "
+                    "quiet minutes - everything saved; your next message wakes it"})
+        self.stop()
+        return True
+
     def _ticker(self, proc):
         while proc is self.proc and proc.poll() is None:
             time.sleep(TICK_CHECK)
@@ -2839,29 +2906,7 @@ class Engine:
                 if self._retry_refinement_handoffs():
                     with self._lock:
                         self._maybe_drive_locked()
-            # automatic sleep: quiet (no talk, no work, nothing queued) for
-            # IDLE_SLEEP_SECONDS -> park the process; resume is seamless.
-            # A commissioned/background run COUNTS AS WORK: the engine stays
-            # awake so the 10-minute status keeps flowing while it runs.
-            if (not self.busy and not self.queue
-                    and now - max(self.last_say, self.last_output,
-                                  self.woke_at) > IDLE_SLEEP_SECONDS
-                    and not self._working_bg()):
-                # commit-on-idle-close is a real mechanism, not a prompt
-                self._commit_if_dirty("steward auto-sleep checkpoint")
-                # W0 of the steward revision (2026-09-28): the FALLBACK leave receipt — only when
-                # presence still says he is on this project (he never switched away); the explicit
-                # switch on the High Seat or another cockpit is the trigger, this is the safety net.
-                try:
-                    from . import presence as _pres
-                    _pres.leave_if_still_here(
-                        self.dir, lambda _pid, at: _pres.run_leave(self.dir, at))
-                except Exception:
-                    pass
-                self._emit({"t": "sys", "text":
-                            f"steward asleep after {IDLE_SLEEP_SECONDS // 60} "
-                            "quiet minutes - everything saved; your next message wakes it"})
-                self.stop()
+            if self._idle_tick(now):
                 return
             # THE DETERMINISTIC STATUS CADENCE (handoff 2026-08-25 #2): fires
             # during the steward's OWN busy turn AND during commissioned/
