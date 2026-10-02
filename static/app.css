@@ -40,8 +40,16 @@ body { background: var(--ground); color: var(--text); font: 13px/1.3 var(--sans)
 .side .bar .x:hover { color: var(--text); background: #2a3344; }
 .side iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 
-/* Narrow (the Cave's own 760 px fold): the pair stacks; the phone pass (S3) refines the strip. */
+/* Narrow (the Cave's own 760 px fold, iPhone): the strip becomes a title bar - only the item in focus, with its
+   place in the list and its x; a swipe on the bar moves along the tiles. The pair stacks. */
+.tile .pos { display: none; }
 @media (max-width: 760px) {
+  #strip { overflow: hidden; touch-action: none; padding: 4px 8px; padding-top: calc(4px + env(safe-area-inset-top, 0px)); }
+  #strip .tile:not(.focus) { display: none; }
+  #strip .tile.focus { flex: 1; max-width: none; height: 36px; border-radius: 10px; box-shadow: none; font-size: 14px; }
+  #strip .tile .pos { display: inline; margin-left: auto; color: var(--faint); font-weight: 400; font-size: 11px; white-space: nowrap; }
+  #strip .tile .x { width: 30px; height: 30px; font-size: 20px; }
+  #strip .tile.cave .pos { margin-right: 0; }
   #stage.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1.2fr); }
   #stage.split > iframe.pane { grid-row: 1; }
   #stage.split > .side { grid-row: 2; grid-column: 1; border-left: 0; border-top: 1px solid var(--line); }

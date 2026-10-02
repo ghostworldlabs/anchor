@@ -253,3 +253,72 @@ def test_close_returns_focus_and_drag_reorders_but_never_past_the_cave(page):
     _settle(page, 300)
     assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
     assert page.locator("#strip .tile.focus").count() == 1
+
+
+# ---------- the phone (S3): the strip is a title bar; swipe on it; x closes; the Cave never closes ----------
+@pytest.fixture()
+def phone(base):
+    with sync_api.sync_playwright() as p:
+        b = p.chromium.launch()
+        ctx = b.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+        pg = ctx.new_page()
+        pg.goto(base + "/static/app.html")
+        pg.wait_for_function("() => { const f = document.querySelector('#stage iframe');"
+                             " return f && f.contentDocument && f.contentDocument.getElementById('ck1'); }")
+        yield pg
+        b.close()
+
+
+def _painted_tiles(pg):
+    return pg.evaluate("""() => [...document.querySelectorAll('#strip .tile')]
+        .filter(t => getComputedStyle(t).display !== 'none' && t.getBoundingClientRect().width > 0)
+        .map(t => t.querySelector('.name').textContent + ' | ' + t.querySelector('.pos').textContent.trim()
+                  + ' | x=' + !!t.querySelector('.x'))""")
+
+
+def _swipe(pg, dx):
+    box = pg.locator("#strip").bounding_box()
+    y = box["y"] + box["height"] / 2
+    x = box["x"] + box["width"] / 2
+    pg.mouse.move(x, y)
+    pg.mouse.down()
+    pg.mouse.move(x + dx, y, steps=8)
+    pg.mouse.up()
+    pg.wait_for_timeout(300)
+
+
+def test_phone_title_bar_shows_only_the_focus_with_its_place_and_swipe_moves_along_the_tiles(phone):
+    assert _painted_tiles(phone) == ["Cave of Wonders |  | x=false"]
+    _cave(phone).locator("#ck1").click()
+    phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
+    phone.locator("#strip .tile.cave").evaluate("e => e.click()")      # hidden on the phone; back to the Cave
+    _cave(phone).locator("#pre").click()
+    phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 3")
+    _settle(phone)
+    assert _painted_tiles(phone) == ["Artificial Magi | ‹ 3 of 3 › | x=true"]
+    _swipe(phone, 160)                                                  # right: the previous one
+    assert _painted_tiles(phone) == ["MBA Teaching AI | ‹ 2 of 3 › | x=true"]
+    _swipe(phone, 160)
+    assert _painted_tiles(phone) == ["Cave of Wonders | ‹ 1 of 3 › | x=false"]
+    _swipe(phone, 160)                                                  # nothing before the Cave
+    assert _painted_tiles(phone) == ["Cave of Wonders | ‹ 1 of 3 › | x=false"]
+    _swipe(phone, -160)                                                 # left: the next one
+    assert _painted_tiles(phone) == ["MBA Teaching AI | ‹ 2 of 3 › | x=true"]
+    _settle(phone)
+    assert _painted_frames(phone) == ["/project/p1"]
+    phone.locator("#strip .tile.focus .x").click()
+    _settle(phone, 300)
+    assert len(phone.evaluate("[...document.querySelectorAll('#strip .tile')].map(t => t.dataset.id)")) == 2
+
+
+def test_phone_a_deliverable_stacks_under_the_dialogue(phone):
+    _cave(phone).locator("#ck1").click()
+    phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
+    _focus_frame(phone, "/project/p1").wait_for_selector("#deliv")
+    _focus_frame(phone, "/project/p1").locator("#deliv").click()
+    phone.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
+    _settle(phone)
+    main = phone.evaluate("(() => { const f = [...document.querySelectorAll('#stage > iframe')].find(f => getComputedStyle(f).display !== 'none'); const r = f.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
+    side = phone.evaluate("(() => { const r = document.querySelector('.side').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
+    assert side[1] >= main[1] + main[3] - 1          # below the dialogue, not beside it
+    assert abs(side[2] - main[2]) < 2 and main[2] > 380   # both full width

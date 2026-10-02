@@ -306,21 +306,46 @@
       name.textContent = t.kind === "cave" ? "Cave of Wonders" : (t.title || "Page");
       el.title = name.textContent;
       el.appendChild(name);
+      var pos = document.createElement("span"); pos.className = "pos";
+      pos.textContent = tiles.length > 1 ? "‹ " + (tiles.indexOf(t) + 1) + " of " + tiles.length + " ›" : "";
+      el.appendChild(pos);
       if (t.kind !== "cave") {
         var x = document.createElement("button"); x.className = "x"; x.type = "button"; x.title = "Close"; x.textContent = "×";
         x.addEventListener("click", function (ev) { ev.stopPropagation(); closeTile(t.id); });
         el.appendChild(x);
       }
-      el.addEventListener("click", function () { if (!dragMoved) focus(t.id); });
+      el.addEventListener("click", function () { if (!dragMoved && !swiped) focus(t.id); });
       el.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focus(t.id); } });
       if (t.kind !== "cave") el.addEventListener("pointerdown", startDrag);
       strip.appendChild(el);
     });
   }
 
-  // drag to reorder (pointer events, so a finger works too); the Cave stays first
+  // the phone (the 760 px fold): a swipe on the title bar moves to the next or previous open item, in tile
+  // order; the bar rather than the page, so a swipe never fights scrolling or text selection in the page
+  var narrow = window.matchMedia("(max-width: 760px)");
+  (function () {
+    var x0 = null, y0 = 0;
+    strip.addEventListener("pointerdown", function (ev) { if (narrow.matches) { x0 = ev.clientX; y0 = ev.clientY; } });
+    strip.addEventListener("pointerup", function (ev) {
+      if (x0 === null) return;
+      var dx = ev.clientX - x0, dy = ev.clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      var i = tiles.indexOf(byId(focusId)), j = i + (dx < 0 ? 1 : -1);
+      if (j < 0 || j >= tiles.length) return;
+      swiped = true;
+      focus(tiles[j].id);
+      setTimeout(function () { swiped = false; }, 0);
+    });
+    strip.addEventListener("pointercancel", function () { x0 = null; });
+  })();
+  var swiped = false;
+
+  // drag to reorder (pointer events, so a finger works too); the Cave stays first; not on the phone's title bar
   var dragMoved = false;
   function startDrag(ev) {
+    if (narrow.matches) return;
     if (ev.button !== 0 || (ev.target && ev.target.classList && ev.target.classList.contains("x"))) return;
     var el = ev.currentTarget, id = el.dataset.id, x0 = ev.clientX;
     dragMoved = false;
