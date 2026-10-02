@@ -193,7 +193,7 @@ def serve_static(name):
     return f.read_bytes(), ctype
 
 
-_CLIENT_SHIM = """<script>
+_CLIENT_SHIM = """<script src="/static/app-frame.js"></script><script>
 window.STEWARD_PID = %s;
 window.STEWARD_BUILD = %s;
 (function(){
@@ -225,11 +225,16 @@ window.STEWARD_BUILD = %s;
   // page polls the server's build and reloads ITSELF when it moves — via the
   // ORIGINAL fetch (_f), so the /api/ -> /api/steward/ rewrite never eats the
   // probe. Loop guard: at most one reload per server version.
+  // Never mid-dictation (the Anchor app, 2026-10-02): a reload waits while a box holds unsent words or
+  // took input in the last ten seconds; the next check (30 s) tries again.
+  var _lastIn=0;document.addEventListener('input',function(){_lastIn=Date.now();},true);
+  function _busy(){var ae=document.activeElement;
+    return Date.now()-_lastIn<10000||!!(ae&&/^(TEXTAREA|INPUT)$/.test(ae.tagName)&&ae.value);}
   if (window.STEWARD_BUILD) setInterval(function(){
     _f('/api/version', {cache:'no-store'}).then(function(r){return r.json();})
       .then(function(j){
         var v = j && j.version;
-        if (!v || v === window.STEWARD_BUILD) return;
+        if (!v || v === window.STEWARD_BUILD || _busy()) return;
         var key = 'steward_reloaded_for';
         try{ if (sessionStorage.getItem(key) === v) return;
              sessionStorage.setItem(key, v); }catch(_){}
