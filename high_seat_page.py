@@ -15,6 +15,7 @@ import html
 import re
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import quote as _quote
 
 import home_rows as _hr
 
@@ -696,7 +697,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div></div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else "/project/%s" % pid, xbtn, goal_line,
+    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else (("/project/%s?dir=%s&amp;open=effort" % (pid, esc(_quote(rel)))) if rel else "/project/%s" % pid), xbtn, goal_line,
          line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 
@@ -841,12 +842,17 @@ def _dialogue(ctx):
             return ""
         return '<a class="gchip" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the Campaign page">about %s</a>' % (camp_pid, esc(g), esc(names.get(g) or g))
     ex = "".join('<li class="exrow %s"><div class="exw %s">%s%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
+        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"])) for t in turns)
     note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
     return (
         '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
         '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section>'
-    ) % (esc(st["label"]), note, ex, "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign page and its cockpit.</li>')
+        # the deliverables this conversation made, newest first, one click each (his word, 2026-10-02: "a little bar ... says
+        # deliverables, you click on it, it opens up and shows you all the time-ordered deliverables that have been created")
+        '<section class="delivbar" id="delivBar" data-pid="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
+        '<span class="db-t">Deliverables</span><span class="db-c" id="delivCount">&hellip;</span><span class="db-caret">&#9662;</span></button>'
+        '<ul class="db-list" id="delivList" hidden></ul></section>'
+    ) % (esc(st["label"]), note, ex, "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign page and its cockpit.</li>', camp_pid)
 
 
 def nudge_html(n, where="brief"):
@@ -919,8 +925,8 @@ def render_high_seat_html(ctx) -> str:
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<link rel="stylesheet" href="/vendor/xterm/xterm.css"><script src="/vendor/xterm/xterm.js"></script>'
-        '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script><script src="/static/cave-terminal.js?v=%s"></script></body></html>'
+        '<script src="/steward-static/md.js?v=%s"></script><script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script><script src="/static/cave-terminal.js?v=%s"></script></body></html>'
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
-         ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
+         ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
     return page

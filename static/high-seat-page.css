@@ -870,3 +870,21 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .healthbar .hb-mark{font-size:16px;color:#f08080}
 .healthbar .hb-t{flex:1;min-width:200px}
 .healthbar .hb-t b{color:#ffd9d9}
+
+/* the Deliverables bar under the Cave's conversation (2026-10-02, his word) */
+.panel>.delivbar{flex:none;margin-top:8px;border:1px solid var(--border);border-radius:11px;background:#0d1016}
+.db-h{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:0;color:var(--text);cursor:pointer;text-align:left}
+.db-t{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.db-c{font-size:11px;color:var(--text-dim);flex:1}
+.db-h[aria-expanded="true"] .db-caret{transform:rotate(180deg)}
+.db-list{list-style:none;margin:0;padding:0 12px 9px;max-height:32vh;overflow-y:auto}
+.db-list[hidden]{display:none}
+.db-list li{padding:6px 0;border-top:1px solid #1e2330;font-size:12.5px;line-height:1.4}
+.db-list li a{color:var(--accent-t)}
+.db-list .db-m{display:block;font-size:10.5px;color:var(--text-dim2)}
+.db-list .db-cur{color:var(--amber-t);font-weight:650}
+
+/* the open tile's conversation is the cockpit's own view (2026-10-02): the conversation, its box and its status, live */
+.cdlg .cframe-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0a0c11;height:66vh;min-height:360px;resize:vertical}
+.cdlg .cframe{display:block;width:100%;height:100%;border:0;background:#0a0c11}
+.cdlg.thin .cframe-wrap{display:none}

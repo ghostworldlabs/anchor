@@ -12,6 +12,15 @@ const Proto = (() => {
   const GENERAL = PARAMS.get("general") === "1";
   const TERM = PARAMS.get("term") || "";
   const EMBED = PARAMS.get("embed") === "1";
+  // the Cave of Wonders' open tile shows THIS view (2026-10-02, his word: "if I had both open I'd be able to see
+  // exactly the same information flowing into the dialog ... and the status bar should be doing the same thing"):
+  // one renderer, one engine stream. The tile hears this view through a bridge scoped to its instance and origin.
+  const TILE = EMBED && PARAMS.get("view") === "tile";
+  const INST = PARAMS.get("inst") || "";
+  function tileSay(kind, data) {
+    if (!TILE || window.parent === window) return;
+    try { window.parent.postMessage(Object.assign({ proto: "anchor-tile", inst: INST, kind: kind }, data || {}), location.origin); } catch (e) {}
+  }
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
       opts = {}, map = null, lastState = null, latestStatusId = "";
 
@@ -366,6 +375,7 @@ const Proto = (() => {
       const stick = s && atBottom(s);
       const body = currentBlock.querySelector(".body");
       renderRich(body, currentBlock._raw || body.textContent);
+      tileSay("turn", { who: "steward", text: String(currentBlock._raw || body.textContent || "").slice(-600) });
       currentBlock = null;
       if (stick) pin(s, true);
     }
@@ -1505,6 +1515,7 @@ const Proto = (() => {
     } else if (ev.t === "john") {
       closeCurrent();
       addBlock("john", opts.johnLabel || "JOHN", ev.text);
+      tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();
     } else if (ev.t === "tool") {
       // ONE live activity line, not a line per call (John, 2026-08-26: the
@@ -1573,7 +1584,7 @@ const Proto = (() => {
         if (j.gap) addLine("sys", "— some output scrolled past (buffer limit) —");
         (j.events || []).forEach(ev => { seq = Math.max(seq, ev.seq); handle(ev); });
         updateState(j.state);
-        if (j.stamp && j.stamp !== stamp) { stamp = j.stamp; await loadMap(); }
+        if (j.stamp && j.stamp !== stamp) { const was = stamp; stamp = j.stamp; await loadMap(); if (was) tileSay("stamp", { stamp: stamp }); }
       } catch (e) {
         await new Promise(res => setTimeout(res, 3000));
       }
@@ -1592,9 +1603,11 @@ const Proto = (() => {
         // A reader can observe projection publication between its writes.
         // Recheck reported inconsistency even if no later event changes stamp.
         if ((j.stamp && j.stamp !== stamp) || map?.refinement?.consistent === false) {
+          const was = stamp, moved = !!(j.stamp && j.stamp !== stamp);
           if(j.stamp)stamp=j.stamp;
           await loadMap();
           await renderDeliverablesTile();
+          if (moved && was) tileSay("stamp", { stamp: stamp });
         }
       } catch (e) { /* the event poll handles backoff */ }
     }
@@ -1633,7 +1646,7 @@ const Proto = (() => {
   }
 
   function updateState(st) {
-    if (st) lastState = st;
+    if (st) { lastState = st; tileSay("state", { light: st.light || "", busy: !!st.busy, alive: !!st.alive, queued: st.queued || 0, word: stateWord(st) || "" }); }
     st = lastState;
     if (!st) return;
     if(_answerQuestionId && !(st.pending_questions||[]).some(q=>q.id===_answerQuestionId))_answerQuestionId=null;
@@ -2082,8 +2095,11 @@ const Proto = (() => {
       t.role === "john" ? "john" : "steward",
       t.role === "john" ? (opts.johnLabel || "JOHN") : (opts.stewardLabel || "ECGBERHT"),
       t.text, "hist"));
-    if (j.turns && j.turns.length)
+    if (j.turns && j.turns.length) {
       addLine("divider", "—— live from here ——");
+      const last = j.turns[j.turns.length - 1];
+      tileSay("turn", { who: last.role === "john" ? "you" : "steward", text: String(last.text || "").slice(-600) });
+    }
     pin(scrollEl(), true);
   }
 
@@ -2117,7 +2133,7 @@ const Proto = (() => {
     // R12 (2026-09-28, John: "conversations are saved as they are put in"): the unsent text is kept in this browser
     // on every keystroke (localStorage, keyed to this record) and put back after a crash, a restart or a reload of
     // the page; a delivered turn clears it, an undelivered one keeps it
-    const DRAFT_KEY = "anchor:draft:say:" + (PARAMS.get("pid") || "") + ":" + DIR;
+    const DRAFT_KEY = "anchor:draft:say:" + (PARAMS.get("pid") || "") + ":" + DIR + (TILE ? ":tile" : "");   // the tile's own words, never the cockpit tab's (ChatGPT 2026-10-02)
     let _draftT = null;
     const saveDraft = () => { try { if (ta.value.trim()) localStorage.setItem(DRAFT_KEY, ta.value); else localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
     const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
@@ -2140,6 +2156,27 @@ const Proto = (() => {
       if (!j.ok) { ta.value = keep; grow(); saveDraft(); } else { clearDraft(); }
     };
     if (send) send.onclick = submit;
+    if (TILE) {
+      const typing = () => tileSay("typing", { active: !!ta.value.trim() || document.activeElement === ta });
+      ta.addEventListener("input", typing); ta.addEventListener("focus", typing); ta.addEventListener("blur", typing);
+      window.addEventListener("message", (ev) => {
+        const m = ev.data;
+        if (ev.origin !== location.origin || ev.source !== window.parent || !m || m.proto !== "anchor-tile" || m.inst !== INST) return;
+        if (m.kind === "prefill" && typeof m.text === "string") {
+          ta.value = ta.value.trim() ? (ta.value.replace(/\s+$/, "") + "\n" + m.text) : m.text;
+          ta.dispatchEvent(new Event("input"));
+          if (m.focus) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {} }
+        }
+      });
+      // a file dropped on this view goes to the tile, which lands it in this effort's folder (one route, one receipt)
+      document.addEventListener("dragover", (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) e.preventDefault(); });
+      document.addEventListener("drop", (e) => {
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length || e.defaultPrevented || (e.target && e.target.closest && e.target.closest("[data-fupload], [data-filesect]"))) return;
+        e.preventDefault(); tileSay("drop", { files: Array.from(files) });
+      });
+      tileSay("ready", {});
+    }
     // (codex-discipline-2026-09-15 Wave 1.2) Send is disabled in the markup
     // and enabled only once its handler exists: a click in the load window
     // used to produce neither a POST nor a record.
@@ -2224,11 +2261,13 @@ const Proto = (() => {
 
   async function init(o) {
     opts = o || {};
+    if (TILE) { const a = document.querySelector(".app"); if (a) { a.classList.add("tileview", "railhide"); } }
     if (opts.stewardLabel) opts._labelSet = true;
     applyTheme();
     try { await loadMap(); } catch (e) {
       const p = $("[data-progress]");
       if (p) p.textContent = "map failed: " + ((e && e.message) || "could not load");
+      tileSay("trouble", { text: "this cockpit's record could not be read" + (e && /401|403|auth/i.test(String(e.message || "")) ? " - this browser is not logged in" : "") });
     }
     if (!opts.skipHistory) {
       try { await loadHistory(); } catch (e) { /* no-op */ }

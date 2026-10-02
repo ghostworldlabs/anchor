@@ -31,7 +31,7 @@
   // what he is doing now: a key or dictated text in the last ten seconds, or a box he is in with words in it
   var lastKey = 0; function markKey() { lastKey = Date.now(); }
   document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);
-  function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }
+  function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()) || $$('.tile.open').some(function (c) { return !!c._typing; }); }   // his words in an open tile's cockpit view count (2026-10-02)
   function tileOpen() { return !!$('.tile.open'); }   // an open terminal does not hold it: its tabs re-attach after the reload (Grok, 2026-10-02); typingNow covers his keys in it
   // W3b (his word, 2026-10-01: dictating into an open tile, "the tile collapses down and whatever I was dictating gets
   // lost"): the page renews itself when the record moves or a new build is live - but NEVER under an open tile or his
@@ -238,77 +238,70 @@
   // last turn's gist (the context first) \u2014 that expands on a click, his send, "talk about it", Accept, or the steward at work
   // the persona driving it, by name (his word 2026-10-02: "Aladdin or Jarvis depending on which one is driving it")
   var STEWARD_NAME = String((window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward').replace(/[<>&"']/g, '');
+  // 2026-10-02 (his word: "if I had both open I'd be able to see exactly the same information flowing into the dialog
+  // ... and the status bar should be doing the same thing in both"; ChatGPT's diagnosis in review/CODEX-TILE-PARITY):
+  // the open tile's conversation IS the cockpit's own view of this effort - /steward/v1?view=tile, the same renderer,
+  // the same engine stream, the same status pane - not a second copy that drifted (it cleared its list under a live
+  // reply, skipped a reply in flight, cut turns at 1600 characters, merged the blocks and never showed the status).
+  // The tile hears the view through a bridge scoped to this instance and this origin: state (the light and the chip),
+  // the last turn (the bar's one line), the record's stamp (the brief re-read), typing (the page never renews under his
+  // words), files dropped on the view, ready (a held "talk about it" goes in).
+  var TILE_SEQ = 0;
   function talkHtml(id) {
-    return '<div class="cdlg thin" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="false" title="open the conversation"><span class="dlg-h">' + STEWARD_NAME + ' \u2014 this cockpit</span><span class="exstate" data-state="">\u2026</span><span class="dlg-gist">reading the conversation\u2026</span><span class="dlg-caret">&#9662;</span></button>'
-      + '<div class="scroll"><ul class="ex"><li class="exfade">Reading the conversation\u2026</li></ul></div>'
-      + '<div class="composer"><textarea rows="2" placeholder="Ask ' + STEWARD_NAME + ' about this cockpit, or tell it what to do \u2014 it answers here as it writes"></textarea>'
-      + '<div class="comp-row"><span class="hint">Ctrl+Enter sends \u00b7 the same conversation as the cockpit</span><button class="send">Send</button></div></div></div>';
+    return '<div class="cdlg big" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="true" title="fold or open the conversation"><span class="dlg-h">' + STEWARD_NAME + ' — this cockpit</span><span class="exstate" data-state="">…</span><span class="dlg-gist">reading the conversation…</span><span class="dlg-caret">&#9662;</span></button>'
+      + '<div class="cframe-wrap"><iframe class="cframe" title="' + STEWARD_NAME + ' — this cockpit’s conversation and status"></iframe></div></div>';
   }
   function grow(card) {
-    var d = $('.cdlg', card); if (!d) return; var was = d.classList.contains('thin');
+    var d = $('.cdlg', card); if (!d) return;
     d.classList.remove('thin'); d.classList.add('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'true'); card.classList.add('talking');
     rememberTile(card, true);
-    // his word (2026-10-01): opening the conversation takes him to its FOOT - the latest turn and the box he talks in
-    var ul = $('.ex', d), sc = $('.scroll', d), comp = $('.composer', d), ta = $('textarea', d);
-    if (ul) ul.scrollTop = ul.scrollHeight; if (sc) sc.scrollTop = sc.scrollHeight;
-    setTimeout(function () { if (sc) sc.scrollTop = sc.scrollHeight; try { if (comp) comp.scrollIntoView({ block: 'end', behavior: 'smooth' }); if (was && ta && document.activeElement !== ta) ta.focus({ preventScroll: true }); } catch (e) {} }, 270);
+    setTimeout(function () { try { d.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {} }, 120);
   }
   function shrink(card) { var d = $('.cdlg', card); if (d) { d.classList.add('thin'); d.classList.remove('big'); var bar = $('.dlg-bar', d); if (bar) bar.setAttribute('aria-expanded', 'false'); } card.classList.remove('talking'); rememberTile(card, false); }
   function startTalk(card, pid, dir) {
-    var id = 'talk-' + card.id, list = $('#' + id + ' .ex'), box = $('#' + id + ' textarea'), sendBtn = $('#' + id + ' .send'), state = $('#' + id + ' .exstate'), bar = $('#' + id + ' .dlg-bar');
-    // the words he dictates into the tile are kept in this browser as he types and put back when the tile opens again
-    var DK = 'anchor:draft:tile:' + pid + ':' + (dir || ''), dkT = null;
-    try { var keptT = localStorage.getItem(DK); if (keptT && keptT.trim() && box && !box.value.trim()) box.value = keptT; } catch (e) {}
-    if (box) box.addEventListener('input', function () { clearTimeout(dkT); dkT = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
-    function gist() {   // the strip's context: the last turn, whoever said it
-      var rows = $$('.exrow', list).filter(function (r) { return !r.classList.contains('sysl'); }), last = rows[rows.length - 1], g = $('#' + id + ' .dlg-gist'); if (!g) return;   // the strip's gist is the last TURN, never a system line
-      if (!last) { var f = $('.exfade', list); g.textContent = f ? f.textContent.trim() : 'nothing said in this cockpit yet'; return; }   // the list's one sentence (not logged in / nothing said / could not be read), as Grok read it
-      var t = ($('.ext', last) || {}).textContent || '';
-      g.textContent = (last.classList.contains('you') ? YOU + ': ' : STEWARD_NAME + ': ') + t.replace(/\s+/g, ' ').trim().slice(0, 160);
+    var id = 'talk-' + card.id, d = $('#' + id), bar = $('#' + id + ' .dlg-bar'), chip = $('#' + id + ' .exstate'), gist = $('#' + id + ' .dlg-gist'), frame = $('#' + id + ' .cframe');
+    if (!d || !frame) return;
+    var inst = 't' + (++TILE_SEQ) + '-' + Date.now().toString(36), ready = false, held = [], heard = false;
+    // the words he dictated into the old tile box come back in the cockpit's own box once (its draft key is the cockpit's)
+    try {
+      var oldKey = 'anchor:draft:tile:' + pid + ':' + (dir || ''), newKey = 'anchor:draft:say:' + pid + ':' + (dir || '') + ':tile', kept = localStorage.getItem(oldKey), there = localStorage.getItem(newKey) || '';
+      if (kept && kept.trim()) localStorage.setItem(newKey, there.trim() && there.trim() !== kept.trim() ? there.replace(/\s+$/, '') + '\n\n' + kept : kept);   // both kept when they differ (ChatGPT)
+      localStorage.removeItem(oldKey);
+    } catch (e) {}
+    function post(kind, data) {
+      var m = { proto: 'anchor-tile', inst: inst, kind: kind }; for (var k in (data || {})) m[k] = data[k];
+      if (!ready) { held.push(m); return; }
+      try { frame.contentWindow.postMessage(m, location.origin); } catch (e) {}
     }
-    if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });
-    fetch('/api/steward/history?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir), { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
-      .then(function (r) { if (r.status === 401 || r.status === 403) { var e = new Error('auth'); e.auth = true; throw e; } return r.json(); })
-      .then(function (j) {
-        var ts = ((j && j.turns) || []).slice(-8); list.innerHTML = '';
-        if (!ts.length) { list.innerHTML = '<li class="exfade">Nothing said in this cockpit yet.</li>'; return; }
-        ts.forEach(function (t) {
-          var you = ['john', 'you', 'user', 'human'].indexOf(String(t.role || '').toLowerCase()) >= 0;
-          var li = document.createElement('li'); li.className = 'exrow ' + (you ? 'you' : 'st');
-          li.innerHTML = '<div class="exw ' + (you ? 'you' : 'st') + '"><span class="w"></span></div><div class="ext"></div>';
-          li.querySelector('.w').textContent = you ? YOU : STEWARD_NAME; li.querySelector('.ext').textContent = String(t.text || '').replace(/\s+/g, ' ').slice(0, 1600);
-          list.appendChild(li);
-        });
-        list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
-      })
-      .then(gist)
-      .then(function () { if (pendingRenew) heldLine(card); })
-      .catch(function (e) {   // a refused read offers the page's box (Grok's read of W2e-3), as the stream's refusal does
-        list.innerHTML = '<li class="exfade">' + (e && e.auth ? 'This browser is not logged in \u2014 log in below.' : 'The conversation could not be read.') + '</li>'; gist();
-        if (e && e.auth) showLogin('This cockpit\u2019s conversation cannot reach this page until this browser is logged in.');
-      });
-    if (window.MutationObserver) { var gm = new MutationObserver(gist); gm.observe(list, { childList: true, subtree: true, characterData: true }); card._gistMo = gm; }
-    var dlg = window.StewardDialogue ? window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate', steward: STEWARD_NAME, you: YOU, stamp: '',
-      onAuth: function () { showLogin('This cockpit\u2019s words cannot reach this page until this browser is logged in.'); },
-      onStamp: function () { refreshTile(card, pid, dir); }, onState: function (st) { paintDot(card, st && st.light); } }) : null;
-    card._talk = dlg;
-    // the strip opens on HIS acts only (his click, send, talk about it, Accept) — never by itself when the steward turns
-    // busy: the chip and the gist already say so (Grok's read of W2e-4; his word 'expand with a click')
-    function go() { var t = (box.value || '').trim(); if (!t || sendBtn.disabled || !dlg) return; grow(card); dlg.send(t, null, list, sendBtn, box, DK); }
-    sendBtn.addEventListener('click', go);
-    box.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); go(); } });
-    // his word (2026-10-02): dictating into an open tile gave "a little tiny window" - the box grows with what he says, up to a
-    // third of the window, the conversation scrolled to its end above it; after Send it is small again
-    function growBox() {
-      box.style.height = 'auto';
-      box.style.height = Math.min(Math.max(42, box.scrollHeight), Math.round(window.innerHeight / 3)) + 'px';
-      box.style.overflowY = box.scrollHeight > box.clientHeight ? 'auto' : 'hidden';
-      var sc = list && list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
-      try { box.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    function onMsg(ev) {
+      var m = ev.data;
+      if (ev.origin !== location.origin || ev.source !== frame.contentWindow || !m || m.proto !== 'anchor-tile' || m.inst !== inst) return;
+      if (m.kind === 'ready') { ready = true; var q = held; held = []; q.forEach(function (x) { try { frame.contentWindow.postMessage(x, location.origin); } catch (e) {} }); return; }
+      if (m.kind === 'state') {
+        paintDot(card, m.light);
+        if (chip) { chip.textContent = m.word || (m.busy ? 'working…' : (m.alive ? 'listening' : 'parked')); chip.setAttribute('data-state', m.busy ? 'busy' : (m.alive ? 'idle' : 'parked')); }   // the cockpit's own word (ChatGPT 2026-10-02)
+        heard = true;
+        return;
+      }
+      if (m.kind === 'trouble' && gist) { gist.textContent = String(m.text || 'the cockpit view could not read its record'); return; }
+      if (m.kind === 'turn' && gist) { gist.textContent = (m.who === 'you' ? YOU : STEWARD_NAME) + ': ' + String(m.text || '').replace(/\s+/g, ' ').trim().slice(-200); return; }
+      if (m.kind === 'stamp') { refreshTile(card, pid, dir); return; }
+      if (m.kind === 'typing') { card._typing = !!m.active; return; }
+      if (m.kind === 'drop' && m.files && m.files.length) { dropFiles(card, pid, m.files); return; }
     }
-    box.addEventListener('input', growBox);
+    window.addEventListener('message', onMsg);
+    // a frame that loads a new document must say ready again before a prefill goes in (ChatGPT 2026-10-02); a view
+    // that never reports its state within 20 s is said, not left at "reading"
+    frame.addEventListener('load', function () { ready = false; });
+    setTimeout(function () { if (!heard && card._talk && gist) gist.textContent = 'the cockpit view has not answered - open the cockpit, or log in on this page'; }, 20000);
+    if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if (d.classList.contains('thin')) grow(card); else shrink(card); });
+    frame.src = '/steward/v1?embed=1&view=tile&inst=' + encodeURIComponent(inst) + '&pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir || '');
+    card._talk = {
+      prefill: function (text, focus) { grow(card); post('prefill', { text: text, focus: !!focus }); },
+      stop: function () { window.removeEventListener('message', onMsg); ready = false; held = []; card._typing = false; try { frame.src = 'about:blank'; } catch (e) {} }
+    };
   }
-  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; if (card._gistMo) { card._gistMo.disconnect(); card._gistMo = null; } }
+  function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
   // W2e-6 (his ask, 19:0x): a file dropped on the OPEN tile lands in the folder of the cockpit the tile was opened on
   // (the project's root, or the effort's directory), through the cockpit's own upload verb - never overwriting; the
   // result is one line in the tile and in its dialogue. A file dropped anywhere else never navigates the page away.
@@ -319,7 +312,6 @@
   function openDir(card) { return card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir') : (card.getAttribute('data-dir') || ''); }
   function dropNote(card, text, bad) {
     var n = $('.cd-note', card); if (n) { n.textContent = text; n.classList.toggle('bad', !!bad); }
-    if (card._talk && card._talk.appendLine) card._talk.appendLine('sys', text, 'dim');
   }
   function dropFiles(card, pid, files) {
     var dir = openDir(card), name = (card.getAttribute('data-name') || $('.t-nm', card).textContent || 'this cockpit').trim();
@@ -483,7 +475,7 @@
     var a = e.target.closest('.cb-ask');
     if (a) { e.preventDefault(); e.stopPropagation(); var bd = a.parentNode.querySelector('.cb-body'); if (!bd) return; var open = bd.hidden; bd.hidden = !open; a.setAttribute('aria-expanded', open ? 'true' : 'false'); a.classList.toggle('open', open); return; }
     var t = e.target.closest('.cb-talk');
-    if (t) { e.preventDefault(); e.stopPropagation(); var card = t.closest('.tile'), box = card && card.querySelector('.cdlg textarea'); if (!box) return; grow(card); box.value = 'About: ' + (t.getAttribute('data-ask') || '') + ' \u2014 '; box.focus(); try { box.setSelectionRange(box.value.length, box.value.length); } catch (err) {} }
+    if (t) { e.preventDefault(); e.stopPropagation(); var card = t.closest('.tile'); if (!card || !card._talk || !card._talk.prefill) return; card._talk.prefill('About: ' + (t.getAttribute('data-ask') || '') + ' \u2014 ', true); }   // into the cockpit's own box (2026-10-02)
   });
   // Accept in the brief: one click, the answer said to the steward as the cockpit says it, the dialogue takes the tile
   document.addEventListener('click', function (e) {
@@ -723,6 +715,44 @@
     window.addEventListener('resize', function () { fit(); grow(); });
     if (say) { say.addEventListener('input', grow); say.addEventListener('focus', fit); }
     setTimeout(fit, 400);
+  })();
+  // the Deliverables bar under the conversation (his word, 2026-10-02): the Campaign's register, newest first, each one
+  // a click away - a text document through the report viewer, anything else through the cockpit's own file route
+  (function () {
+    var bar = $('#delivBar'), btn = $('#delivToggle'), ul = $('#delivList'), cnt = $('#delivCount');
+    if (!bar || !btn || !ul) return;
+    var pid = bar.getAttribute('data-pid') || '';
+    function href(it) {
+      var t = token(), tq = t ? '&token=' + encodeURIComponent(t) : '';
+      var dir = encodeURIComponent(it.dir || ''), path = encodeURIComponent(it.path || '');
+      if (/\.(md|txt|csv|json|log)$/i.test(it.path || '')) return '/steward/report?dir=' + dir + '&path=' + path + '&pid=' + encodeURIComponent(pid) + tq;
+      return '/api/steward/deliverable-file?pid=' + encodeURIComponent(pid) + '&dir=' + dir + '&path=' + path
+        + (it.hash ? '&hash=' + encodeURIComponent(it.hash) : '') + (/\.(docx|pptx|xlsx)$/i.test(it.path || '') ? '&view=1' : '') + tq;
+    }
+    function load() {
+      return fetch('/api/steward/deliverables?pid=' + encodeURIComponent(pid) + '&dir=', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var items = ((j && j.items) || []).filter(function (it) { return it && it.path; });
+          if (cnt) cnt.textContent = items.length ? (items.length + (items.length === 1 ? ' made' : ' made') + ' · newest ' + (items[0].date || '')) : 'none yet';
+          ul.innerHTML = '';
+          if (!items.length) { var e = document.createElement('li'); e.textContent = 'Nothing made in this conversation yet.'; ul.appendChild(e); return; }
+          items.forEach(function (it) {
+            var li = document.createElement('li'), a = document.createElement('a'), m = document.createElement('span');
+            a.href = href(it); a.target = '_blank'; a.rel = 'noopener'; a.textContent = it.what || it.path;
+            if (it.is_current) a.className = 'db-cur';
+            m.className = 'db-m'; m.textContent = (it.date || '') + ' · ' + it.path + (it.step ? ' · ' + it.step : '');
+            li.appendChild(a); li.appendChild(m); ul.appendChild(li);
+          });
+        })
+        .catch(function () { if (cnt) cnt.textContent = 'could not be read'; });
+    }
+    btn.addEventListener('click', function () {
+      var open = ul.hidden; ul.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) load();
+    });
+    load();
+    setInterval(function () { if (!document.hidden) load(); }, 60000);   // a new deliverable shows within a minute
   })();
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;

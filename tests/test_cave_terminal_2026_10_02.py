@@ -65,7 +65,7 @@ def test_the_header_has_no_old_dashboard_and_tiles_name_the_steward():
     src = _read("high_seat_page.py")
     assert "the old dashboard</a>" not in src
     hs = _read("static/high-seat-page.js")
-    assert "steward: STEWARD_NAME" in hs and "box.addEventListener('input', growBox)" in hs
+    assert "STEWARD_NAME + ' — this cockpit" in hs
 
 
 def test_kill_never_touches_the_live_tree_of_a_plain_terminal():

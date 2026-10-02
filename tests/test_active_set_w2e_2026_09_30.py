@@ -126,23 +126,19 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     for s in ("function openTile(card, pid, dir)", "fetchPart(pid, 'brief', dir, false, true)", "function closeTile(card, another)", "function startTalk(card, pid, dir)", "function stopTalk(card)",
               "if (!card.classList.contains('open')) openTile(card, pid, dir);", "var det = $('.cdetail', card);",
-              "function grow(card) {\n    var d = $('.cdlg', card); if (!d) return; var was = d.classList.contains('thin');\n    d.classList.remove('thin'); d.classList.add('big');", "function shrink(card)",
-              '<div class="cdlg thin" id="', 'class="dlg-bar"', 'class="dlg-gist"', "function gist() {", "if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if ($('.cdlg', card).classList.contains('thin')) grow(card); else shrink(card); });",
-              "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
-              "if (e && e.auth) showLogin('This cockpit", "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
-              "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)", "onStamp: function () { refreshTile(card, pid, dir); }",
-              "new DOMParser().parseFromString(html, 'text/html')", "function paintDot(card, light)", "onState: function (st) { paintDot(card, st && st.light); }", "if (facesBusy) { facesAgain = true; return; }",
+              "function shrink(card)",
+              'class="dlg-bar"', 'class="dlg-gist"',               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
+              "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
+              "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)",               "new DOMParser().parseFromString(html, 'text/html')", "function paintDot(card, light)", "if (facesBusy) { facesAgain = true; return; }",
               "the record moved, but the brief could not be re-read", "if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
-              "window.StewardDialogue.init({ pid: pid, dir: dir, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt', list: '#' + id + ' .ex', state: '#' + id + ' .exstate'",
-              "c.classList.add('ready')", "localStorage.setItem('hs_seen_' + card.id, tok)",
-              "var a = e.target.closest('.cb-ask');", "var t = e.target.closest('.cb-talk');", "box.value = 'About: ' + (t.getAttribute('data-ask') || '')",
-              "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });", "window.StewardDialogue.authHeaders(headers())"):
+                            "c.classList.add('ready')", "localStorage.setItem('hs_seen_' + card.id, tok)",
+              "var a = e.target.closest('.cb-ask');", "var t = e.target.closest('.cb-talk');",               "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });", "window.StewardDialogue.authHeaders(headers())"):
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
     assert js.count("function stopTalk(card)") == 1 and "function doLogin()" not in js, "one stopTalk (Grok W2e-3 cut the dead one); the login script is the module's"
-    assert "=== 'busy') grow(card)" not in js and "card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir')" in js and "var f = $('.exfade', list); g.textContent = f ? f.textContent.trim()" in js, "Grok W2e-4: the strip opens on his acts only; Accept goes to the opened cockpit; the gist carries the list's one sentence"
+    assert "=== 'busy') grow(card)" not in js and "card.getAttribute('data-open-dir') !== null ? card.getAttribute('data-open-dir')" in js , "Grok W2e-4: the strip opens on his acts only; Accept goes to the opened cockpit"
     dlg = open(os.path.join(HERE, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function stop() { live.stopped = true; }" in dlg and "if (live.stopped) { live.polling = false; return; }" in dlg and "stop: stop" in dlg, "a tile's dialogue stops when the tile closes"
     assert "if (j.kept) appendLine('sys', 'the steward could not wake just now" in dlg and "init: init, authHeaders: authHeaders" in dlg, "a kept send is said as kept (Grok W2e); the token helper is the module's"
@@ -260,3 +256,34 @@ def test_the_presented_token_is_the_valid_one_when_the_request_carries_several(m
     assert ag._request_presented_token(SimpleNamespace(headers={"X-Anchor-Token": "stale"}), {}) == "stale", "nothing valid: the first carried, which the gate then refuses"
     assert ag._request_presented_token(SimpleNamespace(headers={}), {}) is None
 
+
+
+def test_the_open_tile_is_the_cockpit_s_own_view_through_a_scoped_bridge():
+    # 2026-10-02 (his word: the tile must show "exactly the same information" as the cockpit, status too; ChatGPT's
+    # diagnosis review/CODEX-TILE-PARITY): one renderer, one engine stream - the cockpit's view embedded in the tile
+    js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "frame.src = '/steward/v1?embed=1&view=tile&inst=' + encodeURIComponent(inst)" in js
+    assert "if (ev.origin !== location.origin || ev.source !== frame.contentWindow || !m || m.proto !== 'anchor-tile' || m.inst !== inst) return;" in js
+    for k in ("'ready'", "'state'", "'turn'", "'stamp'", "'typing'", "'drop'"):
+        assert "m.kind === " + k in js, k
+    assert "StewardDialogue.init({ pid: pid, dir: dir" not in js and ".slice(0, 1600)" not in js, "no second renderer, no cut"
+    assert "card._talk.prefill('About: '" in js and "$$('.tile.open').some(function (c) { return !!c._typing; })" in js
+    sh = open(os.path.join(HERE, "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
+    assert 'const TILE = EMBED && PARAMS.get("view") === "tile";' in sh and "window.parent.postMessage(Object.assign({ proto: \"anchor-tile\", inst: INST, kind: kind }, data || {}), location.origin)" in sh
+    assert 'if (ev.origin !== location.origin || ev.source !== window.parent || !m || m.proto !== "anchor-tile" || m.inst !== INST) return;' in sh
+    assert 'tileSay("drop", { files: Array.from(files) });' in sh and 'tileSay("ready", {});' in sh
+
+
+def test_chatgpt_s_folds_on_the_tile_bridge():
+    # review/CODEX-TILE-PARITY-FIX.out.json (2026-10-02): the tile's own draft; a stamp from either poll; one upload; the
+    # cockpit's own word; a fresh handshake after a frame reload; a view that cannot read its record says so; the link
+    js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
+    sh = open(os.path.join(HERE, "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
+    assert '+ DIR + (TILE ? ":tile" : "");' in sh and "newKey = 'anchor:draft:say:' + pid + ':' + (dir || '') + ':tile'" in js
+    assert sh.count('tileSay("stamp", { stamp: stamp });') == 2
+    assert 'e.defaultPrevented || (e.target && e.target.closest && e.target.closest("[data-fupload], [data-filesect]"))' in sh
+    assert "chip.textContent = m.word ||" in js and "frame.addEventListener('load', function () { ready = false; });" in js
+    assert 'tileSay("trouble"' in sh and "m.kind === 'trouble'" in js
+    hp = open(os.path.join(HERE, "high_seat_page.py"), encoding="utf-8").read()
+    ck = open(os.path.join(HERE, "steward_cockpit", "static", "cockpit.html"), encoding="utf-8").read()
+    assert '"/project/%s?dir=%s&amp;open=effort"' in hp and 'q.get("open") !== "effort"' in ck

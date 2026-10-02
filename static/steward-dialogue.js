@@ -28,7 +28,15 @@
         c.addEventListener('click', function () { if (openGoal) openGoal(goal); });
       }
       li.querySelector('.ext').textContent = text;
+      li._raw = text;
       return li;
+    }
+    // the steward's words in the cockpit's own markdown (bold, lists, links, paragraphs) once a block is whole (2026-10-02,
+    // his word: "I liked the formatting in the actual cockpit because it does it in blocks")
+    function md(li) {
+      var x = li && li.querySelector('.ext'); if (!x || !window.mdRender || !li.classList.contains('st')) return;
+      var raw = li._raw !== undefined ? li._raw : x.textContent; if (!String(raw).trim()) return;
+      try { x.textContent = ''; window.mdRender(x, raw); } catch (e) { x.textContent = raw; }
     }
     function settle(list) { list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }
     function put(list, li) { if (!list) return null; var fade = list.querySelector('.exfade'); if (fade) fade.remove(); list.appendChild(li); settle(list); return li; }
@@ -70,23 +78,30 @@
         .then(function (j) {
           var ts = (j && j.turns) || [], last = null;
           for (var i = ts.length - 1; i >= 0; i--) { var role = String(ts[i].role || '').toLowerCase(); if (ts[i].text && role !== 'john' && role !== 'you' && role !== 'user' && role !== 'human') { last = ts[i]; break; } }
-          var main = mainList(), rows = main ? $$('.exrow.st .ext', main) : [], txt = last ? String(last.text).replace(/\s+/g, ' ').trim() : '';
-          if (!last || (rows.length && rows[rows.length - 1].textContent.replace(/\s+/g, ' ').trim() === txt)) { if (mine) appendLine('st', SILENT, 'dim'); return; }
-          live.goal = last.goal || null; live.target = null; appendLine('st', txt, ''); live.goal = null;
+          var main = mainList(), rows = main ? $$('.exrow.st', main) : [], txt = last ? String(last.text).trim() : '';
+          if (!last || (rows.length && String(rows[rows.length - 1]._raw !== undefined ? rows[rows.length - 1]._raw : rows[rows.length - 1].querySelector('.ext').textContent).trim() === txt)) { if (mine) appendLine('st', SILENT, 'dim'); return; }
+          live.goal = last.goal || null; live.target = null; var cu = appendLine('st', txt, ''); each(cu, md); live.goal = null;
         })
         .catch(function () {});
     }
     function handleEvent(ev) {
       if (!ev || ev.tick) return;
-      if (ev.t === 'delta') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { li.querySelector('.ext').textContent += (ev.text || ''); settle(li.parentNode); }); return; }
+      if (ev.t === 'delta') {
+        if (live.act) { each(live.act, function (li) { li.remove(); }); live.act = null; }
+        if (!live.line) live.line = appendLine('st', '', 'live');
+        each(live.line, function (li) { li._raw = (li._raw || '') + (ev.text || ''); li.querySelector('.ext').textContent = li._raw; settle(li.parentNode); });
+        return;
+      }
       if (ev.t === 'turn_end') {
         // a turn that ends without words is said, never left blank (his word, 2026-10-02: he asked for no reply and
         // the page showed nothing - he could not tell the dialogue worked); a row left at "working…" is closed the same way
         var mine = live.sent; live.sent = false;
+        if (live.act) { each(live.act, function (li) { li.remove(); }); live.act = null; }
+        live.steps = 0;
         if (live.line) {
           each(live.line, function (li) {
             li.classList.remove('live');
-            if (li.querySelector('.ext').textContent.trim()) return;
+            if (li.querySelector('.ext').textContent.trim()) { md(li); return; }
             if (mine) { li.querySelector('.ext').textContent = SILENT; li.classList.add('dim'); var w = li.querySelector('.exw .t'); if (w) w.textContent = ''; }
             else li.remove();      // a wordless turn this page did not send leaves no row (Grok, 2026-10-02)
           });
@@ -96,7 +111,14 @@
       }
       if (ev.t === 'john') { var t = String(ev.text || ''); if (live.skipJohn && t === live.skipJohn) { live.skipJohn = ''; return; } live.target = null; live.goal = null; appendLine('you', t, ''); return; }
       if (ev.t === 'sys' && ev.text) { appendLine('sys', ev.text, 'dim'); return; }
-      if (ev.t === 'tool') { if (!live.line) live.line = appendLine('st', '', 'live'); each(live.line, function (li) { var w = li.querySelector('.exw .t'); if (w) w.textContent = 'working…'; }); return; }
+      if (ev.t === 'tool') {
+        // the cockpit's rule: a tool step ends the block the words were in; the next words open a new one
+        if (live.line) { each(live.line, function (li) { li.classList.remove('live'); if (li.querySelector('.ext').textContent.trim()) md(li); else li.remove(); }); live.line = null; }
+        if (!live.act) live.act = appendLine('sys', 'working …', 'dim act');
+        live.steps = (live.steps || 0) + 1;
+        each(live.act, function (li) { li.querySelector('.ext').textContent = 'working … ' + live.steps + ' step' + (live.steps === 1 ? '' : 's') + (ev.name ? ' · ' + ev.name : ''); });
+        return;
+      }
     }
     function primeSeq() {   // the ring's current top, so the poll never replays lines the log below already shows
       return fetch('/api/steward/events' + q() + '&since=0', { headers: getHeaders() })
@@ -164,9 +186,9 @@
     // live from the open: the ring's top first (so the log shown below is not replayed), then the stream
     if (PID && mainList()) primeSeq().then(function () { if (!refused) pollLoop(); });
     // the dialogue opens at its latest turn, never its first (his word, 2026-10-01: "you should be at the bottom of that, not the top")
-    (function () { var ml = mainList(); if (!ml) return; settle(ml); setTimeout(function () { settle(ml); }, 300); })();
+    (function () { var ml = mainList(); if (!ml) return; $$('.exrow.st', ml).forEach(md); settle(ml); setTimeout(function () { settle(ml); }, 300); })();
     function stop() { live.stopped = true; }
-    return { send: send, appendLine: appendLine, mainList: mainList, stop: stop };
+    return { send: send, appendLine: appendLine, mainList: mainList, stop: stop, md: md };
   }
   function authHeaders(base) {   // the page's headers plus the standard Authorization header the GET gate reads
     var h = {}; Object.keys(base || {}).forEach(function (k) { h[k] = base[k]; });

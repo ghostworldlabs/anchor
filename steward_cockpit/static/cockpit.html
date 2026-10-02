@@ -598,7 +598,7 @@ function openEffort(rel, step) {
 // once with the step forwarded; once per load. A bare ?dir= (the cockpit's own address) changes nothing.
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.has("step")) return;
+  if (!q.has("step") && q.get("open") !== "effort") return;   // 2026-10-02: the Cave tile's cockpit link names its effort explicitly
   const open = () => { if (window._resumedOnce) return; window._resumedOnce = true; openEffort(q.get("dir") || "", q.get("step") || ""); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", open); else open();
 })();
