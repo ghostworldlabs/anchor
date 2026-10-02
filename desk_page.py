@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import home_rows as _hr
 from campaign_page import _needs
-from high_seat_page import esc, _brand_img, _masthead, capacity_row_html, tab_icon_link
+from high_seat_page import esc, _brand_img, _masthead, capacity_row_html, tab_icon_link, anchor_tab_stem
 
 GROUPS = ("today", "week", "later", "parked", "done")
 
@@ -298,5 +298,5 @@ def render_desk_html(ctx) -> str:
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every task, date and count on this page is read from the Campaign record; Calendar and Email are not connected, and say so.</span></div></div>'
         '<script src="/static/desk-page.js?v=%s"></script></body></html>'
-    ) % (tab_icon_link((ctx.get("steward") or {}).get("seal"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
+    ) % (tab_icon_link((ctx.get("steward") or {}).get("seal"), ctx["build"], anchor=anchor_tab_stem() == "anchor-tab"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
          _tasks_col(ctx), _steward_col(ctx), _right_col(ctx, tasks), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))

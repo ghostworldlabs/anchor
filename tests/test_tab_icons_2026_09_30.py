@@ -38,18 +38,21 @@ def anchor_set(stem, build="test"):
 ANCHOR_SET = anchor_set(hsp.anchor_tab_stem() or "anchor-icon")
 
 
-def test_his_anchor_icon_is_every_page_s_tab_icon_and_the_default_favicon():
+def test_his_anchor_icon_is_the_tab_icon_of_every_page_but_the_two_and_the_default_favicon():
     """2026-10-01 13:3x, his word: "there is a new anchor icon that I want you to find and use" - the set he dropped into
-    vendor/brand at 13:12 (anchor-icon.ico with six sizes; 16-1024 px PNGs)."""
+    vendor/brand at 13:12 (anchor-icon.ico with six sizes; 16-1024 px PNGs). 18:1x, his rule: the Cave of Wonders and
+    the Campaign pages wear the cave; the rest of the tabs the anchor."""
     for stem in ("anchor-icon.ico", "anchor-icon-16.png", "anchor-icon-32.png", "anchor-icon-180.png", "anchor-icon-256.png"):
         assert os.path.isfile(os.path.join(BRAND, stem)), stem
     with open(os.path.join(BRAND, "anchor-icon.ico"), "rb") as f:
         assert f.read(4) == b"\x00\x00\x01\x00", "an ICO"
     assert hsp.tab_icon_link("aladdin-high-seat-cave.jpg", "test") == ANCHOR_SET and hsp.tab_icon_link("jarvis-seal-salver.jpg", "test") == ANCHOR_SET, "the anchor on every page, whoever the steward"
-    assert ANCHOR_SET in hsp.render_high_seat_html(base._ctx())
-    ctx = w2._ctx(w1._steps()); ctx["steward"] = dict(ctx["steward"], seal="aladdin-seal-lamp.jpg")
+    cave = '<link rel="icon" href="/vendor/brand/aladdin-high-seat-cave.png?v=test" type="image/png" sizes="64x64">'
+    hs = base._ctx(); hs["steward"] = dict(hs["steward"], high_seat="aladdin-high-seat-cave.jpg")
+    assert cave in hsp.render_high_seat_html(hs) and ANCHOR_SET not in hsp.render_high_seat_html(hs)
+    ctx = w2._ctx(w1._steps()); ctx["steward"] = dict(ctx["steward"], high_seat="aladdin-high-seat-cave.jpg", seal="aladdin-seal-lamp.jpg")
     html = cpg.render_campaign_html(ctx)
-    assert ANCHOR_SET in html and ".jpg?v=" not in html[:html.index("<body")]
+    assert cave in html and ANCHOR_SET not in html and ".jpg?v=" not in html[:html.index("<body")]
     gui = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
     assert 'ico_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon.ico"' in gui and 'png_path = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon-256.png"' in gui, "the default favicon and the old dashboard's icon are the anchor too"
     assert 'self.send_header("Cache-Control", "no-cache")   # a new icon reaches the tab on the next load, not in a day' in gui
@@ -64,10 +67,11 @@ def test_without_the_anchor_set_the_steward_s_small_png_stands_in():
 
 def test_the_two_page_icons_are_legible_at_tab_size():
     """John, 2026-10-01: "put the icons back up in the tabs of the web pages" - the pages linked the PNGs all along and
-    the browsers fetched them, but the shrunken paintings read as dark squares on a dark tab bar. The icons are now
-    bright amber tiles with the steward's initial: 64 px (the size the link declares) and bright at 16 px. The two tabs
-    are told apart by a mark that survives tab size (Grok W3): the High Seat's is a SQUARE tile (the hall), a project's
-    seal is a ROUND one - at 16 px the seal's corners are transparent and the tile's are not."""
+    the browsers fetched them, but the shrunken paintings read as dark squares on a dark tab bar. The small PNGs are
+    bright at 16 px and 64 px (the size the link declares): the Cave of Wonders is the cave painting itself, cropped and
+    lifted (his rule of 18:1x - the two pages wear the cave); the seal an amber tile with the steward's initial. A mark
+    that survives tab size tells them apart (Grok W3): the High Seat's is SQUARE (the hall), a project's seal is ROUND -
+    at 16 px the seal's corners are transparent and the picture's are not."""
     import pytest
     PIL = pytest.importorskip("PIL.Image")
     corners = {}

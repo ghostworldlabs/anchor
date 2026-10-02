@@ -21749,8 +21749,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
         try:
             from high_seat_page import with_tab_icon as _with_tab_icon
             html_text = _with_tab_icon(html_text, BUILD_ID)   # every page wears his anchor in its tab (2026-10-01)
-        except Exception:
-            pass
+        except Exception as _e:                               # the page goes as it was; the log says why (Grok W3d)
+            print("  [%s] TAB ICON rewrite failed: %r" % (datetime.now().strftime("%H:%M:%S"), _e))
         body = html_text.encode("utf-8")
         try:
             self.send_response(200)

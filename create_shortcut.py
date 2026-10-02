@@ -4,7 +4,7 @@ Creates a desktop shortcut and a pinnable launcher for Anchor Dashboard.
 Run this once:  python create_shortcut.py
 
 What it does:
-  1. Generates an anchor.ico icon file (blue anchor on dark background)
+  1. Makes anchor.ico his anchor icon (vendor/brand/anchor-icon.ico; a drawn blue anchor only without it)
   2. Creates a Windows shortcut (.lnk) on your Desktop
   3. Creates a .bat launcher you can pin to the taskbar
 
@@ -23,7 +23,14 @@ BAT_PATH = ANCHOR_DIR / "AnchorDashboard.bat"
 # ── Generate a simple .ico file (48x48 + 32x32 + 16x16) ───────────────
 
 def make_ico():
-    """Generate a minimal anchor icon."""
+    """His anchor icon (vendor/brand/anchor-icon.ico, 2026-10-01) is the shortcut's icon; the drawn blue anchor is
+    only the fallback for a folder without it."""
+    his = ANCHOR_DIR / "vendor" / "brand" / "anchor-icon.ico"
+    if his.is_file():
+        import shutil
+        shutil.copyfile(str(his), str(ICON_PATH))
+        print(f"  Icon: {ICON_PATH} (his anchor)")
+        return True
     try:
         from PIL import Image, ImageDraw
         for size in [48, 32, 16]:

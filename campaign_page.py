@@ -531,5 +531,5 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every goal, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/campaign-page.js?v=%s"></script></body></html>'
-    ) % (tab_icon_link(st.get("seal"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), esc(HIS_NAME), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
+    ) % (tab_icon_link(st.get("high_seat") or st.get("seal"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), esc(HIS_NAME), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
          _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))

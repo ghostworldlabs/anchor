@@ -259,11 +259,12 @@ def anchor_tab_stem(brand=None):
 
 
 def tab_icon_link(name, build, anchor=None):
-    """The page's tab icon. 2026-10-01 13:3x, his word: "there is a new anchor icon that I want you to find and use" -
-    the set he dropped into vendor/brand at 13:12 (the multi-size .ico Chrome favours, the 32 and 16 px PNGs, the 180 px
-    touch icon) is every page's tab icon when it is there (``anchor`` None = when the files exist; False = never); its
-    small sizes come from the tab drawing when that is there (``anchor_tab_stem``).
-    Without it, the earlier rule (2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
+    """A page's tab icon. His rule (2026-10-01 18:1x): "the cave of wonders and the campaign web pages should have the
+    cave of wonders icon in the tab; the rest of the other tabs should have the new anchor icon." So the High Seat and
+    the Campaign page call this with ``anchor=False`` and the steward's High Seat picture; every other page wears the
+    anchor (``anchor`` None = when the files exist): the set he dropped into vendor/brand at 13:12, its small sizes from
+    the tab drawing when that is there (``anchor_tab_stem``), the 180 px touch icon always his export.
+    The picture rule (2026-09-30: "the icons in the web page tabs are missing"): a steward's 1024-px JPEG
     is too large for a browser tab, so the small PNG beside it stands in when it exists (vendor/brand/<stem>.png - a
     bright tile with the steward's initial, legible at 16 px); an SVG or a small image is linked as it is."""
     stem = anchor_tab_stem() if anchor is None or anchor else None
@@ -285,36 +286,37 @@ def tab_icon_link(name, build, anchor=None):
 
 
 _ANY_ICON_LINK = re.compile(r'<link\b[^>]*\brel=["\'](?:shortcut icon|icon)["\'][^>]*>', re.I)
-_OLD_ANCHOR_LINK = re.compile(r'<link\b[^>]*\brel=["\'](?:shortcut icon|icon|apple-touch-icon)["\'][^>]*\bhref=["\']/anchor(?:-touch)?\.(?:ico|png)[^"\']*["\'][^>]*>\s*', re.I)
+_OLD_ANCHOR_LINK = re.compile(r'<link\b[^>]*\brel=["\'](?:shortcut icon|icon|apple-touch-icon)["\'][^>]*\bhref=["\'](?:/anchor(?:-touch)?\.(?:ico|png)|/vendor/brand/anchor-icon[-.])[^"\']*["\'][^>]*>\s*', re.I)
 _HEAD_OPEN = re.compile(r"<head\b[^>]*>", re.I)
+_HEAD_CLOSE = re.compile(r"</head\s*>", re.I)
+_SCRIPT_OR_BODY = re.compile(r"<(?:script|body)\b", re.I)
 
 
 def with_tab_icon(html_text, build):
     """Every page the server sends wears his anchor in its tab (2026-10-01, his fourth ask: "where are my icons in
     Chrome tabs?"). What his tab strip showed: the Desk still linked the lamp painting, the cockpit linked the old
     /anchor.ico with no version (Chrome keeps a tab icon it has seen for a week, whatever the cache header says), and a
-    page with no link at all waited on /favicon.ico. One rule at the one door (``_send_html``): a page that already
-    links the anchor set is left; the old /anchor.ico and /anchor.png links become the set, with the build in the
-    address so a new icon is a new address; a page with no icon gets the set; a page with a mark of its own (a tool's)
-    keeps it. Only the head is read."""
-    try:
-        m = _HEAD_OPEN.search(html_text[:4096])
-        if not m:
-            return html_text
-        end = html_text.find("</head", m.end())
-        end = len(html_text) if end < 0 else end
-        head = html_text[m.end():end]
-        if "/vendor/brand/anchor-icon.ico" in head or "/vendor/brand/anchor-tab.ico" in head:
-            return html_text
-        link = tab_icon_link(None, build)
-        if "/vendor/brand/anchor-" not in link:
-            return html_text                                   # no anchor on disk: the page as it is
-        bare = _OLD_ANCHOR_LINK.sub("", head)
-        if _ANY_ICON_LINK.search(bare):
-            return html_text                                   # a mark of its own
-        return html_text[:m.end()] + link + bare + html_text[end:]
-    except Exception:
+    page with no link at all waited on /favicon.ico. One rule at the one door (``_send_html``), and only once the tab
+    drawing is on disk (his dark export is never written onto a tab that has something else - Grok W3d): a page that
+    already links the drawing is left; the old anchor links (/anchor.ico, /anchor.png, his export's set) become the
+    drawing's set, with the build in the address so a new icon is a new address; a page with no icon gets the set; a
+    page with a mark of its own (a tool's) keeps it. Only a real head is touched: the one that opens before any script
+    or body and closes with </head>."""
+    if anchor_tab_stem() != "anchor-tab":
         return html_text
+    window = html_text[:4096]
+    m = _HEAD_OPEN.search(window)
+    first = _SCRIPT_OR_BODY.search(window)
+    close = _HEAD_CLOSE.search(html_text, m.end()) if m else None
+    if not m or not close or (first and first.start() < m.start()):
+        return html_text
+    head = html_text[m.end():close.start()]
+    if "/vendor/brand/anchor-tab.ico" in head:
+        return html_text
+    bare = _OLD_ANCHOR_LINK.sub("", head)
+    if _ANY_ICON_LINK.search(bare):
+        return html_text                                       # a mark of its own
+    return html_text[:m.end()] + tab_icon_link(None, build) + bare + html_text[close.start():]
 
 
 def _brand_img(build, name, cls=""):
@@ -944,7 +946,7 @@ def render_high_seat_html(ctx) -> str:
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
+    ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]))
     return page

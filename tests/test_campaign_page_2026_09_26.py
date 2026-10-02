@@ -54,7 +54,7 @@ def _ctx():
 
 def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record():
     html = cpg.render_campaign_html(_ctx())
-    assert "<title>The Campaign</title>" in html and ('rel="icon" href="/vendor/brand/%s.ico?v=test"' % hsp.anchor_tab_stem()) in html   # the tab: his anchor
+    assert "<title>The Campaign</title>" in html and hsp.tab_icon_link(_ctx()["steward"].get("high_seat") or _ctx()["steward"].get("seal"), "test", anchor=False) in html   # the tab: the High Seat's picture (his rule, 2026-10-01)
     assert "campaign-page.css" in html and "campaign-page.js" in html and 'class="mh-stew"' in html
     # the goal board (W2 v2 of the active set, 2026-09-29): bands Active then the tiers, Tier 1 first; each goal a
     # compact tile — its light and one line — and its place (the area and tier, the Status, the parts) rendered apart
