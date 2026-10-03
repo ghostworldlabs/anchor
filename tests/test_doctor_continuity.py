@@ -5,6 +5,7 @@ model is launched. The ephemeral HTTP server exercises AnchorHandler itself.
 """
 import importlib
 import json
+import os
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +39,8 @@ def doctor_server(tmp_path, monkeypatch):
              "inputs": [], "health": {"started": False, "running": False, "text": "", "exit_code": None}}
 
     def start(seed_context=None, backend=None, resolve=False):
+        if state.get('fail_start'):
+            raise gui._termsess.TerminalSessionError('Synthetic launch denied')
         sid = "fixture-doctor-" + str(len(state["starts"]) + 1)
         rec = {"session_id": sid, "project_id": "__doctor__", "backend": backend,
                "status": "running", "doctor_mode": "resolve" if resolve else "diagnose",
@@ -52,7 +55,8 @@ def doctor_server(tmp_path, monkeypatch):
         if not rec:
             return {"ok": False, "reason": "unknown-session"}
         text = state["outputs"][sid]
-        return {"ok": True, "text": text[cursor:], "next": len(text),
+        retained_start = max(0, len(text) - state.get('retain_chars', len(text)))
+        return {"ok": True, "text": text[max(cursor, retained_start):], "next": len(text),
                 "status": "running" if rec["status"] == "running" else "dead"}
 
     monkeypatch.setattr(gui._termsess, "start_doctor_session", start)
@@ -160,6 +164,10 @@ def test_session_survives_frame_recreation(doctor_server, app, resolve):
     assert "ANCHOR-CTL" not in text
     assert len(doctor_server["starts"]) == 1 and not doctor_server["inputs"]
     assert doctor_server["health_starts"] == 0 and not failures
+    if os.environ.get('DOCTOR_CONTINUITY_EVIDENCE_DIR'):
+        evidence = Path(os.environ['DOCTOR_CONTINUITY_EVIDENCE_DIR'])
+        evidence.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(evidence / ('resolve-return.png' if resolve else 'diagnose-return.png')))
 
 
 @pytest.mark.parametrize("running", [False, True])
@@ -177,6 +185,10 @@ def test_health_progress_restored_without_a_rerun(doctor_server, app, running):
         frame.wait_for_function("document.getElementById('hcout').textContent.includes('COMPLETE')")
         frame.wait_for_function("!document.getElementById('runBtn').disabled")
     assert doctor_server["health_starts"] == 0 and not doctor_server["starts"] and not failures
+    if os.environ.get('DOCTOR_CONTINUITY_EVIDENCE_DIR'):
+        evidence = Path(os.environ['DOCTOR_CONTINUITY_EVIDENCE_DIR'])
+        evidence.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(evidence / ('health-running-return.png' if running else 'health-completed-return.png')))
 
 
 def test_ws_fallback_replays_no_unicode_twice(doctor_server, app):
@@ -210,9 +222,14 @@ def test_missing_pointer_does_not_select_another_session(doctor_server, app):
     doctor_server["start"](backend="grok", resolve=True)
     frame = navigate_back(page, doctor_server["origin"])
     frame.wait_for_function("document.getElementById('terminal').textContent.includes('Saved session is unavailable')")
-    assert frame.evaluate("sessionStorage.getItem('anchor_doctor_session_v1')") is None
+    bookmark = json.loads(frame.evaluate("sessionStorage.getItem('anchor_doctor_session_v1')"))
+    assert bookmark['session_id'] == sid and bookmark['unavailable'] is True
     assert "PRIOR PROGRESS" not in frame.locator("#terminal").inner_text()
     assert len(doctor_server["starts"]) == 2 and not failures
+    frame = navigate_back(page, doctor_server['origin'])
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('Saved session is unavailable')")
+    assert 'PRIOR PROGRESS' not in frame.locator('#terminal').inner_text()
+    assert len(doctor_server['starts']) == 2
 
 
 def test_discovery_is_unique_and_filters_foreign_and_unkeyed_sessions(doctor_server):
@@ -230,3 +247,76 @@ def test_discovery_is_unique_and_filters_foreign_and_unkeyed_sessions(doctor_ser
     del record["doctor_mode"]
     del record["doctor_posture"]
     assert state["gui"]._doctor_restore_session(record["session_id"])["error"] == "unavailable"
+
+
+def test_failed_resolve_keeps_prior_session_and_successful_resolve_replaces_it(doctor_server, app):
+    page, frame, failures = app
+    frame.evaluate('runDiagnose()')
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR PROGRESS')")
+    prior = doctor_server['starts'][0]['id']
+    doctor_server['fail_start'] = True
+    frame.evaluate('runDiagnose({resolve:true})')
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('Synthetic launch denied')")
+    assert json.loads(frame.evaluate("sessionStorage.getItem('anchor_doctor_session_v1')"))['session_id'] == prior
+    doctor_server['outputs'][prior] += 'PRIOR STILL CONNECTED\r\n'
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR STILL CONNECTED')")
+    doctor_server['fail_start'] = False
+    frame.evaluate('runDiagnose({resolve:true})')
+    frame.wait_for_function("document.getElementById('termEngine').textContent.includes('write-enabled')")
+    next_id = doctor_server['starts'][1]['id']
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('fixture-doctor-2')")
+    doctor_server['outputs'][prior] += 'STALE PRIOR OUTPUT\r\n'
+    doctor_server['outputs'][next_id] += 'CURRENT RESOLVE OUTPUT\r\n'
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('CURRENT RESOLVE OUTPUT')")
+    assert 'STALE PRIOR OUTPUT' not in frame.locator('#terminal').inner_text()
+    assert len(doctor_server['starts']) == 2 and not doctor_server['inputs'] and not failures
+
+
+def test_auth_failure_preserves_pointer_without_a_replacement(doctor_server, app):
+    page, frame, failures = app
+    frame.evaluate('runDiagnose()')
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR PROGRESS')")
+    prior = doctor_server['starts'][0]['id']
+    page.context.route('**/api/doctor/status?restore=1*', lambda r: r.fulfill(status=401, json={'ok':False}))
+    frame = navigate_back(page, doctor_server['origin'])
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('Reconnection could not be checked')")
+    assert json.loads(frame.evaluate("sessionStorage.getItem('anchor_doctor_session_v1')"))['session_id'] == prior
+    assert len(doctor_server['starts']) == 1 and frame.locator('#diagnoseBtn').is_disabled()
+    assert 'Saved session is unavailable' not in frame.locator('#terminal').inner_text()
+    assert not failures
+
+
+def test_truncated_replay_disconnect_before_confirmation_is_not_duplicated(doctor_server, app):
+    page, frame, failures = app
+    frame.evaluate('runDiagnose()')
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR PROGRESS')")
+    sid = doctor_server['starts'][0]['id']
+    doctor_server['outputs'][sid] = 'OLDER OUTPUT ' * 500 + 'RETAINED PROGRESS 🌟 é 漢字\r\n'
+    doctor_server['retain_chars'] = 60
+    # Keep the real socket and its replay, but lose replay_complete exactly
+    # before delivery. The existing real SSE endpoint must replay once from
+    # its authoritative absolute cursor, including a dropped buffer prefix.
+    page.context.add_init_script("""if(location.pathname==='/doctor') {
+      const Native=window.WebSocket;
+      window.WebSocket=class {
+        constructor(url) {
+          this.ws=new Native(url);
+          this.ws.onmessage=e=>{
+            if(String(e.data).startsWith('\\x00ANCHOR-CTL:') && String(e.data).includes('replay_complete')) {this.ws.close();return;}
+            if(this.onmessage)this.onmessage(e);
+          };
+          this.ws.onclose=e=>{if(this.onclose)this.onclose(e);};
+          this.ws.onerror=e=>{if(this.onerror)this.onerror(e);};
+        }
+        get readyState(){return this.ws.readyState;}
+        send(data){this.ws.send(data);}
+        close(){this.ws.close();}
+      };
+    }""")
+    frame = navigate_back(page, doctor_server['origin'])
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('RETAINED PROGRESS')")
+    assert frame.locator('#terminal').inner_text().count('RETAINED PROGRESS') == 1
+    doctor_server['outputs'][sid] += 'AFTER EARLY FALLBACK\r\n'
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('AFTER EARLY FALLBACK')")
+    assert frame.locator('#terminal').inner_text().count('RETAINED PROGRESS') == 1
+    assert len(doctor_server['starts']) == 1 and not failures

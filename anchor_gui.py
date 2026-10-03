@@ -17989,8 +17989,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
   function forgetSession(id) {
     if (!savedSession || savedSession.session_id !== id) return;
-    savedSession = null;
-    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+    // Retain the missing identity as a negative bookmark. Removing it would
+    // let the next page discover and silently select a different live Doctor.
+    savedSession = {session_id: id, unavailable: true};
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(savedSession)); } catch (_) {}
   }
   function sessionLabel(s, restored) {
     var eng = document.getElementById('termEngine');
@@ -18109,6 +18111,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     try {
       var ws = new WebSocket(wsUrl);
       activeWs = ws;
+      var confirmed = false;
+      var replayBuffer = '';
+      var beforeReplay = terminalCursor;
       function current() { return generation === transportGeneration && activeWs === ws; }
       ws.onmessage = function (ev) {
         if (!current() || typeof ev.data !== 'string') return;
@@ -18119,15 +18124,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
             if (p.type === 'attach_ack' && p.ok === false) {
               forgetSession(id); sessionId = null; closeTransport();
               term.write('\r\n[doctor] Saved session is unavailable; no replacement was started.\r\n');
-            } else if (p.type === 'replay_complete') terminalCursor = Number(p.next) || terminalCursor;
+            } else if (p.type === 'replay_complete') {
+              var next = Number(p.next);
+              if (!Number.isFinite(next) || next < 0) { fallback(); return; }
+              confirmed = true;
+              terminalCursor = next;
+              if (replayBuffer) term.write(replayBuffer);
+              replayBuffer = '';
+            }
           } catch (_) {}
           return;
         }
-        term.write(ev.data);
-        terminalCursor += Array.from(ev.data).length;
+        if (!confirmed) replayBuffer += ev.data;
+        else { term.write(ev.data); terminalCursor += Array.from(ev.data).length; }
       };
       function fallback() {
         if (!current()) return;
+        if (!confirmed) { replayBuffer = ''; terminalCursor = beforeReplay; }
         activeWs = null;
         try { ws.close(); } catch (_) {}
         startSSE();
