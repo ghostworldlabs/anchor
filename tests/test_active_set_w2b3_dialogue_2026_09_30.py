@@ -34,12 +34,12 @@ def test_the_panel_is_the_brief_the_composer_then_the_dialogue_of_the_whole_log(
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
     assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"'), "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape)"
     # 2026-10-02 (his yes): the conversation is the Campaign cockpit's own view - its whole log, its blocks, its status
-    assert '/steward/v1?embed=1&amp;view=tile&amp;compose=0&amp;inst=campaign&amp;pid=' in panel and 'class="cview-frame"' in panel and 'id="delivBar"' in panel
+    assert '/steward/v1?embed=1&amp;view=talk&amp;inst=campaign&amp;pid=' in panel and '&amp;dir="' in panel and 'class="cview-frame"' in panel and 'id="delivBar"' in panel
     assert 'id="exState"' in panel and '<ul class="ex" id="exList" hidden></ul>' in panel, "the state at the head; the page's dialogue script keeps its hidden list"
     assert 'steward: "Ecgberht"' in html or 'steward: "' in html, "the boot carries the steward's label for the live lines"
     ctx["turns"] = []; ctx["n_turns"] = 0
     html = cpg.render_campaign_html(ctx)
-    assert "open the cockpit &#8599;" in html   # an empty conversation is the cockpit view's own to say (2026-10-02)
+    assert "open in the cockpit &#8599;" in html   # an empty conversation is the cockpit view's own to say (2026-10-02)
 
 
 def test_the_script_is_live_from_the_open_watches_the_build_and_says_a_refusal():

@@ -582,3 +582,10 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}
 /* the Campaign's conversation on the Cave and the Campaign page (2026-10-02): the cockpit view, the page's own box below it */
 .app.nocompose .main .composer{display:none !important}
+/* the steward's dialogue alone, for the Cave and the Campaign page (2026-10-02): the conversation under a thin status line */
+.app.talkview{grid-template-columns:minmax(0,1fr) !important}
+.app.talkview .leftcol,.app.talkview .railtab,.app.talkview .goalbar,.app.talkview .rightcol,.app.talkview .statustab,
+.app.talkview [data-drive],.app.talkview [data-boneyard],.app.talkview [data-min],.app.talkview [data-spend],.app.talkview .composer{display:none !important}
+.app.talkview .main{grid-column:1 !important}
+.app.talkview .bar{padding:3px 10px;min-height:0;font-size:11.5px}
+.app.talkview .bar .title{display:none}

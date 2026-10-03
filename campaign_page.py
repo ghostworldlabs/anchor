@@ -475,7 +475,7 @@ def _panel(ctx):
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '</aside>'
-    ) % (esc(ctx["brief_when"]), bullets, conversation_view(st["label"], ctx.get("pid") or "", "campaign"), esc(st["label"]))
+    ) % (esc(ctx["brief_when"]), bullets, conversation_view(st["label"], ctx.get("pid") or "", "campaign", "", "the Campaign"), esc(st["label"]))
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────

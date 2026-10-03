@@ -1040,31 +1040,35 @@ def _head_li(ctx):
     return '<li class="%s">%s%s</li>%s' % (cls, lead, act, ('<li class="fold">%s</li>' % more) if more else "")
 
 
-def conversation_view(label, camp_pid, inst="main"):
-    """The Campaign's one conversation as the cockpit's OWN view (2026-10-02, his word: the same information flowing
-    in as the cockpit, in its blocks, with its status and deliverables; ChatGPT's read: one renderer). Shared by the
-    Cave and the Campaign page: the cockpit view of the Campaign's record with its box hidden (compose=0) - the page's
-    own box above stays, it carries the Campaign verbs, their receipts and undo; the steward's state chip; a hidden
-    list the page's dialogue script keeps for its sends, the goals' threads and the record's renewals; and the
-    Deliverables bar - what this conversation made, newest first."""
-    src = "/steward/v1?embed=1&amp;view=tile&amp;compose=0&amp;inst=%s&amp;pid=%s&amp;dir=" % (esc(inst), esc(camp_pid))
+CAVE_EFFORT = "Cave of Wonders"   # the Cave's own steward conversation, an effort of the Campaign (2026-10-02)
+
+
+def conversation_view(label, camp_pid, inst="main", dir_="", title="the conversation"):
+    """A steward conversation as the AI Cockpit renders it - its blocks, its markdown, its live flow - and nothing else
+    of the cockpit (his word, 2026-10-02: "I just want the steward dialogue from an AI Cockpit, maybe have the status
+    bar available but thinner, and the plan is not something that we have to worry about in those pages"): the view
+    /steward/v1?view=talk under a thin status line; the page's own box below carries the verbs, receipts and undo.
+    ``dir_`` names the conversation: "" the Campaign's, CAVE_EFFORT the Cave of Wonders' own. The Deliverables bar
+    lists what that conversation made."""
+    src = "/steward/v1?embed=1&amp;view=talk&amp;inst=%s&amp;pid=%s&amp;dir=%s" % (esc(inst), esc(camp_pid), esc(_quote(dir_)))
     return (
-        '<section class="exwrap cview" id="dialogue"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
-        '<a class="note" href="/project/%s?doc=1" target="_blank" rel="noopener" title="the Campaign&rsquo;s cockpit, full size">open the cockpit &#8599;</a></div>'
-        '<iframe class="cview-frame" src="%s" title="%s &mdash; the Campaign&rsquo;s conversation and status"></iframe>'
+        '<section class="exwrap cview" id="dialogue" data-dir="%s"><div class="exhead"><h3>%s &mdash; %s</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
+        '<a class="note" href="/project/%s?doc=1%s" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">open in the cockpit &#8599;</a></div>'
+        '<iframe class="cview-frame" src="%s" title="%s &mdash; %s"></iframe>'
         '<ul class="ex" id="exList" hidden></ul></section>'
-        '<section class="delivbar" id="delivBar" data-pid="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
+        '<section class="delivbar" id="delivBar" data-pid="%s" data-dir="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
         '<span class="db-t">Deliverables</span><span class="db-c" id="delivCount">&hellip;</span><span class="db-caret">&#9662;</span></button>'
         '<ul class="db-list" id="delivList" hidden></ul></section>'
-    ) % (esc(label), esc(camp_pid), src, esc(label), esc(camp_pid))
+    ) % (esc(dir_), esc(label), esc(title), esc(camp_pid), ("&amp;dir=%s&amp;open=effort" % esc(_quote(dir_))) if dir_ else "",
+         src, esc(label), esc(title), esc(camp_pid), esc(dir_))
 
 
 def _dialogue(ctx):
-    """The steward's dialogue on the High Seat: the Campaign's conversation as the cockpit's own view (conversation_view).
-    Nothing here without a Campaign."""
+    """The steward's dialogue on the Cave of Wonders: the Cave's OWN conversation (2026-10-02, his word: one for the Cave,
+    one for the Campaign), shown as the cockpit renders it (conversation_view). Nothing here without a Campaign."""
     if not ctx.get("campaign"):
         return ""
-    return conversation_view(ctx["steward"]["label"], (ctx.get("campaign") or {}).get("pid") or "")
+    return conversation_view(ctx["steward"]["label"], (ctx.get("campaign") or {}).get("pid") or "", "cave", CAVE_EFFORT, "the Cave of Wonders")
 
 
 def nudge_html(n, where="brief"):
@@ -1102,7 +1106,7 @@ def _panel(ctx):
         '%s'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a Campaign verb applies on the record"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Campaign steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
+        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Cave&rsquo;s steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
     ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
          esc(ctx["brief_when"]), bullets, nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]))

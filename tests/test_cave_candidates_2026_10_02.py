@@ -111,3 +111,20 @@ def test_the_tile_searches_and_sorts_by_the_steward_s_score_the_last_work_and_th
     assert '<option value="worked">' in html and '<option value="created">' in html and 'data-score="' in html and 'class="cs" title="' in html
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "r.hidden = !hit;" in js and "sessionStorage.setItem('hs_cands_sort', key)" in js
+
+
+def test_two_conversations_the_cave_s_and_the_campaign_s_each_the_steward_s_dialogue_alone():
+    # his word 2026-10-02: one conversation for the Cave of Wonders, one for the Campaign; the steward's dialogue from an
+    # AI Cockpit with a thinner status line, no plan
+    cave = hsp.conversation_view("Aladdin", "camp", "cave", hsp.CAVE_EFFORT, "the Cave of Wonders")
+    camp = hsp.conversation_view("Aladdin", "camp", "campaign", "", "the Campaign")
+    assert "view=talk" in cave and "dir=Cave%20of%20Wonders" in cave and 'data-dir="Cave of Wonders"' in cave and "Aladdin &mdash; the Cave of Wonders" in cave
+    assert "view=talk" in camp and "dir=\"" in camp and "Aladdin &mdash; the Campaign" in camp
+    css = open(os.path.join(HERE, "steward_cockpit", "static", "shared.css"), encoding="utf-8").read()
+    for hidden in (".app.talkview .leftcol", ".app.talkview .goalbar", ".app.talkview .rightcol", ".app.talkview .composer", ".app.talkview [data-drive]"):
+        assert hidden in css, hidden
+    from steward_cockpit import campaign_say
+    from steward_cockpit.steward_engine import _is_cave_dir
+    assert campaign_say.CAVE_EFFORT == hsp.CAVE_EFFORT and _is_cave_dir(str(campaign_say.campaign_dir() / hsp.CAVE_EFFORT))
+    js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "pid: CAMPAIGN, dir: CAVE_DIR, headers: headers," in js

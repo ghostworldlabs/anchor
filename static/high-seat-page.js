@@ -730,8 +730,9 @@
   // W2c-2 (2026-09-30, his word: the dialogue must "engage the steward and then show the dialogue"): the composer is
   // ONE box. A Campaign verb and the new-project ask are answered by the High Seat's own route as before (a receipt,
   // the confirm card); anything else is said to the Campaign's steward — the Desk — and the exchange shows below, live
+  var CAVE_DIR = (document.getElementById('dialogue') && document.getElementById('dialogue').getAttribute('data-dir')) || '';   // the Cave's own conversation (2026-10-02)
   var dlg = (window.StewardDialogue && CAMPAIGN) ? window.StewardDialogue.init({
-    pid: CAMPAIGN, dir: '', headers: headers, receipt: receipt, receiptKey: 'highseat_receipt',
+    pid: CAMPAIGN, dir: CAVE_DIR, headers: headers, receipt: receipt, receiptKey: 'highseat_receipt',
     steward: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.steward) || 'The steward', stamp: (window.ANCHOR_BOOT && window.ANCHOR_BOOT.stamp) || '',
     goalName: function (id) { var g = $('.grow[data-g="' + id + '"] .gn'); return (g && g.textContent.trim()) || id; },
     openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); },   // the goal's place, as the rendered chip opens it (Grok W2c-2)

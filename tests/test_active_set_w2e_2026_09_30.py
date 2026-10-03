@@ -269,7 +269,7 @@ def test_the_open_tile_is_the_cockpit_s_own_view_through_a_scoped_bridge():
     assert "StewardDialogue.init({ pid: pid, dir: dir" not in js and ".slice(0, 1600)" not in js, "no second renderer, no cut"
     assert "card._talk.prefill('About: '" in js and "$$('.tile.open').some(function (c) { return !!c._typing; })" in js
     sh = open(os.path.join(HERE, "steward_cockpit", "static", "shared.js"), encoding="utf-8").read()
-    assert 'const TILE = EMBED && PARAMS.get("view") === "tile";' in sh and "window.parent.postMessage(Object.assign({ proto: \"anchor-tile\", inst: INST, kind: kind }, data || {}), location.origin)" in sh
+    assert 'const TILE = EMBED && (PARAMS.get("view") === "tile" || TALK);' in sh and 'const TALK = EMBED && PARAMS.get("view") === "talk";' in sh and "window.parent.postMessage(Object.assign({ proto: \"anchor-tile\", inst: INST, kind: kind }, data || {}), location.origin)" in sh
     assert 'if (ev.origin !== location.origin || ev.source !== window.parent || !m || m.proto !== "anchor-tile" || m.inst !== INST) return;' in sh
     assert 'tileSay("drop", { files: Array.from(files) });' in sh and 'tileSay("ready", {});' in sh
 

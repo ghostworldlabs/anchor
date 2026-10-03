@@ -34,14 +34,14 @@ def test_the_high_seat_shows_the_one_conversation_under_the_composer_and_boots_t
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
     assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"') and 'id="todayBlock"' not in panel, "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape); Today is under the board"
     assert 'id="todayBlock"' not in html and "raised by:" not in html, "his word 2026-10-02: the dated deliveries are enough - no Today block"
-    assert '/steward/v1?embed=1&amp;view=tile&amp;compose=0&amp;inst=main&amp;pid=' in panel and 'id="exState"' in panel and 'id="exList"' in panel   # the cockpit's own view (2026-10-02)
+    assert '/steward/v1?embed=1&amp;view=talk&amp;inst=cave&amp;pid=' in panel and '&amp;dir=Cave%20of%20Wonders"' in panel   # the Cave's own conversation (2026-10-02) and 'id="exState"' in panel and 'id="exList"' in panel   # the cockpit's own view (2026-10-02)
     assert 'steward: "Jarvis", stamp: "s9"' in html, "the boot carries the steward's label and the record's stamp for the live lines"
-    assert "it answers above as it writes; a Campaign verb applies on the record" in panel and "the Campaign steward answers above &middot; start a new project called" in panel, "the composer says where the answer lands"
+    assert "it answers above as it writes; a Campaign verb applies on the record" in panel and "the Cave&rsquo;s steward answers above &middot; start a new project called" in panel, "the composer says where the answer lands"
     hcss = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
     assert "grid-template-columns:minmax(0,1fr) 480px" in hcss and "height:calc(100vh - 24px);display:flex;flex-direction:column" in hcss and "max-height:38vh" not in hcss, "W2c-3: the column is wider, the panel is the cockpit's shape, the dialogue fills it"
     assert '<link rel="stylesheet" href="/static/steward-dialogue.css?v=test">' in html and '<script src="/static/steward-dialogue.js?v=test"></script><script src="/static/high-seat-page.js?v=test">' in html
     ctx["turns"] = []; ctx["n_turns"] = 0
-    assert "open the cockpit &#8599;" in hsp.render_high_seat_html(ctx)   # the cockpit view says an empty log its own way (2026-10-02)
+    assert "open in the cockpit &#8599;" in hsp.render_high_seat_html(ctx)   # the cockpit view says an empty log its own way (2026-10-02)
     ctx["campaign"] = None
     assert 'id="dialogue"' not in hsp.render_high_seat_html(ctx), "no dialogue without a Campaign"
 

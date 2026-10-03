@@ -15,7 +15,8 @@ const Proto = (() => {
   // the Cave of Wonders' open tile shows THIS view (2026-10-02, his word: "if I had both open I'd be able to see
   // exactly the same information flowing into the dialog ... and the status bar should be doing the same thing"):
   // one renderer, one engine stream. The tile hears this view through a bridge scoped to its instance and origin.
-  const TILE = EMBED && PARAMS.get("view") === "tile";
+  const TALK = EMBED && PARAMS.get("view") === "talk";
+  const TILE = EMBED && (PARAMS.get("view") === "tile" || TALK);
   const INST = PARAMS.get("inst") || "";
   function tileSay(kind, data) {
     if (!TILE || window.parent === window) return;
@@ -2262,6 +2263,9 @@ const Proto = (() => {
   async function init(o) {
     opts = o || {};
     if (TILE) { const a = document.querySelector(".app"); if (a) { a.classList.add("tileview", "railhide"); if (PARAMS.get("compose") === "0") a.classList.add("nocompose"); } }
+    // the steward's dialogue alone (his word, 2026-10-02: "the steward dialogue from an AI Cockpit, maybe the status bar
+    // available but thinner, and the plan is not something we have to worry about in those pages")
+    if (TALK) { const a = document.querySelector(".app"); if (a) { a.classList.add("talkview", "railhide", "nocompose"); a.classList.remove("statusopen"); } }
     if (opts.stewardLabel) opts._labelSet = true;
     applyTheme();
     try { await loadMap(); } catch (e) {

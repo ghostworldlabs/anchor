@@ -32,6 +32,16 @@ def campaign_dir():
     return Path(_paths.data_dir()).resolve().parent / "Campaign"
 
 
+CAVE_EFFORT = "Cave of Wonders"   # the Cave's own steward conversation (his word, 2026-10-02): an effort of the Campaign
+
+
+def is_cave_folder(folder):
+    try:
+        return Path(str(folder)).resolve() == (campaign_dir() / CAVE_EFFORT).resolve()
+    except Exception:
+        return False
+
+
 def is_campaign_folder(folder):
     try:
         return Path(str(folder)).resolve() == campaign_dir()

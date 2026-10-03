@@ -239,13 +239,13 @@
     var pid = bar.getAttribute('data-pid') || '';
     function href(it) {
       var t = barToken(), tq = t ? '&token=' + encodeURIComponent(t) : '';
-      var dir = encodeURIComponent(it.dir || ''), path = encodeURIComponent(it.path || '');
+      var dir = encodeURIComponent(it.dir || bar.getAttribute('data-dir') || ''), path = encodeURIComponent(it.path || '');
       if (/\.(md|txt|csv|json|log)$/i.test(it.path || '')) return '/steward/report?dir=' + dir + '&path=' + path + '&pid=' + encodeURIComponent(pid) + tq;
       return '/api/steward/deliverable-file?pid=' + encodeURIComponent(pid) + '&dir=' + dir + '&path=' + path
         + (it.hash ? '&hash=' + encodeURIComponent(it.hash) : '') + (/\.(docx|pptx|xlsx)$/i.test(it.path || '') ? '&view=1' : '') + tq;
     }
     function load() {
-      return fetch('/api/steward/deliverables?pid=' + encodeURIComponent(pid) + '&dir=', { headers: authHeaders(barHeaders()) })
+      return fetch('/api/steward/deliverables?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(bar.getAttribute('data-dir') || ''), { headers: authHeaders(barHeaders()) })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var items = ((j && j.items) || []).filter(function (it) { return it && it.path; });

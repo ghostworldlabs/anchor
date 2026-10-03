@@ -583,6 +583,15 @@ def _cli_cmd(cli="claude"):
     return [exe]
 
 
+def _is_cave_dir(folder):
+    """Is this the Cave of Wonders' own conversation (an effort of the Campaign, 2026-10-02)?"""
+    try:
+        from steward_cockpit.campaign_say import is_cave_folder
+        return bool(is_cave_folder(folder))
+    except Exception:
+        return False
+
+
 def _is_campaign_dir(folder):
     """Is this the Campaign's own folder (the steward that talks on the Cave of Wonders and the Campaign page)?"""
     try:
@@ -607,7 +616,7 @@ class Engine:
         # W5 of the active set: the Campaign's own steward holds ONE
         # conversation (it does not park on a quiet half hour; its wake is
         # silent) - see RESUME_QUIET.
-        self.one_conversation = (not general) and _is_campaign_dir(self.dir)
+        self.one_conversation = (not general) and (_is_campaign_dir(self.dir) or _is_cave_dir(self.dir))   # the Cave's own too (2026-10-02)
         self._idle_marked = 0.0     # the quiet spell whose checkpoint is already taken
         _key = self.dir + (f"||general||{tid or 1}" if general else "")
         stored_entry = _read_state_entry(_key)
