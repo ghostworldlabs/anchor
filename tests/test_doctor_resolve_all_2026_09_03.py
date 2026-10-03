@@ -218,7 +218,10 @@ class AutoSubmitTest(unittest.TestCase):
         src = (REPO / "anchor_gui.py").read_text(encoding="utf-8")
         blk = src.split("window.runDiagnose = function")[1].split("window.runDiagnostics")[0]
         self.assertIn("if (sessionId && !opts.resolve)", blk)
-        self.assertIn("sessionId = null", blk)
+        self.assertIn("if (sessionId && opts.resolve)", blk)
+        # A failed explicit Resolve now keeps the prior session connected.
+        # Successful replacement, not clearing first, admits Resolve.
+        self.assertIn("sessionId = p.session.session_id", blk)
 
 
 if __name__ == "__main__":

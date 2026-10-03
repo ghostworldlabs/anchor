@@ -17490,6 +17490,43 @@ def _doctor_latest_issues(body):
         return []
 
 
+def _doctor_restore_session(session_id=""):
+    """Inspect an exact Doctor PTY, or the sole live Doctor. Never start one.
+
+    A browser's saved pointer wins over discovery, even when unavailable. Do
+    not silently substitute another session/model/posture for that pointer.
+    """
+    try:
+        records = ([_termsess.get_session(session_id)] if session_id else
+                   _termsess.list_sessions(project_id=_termsess.DOCTOR_PROJECT_ID,
+                                           status="running"))
+        found = []
+        for rec in records:
+            if not rec or rec.get("project_id") != _termsess.DOCTOR_PROJECT_ID:
+                continue
+            mode = rec.get("doctor_mode")
+            posture = rec.get("doctor_posture")
+            if (mode not in ("diagnose", "resolve") or
+                    {"diagnose": "read-only", "resolve": "write-enabled"}[mode] != posture):
+                continue
+            output = _termsess.read_since(rec["session_id"], 0)
+            if not output.get("ok", True):
+                continue
+            if not session_id and output.get("status") != "running":
+                continue
+            found.append({"session_id": rec["session_id"],
+                          "backend": rec.get("backend", ""),
+                          "mode": mode, "posture": posture,
+                          "status": output.get("status", "unknown")})
+        if len(found) == 1:
+            return {"session": found[0], "error": None}
+        return {"session": None, "error": ("unavailable" if session_id else
+                                            "multiple" if found else None)}
+    except Exception:
+        # A failed inspection is not evidence that the saved session ended.
+        return {"session": None, "error": "inspection_failed"}
+
+
 def handle_doctor_status(handler, path, body):
     # Read-only JSON stats for the /doctor card + reports-list refresh after a
     # diagnostics run. Token-authed by the route row (?token= / header /
@@ -17507,6 +17544,9 @@ def handle_doctor_status(handler, path, body):
         for row in toggle["engines"]:
             row["enabled"] = False
     stats = _doctor_stats()
+    query = parse_qs(urlparse(getattr(handler, "path", path)).query)
+    recovery = (_doctor_restore_session((query.get("session", [""])[0] or "")[:128])
+                if query.get("restore") == ["1"] else None)
     handler._send_json({
         "ok": state["valid"],
         "error": state["error"],
@@ -17518,6 +17558,7 @@ def handle_doctor_status(handler, path, body):
         "defaultEngine": toggle["defaultEngine"],
         "shellFirst": True,
         "autoStartSession": False,
+        "recovery": recovery,
         "oneClickDiagnose": True,
         "p5Plumbing": _W8_P5_PLUMBING,
     })
@@ -17931,6 +17972,30 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   var activeWs = null;
   var sendChain = Promise.resolve();
   var sessionId = null;
+  var recoveryPending = true;
+  var restoredHealth = false;
+  var terminalCursor = 0;
+  var transportGeneration = 0;
+  var activeSse = null;
+  var savedSession = null;
+  var SESSION_KEY = 'anchor_doctor_session_v1';
+  try {
+    var saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    if (saved && typeof saved.session_id === 'string' && saved.session_id.length <= 128) savedSession = saved;
+  } catch (_) {}
+  function rememberSession(s) {
+    savedSession = {session_id: s.session_id};
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(savedSession)); } catch (_) {}
+  }
+  function forgetSession(id) {
+    if (!savedSession || savedSession.session_id !== id) return;
+    savedSession = null;
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+  }
+  function sessionLabel(s, restored) {
+    var eng = document.getElementById('termEngine');
+    if (eng) eng.textContent = s.backend + ' · ' + s.mode + ' · ' + s.posture + (restored ? ' (reconnected)' : '');
+  }
   var ZH_ENG = null;
   var ZH_SETTINGS_REVISION = null;
   var ZH_ENG_HEALTH = { claude: false, gemini: false, grok: false, chatgpt: false };
@@ -17947,8 +18012,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var h = document.getElementById('engHealth');
     if (h) h.textContent = !ZH_ENG ? 'Model settings unavailable; reload after signing in' : (ZH_ENG_HEALTH[ZH_ENG] === false ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' ready'));
     var launchButton = document.getElementById('diagnoseBtn');
-    if (launchButton) launchButton.disabled = !ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true;
+    if (launchButton) launchButton.disabled = recoveryPending || !ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true;
+    document.querySelectorAll('button[onclick^="resolve"]').forEach(function (el) { el.disabled = recoveryPending; });
   }
+  paintEng();
   window.pickDoctorEng = function (e) {
     if (ZH_ENG_HEALTH[e] === false) {
       term.write('[doctor] ' + e + ' disabled (unhealthy).\r\n');
@@ -17970,17 +18037,57 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
   term.onData(sendInput);
   var sseStarted = false;
+  function closeTransport() {
+    transportGeneration++;
+    var ws = activeWs;
+    activeWs = null;
+    if (ws) { try { ws.close(); } catch (_) {} }
+    if (activeSse) { try { activeSse.close(); } catch (_) {} }
+    activeSse = null;
+    sseStarted = false;
+  }
   function startSSE() {
     if (sseStarted || !sessionId) return;
     sseStarted = true;
-    var es = new EventSource(tq('/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId)));
+    var generation = transportGeneration;
+    var id = sessionId;
+    var es = new EventSource(tq('/api/rnd/term_stream2?session=' + encodeURIComponent(id) + '&since=' + terminalCursor));
+    activeSse = es;
+    function current() { return generation === transportGeneration && activeSse === es; }
     es.addEventListener('output', function (ev) {
+      if (!current()) return;
       try {
         var p = JSON.parse(ev.data);
-        if (p.text) term.write(p.text);
+        var chars = Array.from(p.text || '');
+        var next = Number(p.next);
+        if (!Number.isFinite(next) || next < 0) return;
+        if (next > terminalCursor) {
+          term.write(chars.slice(Math.max(0, terminalCursor - (next - chars.length))).join(''));
+          terminalCursor = next;
+        }
       } catch (e) {}
     });
-    es.addEventListener('done', function () { try { es.close(); } catch (e) {} });
+    es.addEventListener('replay_complete', function (ev) {
+      if (!current()) return;
+      try { terminalCursor = Math.max(terminalCursor, Number(JSON.parse(ev.data).next) || 0); } catch (_) {}
+    });
+    es.addEventListener('done', function (ev) {
+      if (!current()) return;
+      try {
+        var p = JSON.parse(ev.data);
+        if (p.error) { forgetSession(id); sessionId = null; term.write('\r\n[doctor] Saved session is unavailable; no replacement was started.\r\n'); }
+        else if (p.status === 'dead') { sessionId = null; term.write('\r\n[doctor] Session finished. Retained output is shown above.\r\n'); }
+        else { es.onerror(); return; }
+      } catch (_) {}
+      es.close(); activeSse = null; sseStarted = false;
+    });
+    es.onerror = function () {
+      if (!current()) return;
+      es.close(); activeSse = null; sseStarted = false;
+      // EventSource's own retry would use an obsolete URL cursor. Reconnect
+      // explicitly to the SAME session at the last displayed offset instead.
+      setTimeout(function () { if (generation === transportGeneration && sessionId === id) startSSE(); }, 1500);
+    };
   }
   function fitTerm() {
     if (!sessionId) return;
@@ -17994,20 +18101,46 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
   window.addEventListener('resize', fitTerm);
   function attach() {
+    closeTransport();
+    var generation = transportGeneration;
+    var id = sessionId;
     var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
-    var wsUrl = tq(wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId));
+    var wsUrl = tq(wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(id) + '&since=' + terminalCursor);
     try {
       var ws = new WebSocket(wsUrl);
       activeWs = ws;
-      ws.onmessage = function (ev) { term.write(ev.data); };
-      ws.onclose = function () { activeWs = null; if (!sseStarted) startSSE(); };
-      ws.onerror = function () { activeWs = null; try { ws.close(); } catch (e) {} startSSE(); };
+      function current() { return generation === transportGeneration && activeWs === ws; }
+      ws.onmessage = function (ev) {
+        if (!current() || typeof ev.data !== 'string') return;
+        var prefix = '\x00ANCHOR-CTL:';
+        if (ev.data.indexOf(prefix) === 0) {
+          try {
+            var p = JSON.parse(ev.data.slice(prefix.length));
+            if (p.type === 'attach_ack' && p.ok === false) {
+              forgetSession(id); sessionId = null; closeTransport();
+              term.write('\r\n[doctor] Saved session is unavailable; no replacement was started.\r\n');
+            } else if (p.type === 'replay_complete') terminalCursor = Number(p.next) || terminalCursor;
+          } catch (_) {}
+          return;
+        }
+        term.write(ev.data);
+        terminalCursor += Array.from(ev.data).length;
+      };
+      function fallback() {
+        if (!current()) return;
+        activeWs = null;
+        try { ws.close(); } catch (_) {}
+        startSSE();
+      }
+      ws.onclose = fallback;
+      ws.onerror = fallback;
     } catch (e) {
       activeWs = null;
       startSSE();
     }
     setTimeout(fitTerm, 100);
   }
+  window.addEventListener('pagehide', closeTransport);
   // W9 / SC7 — banner→Doctor seed from URL query (1:1 fields; not a markdown path).
   var BANNER_ISSUE = null;
   // (2026-08-07) The instant diagnosis: issues parsed server-side from the
@@ -18025,6 +18158,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     });
   }
   window.resolveAll = function () {
+    if (recoveryPending) return;
     var btn = document.getElementById('resolveAllBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Probing…'; }
     fetch('/api/doctor/resolve_all', { method: 'POST', headers: hdrs(), body: JSON.stringify(token ? { token: token } : {}) })
@@ -18129,7 +18263,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         if (p.decision === 'rerun') {
           term.write('[doctor] This looks like a known stale or load result, not live damage. '
             + 'Re-running the health check myself; the red banner clears when the report is clean.\r\n');
-          window.runDiagnostics();
+          if (!restoredHealth && !sessionId) window.runDiagnostics();
+          else term.write('[doctor] Existing progress restored; no new health check started.\r\n');
         } else if (p.decision === 'session') {
           term.write('[doctor] ' + (p.issues || []).length + ' issue(s) still real. Resolve all starts ONE doctor session for them (a model session) - your click.\r\n');
         } else {
@@ -18141,14 +18276,44 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // Shell-first: load deterministic status/engine health only. Opening this
   // page NEVER starts a paid model, including banner URLs with diagnose=1.
-  fetch(tq('/api/doctor/status'), { headers: getHdrs() })
+  var recoveryUrl = '/api/doctor/status?restore=1' + (savedSession ? '&session=' + encodeURIComponent(savedSession.session_id) : '');
+  Promise.all([
+    fetch(tq(recoveryUrl), { headers: getHdrs() })
     .then(function (r) { if (!r.ok) throw new Error('Model status authentication failed'); return r.json(); })
-    .then(function (s) {
+    , fetch(tq('/api/doctor/healthcheck_tail?since=0'), { headers: getHdrs() })
+      .then(function (r) { if (!r.ok) throw new Error('Health progress unavailable'); return r.json(); })
+      .catch(function () { return null; })
+  ]).then(function (results) {
+      var s = results[0], health = results[1];
+      // An unavailable progress read must not cause an automatic replacement.
+      restoredHealth = !health || !!(health.started || health.running);
+      if (health && health.ok && (health.started || health.running)) {
+        document.getElementById('hcout').style.display = 'block';
+        if (health.running) {
+          document.getElementById('runBtn').disabled = true;
+          document.getElementById('runBtn').textContent = 'Running…';
+        }
+        pollTail(0, health);
+      }
       if (s && s.engines) {
         s.engines.forEach(function (row) { ZH_ENG_HEALTH[row.id] = !!row.enabled; });
         if (s.defaultEngine) ZH_ENG = s.defaultEngine;
         ZH_SETTINGS_REVISION = s.settings_revision == null ? null : s.settings_revision;
       }
+      if (s && s.recovery && s.recovery.session) {
+        var restored = s.recovery.session;
+        sessionId = restored.session_id;
+        rememberSession(restored);
+        term.reset();
+        sessionLabel(restored, true);
+        attach();
+      } else if (s && s.recovery && s.recovery.error === 'unavailable' && savedSession) {
+        forgetSession(savedSession.session_id);
+        term.write('[doctor] Saved session is unavailable; no replacement was started.\r\n');
+      } else if (s && s.recovery && s.recovery.error) {
+        term.write('[doctor] Existing session could not be selected (' + s.recovery.error + '); no replacement was started.\r\n');
+      }
+      recoveryPending = false;
       paintEng();
       // Banner URLs preload context but require a human click before a MODEL
       // spends. What does NOT wait for a click: reading the report and probing
@@ -18170,7 +18335,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       if (BANNER_ISSUE || DOCTOR_ISSUES.length) probeOnOpen();
     })
     .catch(function () {
+      recoveryPending = false;
       paintEng();
+      term.write('[doctor] Reconnection could not be checked; no replacement was started.\r\n');
       if (REQUESTED_DIAGNOSE && BANNER_ISSUE) {
         term.write('[doctor] Engine health probe failed (non-blocking); shell usable. Click Diagnose when ready.\r\n');
       }
@@ -18178,13 +18345,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   window.runDiagnose = function (opts) {
     opts = opts || {};
+    if (recoveryPending) return;
     if (sessionId && !opts.resolve) {
       term.write('[doctor] Session already live.\r\n');
       return;
     }
     if (sessionId && opts.resolve) {
       term.write('[doctor] Starting a fresh Resolve session on the selected engine.\r\n');
-      sessionId = null;
     }
     if (!ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true) {
       term.write('[doctor] Engine ' + ZH_ENG + ' disabled with health — pick another.\r\n');
@@ -18208,8 +18375,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         if (btn) { btn.disabled = false; btn.textContent = 'Diagnose'; }
         if (p && p.ok && p.session && p.session.session_id) {
           sessionId = p.session.session_id;
-          var eng = document.getElementById('termEngine');
-          if (eng && p.session.backend) eng.textContent = p.session.backend + (p.attached ? ' (reattached)' : '');
+          rememberSession(p.session);
+          terminalCursor = 0;
+          term.reset();
+          sessionLabel(p.session, p.attached);
           term.write('[doctor] Session started async on ' + (p.session.backend || ZH_ENG)
             + (opts.fromBanner ? ' (banner seed)' : '') + (opts.resolve ? ' (RESOLVE mode)' : '') + '.\r\n');
           if (p.attached && opts.resolve) {
@@ -18296,12 +18465,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     btn.textContent = 'Run diagnostics';
     refreshStats();
   }
-  function pollTail(since) {
+  function pollTail(since, initial) {
     if (polling) return;
     polling = true;
     (function step(cursor) {
-      fetch(tq('/api/doctor/healthcheck_tail?since=' + cursor), { headers: getHdrs() })
-        .then(function (r) { return r.json(); })
+      var request = initial ? Promise.resolve(initial) :
+        fetch(tq('/api/doctor/healthcheck_tail?since=' + cursor), { headers: getHdrs() }).then(function (r) { return r.json(); });
+      initial = null;
+      request
         .then(function (p) {
           var out = document.getElementById('hcout');
           if (p && p.ok) {

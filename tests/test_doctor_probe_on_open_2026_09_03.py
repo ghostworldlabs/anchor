@@ -110,7 +110,7 @@ class PageProbesOnOpenTest(unittest.TestCase):
         self.assertIn("fetch(tq('/api/doctor/probe')", self.tpl)
         self.assertIn("if (BANNER_ISSUE || DOCTOR_ISSUES.length) probeOnOpen();", self.tpl)
         # It runs after the engine-health status fetch (shell-first), once.
-        self.assertLess(self.tpl.index("fetch(tq('/api/doctor/status')"),
+        self.assertLess(self.tpl.index("fetch(tq(recoveryUrl)"),
                         self.tpl.index("if (BANNER_ISSUE || DOCTOR_ISSUES.length) probeOnOpen();"))
         self.assertIn("if (PROBED_ON_OPEN) return;", self.tpl)
 
