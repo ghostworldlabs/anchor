@@ -2261,7 +2261,7 @@ const Proto = (() => {
 
   async function init(o) {
     opts = o || {};
-    if (TILE) { const a = document.querySelector(".app"); if (a) { a.classList.add("tileview", "railhide"); } }
+    if (TILE) { const a = document.querySelector(".app"); if (a) { a.classList.add("tileview", "railhide"); if (PARAMS.get("compose") === "0") a.classList.add("nocompose"); } }
     if (opts.stewardLabel) opts._labelSet = true;
     applyTheme();
     try { await loadMap(); } catch (e) {

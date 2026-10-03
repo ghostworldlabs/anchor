@@ -228,5 +228,47 @@
     if (tok) tok.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } });
     return { show: show, login: login };
   }
-  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox };   // authHeaders: the one way a GET on these pages carries the token; loginBox: the one login script
+  // the Deliverables bar under the conversation (his word, 2026-10-02): the Campaign's register, newest first, each one
+  // a click away - a text document through the report viewer, anything else through the cockpit's own file route
+  function deliverablesBar() {
+    var $ = function (s) { return document.querySelector(s); };
+    function barToken() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
+    function barHeaders() { var h = { 'Content-Type': 'application/json' }, t = barToken(); if (t) { h['X-Anchor-Token'] = t; } return h; }
+    var bar = $('#delivBar'), btn = $('#delivToggle'), ul = $('#delivList'), cnt = $('#delivCount');
+    if (!bar || !btn || !ul) return;
+    var pid = bar.getAttribute('data-pid') || '';
+    function href(it) {
+      var t = barToken(), tq = t ? '&token=' + encodeURIComponent(t) : '';
+      var dir = encodeURIComponent(it.dir || ''), path = encodeURIComponent(it.path || '');
+      if (/\.(md|txt|csv|json|log)$/i.test(it.path || '')) return '/steward/report?dir=' + dir + '&path=' + path + '&pid=' + encodeURIComponent(pid) + tq;
+      return '/api/steward/deliverable-file?pid=' + encodeURIComponent(pid) + '&dir=' + dir + '&path=' + path
+        + (it.hash ? '&hash=' + encodeURIComponent(it.hash) : '') + (/\.(docx|pptx|xlsx)$/i.test(it.path || '') ? '&view=1' : '') + tq;
+    }
+    function load() {
+      return fetch('/api/steward/deliverables?pid=' + encodeURIComponent(pid) + '&dir=', { headers: authHeaders(barHeaders()) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var items = ((j && j.items) || []).filter(function (it) { return it && it.path; });
+          if (cnt) cnt.textContent = items.length ? (items.length + (items.length === 1 ? ' made' : ' made') + ' · newest ' + (items[0].date || '')) : 'none yet';
+          ul.innerHTML = '';
+          if (!items.length) { var e = document.createElement('li'); e.textContent = 'Nothing made in this conversation yet.'; ul.appendChild(e); return; }
+          items.forEach(function (it) {
+            var li = document.createElement('li'), a = document.createElement('a'), m = document.createElement('span');
+            a.href = href(it); a.target = '_blank'; a.rel = 'noopener'; a.textContent = it.what || it.path;
+            if (it.is_current) a.className = 'db-cur';
+            m.className = 'db-m'; m.textContent = (it.date || '') + ' · ' + it.path + (it.step ? ' · ' + it.step : '');
+            li.appendChild(a); li.appendChild(m); ul.appendChild(li);
+          });
+        })
+        .catch(function () { if (cnt) cnt.textContent = 'could not be read'; });
+    }
+    btn.addEventListener('click', function () {
+      var open = ul.hidden; ul.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) load();
+    });
+    load();
+    setInterval(function () { if (!document.hidden) load(); }, 60000);   // a new deliverable shows within a minute
+  }
+  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', deliverablesBar); else deliverablesBar();   // authHeaders: the one way a GET on these pages carries the token; loginBox: the one login script
 })();

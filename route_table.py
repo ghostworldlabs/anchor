@@ -365,6 +365,9 @@ ROUTES = [
        handler="handle_cave_terminal", migrated=True),
     _r("GET", "/api/cave/terminals", AUTH_TOKEN,
        handler="handle_cave_terminals", migrated=True),
+    # what a slow request waits on (2026-10-02): every thread's stack, token only
+    _r("GET", "/api/debug/threads", AUTH_TOKEN,
+       handler="handle_debug_threads", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

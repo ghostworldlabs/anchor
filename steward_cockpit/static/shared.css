@@ -580,3 +580,5 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 /* the Cave tile's view of this cockpit (2026-10-02): the conversation and the status, no plan, no goal bar, no frame chrome */
 /* his word 2026-10-02: the tile has the same information as the cockpit - the plan opens from its tab (folded at first), the goal bar stays */
 .app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}
+/* the Campaign's conversation on the Cave and the Campaign page (2026-10-02): the cockpit view, the page's own box below it */
+.app.nocompose .main .composer{display:none !important}

@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import home_rows as _hr
-from high_seat_page import tab_icon_link, HIS_NAME
+from high_seat_page import tab_icon_link, HIS_NAME, conversation_view
 from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative, nudge_html
 import home_attention as _ha
 
@@ -464,22 +464,9 @@ def _panel(ctx):
     # the brief shrinks to its lead plus a fold (A1)
     bullets = '<li class="lead">%s</li><li class="fold"><details class="brief-more"><summary>the rest, by tier</summary><ul>%s</ul></details></li>' % (
         lead, "".join('<li>%s</li>' % b for b in rest))
-    turns = (ctx.get("turns") or [])[-40:]
-    n_all = int(ctx.get("n_turns") or len(turns))
-    names = ctx.get("goal_names") or {}
-
-    def chip(t):
-        g = str(t.get("goal") or "")
-        if not g:
-            return ""
-        return '<button class="gchip" data-open="%s" title="open this goal">about %s</button>' % (esc(g), esc(names.get(g) or g))
-    ex = "".join('<li class="exrow %s"><div class="exw %s">%s%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"][:1600])) for t in turns)
-    note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
     return (
         '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
-        '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section>'
+        '%s'
         '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
         '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
         '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
@@ -488,8 +475,7 @@ def _panel(ctx):
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '</aside>'
-    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), note, ex,
-         "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign&rsquo;s cockpit; what the steward does with the record shows on the board.</li>', esc(st["label"]))
+    ) % (esc(ctx["brief_when"]), bullets, conversation_view(st["label"], ctx.get("pid") or "", "campaign"), esc(st["label"]))
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────

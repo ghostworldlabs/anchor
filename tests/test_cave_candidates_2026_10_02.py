@@ -92,3 +92,22 @@ def test_the_tile_shows_the_plan_tab_and_the_goal_bar_like_the_cockpit():
     css = open(os.path.join(HERE, "steward_cockpit", "static", "shared.css"), encoding="utf-8").read()
     assert ".app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}" in css
     assert ".app.tileview .goalbar" not in css and ".app.tileview .railtab" not in css and ".app3.tileview{" not in css
+
+
+def test_the_relevance_score_reads_the_record_and_the_steward_s_own_score_stands():
+    from datetime import date
+    today = date(2026, 10, 2)
+    s, why = hsp.relevance({"needs": True, "due": "2026-10-05", "tier": 1, "worked": "2026-10-02"}, today)
+    assert s == 100 and "waits on you" in why and "due in 3 days" in why and "worked today" in why
+    s2, why2 = hsp.relevance({"worked": "2026-07-01"}, today)
+    assert s2 == 10 and "still for" in why2
+    assert hsp.relevance({}, today, {"score": 88, "why": "the steward thinks so"}) == (88, "the steward thinks so")
+
+
+def test_the_tile_searches_and_sorts_by_the_steward_s_score_the_last_work_and_the_birth():
+    facts = {"p-dar": {"name": "DARPA", "has_record": True, "folder": "", "efforts": [{"rel": "DARPA proposal", "name": "DARPA proposal"}]}}
+    html = hsp._candidates_tile(_ctx(_steps(), facts, [{"id": "p-dar"}]))
+    assert 'id="candSearch"' in html and 'id="candSort"' in html and '<option value="score" selected>' in html
+    assert '<option value="worked">' in html and '<option value="created">' in html and 'data-score="' in html and 'class="cs" title="' in html
+    js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "r.hidden = !hit;" in js and "sessionStorage.setItem('hs_cands_sort', key)" in js

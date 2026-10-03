@@ -26,14 +26,12 @@ def test_his_name_in_every_dialogue_row_on_both_pages_and_in_the_boot():
     assert hsp.HIS_NAME == "John"
     ctx = w2c._ctx(); ctx["turns"] = _turns(); ctx["n_turns"] = 4; ctx["stamp"] = "s1"
     html = hsp.render_high_seat_html(ctx)
-    ex = html[html.index('<ul class="ex" id="exList"'):html.index("</ul>", html.index('<ul class="ex" id="exList"'))]
-    assert ex.count('<div class="exw you">John<span class="t">') == 2 and ">You<" not in ex, "his rows carry his name, the AI Cockpit's way"
+    assert 'class="cview-frame"' in html, "the conversation is the cockpit's own view, which names him its own way (2026-10-02)"
     assert 'steward: "Aladdin", stamp: "s1", you: "John"};' in html or 'stamp: "s1", you: "John"};' in html, "the script learns the name from the boot"
     cctx = w2._ctx(); cctx["turns"] = _turns(); cctx["n_turns"] = 4; cctx["stamp"] = "s1"
     cctx["goal_turns"] = {"trusts": [{"you": True, "text": "about the trusts", "at": "10:10"}, {"you": False, "text": "noted", "at": "10:11"}]}
     chtml = cpg.render_campaign_html(cctx, open_id="trusts")
-    cex = chtml[chtml.index('<ul class="ex" id="exList"'):chtml.index("</ul>", chtml.index('<ul class="ex" id="exList"'))]
-    assert cex.count('<div class="exw you">John<span class="t">') == 2 and ">You<" not in cex
+    assert 'class="cview-frame"' in chtml
     place = chtml[chtml.index('id="place-trusts"'):chtml.index("</article>", chtml.index('id="place-trusts"'))]
     assert '<div class="exw you">John<span class="t">10:10</span></div>' in place, "the goal's thread too"
     assert 'you: "John"};</script>' in chtml

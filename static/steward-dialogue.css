@@ -52,3 +52,20 @@
 .exrow .ext p,.exrow .ext ul,.exrow .ext ol{margin:0 0 6px}
 .exrow .ext a{color:var(--accent-t)}
 .exrow.act .ext{font-style:italic}
+
+/* the Campaign's conversation as the cockpit's own view (2026-10-02) */
+.exwrap.cview{padding:6px 0 0;overflow:hidden}
+.exwrap.cview .exhead{padding:0 10px 5px}
+.exwrap.cview .exhead .note{color:var(--accent-t);text-decoration:none}
+.exwrap .cview-frame{flex:1 1 auto;width:100%;min-height:240px;border:0;background:#0a0c11;display:block}
+.delivbar{flex:none;margin-top:8px;border:1px solid var(--border);border-radius:11px;background:#0d1016}
+.db-h{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:0;color:var(--text);cursor:pointer;text-align:left}
+.db-t{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.db-c{font-size:11px;color:var(--text-dim);flex:1}
+.db-h[aria-expanded="true"] .db-caret{transform:rotate(180deg)}
+.db-list{list-style:none;margin:0;padding:0 12px 9px;max-height:32vh;overflow-y:auto}
+.db-list[hidden]{display:none}
+.db-list li{padding:6px 0;border-top:1px solid #1e2330;font-size:12.5px;line-height:1.4}
+.db-list li a{color:var(--accent-t)}
+.db-list .db-m{display:block;font-size:10.5px;color:var(--text-dim2)}
+.db-list .db-cur{color:var(--amber-t);font-weight:650}

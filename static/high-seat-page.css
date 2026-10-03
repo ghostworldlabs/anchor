@@ -901,3 +901,13 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cand .cn{flex:1;min-width:0;color:var(--text)}
 .cand .cw{font-size:11px;color:var(--text-dim2);white-space:nowrap}
 .cand .acts{display:flex;gap:5px;flex:none}
+
+/* the Candidates' search, sort, score and dates (2026-10-02) */
+.cand-tools{display:flex;align-items:center;gap:10px;margin:8px 0 2px;flex-wrap:wrap}
+#candSearch{flex:1;min-width:200px;background:#0a0c11;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px 10px;font-size:13px}
+.cand-sort{font-size:11px;color:var(--text-dim)}
+.cand-sort select{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-size:12px;margin-left:4px}
+.cand-note{font-size:11px;color:var(--text-dim2)}
+.cand .cs{flex:none;min-width:26px;text-align:center;font-size:11px;font-weight:700;color:#0b1220;background:var(--accent);border-radius:999px;padding:1px 6px;cursor:help}
+.cand .cd{font-size:10.5px;color:var(--text-dim2);white-space:nowrap}
+.cand[hidden]{display:none}

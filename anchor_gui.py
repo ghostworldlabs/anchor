@@ -7819,6 +7819,7 @@ def _high_seat_context():
         tasks_open = 0
     # the Campaign: the project whose folder is <workspace>/Campaign (PLAN §3), read once
     campaign, initiatives, seeds, seed_rows = None, [], 0, []
+    step_dates, relevance_override = {}, {}
     try:
         camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
         entry = next((e for e in everything
@@ -7833,6 +7834,19 @@ def _high_seat_context():
             resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=True)   # a project part's lead line feeds the initiative's Status
             initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
             _loose = _hsp.loose_initiative(m.get("steps") or [], resolved)     # a cockpit seated from the Candidates, in no goal yet (2026-10-02)
+            try:   # the Candidates' dates (2026-10-02): each step's first and last event on the Campaign record
+                _evs = json.loads((camp_dir / "roadmap.json").read_text(encoding="utf-8")).get("roadmap_events") or []
+                for _e in _evs:
+                    _sid, _at = str(_e.get("step_id") or ""), str(_e.get("at") or "")[:10]
+                    if _sid and _at:
+                        _a, _b = step_dates.get(_sid, ("", ""))
+                        step_dates[_sid] = (_a or _at, max(_b, _at))
+            except Exception:
+                pass
+            try:   # the steward's own relevance scores, when it has written them
+                relevance_override = json.loads((camp_dir / ".ecgberht" / "relevance.json").read_text(encoding="utf-8")) or {}
+            except Exception:
+                relevance_override = {}
             if _loose:
                 initiatives.append(_loose)
             campaign = {"pid": entry.get("id"), "name": entry.get("name")}
@@ -7906,6 +7920,7 @@ def _high_seat_context():
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets, "head": head, "overnight": overnight,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "default_cli": default_cli, "terms_open": terms_open,
+        "campaign_step_dates": step_dates, "relevance_override": relevance_override if isinstance(relevance_override, dict) else {},
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": working, "pickup": pickup,
         "projects_html": _high_seat_projects_html(groups, facts),
@@ -8221,14 +8236,56 @@ def handle_high_seat_repair(handler, path, body):
     handler._send_json(answer, 200 if ok else 409)
 
 
+class _SlowWatch:
+    """A page that takes long says WHERE it waited (2026-10-02, his word: find why the Cave is slow again): a watcher
+    thread samples the request thread's stack at 2 s and 4 s while the page is still building, and the total is logged
+    when it is over 1.5 s. One line per sample in the service log ("SLOW <label>"); nothing when the page is quick."""
+    def __init__(self, label):
+        self.label, self.tid, self.done, self.t0 = label, threading.get_ident(), threading.Event(), time.time()
+
+    def __enter__(self):
+        def watch():
+            for at in (2.0, 4.0):
+                if self.done.wait(at - (time.time() - self.t0)):
+                    return
+                try:
+                    import traceback as _tb
+                    fr = sys._current_frames().get(self.tid)
+                    stack = " <- ".join("%s:%d %s" % (os.path.basename(f.filename), f.lineno, f.name) for f in reversed(_tb.extract_stack(fr)[-14:])) if fr else "?"
+                    print("  [%s] SLOW %s at %.0fs: %s" % (datetime.now().strftime("%H:%M:%S"), self.label, at, stack), flush=True)
+                except Exception:
+                    pass
+        threading.Thread(target=watch, name="slow-watch", daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.done.set()
+        took = time.time() - self.t0
+        if took > 1.5:
+            print("  [%s] SLOW %s took %.1fs" % (datetime.now().strftime("%H:%M:%S"), self.label, took), flush=True)
+        return False
+
+
+def handle_debug_threads(handler, path, body):
+    """GET /api/debug/threads (token) - every thread's stack, for finding what a slow request waits on (2026-10-02)."""
+    import traceback as _tb
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out = []
+    for tid, fr in sys._current_frames().items():
+        out.append("--- %s (%s)" % (names.get(tid, "?"), tid))
+        out.extend(l.rstrip() for l in _tb.format_stack(fr)[-18:])
+    handler._send_bytes(("\n".join(out) + "\n").encode("utf-8", "replace"), "text/plain; charset=utf-8", cache="no-store")
+
+
 def render_high_seat_page(logged_in=False) -> str:
     """GET /high-seat — the steward's portfolio surface (W1b); an honest error page, never a blank. ``logged_in``: the
     request carried a valid token or the login cookie (W2c-4: the page shows its login box only when it did not)."""
     try:
         import high_seat_page as _hsp
-        ctx = _high_seat_context()
-        ctx["logged_in"] = bool(logged_in)
-        return _hsp.render_high_seat_html(ctx)
+        with _SlowWatch("the Cave of Wonders"):
+            ctx = _high_seat_context()
+            ctx["logged_in"] = bool(logged_in)
+            return _hsp.render_high_seat_html(ctx)
     except Exception as e:
         return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
                 "<h1>The High Seat could not render</h1><p>%s</p><p><a href=\"/dashboard\" style=\"color:#8ab4f8\">the dashboard</a></p></body></html>"
@@ -21421,6 +21478,7 @@ _MIGRATED_HANDLERS = {
     "handle_high_seat_campaign": handle_high_seat_campaign,
     "handle_high_seat_repair": handle_high_seat_repair,
     "handle_cave_terminal": handle_cave_terminal,
+    "handle_debug_threads": handle_debug_threads,
     "handle_cave_terminals": handle_cave_terminals,
     "handle_version": handle_version,
     "handle_status": handle_status,

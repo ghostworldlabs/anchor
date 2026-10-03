@@ -82,3 +82,20 @@ def test_kill_never_touches_the_live_tree_of_a_plain_terminal():
     assert "if wt and not _is_shell_record(rec):" in src
     assert 'if _is_shell_record(record)\n              else _wt.remove_worktree(session_id, project_id=project_id))' in src
     assert "if is_shell or plain:" in src and "plain=bool(plain)," in src
+
+
+def test_a_slow_page_says_where_it_waited(capsys):
+    # 2026-10-02: the Cave answered in 2.5-5.5 s with the server's Python idle; the watcher names the wait
+    import time as _t
+    import anchor_gui as g
+
+    def a_slow_read():
+        _t.sleep(2.4)
+    with g._SlowWatch("a test page"):
+        a_slow_read()
+    out = capsys.readouterr().out
+    assert "SLOW a test page at 2s:" in out and "a_slow_read" in out and "SLOW a test page took 2." in out
+    with g._SlowWatch("a quick page"):
+        pass
+    assert "a quick page" not in capsys.readouterr().out
+    assert '"/api/debug/threads", AUTH_TOKEN' in _read("route_table.py")

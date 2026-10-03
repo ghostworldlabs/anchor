@@ -812,6 +812,69 @@ def _terminal(ctx):
 
 
 KIND_LABEL = {"project": "cockpit", "effort": "cockpit within a project", "task": "desk item"}
+_RECORD_FILES = ("ECGBERHT.md", "roadmap.json", "strip.json", ".ecgberht/conversation-log.json", ".ecgberht/status-summary.json")
+
+
+def cockpit_dates(folder):
+    """(created, last worked) of a cockpit's record, as dates: its Face's birth, and the newest of its record files.
+    Read-only stats; (None, None) when the folder holds no record."""
+    import os as _os
+    from datetime import datetime as _dt
+    born, last = None, None
+    for rel in _RECORD_FILES:
+        try:
+            st = _os.stat(_os.path.join(folder, rel))
+        except OSError:
+            continue
+        b = getattr(st, "st_birthtime", None) or st.st_ctime
+        if rel == "ECGBERHT.md":
+            born = b
+        last = max(last or 0, st.st_mtime)
+    d = lambda t: _dt.fromtimestamp(t).date().isoformat() if t else ""
+    return d(born), d(last)
+
+
+def relevance(c, today, override=None):
+    """The steward's relevance score (0-100) for a candidate, with its reasons (his word, 2026-10-02: "how likely the
+    user is to want to/need to work on the project"). The steward's own score, when it has written one for this
+    candidate (Campaign/.ecgberht/relevance.json), stands; else the record's: what waits on him, how near its date,
+    its goal's tier, how recently it was worked, how long it has lain still."""
+    if isinstance(override, dict) and isinstance(override.get("score"), (int, float)):
+        return max(0, min(100, int(override["score"]))), str(override.get("why") or "the steward's own score")
+    from datetime import date as _date
+    score, why = 20, []
+    if c.get("needs"):
+        score += 35; why.append("waits on you")
+    due = str(c.get("due") or "")
+    if due:
+        try:
+            days = (_date.fromisoformat(due[:10]) - today).days
+            if days < 0:
+                score += 30; why.append("overdue")
+            elif days <= 7:
+                score += 22; why.append("due in %d day%s" % (days, "" if days == 1 else "s"))
+            elif days <= 21:
+                score += 10; why.append("due %s" % due[:10])
+        except ValueError:
+            pass
+    tier = c.get("tier")
+    if tier == 1:
+        score += 15; why.append("a tier-1 goal")
+    elif tier == 2:
+        score += 7; why.append("a tier-2 goal")
+    worked = str(c.get("worked") or "")
+    if worked:
+        try:
+            ago = (today - _date.fromisoformat(worked[:10])).days
+            if ago <= 3:
+                score += 12; why.append("worked %s" % ("today" if ago == 0 else "%d day%s ago" % (ago, "" if ago == 1 else "s")))
+            elif ago <= 14:
+                score += 5; why.append("worked %d days ago" % ago)
+            elif ago > 45:
+                score -= 10; why.append("still for %d days" % ago)
+        except ValueError:
+            pass
+    return max(0, min(100, score)), (", ".join(why) or "nothing presses")
 
 
 def candidates(ctx):
@@ -829,11 +892,25 @@ def candidates(ctx):
                 on_map.add((p["pid"], p.get("dir") or ""))
                 if p.get("kind") == "project":
                     on_map.add((p["pid"], "*"))
+    facts = ctx.get("facts") or {}
+    today = ctx.get("today")
+    if today is None:
+        from datetime import date as _date
+        today = _date.today()
+    ev = ctx.get("campaign_step_dates") or {}
+    over = ctx.get("relevance_override") or {}
     for i in goals_only(inits):
         for p in i.get("parts") or ():
             if p.get("kind") in KIND_LABEL and not p.get("seat") and not p.get("closed") and not p.get("broken"):
+                made, touched = (ev.get(p.get("id")) or ("", ""))
+                if p.get("pid") and facts.get(p["pid"], {}).get("folder"):
+                    import os as _os
+                    b, l = cockpit_dates(_os.path.join(facts[p["pid"]]["folder"], p.get("dir") or ""))
+                    touched = max(touched or "", l or "")
+                p["c_created"], p["c_worked"] = made, touched
+                p["c_score"], p["c_why"] = relevance({"needs": p.get("needs_you"), "due": p.get("date"), "tier": i.get("tier"), "worked": touched},
+                                                     today, over.get(p.get("id")))
                 in_goal.append((i, p))
-    facts = ctx.get("facts") or {}
     camp = (ctx.get("campaign") or {}).get("pid")
     loose = []
     for e in ctx.get("entries") or ():
@@ -844,7 +921,7 @@ def candidates(ctx):
         effs = [x for x in (f.get("efforts") or []) if isinstance(x, dict)]
         if not effs:
             if (pid, "") not in on_map:
-                loose.append({"ref": "project:%s" % pid, "name": f.get("name") or e.get("name") or pid[:8], "where": "a project", "needs": bool(f.get("needs_you"))})
+                loose.append({"ref": "project:%s" % pid, "name": f.get("name") or e.get("name") or pid[:8], "where": "a project", "needs": bool(f.get("needs_you")), "folder": f.get("folder") or ""})
             continue
         for x in effs:
             rel = str(x.get("rel") or "")
@@ -853,7 +930,11 @@ def candidates(ctx):
             nm = f.get("name") or e.get("name") or pid[:8]
             loose.append({"ref": ("effort:%s/%s" % (pid, _quote(rel))) if rel else ("project:%s" % pid),
                           "name": ("%s · %s" % (nm, x.get("name") or rel)) if rel else nm,
-                          "where": ("an effort of %s" % nm) if rel else "a project", "needs": bool(x.get("needs_you"))})
+                          "where": ("an effort of %s" % nm) if rel else "a project", "needs": bool(x.get("needs_you")),
+                          "folder": (f.get("folder") or "") + (("/" + rel) if rel else "")})
+    for c in loose:
+        c["created"], c["worked"] = cockpit_dates(c["folder"]) if c.get("folder") else ("", "")
+        c["score"], c["why"] = relevance({"needs": c["needs"], "worked": c["worked"]}, today, over.get(c["ref"]))
     return in_goal, loose
 
 
@@ -871,15 +952,31 @@ def _candidates_tile(ctx):
         return ('<span class="acts"><button class="mini" data-cand-seat="deck" data-ref="%s" data-name="%s">&rarr; on deck</button>'
                 '<button class="mini" data-cand-seat="active" data-ref="%s" data-name="%s">&rarr; active</button></span>') % (
             esc(c["ref"]), esc(c["name"]), esc(c["ref"]), esc(c["name"]))
-    rows_a = "".join('<li class="cand"><span class="cn">%s%s</span><span class="cw">%s &middot; in %s</span>%s</li>' % (
-        '<span class="wm">&#9873;</span> ' if p.get("needs_you") else "", esc(part_name(p)), esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or ""), acts_step(p.get("id") or ""))
-        for i, p in in_goal)
-    rows_b = "".join('<li class="cand"><span class="cn">%s%s</span><span class="cw">%s &middot; in no goal</span>%s</li>' % (
-        '<span class="wm">&#9873;</span> ' if c["needs"] else "", esc(c["name"]), esc(c["where"]), acts_new(c)) for c in loose)
+    def meta(score, why, created, worked):
+        return ('data-score="%d" data-created="%s" data-worked="%s"' % (score, esc(created or ""), esc(worked or "")),
+                '<span class="cs" title="%s">%d</span>' % (esc(why), score),
+                '<span class="cd">%s%s</span>' % (("worked " + esc(worked)) if worked else "not worked yet", (" &middot; made " + esc(created)) if created else ""))
+
+    def row(attrs, score_html, dates_html, name_html, where, acts):
+        return '<li class="cand" %s>%s<span class="cn">%s</span><span class="cw">%s</span>%s%s</li>' % (attrs, score_html, name_html, where, dates_html, acts)
+    rows_a = "".join(row(*meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[:1],
+                         meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[1],
+                         meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[2],
+                         ('<span class="wm">&#9873;</span> ' if p.get("needs_you") else "") + esc(part_name(p)),
+                         "%s &middot; in %s" % (esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or "")), acts_step(p.get("id") or ""))
+                     for i, p in sorted(in_goal, key=lambda t: -t[1].get("c_score", 0)))
+    rows_b = "".join(row(*meta(c["score"], c["why"], c["created"], c["worked"])[:1], meta(c["score"], c["why"], c["created"], c["worked"])[1],
+                         meta(c["score"], c["why"], c["created"], c["worked"])[2],
+                         ('<span class="wm">&#9873;</span> ' if c["needs"] else "") + esc(c["name"]), "%s &middot; in no goal" % esc(c["where"]), acts_new(c))
+                     for c in sorted(loose, key=lambda c: -c["score"]))
     return (
         '<section class="shelf cands" id="shCands"><details class="cands-tile" id="candsTile"><summary class="shelf-h">'
         '<h3>Candidates</h3><span class="c">%d</span><span class="rule"></span>'
         '<span class="sub">every cockpit and desk item you could put on deck or make active</span></summary>'
+        '<div class="cand-tools"><input type="search" id="candSearch" placeholder="search the candidates&hellip;" aria-label="search the candidates" autocomplete="off">'
+        '<label class="cand-sort">sort <select id="candSort"><option value="score" selected>the steward&rsquo;s relevance</option><option value="worked">last worked on</option>'
+        '<option value="created">date created</option><option value="name">name</option></select></label>'
+        '<span class="cand-note" id="candNote"></span></div>'
         '%s%s</details></section>'
     ) % (n,
          ('<div class="cand-group"><div class="k">In a goal, not on the desk &middot; %d</div><ul>%s</ul></div>' % (len(in_goal), rows_a)) if in_goal else "",
@@ -929,38 +1026,31 @@ def _head_li(ctx):
     return '<li class="%s">%s%s</li>%s' % (cls, lead, act, ('<li class="fold">%s</li>' % more) if more else "")
 
 
-def _dialogue(ctx):
-    """The steward's dialogue on the High Seat (W2c-2, 2026-09-30, his word: both dialogues "need to engage the steward
-    and then show the dialogue between the user and the steward"): the Campaign's one conversation log — the last 40
-    turns, a turn said from a goal's place with the goal's chip — between the brief and the composer at the column's
-    foot (W2c-3: the cockpit's shape), live from the open through the
-    cockpit's stream (static/steward-dialogue.js, the one mechanism the Campaign page uses), the steward's state at its
-    head. Nothing here without a Campaign."""
-    if not ctx.get("campaign"):
-        return ""
-    st = ctx["steward"]
-    turns = (ctx.get("turns") or [])[-40:]
-    n_all = int(ctx.get("n_turns") or len(turns))
-    names = ctx.get("goal_names") or {}
-    camp_pid = esc((ctx.get("campaign") or {}).get("pid") or "")
-
-    def chip(t):
-        g = str(t.get("goal") or "")
-        if not g:
-            return ""
-        return '<a class="gchip" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the Campaign page">about %s</a>' % (camp_pid, esc(g), esc(names.get(g) or g))
-    ex = "".join('<li class="exrow %s"><div class="exw %s">%s%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(st["label"]), chip(t), esc(t["at"]), esc(t["text"])) for t in turns)
-    note = ("the last %d of %d" % (len(turns), n_all)) if n_all > len(turns) else (("%d turn%s" % (n_all, "" if n_all == 1 else "s")) if n_all else "")
+def conversation_view(label, camp_pid, inst="main"):
+    """The Campaign's one conversation as the cockpit's OWN view (2026-10-02, his word: the same information flowing
+    in as the cockpit, in its blocks, with its status and deliverables; ChatGPT's read: one renderer). Shared by the
+    Cave and the Campaign page: the cockpit view of the Campaign's record with its box hidden (compose=0) - the page's
+    own box above stays, it carries the Campaign verbs, their receipts and undo; the steward's state chip; a hidden
+    list the page's dialogue script keeps for its sends, the goals' threads and the record's renewals; and the
+    Deliverables bar - what this conversation made, newest first."""
+    src = "/steward/v1?embed=1&amp;view=tile&amp;compose=0&amp;inst=%s&amp;pid=%s&amp;dir=" % (esc(inst), esc(camp_pid))
     return (
-        '<section class="exwrap" id="dialogue" aria-live="polite"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" id="exScroll"><ul class="ex" id="exList">%s%s</ul></div></section>'
-        # the deliverables this conversation made, newest first, one click each (his word, 2026-10-02: "a little bar ... says
-        # deliverables, you click on it, it opens up and shows you all the time-ordered deliverables that have been created")
+        '<section class="exwrap cview" id="dialogue"><div class="exhead"><h3>%s &mdash; the conversation</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
+        '<a class="note" href="/project/%s?doc=1" target="_blank" rel="noopener" title="the Campaign&rsquo;s cockpit, full size">open the cockpit &#8599;</a></div>'
+        '<iframe class="cview-frame" src="%s" title="%s &mdash; the Campaign&rsquo;s conversation and status"></iframe>'
+        '<ul class="ex" id="exList" hidden></ul></section>'
         '<section class="delivbar" id="delivBar" data-pid="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
         '<span class="db-t">Deliverables</span><span class="db-c" id="delivCount">&hellip;</span><span class="db-caret">&#9662;</span></button>'
         '<ul class="db-list" id="delivList" hidden></ul></section>'
-    ) % (esc(st["label"]), note, ex, "" if turns else '<li class="exfade">Nothing said here yet. This is the same conversation as the Campaign page and its cockpit.</li>', camp_pid)
+    ) % (esc(label), esc(camp_pid), src, esc(label), esc(camp_pid))
+
+
+def _dialogue(ctx):
+    """The steward's dialogue on the High Seat: the Campaign's conversation as the cockpit's own view (conversation_view).
+    Nothing here without a Campaign."""
+    if not ctx.get("campaign"):
+        return ""
+    return conversation_view(ctx["steward"]["label"], (ctx.get("campaign") or {}).get("pid") or "")
 
 
 def nudge_html(n, where="brief"):

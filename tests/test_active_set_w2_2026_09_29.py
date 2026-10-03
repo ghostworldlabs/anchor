@@ -89,7 +89,7 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
 def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
     html = cpg.render_campaign_html(_ctx())
     panel = html[html.index('<aside class="panel"'):]
-    assert panel.index('id="brief"') < panel.index('class="exwrap"') < panel.index('class="composer"'), "brief, the conversation, then the composer at its foot (W2c-3: the cockpit's shape)"
+    assert panel.index('id="brief"') < panel.index('class="exwrap') < panel.index('class="composer"'), "brief, the conversation, then the composer at its foot (W2c-3: the cockpit's shape)"
     lead = panel[panel.index('<li class="lead">'):panel.index('<li class="fold">')]
     assert lead.startswith('<li class="lead"><b>Tier 1</b> holds'), "the brief leads with the tiers' line; the set-first lead went with the Active band (Grok, the W2 trim)"
     assert "<summary>the rest, by tier</summary>" in panel
