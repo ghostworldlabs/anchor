@@ -118,11 +118,17 @@ def _tiles(pg):
 
 
 def _painted_frames(pg):
-    """Paths of the frames actually painted (display not none, non-zero box), top-level panes and the side pane."""
-    return pg.evaluate("""() => [...document.querySelectorAll('#stage iframe')].filter(f => {
-        const box = f.closest('.side') || f; const cs = getComputedStyle(box);
-        return cs.display !== 'none' && f.getBoundingClientRect().width > 0;
-      }).map(f => { try { return f.contentWindow.location.pathname; } catch (e) { return '?'; } })""")
+    """Paths of the pane frames actually painted (display not none, non-zero box), left to right, top to bottom."""
+    return pg.evaluate("""() => [...document.querySelectorAll('#stage > iframe')].filter(f =>
+        getComputedStyle(f).display !== 'none' && f.getBoundingClientRect().width > 0)
+      .map(f => { const r = f.getBoundingClientRect(); let p = '?';
+                  try { p = f.contentWindow.location.pathname; } catch (e) {}
+                  return [r.y, r.x, p]; })
+      .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1])).map(a => a[2])""")
+
+
+def _two(pg):
+    return pg.evaluate("document.body.classList.contains('two')")
 
 
 def _cave(pg):
@@ -181,41 +187,10 @@ def _open_p1(page):
     return _focus_frame(page, "/project/p1")
 
 
-def test_a_deliverable_opens_beside_its_cockpit_and_a_second_replaces_it(page):
-    p1 = _open_p1(page)
-    p1.locator("#deliv").click()
-    page.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
-    _settle(page)
-    assert _painted_frames(page) == ["/project/p1", "/api/steward/deliverable-file"]
-    p1.locator("#rep").click()                          # the cockpit's own shim rewrites /report -> /steward/report
-    page.wait_for_function("() => { const f = document.querySelector('.side iframe');"
-                           " try { return f.contentWindow.location.pathname === '/steward/report'; } catch (e) { return false; } }")
-    assert _painted_frames(page) == ["/project/p1", "/steward/report"]
-    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]      # no tile for a deliverable
-    page.locator(".side .x").click()
-    _settle(page, 200)
-    assert _painted_frames(page) == ["/project/p1"]
 
 
-def test_a_nested_frame_link_and_a_named_target_land_in_the_app(page):
-    p1 = _open_p1(page)
-    _focus_frame(page, "/steward/v1").locator("#nested").click()
-    page.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
-    assert _painted_frames(page)[-1] == "/artifact/p1"
-    p1.locator("#named").click()
-    page.wait_for_function("() => { const f = document.querySelector('.side iframe');"
-                           " try { return f.contentWindow.location.pathname === '/report/x'; } catch (e) { return false; } }")
-    assert page.pages_opened == []
 
 
-def test_a_download_is_not_a_tile(page):
-    p1 = _open_p1(page)
-    with page.expect_download() as dl:
-        p1.locator("#dl").click()
-    assert dl.value.suggested_filename == "Deck.pptx"
-    _settle(page, 300)
-    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
-    assert not page.evaluate("document.getElementById('stage').classList.contains('split')")
 
 
 def test_cockpit_to_cockpit_keeps_the_caller_until_the_new_one_loads_then_comes_back_from_its_address(page):
@@ -312,31 +287,8 @@ def test_phone_title_bar_shows_only_the_focus_with_its_place_and_swipe_moves_alo
     assert len(phone.evaluate("[...document.querySelectorAll('#strip .tile')].map(t => t.dataset.id)")) == 2
 
 
-def test_phone_a_deliverable_stacks_under_the_dialogue(phone):
-    _cave(phone).locator("#ck1").click()
-    phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
-    _focus_frame(phone, "/project/p1").wait_for_selector("#deliv")
-    _focus_frame(phone, "/project/p1").locator("#deliv").click()
-    phone.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
-    _settle(phone)
-    main = phone.evaluate("(() => { const f = [...document.querySelectorAll('#stage > iframe')].find(f => getComputedStyle(f).display !== 'none'); const r = f.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
-    side = phone.evaluate("(() => { const r = document.querySelector('.side').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()")
-    assert side[1] >= main[1] + main[3] - 1          # below the dialogue, not beside it
-    assert abs(side[2] - main[2]) < 2 and main[2] > 380   # both full width
 
 
-
-def test_a_page_written_into_a_blank_pane_stays_beside_its_caller_which_keeps_updating_it(page):
-    """Tidy-Idy (project-window.js / tidy-idy-run.js): the cockpit writes its progress page into a blank window and
-    polls it. document.open gives that page the caller's address - it must NOT be promoted to a tile of its own."""
-    p1 = _open_p1(page)
-    p1.locator("#tidy").click()
-    page.wait_for_function("() => document.getElementById('stage').classList.contains('split')")
-    page.wait_for_timeout(1200)
-    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
-    n = page.evaluate("+document.querySelector('.side iframe').contentDocument.getElementById('n').textContent")
-    assert n >= 5                                       # the caller is alive and still writing into it
-    assert page.locator(".side .name").text_content() == "Tidy run"
 
 
 def test_ctrl_plus_minus_zero_and_ctrl_wheel_ask_the_host_to_zoom_from_the_strip_and_from_inside_a_frame(base):
@@ -364,3 +316,124 @@ def test_ctrl_plus_minus_zero_and_ctrl_wheel_ask_the_host_to_zoom_from_the_strip
 
 def test_in_a_plain_browser_the_zoom_keys_are_left_to_the_browser(page):
     assert page.evaluate("window.ANCHOR_APP.zoom(1)") is False
+
+
+
+# ---------- two panes (his layout, 2026-10-03) ----------
+def test_a_deliverable_from_a_cockpit_opens_the_second_pane_on_the_right_and_the_cockpit_keeps_the_focus(page):
+    p1 = _open_p1(page)
+    assert not _two(page)
+    p1.locator("#deliv").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    assert _painted_frames(page) == ["/project/p1", "/api/steward/deliverable-file"]
+    assert page.locator("#head0").evaluate("e => e.classList.contains('active')")          # the cockpit's pane
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Deck.pptx"]               # a tile like any other
+    p1.locator("#rep").click()                          # the cockpit's own shim rewrites /report -> /steward/report
+    page.wait_for_function("() => [...document.querySelectorAll('#stage > iframe')].some(f => { try {"
+                           " return f.dataset.pane === '1' && f.contentWindow.location.pathname === '/steward/report'; }"
+                           " catch (e) { return false; } })")
+    assert _painted_frames(page) == ["/project/p1", "/steward/report"]
+
+
+def test_a_deliverable_from_a_cockpit_on_the_right_goes_to_the_left(page):
+    p1 = _open_p1(page)
+    p1.locator("#deliv").click()                        # cockpit left, deck right
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    page.locator("#head1").click()                      # make the right pane active, then show the cockpit there
+    page.locator("#strip .tile", has_text="MBA Teaching AI").click()
+    _settle(page)
+    assert _painted_frames(page) == ["/api/steward/deliverable-file", "/project/p1"]        # the two swapped
+    _focus_frame(page, "/project/p1").locator("#rep").click()
+    page.wait_for_function("() => [...document.querySelectorAll('#stage > iframe')].some(f => { try {"
+                           " return f.dataset.pane === '0' && f.contentWindow.location.pathname === '/steward/report'; }"
+                           " catch (e) { return false; } })")
+    _settle(page)
+    assert _painted_frames(page) == ["/steward/report", "/project/p1"]
+    assert page.locator("#head1").evaluate("e => e.classList.contains('active')")
+
+
+def test_click_a_pane_then_a_tile_to_show_it_there_with_its_side_marked(page):
+    p1 = _open_p1(page)
+    p1.locator("#deliv").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    _focus_frame(page, "/api/steward/deliverable-file").locator("p").click()   # a click inside the right pane
+    page.wait_for_function("() => document.getElementById('head1').classList.contains('active')")
+    page.locator("#strip .tile.cave").click()
+    _settle(page)
+    assert _painted_frames(page) == ["/project/p1", "/"]
+    sides = page.eval_on_selector_all("#strip .tile", "els => els.map(e => (e.querySelector('.side') || {}).textContent || '')")
+    assert sides == ["R", "L", ""]
+
+
+def test_a_panes_x_shuts_that_pane_and_its_tile_stays_and_the_toggle_brings_two_back(page):
+    p1 = _open_p1(page)
+    p1.locator("#deliv").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    page.locator("#head1 .x").click()
+    _settle(page)
+    assert not _two(page)
+    assert _painted_frames(page) == ["/project/p1"]
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Deck.pptx"]
+    page.locator("#two").click()
+    _settle(page)
+    assert _two(page) and _painted_frames(page) == ["/project/p1", "/api/steward/deliverable-file"]
+    page.locator("#one").click()
+    _settle(page)
+    assert not _two(page) and len(_painted_frames(page)) == 1
+
+
+def test_a_nested_frame_link_and_a_named_target_land_in_the_app(page):
+    p1 = _open_p1(page)
+    _focus_frame(page, "/steward/v1").locator("#nested").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    assert _painted_frames(page) == ["/project/p1", "/artifact/p1"]
+    p1.locator("#named").click()
+    page.wait_for_function("() => [...document.querySelectorAll('#stage > iframe')].some(f => { try {"
+                           " return f.dataset.pane === '1' && f.contentWindow.location.pathname === '/report/x'; }"
+                           " catch (e) { return false; } })")
+    assert page.pages_opened == []
+
+
+def test_a_download_is_not_a_tile(page):
+    p1 = _open_p1(page)
+    with page.expect_download() as dl:
+        p1.locator("#dl").click()
+    assert dl.value.suggested_filename == "Deck.pptx"
+    _settle(page, 300)
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
+    assert not _two(page)
+
+
+def test_a_page_written_into_a_blank_window_stays_beside_its_caller_which_keeps_updating_it(page):
+    """Tidy-Idy (tidy-idy-run.js): the cockpit writes its progress page into a blank window and polls it.
+    document.open gives that page the caller's address - it must stay a deliverable beside the cockpit."""
+    p1 = _open_p1(page)
+    p1.locator("#tidy").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    page.wait_for_timeout(1200)
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Tidy run"]
+    n = page.evaluate("+[...document.querySelectorAll('#stage > iframe')].find(f => f.dataset.pane === '1')"
+                      ".contentDocument.getElementById('n').textContent")
+    assert n >= 5                                       # the caller is alive and still writing into it
+
+
+def test_phone_a_deliverable_stacks_under_the_dialogue(phone):
+    _cave(phone).locator("#ck1").click()
+    phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
+    _focus_frame(phone, "/project/p1").wait_for_selector("#deliv")
+    _focus_frame(phone, "/project/p1").locator("#deliv").click()
+    phone.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(phone)
+    boxes = phone.evaluate("""() => [...document.querySelectorAll('#stage > iframe')]
+        .filter(f => getComputedStyle(f).display !== 'none')
+        .map(f => { const r = f.getBoundingClientRect(); return [r.x, r.y, r.width, r.height, f.dataset.pane]; })
+        .sort((a, b) => a[1] - b[1])""")
+    top, bottom = boxes
+    assert top[4] == "0" and bottom[4] == "1"
+    assert bottom[1] >= top[1] + top[3] - 1                     # below the dialogue, not beside it
+    assert abs(bottom[2] - top[2]) < 2 and top[2] > 380         # both full width

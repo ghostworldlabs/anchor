@@ -10,7 +10,11 @@ not on the ship list. The service is unchanged; this only opens a window onto it
   - one instance: a second launch brings the open window forward;
   - Ctrl + / Ctrl - / Ctrl 0 (and Ctrl + wheel) zoom the whole window, remembered for the next start. pywebview
     turns WebView2's own browser keys off (F5 would reload the app and lose the open tiles), so the pages catch
-    just these keys (static/app.js, app-frame.js) and call zoom() here.
+    just these keys (static/app.js, app-frame.js) and call zoom() here;
+  - its own title bar (his ask, 2026-10-03): the window has no Windows caption; the page draws the bar (the anchor,
+    the tiles, the one/two-pane toggle, minimize/maximize/close). The bar's empty parts carry CSS app-region: drag,
+    which WebView2 (non-client region support) turns into a real caption - smooth moves, snap, double-click to
+    maximize. Windows 11 rounds the corners; the window's outer edges resize it.
 
 Usage:  pythonw shell/anchor_shell.py [--url URL]
 """
@@ -36,7 +40,20 @@ user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, w
 user32.SendMessageW.restype = wintypes.LPARAM
 user32.LoadImageW.restype = wintypes.HANDLE
 user32.FindWindowW.restype = wintypes.HWND
+user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+user32.GetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int)
+user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+user32.SetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                wintypes.UINT)
+comctl32 = ctypes.WinDLL("comctl32")
+SUBCLASSPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                  ctypes.c_size_t, ctypes.c_size_t)
+comctl32.SetWindowSubclass.argtypes = (wintypes.HWND, SUBCLASSPROC, ctypes.c_size_t, ctypes.c_size_t)
+comctl32.DefSubclassProc.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+comctl32.DefSubclassProc.restype = ctypes.c_ssize_t
 ERROR_ALREADY_EXISTS = 183
+EDGE = 6                                                # px of the window's edge that resize it
 
 
 def bring_forward_existing():
@@ -58,6 +75,44 @@ def set_window_icon(hwnd, path):
             user32.SendMessageW(hwnd, WM_SETICON, which, h)
 
 
+def _own_title_bar(hwnd):
+    """Run on the window's UI thread. A resizable window (snap, minimize animation, Windows 11 rounded corners) whose
+    caption and frame nobody draws: WM_NCCALCSIZE gives the page the whole window; WM_NCHITTEST answers the outer
+    edges with the resize codes; the bar's app-region is the caption."""
+    GWL_STYLE, WS_THICKFRAME, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU = -16, 0x40000, 0x10000, 0x20000, 0x80000
+    WM_NCCALCSIZE, WM_NCHITTEST = 0x0083, 0x0084
+    style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
+    user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU)
+    codes = {(1, 0, 1, 0): 13, (0, 1, 1, 0): 14, (1, 0, 0, 1): 16, (0, 1, 0, 1): 17,
+             (1, 0, 0, 0): 10, (0, 1, 0, 0): 11, (0, 0, 1, 0): 12, (0, 0, 0, 1): 15}
+
+    def proc(h, msg, wp, lp, _id, _ref):
+        if msg == WM_NCCALCSIZE and wp:
+            if user32.IsZoomed(h):                      # maximised: keep the page inside the screen
+                rc = ctypes.cast(lp, ctypes.POINTER(wintypes.RECT)).contents
+                pad = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)   # SM_CXFRAME + SM_CXPADDEDBORDER
+                rc.left += pad
+                rc.top += pad
+                rc.right -= pad
+                rc.bottom -= pad
+            return 0
+        if msg == WM_NCHITTEST and not user32.IsZoomed(h):
+            x, y = ctypes.c_short(lp & 0xFFFF).value, ctypes.c_short((lp >> 16) & 0xFFFF).value
+            r = wintypes.RECT()
+            user32.GetWindowRect(h, ctypes.byref(r))
+            key = (int(x < r.left + EDGE), int(x >= r.right - EDGE), int(y < r.top + EDGE), int(y >= r.bottom - EDGE))
+            if key in codes:
+                return codes[key]                       # HTLEFT/RIGHT/TOP/BOTTOM and the corners
+        return comctl32.DefSubclassProc(h, msg, wp, lp)
+
+    cb = SUBCLASSPROC(proc)
+    _own_title_bar.keep = cb                           # the callback must outlive this call
+    comctl32.SetWindowSubclass(hwnd, cb, 1, 0)
+    pref = ctypes.c_int(2)                              # DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND
+    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(pref), 4)
+    user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0027)    # SWP_FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER
+
+
 def _read_zoom():
     try:
         z = float(ZOOM_FILE.read_text(encoding="utf-8").strip())
@@ -66,8 +121,9 @@ def _read_zoom():
         return 1.0
 
 
-class ZoomApi:
-    """window.pywebview.api.zoom(step): +1 / -1 along the ladder, 0 = back to 100 %."""
+class HostApi:
+    """What the page may ask of the program: zoom(step) (+1 / -1 along the ladder, 0 = 100 %) and
+    window_control(act) for the bar's own minimize / maximize-restore / close."""
 
     def __init__(self):
         self._window = None
@@ -100,6 +156,33 @@ class ZoomApi:
         except Exception as exc:                         # zoom is a convenience; the window works without it
             print("zoom:", exc, file=sys.stderr)
 
+    def window_control(self, act):
+        w = self._window
+        if act == "minimize":
+            w.minimize()
+        elif act == "maximize":
+            if user32.IsZoomed(int(str(w.native.Handle))):
+                w.restore()
+            else:
+                w.maximize()
+        elif act == "close":
+            w.destroy()
+
+    def _frame(self):
+        """WebView2's app-region support on; True when it was off (the page then reloads once so it takes)."""
+        from System import Action
+        form = self._window.native
+        changed = []
+
+        def on_ui():                                    # WebView2 is touched on its own thread only
+            settings = form.browser.webview.CoreWebView2.Settings
+            if not settings.IsNonClientRegionSupportEnabled:
+                settings.IsNonClientRegionSupportEnabled = True
+                changed.append(True)
+
+        form.Invoke(Action(on_ui))
+        return bool(changed)
+
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
@@ -118,17 +201,29 @@ def main(argv=None):
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # ms-word:, mailto:, other sites -> Windows
     PROFILE.mkdir(parents=True, exist_ok=True)
 
-    zoom = ZoomApi()
-    win = webview.create_window(TITLE, args.url, js_api=zoom, width=1500, height=950, min_size=(420, 500),
-                                background_color="#0f141c")
-    zoom.bind(win)
-    win.events.loaded += lambda: zoom.apply()           # the remembered level, once the page is up
+    host = HostApi()
+    win = webview.create_window(TITLE, args.url, js_api=host, width=1500, height=950, min_size=(420, 500),
+                                background_color="#0f141c", frameless=True, easy_drag=False)
+    host.bind(win)
+
+    def on_loaded():
+        host.apply()                                    # the remembered zoom
+        try:
+            if host._frame():
+                win.evaluate_js("location.reload()")
+        except Exception as exc:                         # without it the bar does not move the window
+            print("app-region:", exc, file=sys.stderr)
+
+    win.events.loaded += on_loaded
 
     def on_shown():
         try:
-            set_window_icon(int(str(win.native.Handle)), ICON)
-        except Exception as exc:                         # the window still works with the default icon
-            print("icon:", exc, file=sys.stderr)
+            hwnd = int(str(win.native.Handle))
+            set_window_icon(hwnd, ICON)
+            from System import Action
+            win.native.Invoke(Action(lambda: _own_title_bar(hwnd)))
+        except Exception as exc:                         # the window still works with the defaults
+            print("frame:", exc, file=sys.stderr)
 
     win.events.shown += on_shown
     webview.start(private_mode=False, storage_path=str(PROFILE))

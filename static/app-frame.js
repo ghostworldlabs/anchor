@@ -51,6 +51,8 @@
     if (opener) Object.defineProperty(window, "opener", { configurable: true, get: function () { return opener; } });
   } catch (e) { /* the page keeps its own opener */ }
   try { app.zoomKeys(document); } catch (e) { /* zoom is a convenience */ }
+  // a click anywhere in a pane makes that pane the active one (where the next tile he clicks will show)
+  document.addEventListener("pointerdown", function () { try { app.touch(window); } catch (e) { /* no app */ } }, true);
 
   if (window.parent === window.top) {
     window.close = function () { try { app.closeWindow(window); } catch (e) { /* nothing to close */ } };
