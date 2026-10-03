@@ -36,6 +36,28 @@ Because the service owns the process, the dashboard no longer has a Stop button 
 
 > ✅ **Resolved (2026-06-08) — duplicate supervisor was a rogue NSSM service.** The real cause of stale-code-on-8777 was a **second NSSM service `Anchor-Server`** (WinGet nssm, created 2026-05-16, running old code) racing the legit `anchor` service for the port. Because the old code bound with `SO_REUSEADDR`, *both* servers could listen on 8777 at once and requests randomly hit old or new — and `nssm restart anchor` only restarts one supervisor. Fixes shipped: (1) a **single-instance guard** — the server now binds with `SO_EXCLUSIVEADDRUSE` (Windows) so only one Anchor process can own 8777; a duplicate exits(0) cleanly instead of squatting (see `paths.classify_bind_error`/`use_exclusive_bind`, `anchor_gui._ExclusiveThreadingHTTPServer`). (2) Every desktop launcher (`AnchorDashboard.vbs/.bat`, `launch_anchor.pyw`, `pin_anchor_to_taskbar.vbs`, `create_shortcut.py`) now **only opens the browser**, never spawns a server. (3) `fix_anchor_stale.ps1` (run elevated) removes the rogue `Anchor-Server` service, reaps 8777 by PID, restarts `anchor`, and verifies the new code is live. The Task Scheduler task **"Anchor Server"** is already Disabled and was NOT the cause. The `ledger` NSSM service (`ledger_gui.py`, port 8778) is unrelated — leave it alone.
 
+> 🪟 **The Anchor app (2026-10-02/03, Skill Foundry/planning/anchor-app-shell-2026-09-29).** Anchor runs as its own
+> program on PUTER and as a Home Screen app on iPad/iPhone, around ONE page: `static/app.html` (+ `app.js`, `app.css`),
+> served from disk (no restart for edits). Its title bar holds the anchor, the tiles (the Cave of Wonders first, never
+> closable; everything opened becomes a tile; deliverables are dashed tiles keeping their file name), the one/two-pane
+> toggle, and - in the desktop program only - minimize/maximize/close. Each pane is an iframe of Anchor's OWN page; a
+> click in a pane makes it active, a tile click shows it there; a deliverable opened from a cockpit lands in the OTHER
+> pane (right by default, left when the cockpit is right). `static/app-frame.js` is the one script that makes framed
+> pages behave: inert unless inside the app (`window.top.ANCHOR_APP`); it replaces `window.open` and catches new-window
+> links (they become tiles returning the frame's real window), sets opener/close for app-opened tiles, forwards
+> Ctrl +/-/0 and Ctrl+wheel zoom, and reports clicks (active pane). The cockpit shim (`steward_routes._CLIENT_SHIM`)
+> loads it FIRST (so the shim's own `window.open` wrapper wraps it) and carries the dictation guard: a cockpit's
+> self-reload on a new build waits while a box (incl. the chamber's, in its nested frame, via `window.__stewardBusy`)
+> holds words or took input in the last 10 s. Other pages are armed by app.js on load. The desktop host is
+> `shell/anchor_shell.py` (NOT product code: its own venv `%LOCALAPPDATA%/anchor-shell/.venv` = pywebview 6.2.1 +
+> pywin32; not on the ship list): one frameless WebView2 window, AppUserModelID `GhostWorldLabs.Anchor` + the
+> Start-menu `Anchor.lnk` (`shell/make_shortcut.py`), the anchor icon, a persistent profile (one token paste), zoom
+> remembered in `%LOCALAPPDATA%/anchor-shell/zoom.txt`, a comctl32 subclass (WM_NCCALCSIZE/WM_NCHITTEST) + form
+> padding for edge resizing, DWM rounded corners, WebView2 non-client regions so the bar's CSS `app-region: drag` is a
+> real caption. Phones (<760 px): one item at a time, swipe the title bar, a deliverable stacks under the dialogue.
+> Tests: `tests/test_app_shell_2026_10_02.py` (hermetic Playwright, throwaway server, never :8777) +
+> `tests/test_app_shell_host_2026_10_02.py`.
+
 ## Minimum Subscription & Degradation Behavior
 - **Minimum Viable Tier:** A **Claude Pro** subscription is the minimum viable tier for running Crucible and Foreman (which require Claude Code).
 - **Gemini-Only Degradation:** If only Gemini is present, Research and General lanes run normally, but Crucible (Planning) and Foreman (Build) lanes degrade to `REQUIRES_CLAUDE` status (an honest refusal, not a crash) because they depend on the Claude Code engine.
