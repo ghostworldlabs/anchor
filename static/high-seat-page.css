@@ -253,7 +253,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .orphans .oh{font-size:10.5px;color:var(--text-dim2);margin-left:auto}
 
 /* the dialogue on this page (W2c-3: it fills the column; the brief, the seeds and the composer keep their height) */
-.panel>.seedbar,.panel>.brief,.panel>.loginbox,.panel>.composer{flex:none}
+.panel>.seedbar,.panel>.brief,.panel>.nudgeslot,.panel>.loginbox,.panel>.composer{flex:none}
 #dialogue{margin-top:9px;min-height:200px}
 .panel>.composer{margin-top:8px}
 .today{margin:0 0 20px}
@@ -923,3 +923,16 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
   .mh-title{font-size:21px}
   .mh-stew{flex-basis:100%;margin-right:0}
 }
+
+/* the interrupt lane (John, 2026-10-03: on the Cave, "the main day to day work page"): a dated item within three
+   days, once, at the top of the board; and the nudge slot that took the brief's place at the top of the panel */
+.lane{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;margin:0 0 12px;padding:10px 14px;border:1px solid var(--amber-edge);border-left:3px solid var(--amber);border-radius:10px;background:var(--amber-wash);font-size:13px;line-height:1.45}
+.lane .lk{flex:none;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--amber-t)}
+.lane .ltext{flex:1 1 60%;min-width:0;color:var(--text);font-weight:600}
+.lane .nacts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.lane .nacts .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:2px 10px;font:inherit;font-size:12px;color:var(--accent-t);cursor:pointer;text-decoration:none}
+.lane .nacts .lane-open{background:var(--amber);border-color:var(--amber);color:#0b1220;font-weight:700}
+.lane .nwhy,.lane .lnote{flex:1 1 100%;font-size:11px;color:var(--text-dim2)}
+.nudgeslot:empty{display:none}
+.nudge.resume{border-left-color:var(--accent-t)}
+.nudge.resume .nk{color:var(--accent-t)}

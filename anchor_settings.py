@@ -51,6 +51,10 @@ STEWARDS = {
         "high_seat_name": "High Seat",
         "seal_name": "Seal",
         "projects_hint": "each under Ecgberht&rsquo;s seal",
+        # The Campaign page in the steward's goals-and-foresight mode takes this name and picture
+        # (John, 2026-10-03: Aladdin the Star Chart, Jarvis the Chart Room, Ecgberht the Beacon).
+        "campaign_name": "Beacon",
+        "campaign_icon": "campaign-ecgberht-beacon.jpg",
     },
     "aladdin": {
         "label": "Aladdin",
@@ -60,6 +64,8 @@ STEWARDS = {
         "high_seat_name": "Cave of Wonders",
         "seal_name": "Lamp",
         "projects_hint": "each kept under the Lamp&rsquo;s watch",
+        "campaign_name": "Star Chart",
+        "campaign_icon": "campaign-aladdin-star-chart.jpg",
     },
     "jarvis": {
         "label": "Jarvis",
@@ -74,6 +80,8 @@ STEWARDS = {
         # label changed.
         "seal_name": "Server",
         "projects_hint": "each served on the Server",
+        "campaign_name": "Chart Room",
+        "campaign_icon": "campaign-jarvis-chart-room.jpg",
     },
 }
 VALID_STEWARDS = frozenset(STEWARDS)

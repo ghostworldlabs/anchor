@@ -15,7 +15,7 @@ from datetime import timedelta
 
 import home_rows as _hr
 from high_seat_page import tab_icon_link, HIS_NAME, conversation_view
-from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative, nudge_html
+from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html, is_initiative, nudge_html, mode_name
 import home_attention as _ha
 
 TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
@@ -125,16 +125,41 @@ def _gtile(i, ctx, band, draggable=True):
         '<article class="gtile%s%s" draggable="%s" data-lane="%s" data-band="%s" style="--areac:%s">'
         '<div class="ihead"><button class="iname" data-open="%s" title="open its place">%s</button>'
         '<span class="gtier">tier %s</span><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
-        '<div class="ggoal" title="%s">%s</div>%s'
+        '<div class="ggoal" title="%s">%s</div>%s%s'
         '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span><span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
     ) % (" needs" if i["needs"] else "", " bone" if i["status"] in ("done", "parked") else "", "true" if draggable else "false", esc(i["id"]), band, AREA_COLOURS.get(i["area"], "#8b93a6"),
          esc(i["id"]), esc(i["name"]), i["tier"] or "?",
          initiative_light(i, ctx.get("working") or set()), glyph, word,
          esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>',
-         _cockpits(i, ctx),
+         _cockpits(i, ctx), _ifthen(i) + _premortem(i, ctx),
          pct, done, n, "" if i.get("pace") else "dim", ("pace " + esc(_short(i["pace"]))) if i.get("pace") else "no pace",
          dcls, (("overdue " if dcls == "over" else "next ") + esc(_short(nd))) if nd else "no deadline",
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
+
+
+PREMORTEM_Q = "It is three months on and this goal fell short: what went wrong?"
+
+
+def _ifthen(i):
+    """The Star Chart (2026-10-03, the research's Adopt): a Tier-1 goal carries ONE if-then next step in his words
+    ("If it is Monday 9:00, then I send the trust questions"); unwritten, the line asks for it. Click to write or revise."""
+    if i.get("tier") != 1 or i.get("status") in ("done", "parked"):
+        return ""
+    t = str(i.get("if_then") or "")
+    return ('<div class="gift%s" data-ifthen="%s" data-text="%s" title="the next step as an if-then, in your words - click to %s">&#8627; %s</div>') % (
+        "" if t else " empty", esc(i["id"]), esc(t), "revise" if t else "write it",
+        esc(t) if t else "If-then step not written yet &middot; add one in your words")
+
+
+def _premortem(i, ctx):
+    """The premortem ask (2026-10-03, the research's Try): asked once when a goal is made or its pace slips later; the
+    answer goes into the goal's guide; 'not now' sets it aside."""
+    pm = (ctx.get("premortems") or {}).get(i["id"])
+    if not isinstance(pm, dict) or i.get("status") in ("done", "parked"):
+        return ""
+    return ('<div class="gpm" data-pm="%s"><b>Premortem</b> &middot; %s. &ldquo;%s&rdquo; Your answer goes into the goal&rsquo;s guide. '
+            '<button class="mini" data-pm-answer="%s">Answer</button> <button class="mini" data-pm-skip="%s">Not now</button></div>') % (
+        esc(i["id"]), esc(pm.get("reason") or "asked"), esc(PREMORTEM_Q), esc(i["id"]), esc(i["id"]))
 
 
 def _band(key, label, note, items, ctx, cls="", extra="", quiet_empty=False):
@@ -434,6 +459,57 @@ def brief_bullets(ctx):
     return out
 
 
+def look_ahead(ctx):
+    """The look-ahead (the Star Chart, 2026-10-03; it took the brief's place): what is coming up in the next seven days,
+    the Tier-1/2 goals behind their pace, the goals starving (each with Open · Not now · Park), and one preparation -
+    all read from the record. A dated item within three days is named here only; its alert is the Cave's interrupt lane."""
+    inits = [i for i in ctx["initiatives"] if i["status"] not in ("done", "parked")]
+    today = ctx["today"]
+    dated = sorted(((_hr._iso(p["date"]), p, i) for i in inits for p in i["parts"]
+                    if p["date"] and not p["broken"] and p["status"] not in ("done", "parked") and _hr._iso(p["date"])), key=lambda x: x[0])
+    soon = [(d, p, i) for d, p, i in dated if today <= d <= today + timedelta(days=7)]
+    items = []
+    if soon:
+        items.append('<li><b>Coming up:</b> %s.</li>' % " &middot; ".join(
+            '%s %s (%s)%s' % (esc(_short(d.isoformat())), esc(p["text"][:60]), esc(i["name"]),
+                              ' <span class="dim">its alert is on the %s</span>' % esc(ctx["steward"]["high_seat_name"]) if (d - today).days <= 3 else "")
+            for d, p, i in soon[:4]))
+    else:
+        nxt = next(((d, p, i) for d, p, i in dated if d >= today), None)
+        items.append('<li><b>Coming up:</b> nothing dated in the next seven days%s.</li>' % (
+            (" &middot; the first is %s, %s (%s)" % (esc(_short(nxt[0].isoformat())), esc(nxt[1]["text"][:60]), esc(nxt[2]["name"]))) if nxt else ""))
+    behind = []
+    for i in inits:
+        if i["tier"] not in (1, 2):
+            continue
+        pace = _hr._iso(i.get("pace") or "")
+        n = int(i.get("part_count") or 0); done = int(i.get("done_count") or 0)
+        if not pace:
+            if i["tier"] == 1:
+                behind.append('%s has no pace set' % esc(i["name"]))
+            continue
+        if pace < today and done < n:
+            behind.append('%s is past its pace (%s) with %d of %d parts done' % (esc(i["name"]), esc(_short(pace.isoformat())), done, n))
+        elif n and (pace - today).days <= 14 and done < n / 2:
+            behind.append('%s paces to %s with %d of %d parts done' % (esc(i["name"]), esc(_short(pace.isoformat())), done, n))
+    if behind:
+        items.append('<li><b>Behind pace:</b> %s.</li>' % "; ".join(behind[:4]))
+    starving = [(gid, n) for gid, n in (ctx.get("nudges") or {}).items() if isinstance(n, dict) and n.get("kind") == "starving"]
+    names = {i["id"]: i["name"] for i in inits}
+    for gid, n in starving[:3]:
+        items.append('<li class="starve"><b>Starving:</b> %s <span class="lacts"><button class="mini" data-goto="%s">Open</button>'
+                     '<button class="mini" data-nudge-act="not_now" data-key="%s" data-fact="%s" data-text="%s">Not now</button>'
+                     '<button class="mini" data-look-park="%s" title="to the boneyard, with undo">Park</button></span></li>' % (
+                         esc(n.get("text") or names.get(gid, gid)), esc(gid), esc(n.get("key") or ""), esc(n.get("fact") or ""), esc((n.get("text") or "")[:200]), esc(gid)))
+    first = next(((d, p, i) for d, p, i in dated if d >= today), None)
+    if first:
+        items.append('<li><b>One preparation:</b> the nearest date is %s (%s), due %s &mdash; ready it before the week fills.</li>' % (
+            esc(first[1]["text"][:80]), esc(first[2]["name"]), esc(_short(first[0].isoformat()))))
+    return ('<section class="lookahead" id="lookAhead"><div class="kicker">The look-ahead <span class="k-when">the next seven days, from %s</span></div><ul class="blist">%s</ul>'
+            '<div class="lane-note">The nudges that are not urgent wait here instead of interrupting.</div></section>') % (
+        esc(today.strftime("%A %d %B").replace(" 0", " ")), "".join(items))
+
+
 def _lead(ctx):
     """The brief's lead when a set exists: the head as the High Seat reads it - a part that needs him in an active
     initiative, else the tiers, else the pick-up while the set runs - with an open to its tile."""
@@ -457,25 +533,19 @@ def _panel(ctx):
     its head - and the composer at the column's foot. A login box, hidden until a read is refused (Grok's read of
     W2c-3: the refusal is answered on the page he is looking at)."""
     st = ctx["steward"]
-    rest = brief_bullets(ctx)
-    lead = _lead(ctx)
-    if lead is None:
-        lead, rest = rest[0], rest[1:]
-    # the brief shrinks to its lead plus a fold (A1)
-    bullets = '<li class="lead">%s</li><li class="fold"><details class="brief-more"><summary>the rest, by tier</summary><ul>%s</ul></details></li>' % (
-        lead, "".join('<li>%s</li>' % b for b in rest))
     return (
-        '<aside class="panel" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
+        # the brief is gone (John, 2026-10-03: "I don't think that it helps"); the look-ahead takes its place
+        '<aside class="panel" aria-label="The steward">%s'
         '%s'
         '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
         '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
         '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
-        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it runs the Campaign: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
+        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it runs the %s: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '</aside>'
-    ) % (esc(ctx["brief_when"]), bullets, conversation_view(st["label"], ctx.get("pid") or "", "campaign", "", "the Campaign"), esc(st["label"]))
+    ) % (look_ahead(ctx), conversation_view(st["label"], ctx.get("pid") or "", "campaign", "", "the " + mode_name(st)), esc(st["label"]), esc(mode_name(st)))
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────
@@ -495,27 +565,27 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_dated = sum(1 for i in live for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked"))
     n_needs = sum(len(i["needs"]) for i in live)
     board = (
-        '<section class="board" aria-label="The Campaign" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
+        '<section class="board" aria-label="The %s" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
         '<span class="c" id="boardCount">%d goals &middot; Tier 1 %d &middot; Tier 2 %d &middot; seed goals %d &middot; the boneyard %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close the goal</button></div>'
         '%s%s%s%s'
         '<p class="boardfoot" id="boardFoot">Drag a goal into another tier or into Seed goals; there is no order inside a tier. Click a name for its place &mdash; every change is one line with undo.</p></section>'
-    ) % (esc(open_id or ""), len(live), sum(1 for i in live if i["tier"] == 1), sum(1 for i in live if i["tier"] == 2), n_seedy, n_bone, n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
+    ) % (esc(mode_name(st)), esc(open_id or ""), len(live), sum(1 for i in live if i["tier"] == 1), sum(1 for i in live if i["tier"] == 2), n_seedy, n_bone, n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _areas(ctx), _bands(ctx), _places(ctx), _calendar(ctx))
     hdr = (
-        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>'
+        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2 class="modeh">The %s</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
         '<a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(st["high_seat_name"]),
+    ) % (esc(st["high_seat_name"]), esc(mode_name(st)),
          _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>The Campaign</title>%s'
+        '<title>The %s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/campaign-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s", you: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every goal, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
         '<script src="/steward-static/md.js?v=%s"></script><script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/campaign-page.js?v=%s"></script></body></html>'
-    ) % (tab_icon_link(st.get("high_seat") or st.get("seal"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), esc(HIS_NAME), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
+    ) % (esc(mode_name(st)), tab_icon_link(st.get("high_seat") or st.get("seal"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), esc(str(ctx.get("stamp") or "")), esc(st["label"]), esc(HIS_NAME), _masthead(ctx, mode=True), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
          _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))

@@ -214,6 +214,8 @@ _SCOPED = [
     ("campaign_home", re.compile(r"^send (.+?) (?:back|home)(?: to (?:its|the) goal)?\s*[.!]?$|^put (.+?) back(?: in (?:its|the) goal)?\s*[.!]?$|^bench (.+?)\s*[.!]?$", re.I)),
     ("campaign_move_tier", re.compile(r"^(?:(?:move|put) (?:it |this )?(?:to |in |into )?)?tier ([123])\s*[.!]?$", re.I)),
     ("campaign_done_when", re.compile(r"^(?:the )?(?:goal|done when|done looks like|done is|done means)(?: is)?:?\s+(.+?)\s*[.!]?$", re.I)),
+    # the Star Chart (2026-10-03): "if-then: if it is Monday 9:00, then I send the trust questions" - his words, kept whole
+    ("campaign_if_then", re.compile(r"^(?:the )?(?:if[- ]then|next step)(?: is)?:\s*(.+?)\s*$", re.I)),
 ]
 
 
@@ -257,6 +259,8 @@ def _scoped(folder, goal, text, today):
             return _answer(acts.move_tier(folder, goal, int(m.group(1))), act)
         if act == "campaign_done_when":
             return _answer(acts.done_when(folder, goal, m.group(1)), act)
+        if act == "campaign_if_then":
+            return _answer(acts.if_then(folder, goal, m.group(1)), act)
     return None
 
 

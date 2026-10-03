@@ -32,7 +32,7 @@ def test_the_high_seat_shows_the_one_conversation_under_the_composer_and_boots_t
     ctx = w2c._ctx(); ctx["turns"] = _turns(); ctx["n_turns"] = 3; ctx["goal_names"] = {"trusts": "The trusts"}; ctx["stamp"] = "s9"
     html = hsp.render_high_seat_html(ctx)
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
-    assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"') and 'id="todayBlock"' not in panel, "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape); Today is under the board"
+    assert panel.index('id="nudgeSlot"') < panel.index('id="dialogue"') < panel.index('class="composer"') and 'id="todayBlock"' not in panel and 'id="brief"' not in panel, "the nudge slot (the brief is gone, 2026-10-03), the dialogue, then the composer at its foot; Today is under the board"
     assert 'id="todayBlock"' not in html and "raised by:" not in html, "his word 2026-10-02: the dated deliveries are enough - no Today block"
     assert '/steward/v1?embed=1&amp;view=talk&amp;inst=cave&amp;pid=' in panel and '&amp;dir=Cave%20of%20Wonders"' in panel   # the Cave's own conversation (2026-10-02) and 'id="exState"' in panel and 'id="exList"' in panel   # the cockpit's own view (2026-10-02)
     assert 'steward: "Jarvis", stamp: "s9"' in html, "the boot carries the steward's label and the record's stamp for the live lines"

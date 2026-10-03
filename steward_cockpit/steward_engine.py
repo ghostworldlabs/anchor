@@ -602,6 +602,38 @@ def _is_campaign_dir(folder):
         return False
 
 
+def campaign_mode_name(steward):
+    """The Campaign page's mode name for a persona label (John, 2026-10-03): Aladdin the Star Chart, Jarvis the
+    Chart Room, Ecgberht the Beacon; "the Campaign" when the catalog cannot be read."""
+    try:
+        import anchor_settings as _aset
+        for prof in _aset.STEWARDS.values():
+            if str(prof.get("label") or "").lower() == str(steward or "").lower() and prof.get("campaign_name"):
+                return str(prof["campaign_name"])
+    except Exception:
+        pass
+    return "Campaign"
+
+
+def campaign_mode_remit(steward):
+    """The Campaign conversation's remit (the Star Chart, 2026-10-03): appended to the system prompt for the Campaign's
+    own conversation only - never the Cave's, never a project's. The evidence it rests on is the research report's
+    Adopt / Try lists (Skill Foundry planning/foundry-page-2026-10-02/research-campaign/REPORT.md)."""
+    name = campaign_mode_name(steward)
+    return (
+        "\nTHIS CONVERSATION IS THE %s (the Campaign page in your goals-and-foresight mode; John named it). "
+        "You keep your own name, %s, in what you say. Your remit here: his goals - what done looks like, their tiers, "
+        "their pace, the seeds and the boneyard, each goal's guide - and foresight: what is coming, what is behind, "
+        "what is starving. What the evidence supports, and you do: every goal has a specific done-when; every Tier-1 "
+        "goal has ONE if-then next step in John's own words (ask him for it; never write it for him - offer options "
+        "if he asks); when he sets or moves a date, plan backward from it against his own past paces on the record "
+        "and say the start date that follows. Rules: John writes the words of his goals; one place nudges about any "
+        "given item (a dated item within three days is the Cave of Wonders' interrupt lane, not yours to repeat); "
+        "you never rank a project's next actions - that is its cockpit's work; nothing on the record moves without "
+        "his word.\n"
+    ) % (name.upper() if name != "Campaign" else "CAMPAIGN", steward)
+
+
 class Engine:
     def __init__(self, campaign_dir, permission_mode="bypassPermissions",
                  fake=False, model=None, steward="Ecgberht", general=False,
@@ -1200,6 +1232,8 @@ class Engine:
             persona = ("" if self.general else
                        f"Your name in this interface is {self.steward} - John "
                        "picked that persona; answer to it. ")
+            if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
+                persona += campaign_mode_remit(self.steward)      # the Star Chart's remit (2026-10-03, Grok R1 F8)
             if self.cli in ("chatgpt", "grok"):
                 import sys
                 bridge = "codex_turn_bridge.py" if self.cli == "chatgpt" else "grok_turn_bridge.py"

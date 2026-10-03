@@ -213,7 +213,7 @@ def test_the_seeds_button_opens_a_panel_of_the_campaigns_seeds():
     """John, 2026-09-27: the Seeds button did nothing. It opens a panel: each seed with Make it an initiative (the
     steward's verb into the composer; Send is the word) and the way to the Campaign; no writer."""
     html = hsp.render_high_seat_html(_ctx(campaign=True))
-    panel = html[html.index('id="seedPanel"'):html.index('id="brief"')]
+    panel = html[html.index('id="seedPanel"'):html.index('id="nudgeSlot"')]
     assert 'aria-controls="seedPanel"' in html and "Seeds &middot; 1" in panel
     assert 'data-seed="s3"' in panel and "An AI mechanics class with the group" in panel and 'data-seed-text="An AI mechanics class with the group"' in panel
     assert 'href="/project/df56"' in panel and "asks both on the card" in panel

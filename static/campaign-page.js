@@ -304,6 +304,44 @@
     else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
     else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
   });
+  // the Star Chart (2026-10-03): the if-then line, the premortem and the look-ahead's Park - each a small box in place,
+  // Enter or the button is the word; Escape puts it back; nothing moves without it
+  function inlineAsk(host, label, value, onGo) {
+    if (!host || host.querySelector('.ask-in')) return;
+    var box = document.createElement('span'); box.className = 'ask-in';
+    var inp = document.createElement('input'); inp.type = 'text'; inp.value = value || ''; inp.placeholder = label; inp.setAttribute('aria-label', label);
+    var go = document.createElement('button'); go.className = 'mini'; go.textContent = 'Save';
+    box.appendChild(inp); box.appendChild(go); host.appendChild(box);
+    ['mousedown', 'click', 'dragstart'].forEach(function (ev) { box.addEventListener(ev, function (e) { e.stopPropagation(); }); });
+    var fire = function () { var v = inp.value.trim(); if (v || value) onGo(v); };
+    go.addEventListener('click', fire);
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); fire(); } else if (e.key === 'Escape') { box.remove(); } });
+    inp.focus();
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-ifthen]');
+    if (t && !e.target.closest('.ask-in')) {
+      e.preventDefault(); e.stopPropagation();
+      var step = t.getAttribute('data-ifthen');
+      inlineAsk(t, 'If <when>, then I <do what>', t.getAttribute('data-text') || '', function (v) { act({ act: 'if_then', step: step, text: v }); });
+      return;
+    }
+    var a = e.target.closest('[data-pm-answer]');
+    if (a) {
+      e.preventDefault(); e.stopPropagation();
+      var g = a.getAttribute('data-pm-answer');
+      inlineAsk(a.closest('.gpm'), 'what went wrong, in a sentence', '', function (v) { act({ act: 'premortem', step: g, text: v }); });
+      return;
+    }
+    var sk = e.target.closest('[data-pm-skip]');
+    if (sk) { e.preventDefault(); e.stopPropagation(); act({ act: 'premortem_skip', step: sk.getAttribute('data-pm-skip') }); return; }
+    var pk = e.target.closest('[data-look-park]');
+    if (pk) {
+      e.preventDefault(); e.stopPropagation();
+      var gid = pk.getAttribute('data-look-park');
+      inlineAsk(pk.closest('li'), 'park until when, or what?', '', function (v) { act({ act: 'park', step: gid, waiting_on: v }); });
+    }
+  });
   $$('.place [data-guide-edit]').forEach(function (b) {
     b.addEventListener('click', function (e) {
       e.stopPropagation();

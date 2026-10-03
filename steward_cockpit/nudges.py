@@ -25,8 +25,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 STARVE_DAYS = {1: 7, 2: 14}
+NOT_DATED = frozenset({"deck_wait", "starving", "seed", "free"})     # every kind but the interrupt lane's (2026-10-03)
 DATED_WINDOW_DAYS = 3
 NUDGES_FILE = ".ecgberht/nudges.json"
+RESUME_FILE = ".ecgberht/resume.json"      # the interrupt lane's ready-to-resume note (2026-10-03)
+RESUME_DAYS = 2
+PREMORTEM_FILE = ".ecgberht/premortem.json"   # the Star Chart's premortem asks (2026-10-03)
 _SEED_VERBS = re.compile(r"\b(finish|ship|write|launch|build|publish|get|teach|run|deliver|submit|complete|start|set up|create|design|draft)\b", re.I)
 
 
@@ -69,11 +73,13 @@ def _goals_at_hand(initiatives, working):
 
 
 def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_ages=None, goal_last_at=None,
-           dismissed=None, scope_goal=None, campaign_pid="", head_lead=None):
+           dismissed=None, scope_goal=None, campaign_pid="", head_lead=None, kinds=None):
     """The one nudge for this boundary, or None. ``scope_goal`` narrows it to one goal's conversation (the Campaign
     page's place): only that goal's dated parts, deck waits and starvation; seeds and the free moment belong to the
     High Seat's brief. ``dismissed`` is the receipts file read (``read_dismissed``). ``head_lead`` is (pid, part name)
-    of the brief's own lead sentence: a part the head already names is never nudged too (Grok W3, RC-3)."""
+    of the brief's own lead sentence: a part the head already names is never nudged too (Grok W3, RC-3). ``kinds``
+    limits the candidates to those kinds (None = all): one lane per item (John, 2026-10-03) - the Cave's interrupt lane
+    asks for ``{"dated"}``, its panel and the Star Chart's goal places for the rest, so a dated item shows once."""
     today = today or date.today()
     inits = [i for i in initiatives or () if isinstance(i, dict) and i.get("status") not in ("done", "parked")]
     if scope_goal:
@@ -91,7 +97,7 @@ def derive(initiatives, facts=None, seeds=None, working=None, today=None, strip_
 
     def add(kind, subject, fact, text, why, acts, goal=None, rank=0):
         key = fact_key(kind, subject, fact)
-        if key in dismissed:
+        if (kinds is not None and kind not in kinds) or key in dismissed:
             return
         cands.append({"kind": kind, "key": key, "fact": str(fact), "text": text, "why": why, "acts": acts, "goal": goal, "rank": rank})
 
@@ -226,3 +232,85 @@ def undismiss(campaign_dir, key):
     except OSError as e:
         return {"ok": False, "error": "the receipt could not be dropped: %s" % e}
     return {"ok": True, "key": str(key)}
+
+
+# ── the interrupt lane's ready-to-resume note (John, 2026-10-03: the lane lives on the Cave of Wonders) ─────────────
+# When he opens a dated item from the lane, what he was on is kept as one line; the Cave shows it at the top of the
+# panel ("You were on: ...") until he clears it or two days pass. One note at a time; never raises.
+
+def write_resume(campaign_dir, note, switched_to=""):
+    note = " ".join(str(note or "").split())[:240]
+    if not note:
+        return {"ok": False, "error": "nothing to keep"}
+    d = {"at": time.strftime("%Y-%m-%d %H:%M"), "note": note, "switched_to": " ".join(str(switched_to or "").split())[:160]}
+    try:
+        p = Path(campaign_dir) / RESUME_FILE; p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp"); tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8"); os.replace(str(tmp), str(p))
+    except OSError as e:
+        return {"ok": False, "error": "the note could not be kept: %s" % e}
+    return {"ok": True, **d}
+
+
+def read_resume(campaign_dir, today=None):
+    """The note, or None when there is none or it is older than RESUME_DAYS."""
+    try:
+        d = json.loads((Path(campaign_dir) / RESUME_FILE).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(d, dict) or not d.get("note"):
+        return None
+    at = _iso(str(d.get("at") or "")[:10])
+    if at and ((today or date.today()) - at).days > RESUME_DAYS:
+        return None
+    return d
+
+
+def clear_resume(campaign_dir):
+    was = read_resume(campaign_dir)
+    try:
+        (Path(campaign_dir) / RESUME_FILE).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        return {"ok": False, "error": "the note could not be cleared: %s" % e}
+    return {"ok": True, "was": was}
+
+
+# ── the Star Chart's premortem (2026-10-03): asked once when a goal is made or its pace slips later ──────────────────
+# {goal_id: {at, reason}}; the ask stands on the goal's card until he answers (the answer goes into the goal's guide)
+# or says not now. Never raises.
+
+def _pm_read(campaign_dir):
+    try:
+        d = json.loads((Path(campaign_dir) / PREMORTEM_FILE).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _pm_write(campaign_dir, d):
+    try:
+        p = Path(campaign_dir) / PREMORTEM_FILE; p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp"); tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8"); os.replace(str(tmp), str(p))
+        return True
+    except OSError:
+        return False
+
+
+def read_premortems(campaign_dir):
+    return _pm_read(campaign_dir)
+
+
+def ask_premortem(campaign_dir, goal_id, reason):
+    goal_id = str(goal_id or "").strip()
+    if not goal_id or "/" in goal_id or "\\" in goal_id:
+        return False
+    d = _pm_read(campaign_dir)
+    d[goal_id] = {"at": time.strftime("%Y-%m-%d %H:%M"), "reason": " ".join(str(reason or "").split())[:160]}
+    return _pm_write(campaign_dir, d)
+
+
+def close_premortem(campaign_dir, goal_id):
+    d = _pm_read(campaign_dir)
+    was = d.pop(str(goal_id), None)
+    return was if _pm_write(campaign_dir, d) else None

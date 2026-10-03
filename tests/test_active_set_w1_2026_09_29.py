@@ -120,10 +120,5 @@ def test_the_page_leads_with_the_pick_up_while_active_runs():
     ctx["pickup"] = {"initiative": "Holding Company", "goal": "The trusts and the holding company", "id": "hc", "why": "on deck", "text": "", "pid": "p-hc",
                      "active": ["MBA Teaching AI"], "running": ["MBA Teaching AI"], "waiting": []}
     html = hsp.render_high_seat_html(ctx)
-    i = html.index('class="lead"')
-    lead = html[i:i + 400]
-    assert "Active: MBA Teaching AI is running. While it runs: pick up Holding Company (The trusts and the holding company) (on deck)." in lead
-    assert 'data-pid="p-hc"' in lead, "the pick-up's button opens the picked project"
-    ctx["pickup"] = None
-    html = hsp.render_high_seat_html(ctx)
-    assert "Nothing is waiting on you." in html[html.index('class="lead"'):][:200]
+    # his word 2026-10-03: the brief is gone from the Cave and the Star Chart: the head's sentence no longer leads a brief on the page
+    assert 'class="lead"' not in html and 'id="brief"' not in html

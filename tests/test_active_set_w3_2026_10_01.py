@@ -119,11 +119,12 @@ def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_
          "acts": [{"act": "seat", "step": "hw", "seat": "active", "label": "make it active"}, {"act": "open", "href": "/project/p-mba", "label": "open"}]}
     ctx["nudge"] = n
     html = hsp.render_high_seat_html(ctx)
-    brief = html[html.index('<section class="brief" id="brief">'):html.index("</section>", html.index('<section class="brief" id="brief">'))]
+    # the brief is gone (2026-10-03): the nudge keeps its place at the top of the panel, in its own slot (Grok R1 F1)
+    brief = html[html.index('<section class="nudgeslot" id="nudgeSlot"'):html.index("</section>", html.index('<section class="nudgeslot" id="nudgeSlot"'))]
     assert '<div class="nudge brief" data-nudge="deck_wait:hw:abc123" data-kind="deck_wait"><span class="nk">&#9873; the steward</span>' in brief and "make it active?</span>" in brief
     assert '<button class="mini" data-nudge-act="seat" data-step="hw" data-seat="active">make it active</button><a class="mini" href="/project/p-mba">open</a><button class="mini" data-nudge-act="not_now" data-key="deck_wait:hw:abc123" data-fact="approve the plan"' in brief
     assert '<span class="nwhy">read from its record: needs you · approve the plan</span>' in brief, "the receipt: the fact it read"
-    assert brief.index('</ul>') < brief.index('<div class="nudge'), "under the brief's list"
+    assert html.index('id="nudgeSlot"') < html.index('id="dialogue"'), "at the top of the panel, above the conversation"
     ctx["nudge"] = None
     assert '<div class="nudge' not in hsp.render_high_seat_html(ctx), "no nudge, no line"
     cctx = w2._ctx()
@@ -143,9 +144,11 @@ def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_
 
 def test_the_contexts_derive_the_nudge_and_the_standing_text_says_the_law(capsys):
     src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
-    assert 'return _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),' in src and '"lights": lights, "nudge": nudge,' in src
-    assert 'head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""))' in src and 'nudge = _nudge_or_log("high-seat", _derive_nudge)' in src
-    assert 'return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"]' in src and 'nudges = _nudge_or_log("campaign", _derive_nudges) or {}' in src and '"guides": guides, "nudges": nudges,' in src
+    assert 'return _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),' in src and '"lights": lights, "nudge": nudge, "lane": lane,' in src
+    # one lane per item (2026-10-03): the panel's nudge is every kind but dated; the dated one is the Cave's interrupt lane
+    assert 'head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""), kinds=kinds)' in src and 'nudge = _nudge_or_log("high-seat", lambda: _derive_nudge(_nudges_k.NOT_DATED))' in src
+    assert 'lane = _nudge_or_log("high-seat-lane", lambda: _derive_nudge({"dated"}))' in src
+    assert 'return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"]' in src and 'kinds=_nudges.NOT_DATED) for i in initiatives}' in src and 'nudges = _nudge_or_log("campaign", _derive_nudges) or {}' in src and '"guides": guides, "nudges": nudges,' in src
     assert "def _strip_ages(entries):" in src and "def _goal_last_at(campaign_dir):" in src
     # Grok W3 (RC-G): the guard logs the failure it exists for, and the page goes on without a nudge
     import anchor_gui as ag

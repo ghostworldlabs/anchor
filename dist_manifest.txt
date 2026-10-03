@@ -421,6 +421,9 @@ vendor/brand/ecgberht-portfolio-high-seat.jpg
 vendor/brand/ecgberht-project-seal.jpg
 vendor/brand/aladdin-high-seat-cave.jpg
 vendor/brand/aladdin-seal-lamp.jpg
+vendor/brand/campaign-aladdin-star-chart.jpg
+vendor/brand/campaign-ecgberht-beacon.jpg
+vendor/brand/campaign-jarvis-chart-room.jpg
 vendor/brand/jarvis-high-seat-hat.jpg
 vendor/brand/jarvis-seal-salver.jpg
 # Workbench tile icon (2026-07-30, John-LOCKED): the Watchmaker's Bench.

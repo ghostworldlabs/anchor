@@ -97,6 +97,7 @@ def campaign_initiatives(steps, resolved=None):
             "id": sid, "name": s.get("name") or sid, "tier": int(s["tier"]) if s.get("tier") in (1, 2, 3) else None,
             "order": int((own or {}).get("order") or 0), "area": str(s.get("area") or ""),
             "done_when": s.get("done_when") or "", "status": s.get("status") or "",
+            "if_then": str(s.get("if_then") or ""),      # the Star Chart's one if-then step, in his words (2026-10-03)
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
             "done_count": sum(1 for p in parts if p["done"]),
@@ -390,8 +391,8 @@ def _rail(ctx):
         '<div class="sub">Anchor &middot; the whole portfolio, ranked</div>'
         '<div class="navk">Destinations</div>'
         '<ul class="nav" id="railNav">'
-        '<li><button data-rail="seat"><span class="n">%s</span><span class="c">brief</span></button></li>'
-        '<li><button data-rail="campaign"><span class="n">Campaign</span><span class="c">%s</span></button></li>'
+        '<li><button data-rail="seat"><span class="n">%s</span><span class="c">nudges</span></button></li>'
+        '<li><button data-rail="campaign"><span class="n">%s</span><span class="c">%s</span></button></li>'
         '<li><button data-rail="active"><span class="n">Active</span><span class="c">%d</span></button></li>'
         '<li><button data-rail="week"><span class="n">This week</span><span class="c">%s</span></button></li>'
         '<li><button data-rail="desk"><span class="n">Desk</span><span class="c">%d</span></button></li>'
@@ -404,7 +405,7 @@ def _rail(ctx):
         '</nav>'
     ) % (_brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
          _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
-         esc(st["high_seat_name"]), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
+         esc(st["high_seat_name"]), esc(mode_name(st)), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
          esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
 
 
@@ -417,14 +418,19 @@ def anchor_mark(build, px=26):
             % (esc(build), px, px, max(4, px // 4)))
 
 
-def _masthead(ctx):
+def _masthead(ctx, mode=False):
     """The masthead every High Seat page shares: Anchor, the Ghost World Labs lockup, then — at the very top — the
     steward: its High Seat image, the seat's name, who serves. (The AI Cockpit pill left it on his word, 2026-09-30;
-    the footer keeps the tagline.)"""
+    the footer keeps the tagline.) ``mode``: the Campaign page wears its mode's picture and name instead (the Star
+    Chart, the Chart Room, the Beacon - his accepted mockup, 2026-10-03)."""
     b = ctx["build"]
     st = ctx.get("steward") or {}
-    stew = ('<div class="mh-stew" title="your steward">%s<div><b>The %s</b><span>%s &middot; your steward</span></div></div>' % (
-        _brand_img(b, st.get("high_seat") or "", "mh-seat"), esc(st.get("high_seat_name") or "High Seat"), esc(st.get("label") or "the steward"))) if st else ""
+    if st and mode:
+        stew = '<div class="mh-stew" title="your steward in its goals-and-foresight mode">%s<div><b>The %s</b><span>%s &middot; goals and foresight</span></div></div>' % (
+            _brand_img(b, st.get("campaign_icon") or st.get("high_seat") or "", "mh-seat"), esc(mode_name(st)), esc(st.get("label") or "the steward"))
+    else:
+        stew = ('<div class="mh-stew" title="your steward">%s<div><b>The %s</b><span>%s &middot; your steward</span></div></div>' % (
+            _brand_img(b, st.get("high_seat") or "", "mh-seat"), esc(st.get("high_seat_name") or "High Seat"), esc(st.get("label") or "the steward"))) if st else ""
     return (
         '<div class="masthead"><div class="mh-title">%sAnchor</div><div class="mh-div"></div>'
         '<div class="mh-lock">%s<div><div class="mh-w1">Ghost World <span class="gwl-accent">Labs</span></div>'
@@ -500,11 +506,11 @@ def _goal_rows(ctx, live, camp_pid):
         summary = "%d in the goal" % len(home) + ((" &middot; out: %s" % ", ".join(x for x in (("%d active" % n_act) if n_act else "", ("%d on deck" % n_deck) if n_deck else "") if x)) if out else "")
         rows.append(
             '<div class="grow%s" data-g="%s"><div class="gh"><b class="gn">%s</b><span class="t">%s</span><span class="ilight %s">%s %s</span><span class="c">%s</span>'
-            '<a class="gopen" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the Campaign page">its place &#8599;</a></div>'
+            '<a class="gopen" href="/project/%s?open=%s" target="_blank" rel="noopener" title="its place on the %s">its place &#8599;</a></div>'
             '<div class="inits">%s</div></div>' % (
                 " needs" if i["needs"] else "", esc(i["id"]), esc(i["name"]), tier_word, light, glyph, word, summary,
-                esc(camp_pid), esc(i["id"]),
-                "".join(irow(p) for p in comps) or '<div class="irow el"><span class="el">no component yet &mdash; add one in its place on the Campaign page</span></div>'))
+                esc(camp_pid), esc(i["id"]), esc(mode_name(ctx.get("steward"))),
+                "".join(irow(p) for p in comps) or '<div class="irow el"><span class="el">no component yet &mdash; add one in its place on the %s</span></div>' % esc(mode_name(ctx.get("steward")))))
     return "".join(rows)
 
 
@@ -527,13 +533,13 @@ def _campaign_tile(ctx):
     deck = seated(live, "deck")
     line = ('&middot; <b>Tier 1:</b> %s &middot; <b>Tier 2:</b> %d &middot; <b>seed goals:</b> %d &middot; <b>out:</b> %d active, %d on deck' % (
         esc(" · ".join(i["name"] for i in t1)) if t1 else "none yet", len(t2), len(seedy) + int(ctx.get("seeds") or 0), len(act), len(deck)))      # one seed-goal count (Grok W2c): the goals not in tier 1 or 2, and the seeds
-    body = '<div class="grows">%s</div>' % (_goal_rows(ctx, live, camp["pid"]) or '<div class="camp-note">No goal yet &mdash; the Campaign page makes one.</div>')
+    body = '<div class="grows">%s</div>' % (_goal_rows(ctx, live, camp["pid"]) or '<div class="camp-note">No goal yet &mdash; the %s makes one.</div>' % esc(mode_name(ctx.get("steward"))))
     return (
         '<section class="camp" id="camp" data-drop="home"><div class="camp-h" id="campHead"><span class="k">Goals</span>'
         '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Expand</span>'
-        '<a class="camp-open" href="/project/%s" target="_blank" rel="noopener">Open the Campaign</a></div>'
+        '<a class="camp-open" href="/project/%s" target="_blank" rel="noopener">Open the %s</a></div>'
         '<div class="camp-body" id="campBody">%s</div></section>'
-    ) % (line, esc(camp["pid"]), body)
+    ) % (line, esc(camp["pid"]), esc(mode_name(ctx.get("steward"))), body)
 
 
 def _desk_card(ctx, g, p):
@@ -1005,7 +1011,7 @@ def _seed_panel(ctx):
     rows = ctx.get("seed_rows") or []
     camp = ctx.get("campaign") or {}
     if not camp:
-        body = '<div class="sd"><span class="st dim">The Campaign is not stood up yet; seeds arrive with it.</span></div>'
+        body = '<div class="sd"><span class="st dim">The %s is not stood up yet; seeds arrive with it.</span></div>' % esc(mode_name(ctx.get("steward")))
     elif not rows:
         body = '<div class="sd"><span class="st dim">No seeds yet.<em>Tell the steward &ldquo;seed: &hellip;&rdquo; here, or in a cockpit&rsquo;s grasscatcher.</em></span></div>'
     else:
@@ -1015,7 +1021,7 @@ def _seed_panel(ctx):
                 esc(r.get("id")), esc(r.get("text")), ("caught " + esc(_hr.short_date(r.get("at")))) if r.get("at") else "from the grasscatcher", esc(r.get("text")))
             for r in rows)
     foot = ('<div class="hint">A seed becomes a goal in tier 3 unless you say the tier and the life area &mdash; '
-            '<a href="/project/%s" target="_blank" rel="noopener">the Campaign</a> asks both on the card.</div>' % esc(camp.get("pid"))) if camp else ""
+            '<a href="/project/%s" target="_blank" rel="noopener">the %s</a> asks both on the card.</div>' % (esc(camp.get("pid")), esc(mode_name(ctx.get("steward"))))) if camp else ""
     return '<section class="seedpanel" id="seedPanel"><h4>Seeds &middot; %d</h4>%s%s</section>' % (len(rows), body, foot)
 
 
@@ -1071,6 +1077,38 @@ def _dialogue(ctx):
     return conversation_view(ctx["steward"]["label"], (ctx.get("campaign") or {}).get("pid") or "", "cave", CAVE_EFFORT, "the Cave of Wonders")
 
 
+def mode_name(st):
+    """The Campaign page's name in the steward's goals-and-foresight mode, per persona (John, 2026-10-03: Aladdin
+    the Star Chart, Jarvis the Chart Room, Ecgberht the Beacon); every label that names that page says it."""
+    return str((st or {}).get("campaign_name") or "Campaign")
+
+
+def lane_html(n, resume_from=""):
+    """The interrupt lane (John, 2026-10-03: on the Cave of Wonders, "seen more regularly ... the main day to day work
+    page"): a dated item within three days, at the top of the board, once. Opening it keeps a ready-to-resume note of
+    what he is on (the active initiatives); 'not now' is the nudge's own receipt."""
+    if not n:
+        return ""
+    acts = []
+    for a in n.get("acts") or []:
+        if a.get("act") == "open" and a.get("href"):
+            acts.append('<a class="mini lane-open" data-lane-open="1" data-switched="%s" href="%s">%s</a>' % (esc(re.sub(r"^Excuse me:\s*", "", n.get("text") or ""))[:160], esc(a["href"]), esc(a.get("label") or "open")))
+    acts.append('<button class="mini" data-nudge-act="not_now" data-key="%s" data-fact="%s" data-text="%s">not now</button>' % (esc(n.get("key") or ""), esc(n.get("fact") or ""), esc((n.get("text") or "")[:200])))
+    note = ('<span class="lnote">If you switch now, a note of what you were on is kept: &ldquo;%s&rdquo;</span>' % esc(resume_from)) if resume_from else ""
+    return ('<section class="lane" id="lane" data-nudge="%s" data-note="%s"><span class="lk">&#9873; interrupt lane</span><span class="ltext">%s</span>'
+            '<span class="nacts">%s</span><span class="nwhy">read from %s</span>%s</section>') % (
+        esc(n.get("key") or ""), esc(resume_from), esc(n.get("text") or ""), "".join(acts), esc(n.get("why") or "the record"), note)
+
+
+def resume_html(r):
+    """The ready-to-resume note, at the top of the panel until he clears it (or two days pass)."""
+    if not isinstance(r, dict) or not r.get("note"):
+        return ""
+    return ('<div class="nudge resume" id="resumeNote"><span class="nk">&#8617; ready to resume</span><span class="ntext">You were on %s%s</span>'
+            '<span class="nacts"><button class="mini" data-nudge-act="resume_done">done</button></span><span class="nwhy">kept %s</span></div>') % (
+        esc(r["note"]), (" when you opened: %s" % esc(r["switched_to"])) if r.get("switched_to") else ".", esc(r.get("at") or ""))
+
+
 def nudge_html(n, where="brief"):
     """W3 (2026-10-01, fits 8-9): the steward stepping in - ONE line in his words with its reason, the fact it read (the
     receipt), and the acts in one click: make it active · put it on deck · make it a goal · open · not now. Nothing
@@ -1093,11 +1131,12 @@ def nudge_html(n, where="brief"):
 
 def _panel(ctx):
     st = ctx["steward"]
-    bullets = _head_li(ctx)
     seeds = int(ctx.get("seeds") or 0)
     return (
         '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn" aria-expanded="false" aria-controls="seedPanel"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>%s'
-        '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul>%s</section>'
+        # the brief is gone (John, 2026-10-03: "I'm not sure it helps on the cave of wonders page either"); the
+        # steward's nudge and the ready-to-resume note keep their place at the top of the panel (Grok R1 F1)
+        '<section class="nudgeslot" id="nudgeSlot" aria-label="The steward steps in">%s%s</section>'
         # R14 (2026-09-29): the token is pasted INTO the page — a browser pop-up (window.prompt) is what his desktop
         # browser suppressed ("I click that button and nothing happens"); the box is hidden until it is needed
         '<div class="loginbox" id="loginBox" hidden><span class="lb-t">This browser is not logged in to Anchor.</span>'
@@ -1105,11 +1144,11 @@ def _panel(ctx):
         '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
         '%s'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
-        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a Campaign verb applies on the record"></textarea>'
+        '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a %s verb applies on the record"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Cave&rsquo;s steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
     ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
-         esc(ctx["brief_when"]), bullets, nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]))
+         resume_html(ctx.get("resume")), nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]), esc(mode_name(st)))
 
 
 def render_locked_html(ctx) -> str:
@@ -1166,7 +1205,7 @@ def render_high_seat_html(ctx) -> str:
     ctx["orphans"] = [e for e in entries if e.get("id") and e["id"] not in in_goal and e["id"] != camp_pid and e["id"] not in parked_ids]
     ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
     ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("deck", "active") for g, p in seated(live_inits, seat) if p.get("pid")}      # Active wins when a project has cards on both (Grok's read of W2c)
-    board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _candidates_tile(ctx) + _projects_tile(ctx)
+    board = ('<div class="board">' + lane_html(ctx.get("lane"), ctx.get("resume_from") or "") + _campaign_tile(ctx) + _seat_shelves(ctx) + _candidates_tile(ctx) + _projects_tile(ctx)
              + _desk_line(ctx) + _ruler(ctx) + _terminal(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'

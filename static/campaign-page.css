@@ -337,12 +337,12 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 
 /* ═════════ the steward panel ═════════ */
 .panel{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding-right:2px}
-.brief{border:1px solid var(--amber-edge);border-radius:11px;flex:none;
+.brief,.lookahead{border:1px solid var(--amber-edge);border-radius:11px;flex:none;
   background:linear-gradient(180deg,var(--amber-wash),transparent 62%),var(--surface);padding:10px 12px 11px}
 .brief.flash{box-shadow:0 0 0 2px rgba(226,169,63,.7)}
-.brief .kicker{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--amber-t);font-weight:700;
+.brief .kicker,.lookahead .kicker{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--amber-t);font-weight:700;
   display:flex;align-items:baseline;gap:8px}
-.brief .kicker .k-when{color:var(--text-dim);font-weight:600;letter-spacing:.04em;margin-left:auto;text-transform:none}
+.brief .kicker .k-when,.lookahead .kicker .k-when{color:var(--text-dim);font-weight:600;letter-spacing:.04em;margin-left:auto;text-transform:none}
 .blist{list-style:none;margin-top:5px}
 .blist li{position:relative;padding:2px 0 2px 13px;font-size:11.5px;line-height:1.45;color:var(--text-warm)}
 .blist li::before{content:"";position:absolute;left:2px;top:10px;width:4px;height:4px;border-radius:50%;background:var(--amber)}
@@ -501,3 +501,19 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
   .colk .rule{display:none}
   .colk .c{flex-basis:100%;order:9}
 }
+
+/* the Star Chart (2026-10-03): the look-ahead in the brief's place, the if-then line and the premortem on a goal */
+.lookahead .starve .lacts{display:inline-flex;flex-wrap:wrap;gap:5px;margin-left:6px}
+.lookahead .mini,.gpm .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:11px;color:var(--accent-t);cursor:pointer}
+.lookahead .lane-note{margin-top:5px;font-size:10.5px;color:var(--text-dim)}
+.lookahead .dim{color:var(--text-dim)}
+.gift{margin-top:4px;font-size:11.5px;color:var(--accent-t);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gift.empty{color:var(--text-dim);font-style:italic}
+.gift:hover{text-decoration:underline;text-underline-offset:3px}
+.gpm{margin-top:6px;padding:6px 8px;border:1px solid var(--amber-edge);border-radius:7px;background:var(--amber-wash);font-size:11.5px;line-height:1.45;color:var(--text-warm)}
+.gpm b{color:var(--amber-t)}
+.ask-in{display:flex;gap:6px;margin-top:5px;white-space:normal}
+.ask-in input{flex:1 1 auto;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:12px;padding:3px 7px}
+.board.placed .gtile .gift,.board.placed .gtile .gpm{display:none}
+.hdr h2.modeh{display:inline-flex;align-items:center;gap:8px}
+.hdr h2.modeh img{width:28px;height:28px;border-radius:6px;object-fit:cover}

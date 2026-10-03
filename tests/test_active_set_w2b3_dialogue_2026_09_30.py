@@ -32,7 +32,7 @@ def test_the_panel_is_the_brief_the_composer_then_the_dialogue_of_the_whole_log(
     ctx["turns"] = _turns(45)[-40:]; ctx["n_turns"] = 45; ctx["goal_names"] = {"trusts": "The trusts and the holding company"}
     html = cpg.render_campaign_html(ctx)
     panel = html[html.index('<aside class="panel"'):html.index("</aside>")]
-    assert panel.index('id="brief"') < panel.index('id="dialogue"') < panel.index('class="composer"'), "brief, the dialogue, then the composer at its foot (W2c-3: the cockpit's shape)"
+    assert panel.index('id="lookAhead"') < panel.index('id="dialogue"') < panel.index('class="composer"'), "the look-ahead (it took the brief's place, 2026-10-03), the dialogue, then the composer at its foot"
     # 2026-10-02 (his yes): the conversation is the Campaign cockpit's own view - its whole log, its blocks, its status
     assert '/steward/v1?embed=1&amp;view=talk&amp;inst=campaign&amp;pid=' in panel and '&amp;dir="' in panel and 'class="cview-frame"' in panel and 'id="delivBar"' in panel
     assert 'id="exState"' in panel and '<ul class="ex" id="exList" hidden></ul>' in panel, "the state at the head; the page's dialogue script keeps its hidden list"

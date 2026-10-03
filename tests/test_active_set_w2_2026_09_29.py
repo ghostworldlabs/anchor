@@ -64,7 +64,7 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
     turns = {"trusts": [{"you": True, "text": "add a part: call the trustee", "at": "10:50", "goal": "trusts"},
                         {"you": False, "text": "Added to The trusts and the holding company.", "at": "10:50", "goal": "trusts"}]}
     html = cpg.render_campaign_html(_ctx(goal_turns=turns), open_id="trusts")
-    assert 'class="board" aria-label="The Campaign" data-place="trusts"' in html, "?open= deep-links the place"
+    assert 'class="board" aria-label="The Chart Room" data-place="trusts"' in html, "?open= deep-links the place"
     place = html[html.index('id="place-trusts"'):html.index('id="place-paper"')]
     assert 'hidden' in place[:120], "rendered for every goal, shown by the page script"
     assert 'class="pname">The trusts and the holding company</span>' in place
@@ -89,12 +89,10 @@ def test_a_goal_opens_into_its_place_with_the_goal_where_it_stands_the_workflow_
 def test_the_composer_sits_under_the_brief_and_the_brief_leads_with_the_set():
     html = cpg.render_campaign_html(_ctx())
     panel = html[html.index('<aside class="panel"'):]
-    assert panel.index('id="brief"') < panel.index('class="exwrap') < panel.index('class="composer"'), "brief, the conversation, then the composer at its foot (W2c-3: the cockpit's shape)"
-    lead = panel[panel.index('<li class="lead">'):panel.index('<li class="fold">')]
-    assert lead.startswith('<li class="lead"><b>Tier 1</b> holds'), "the brief leads with the tiers' line; the set-first lead went with the Active band (Grok, the W2 trim)"
-    assert "<summary>the rest, by tier</summary>" in panel
+    assert panel.index('id="lookAhead"') < panel.index('class="exwrap') < panel.index('class="composer"'), "the look-ahead, the conversation, then the composer at its foot"
+    assert 'id="brief"' not in panel and '<li class="lead">' not in panel, "his word 2026-10-03: the brief is gone from the Cave and the Star Chart; the look-ahead took its place"
     assert "make &hellip; active" not in panel and "bench" not in panel, "the placeholders do not teach verbs the page no longer offers"
-    assert "in Seed goals" in panel and "above the board" not in panel
+    assert "above the board" not in panel   # the brief that named Seed goals is gone (2026-10-03)
 
 
 def test_lint_a_drop_is_one_place_act_and_the_place_s_acts_are_the_record_s():

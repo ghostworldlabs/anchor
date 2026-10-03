@@ -374,7 +374,8 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again", "seat_new"}
+        "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again", "seat_new",
+        "resume", "resume_done", "if_then", "premortem", "premortem_skip", "premortem_ask"}
 
 
 # ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
@@ -521,6 +522,11 @@ def new_goal(project, text, tier=None, area=None, done_when=None):
     r2 = _spine_set(project, sid, {"navigation": {"path": [sid], "groups": [{"id": sid, "label": text, "order": _foot(project, tier), "parent_id": None}], "role": "primary"}})
     if not r2.get("ok"):
         return _no("the heading was written but not grouped: %s" % r2.get("error"))
+    try:   # the Star Chart asks its premortem once on a new goal (2026-10-03)
+        from . import nudges as _n
+        _n.ask_premortem(project, sid, "a new goal")
+    except Exception:
+        pass
     return _ok("%s is now a goal in tier %d%s" % (text, tier, (" \u00b7 " + str(area)) if area else ""), undo={"act": "withdraw", "step": sid}, step=sid)
 
 
@@ -534,6 +540,12 @@ def pace(project, step, when):
     if not r.get("ok"):
         return _no("the engine refused: %s (a pace is YYYY-MM-DD, or none)" % r.get("error"))
     old = s.get("pace") or "none"
+    if old != "none" and when != "none" and when > old:   # the pace slipped later: the Star Chart asks its premortem (2026-10-03)
+        try:
+            from . import nudges as _n
+            _n.ask_premortem(project, step, "its pace moved from %s to %s" % (old, when))
+        except Exception:
+            pass
     return _ok("%s: the pace is %s" % (s.get("name"), ("now " + when) if when != "none" else "cleared"), undo={"act": "pace", "step": step, "when": old})
 
 
@@ -625,6 +637,84 @@ def nudge_again(project, key):
     return _ok("the nudge may speak again", undo={"act": "not_now", "key": key, "fact": str(was.get("fact") or ""), "text": str(was.get("text") or "")})
 
 
+def resume(project, note, switched_to=""):
+    """The interrupt lane (2026-10-03): opening a dated item keeps one line of what he was on; undo clears it."""
+    from . import nudges as _n
+    r = _n.write_resume(project, note, switched_to)
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "that did not go through"))
+    return _ok("kept: you were on %s" % r["note"], undo={"act": "resume_done"})
+
+
+def resume_done(project):
+    from . import nudges as _n
+    r = _n.clear_resume(project)
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "that did not go through"))
+    was = r.get("was") or {}
+    return _ok("the note is cleared", undo=({"act": "resume", "note": was.get("note"), "switched_to": was.get("switched_to") or ""} if was.get("note") else None))
+
+
+def if_then(project, step, text):
+    """The Star Chart (2026-10-03): a goal's one if-then next step, in his words, on the record (receipted step_set)."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such goal")
+    text = " ".join(str(text or "").split())[:300]
+    old = s.get("if_then") or ""
+    if text == old:
+        return _no("the if-then of %s already reads so" % s.get("name"))
+    r = _spine_set(project, step, {"if_then": text or None})
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    return _ok("%s: %s" % (s.get("name"), ("the next step is \u201c%s\u201d" % text) if text else "the if-then is cleared"),
+               undo={"act": "if_then", "step": step, "text": old})
+
+
+PREMORTEM_Q = "It is three months on and this goal fell short: what went wrong?"
+
+
+def premortem(project, step, text):
+    """His answer to the premortem goes into the goal's guide under '## Premortem', then the ask is closed."""
+    s = _step(project, step)
+    if s is None or _own_group(s) is None:
+        return _no("no such goal")
+    answer = " ".join(str(text or "").split())
+    if not answer:
+        return _no("say what went wrong, in a sentence")
+    import time as _time
+    from .steward_campaign import read_guide, write_guide
+    from . import nudges as _n
+    g = read_guide(project, step)
+    body = (g.get("text") or ("# %s\n" % (s.get("name") or step))).rstrip("\n")
+    block = "## Premortem, %s\n%s\n%s" % (_time.strftime("%Y-%m-%d"), PREMORTEM_Q, answer)
+    lines = body.split("\n")
+    h = next((k for k, ln in enumerate(lines) if ln.strip().lower() == "## history"), None)
+    if h is not None:
+        body = "\n".join(lines[:h]).rstrip("\n") + "\n\n" + block + "\n\n" + "\n".join(lines[h:])
+    else:
+        body = body + "\n\n" + block + "\n"
+    r = write_guide(project, step, body, who="John")
+    if not r.get("ok"):
+        return _no(str(r.get("error") or "the guide was not written"))
+    _n.close_premortem(project, step)
+    return _ok("the premortem of %s is in its guide" % s.get("name"), undo=None, updated=r.get("updated"))
+
+
+def premortem_skip(project, step):
+    from . import nudges as _n
+    was = _n.close_premortem(project, step)
+    return _ok("not now \u2014 the premortem is set aside",
+               undo=({"act": "premortem_ask", "step": step, "reason": (was or {}).get("reason") or ""} if was else None))
+
+
+def premortem_ask(project, step, reason=""):
+    from . import nudges as _n
+    if not _n.ask_premortem(project, step, reason or "asked again"):
+        return _no("that did not go through")
+    return _ok("the premortem is asked again", undo={"act": "premortem_skip", "step": step})
+
+
 def seat_new(project, ref, name, seat_to):
     """A candidate not yet on the Campaign - a cockpit (project:<pid>) or a cockpit within a project
     (effort:<pid>/<dir>) - put on the desk in one act (his word, 2026-10-02: "a tile ... right below the on deck that
@@ -711,6 +801,18 @@ def act(project, body):
             return nudge_again(project, body.get("key"))
         if a == "seat_new":
             return seat_new(project, body.get("ref"), body.get("name"), body.get("seat"))
+        if a == "resume":
+            return resume(project, body.get("note"), body.get("switched_to"))
+        if a == "resume_done":
+            return resume_done(project)
+        if a == "if_then":
+            return if_then(project, body.get("step"), body.get("text"))
+        if a == "premortem":
+            return premortem(project, body.get("step"), body.get("text"))
+        if a == "premortem_skip":
+            return premortem_skip(project, body.get("step"))
+        if a == "premortem_ask":
+            return premortem_ask(project, body.get("step"), body.get("reason"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")

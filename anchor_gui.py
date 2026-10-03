@@ -5971,6 +5971,8 @@ _STEWARD_UI_FALLBACK = {
     "high_seat_name": "High Seat",
     "seal_name": "Seal",
     "projects_hint": "each under Ecgberht&rsquo;s seal",
+    "campaign_name": "Beacon",
+    "campaign_icon": "campaign-ecgberht-beacon.jpg",
 }
 
 
@@ -7903,15 +7905,30 @@ def _high_seat_context():
             hs_stamp = str(_map_stamp(str(_campaign_dir())))
         except Exception:
             hs_turns, hs_stamp = [], ""
-    nudge = None
+    nudge = lane = resume = None
+    resume_from = ""
     if campaign:
-        def _derive_nudge():   # W3: ONE nudge at the page_open boundary, derived from the records; "not now" receipts honoured;
+        def _derive_nudge(kinds):   # W3: ONE nudge at the page_open boundary, derived from the records; "not now" receipts honoured;
             from steward_cockpit import nudges as _nudges     # a part the head's own sentence leads with is never nudged too
             cdir = str(_campaign_dir())
             return _nudges.derive(initiatives, facts, seed_rows, working, today=today, strip_ages=_strip_ages(everything),
                                   goal_last_at=_goal_last_at(cdir), dismissed=_nudges.read_dismissed(cdir), campaign_pid=str(campaign.get("pid") or ""),
-                                  head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""))
-        nudge = _nudge_or_log("high-seat", _derive_nudge)
+                                  head_lead=((head or {}).get("pid") or "", (head or {}).get("part") or ""), kinds=kinds)
+        # one lane per item (John, 2026-10-03): a dated item is the interrupt lane at the top of the board, the panel
+        # nudge is the next of the other kinds - a dated item never shows twice
+        from steward_cockpit import nudges as _nudges_k
+        nudge = _nudge_or_log("high-seat", lambda: _derive_nudge(_nudges_k.NOT_DATED))
+        lane = _nudge_or_log("high-seat-lane", lambda: _derive_nudge({"dated"}))
+        try:
+            resume = _nudges_k.read_resume(str(_campaign_dir()), today=today)
+        except Exception:
+            resume = None
+        try:   # what he is on now, kept as the ready-to-resume note if he opens the lane's item: the active initiatives
+            _on = [str(p.get("target") or p.get("text") or "a part").split(" · ")[0]
+                   for g, p in _hsp.seated([i for i in initiatives if i.get("status") not in ("done", "parked")], "active")]
+            resume_from = (", ".join(_on[:3]) + (" and %d more" % (len(_on) - 3) if len(_on) > 3 else ""))[:240]
+        except Exception:
+            resume_from = ""
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
@@ -7928,7 +7945,7 @@ def _high_seat_context():
         "projects_html": '<p class="ptile-note" id="ptileLoading">the list opens when you press Show all</p>',
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
-        "lights": lights, "nudge": nudge,
+        "lights": lights, "nudge": nudge, "lane": lane, "resume": resume, "resume_from": resume_from,
     }
 
 
@@ -8098,9 +8115,15 @@ def _campaign_context(entry):
     def _derive_nudges():   # W3: the one nudge for each goal's conversation (its dated parts, its deck waits, its starvation)
         from steward_cockpit import nudges as _nudges
         _dis = _nudges.read_dismissed(folder); _ages = _strip_ages(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False)); _last = _goal_last_at(folder)
-        return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"], campaign_pid=str(entry.get("id") or "")) for i in initiatives}
+        # a dated item is the Cave's interrupt lane, never a goal place's nudge here (one lane per item, 2026-10-03)
+        return {i["id"]: _nudges.derive(initiatives, {}, [], working, today=today, strip_ages=_ages, goal_last_at=_last, dismissed=_dis, scope_goal=i["id"], campaign_pid=str(entry.get("id") or ""), kinds=_nudges.NOT_DATED) for i in initiatives}
     nudges = _nudge_or_log("campaign", _derive_nudges) or {}
-    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges,
+    try:   # the Star Chart's premortem asks (2026-10-03): a new goal, or a pace that slipped later
+        from steward_cockpit import nudges as _nudges_pm
+        premortems = _nudges_pm.read_premortems(folder)
+    except Exception:
+        premortems = {}
+    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges, "premortems": premortems,
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log
             "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},

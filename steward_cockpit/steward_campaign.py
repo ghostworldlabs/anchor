@@ -399,6 +399,7 @@ def read_map(campaign_dir: str):
                 "name": s.get("name") or "(unnamed)",
                 "status": s.get("status") or "proposed",
                 "done_when": s.get("done_when") or "",
+                "if_then": s.get("if_then") or "",
                 "waiting_on": s.get("waiting_on"),
                 "due": s.get("due"),
                 "ref": s.get("ref"),

@@ -81,7 +81,7 @@
   });
 
   // the rail: each destination scrolls to its section and opens it
-  var DEST = { seat: '#brief', campaign: '#camp', active: '#shActive', week: '#shDated', desk: '#deskline',
+  var DEST = { seat: '#nudgeSlot', campaign: '#camp', active: '#shActive', week: '#shDated', desk: '#deskline',
                deck: '#shDeck', calendar: '#cal', email: '#cal', term: '#shTerm' };
   $$('#railNav button').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -210,6 +210,17 @@
     if (k === 'seat') act({ act: 'seat', step: b.getAttribute('data-step'), seat: b.getAttribute('data-seat') });
     else if (k === 'promote') act({ act: 'promote', seed: b.getAttribute('data-seed'), tier: parseInt(b.getAttribute('data-tier') || '2', 10), area: '', done_when: b.getAttribute('data-done-when') || '' });
     else if (k === 'not_now') act({ act: 'not_now', key: b.getAttribute('data-key'), fact: b.getAttribute('data-fact'), text: b.getAttribute('data-text') });
+    else if (k === 'resume_done') act({ act: 'resume_done' });
+  });
+  // the interrupt lane's open (2026-10-03): keep the ready-to-resume note of what he is on, then follow the link
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-lane-open]'); if (!a || !CAMPAIGN) return;
+    var lane = a.closest('#lane'), note = lane ? lane.getAttribute('data-note') : '';
+    if (!note) return;
+    try {
+      fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), keepalive: true,
+        body: JSON.stringify({ pid: CAMPAIGN, act: 'resume', note: note, switched_to: a.getAttribute('data-switched') || '' }) }).catch(function () {});
+    } catch (err) {}
   });
   // the Projects tile and its folders
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');
@@ -434,12 +445,16 @@
           var l0 = $('.tlight', card), l1 = $('.tlight', fresh); if (l0 && l1) { l0.className = l1.className; l0.title = l1.title; }
           var r1 = fresh.getAttribute('data-ready'); if (r1) card.setAttribute('data-ready', r1); else card.removeAttribute('data-ready');
         });
-        // the brief's list and the steward's nudge follow the record too (W3b) - unless he is in that section
-        var b0 = $('#brief'), b1 = doc.getElementById('brief');
-        if (b0 && b1 && !b0.contains(document.activeElement)) {
-          var bl0 = $('.blist', b0), bl1 = $('.blist', b1); if (bl0 && bl1 && bl0.innerHTML !== bl1.innerHTML) bl0.innerHTML = bl1.innerHTML;
-          var n0 = $('.nudge', b0), n1 = $('.nudge', b1);
-          if (n0 && !n1) n0.remove(); else if (n1 && !n0 && bl0) bl0.insertAdjacentHTML('afterend', n1.outerHTML); else if (n0 && n1 && n0.outerHTML !== n1.outerHTML) n0.outerHTML = n1.outerHTML;
+        // the steward's nudge follows the record too (W3b; the brief is gone, 2026-10-03) - unless he is in that section
+        var s0 = $('#nudgeSlot'), s1 = doc.getElementById('nudgeSlot');
+        if (s0 && s1 && !s0.contains(document.activeElement) && s0.innerHTML !== s1.innerHTML) s0.innerHTML = s1.innerHTML;
+        // the interrupt lane arrives at a natural break, never while he types (2026-10-03)
+        var ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable);
+        if (!typing) {
+          var l0 = $('#lane'), l1 = doc.getElementById('lane'), bd = $('.board');
+          if (l0 && !l1) l0.remove();
+          else if (l1 && !l0 && bd) bd.insertAdjacentHTML('afterbegin', l1.outerHTML);
+          else if (l0 && l1 && l0.outerHTML !== l1.outerHTML) l0.outerHTML = l1.outerHTML;
         }
       })
       .catch(function () {})

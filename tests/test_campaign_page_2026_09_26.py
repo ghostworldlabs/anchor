@@ -46,7 +46,7 @@ def _resolved():
 
 def _ctx():
     return {"pid": "df56", "name": "Campaign", "today": TODAY, "today_str": "Saturday, September 26, 2026", "brief_when": "19:00 · Saturday 26 September",
-            "build": "test", "steward": {"key": "jarvis", "label": "Jarvis", "high_seat": "jarvis-high-seat-hat.jpg", "seal": "jarvis-seal-salver.jpg", "high_seat_name": "Tip of the Hat", "seal_name": "Server"},
+            "build": "test", "steward": {"key": "jarvis", "label": "Jarvis", "high_seat": "jarvis-high-seat-hat.jpg", "seal": "jarvis-seal-salver.jpg", "high_seat_name": "Tip of the Hat", "seal_name": "Server", "campaign_name": "Chart Room", "campaign_icon": "campaign-jarvis-chart-room.jpg"},
             "prefs_html": "<span id='prefs-here'></span>", "initiatives": hsp.campaign_initiatives(_steps(), _resolved()),
             "seeds": [{"id": "s3", "text": "An AI mechanics class with the group", "at": "2026-09-26"}], "turns": [{"you": True, "text": "what does the Campaign say?", "at": "18:50"}, {"you": False, "text": "Tier 1 holds the teaching.", "at": "18:51"}],
             "projects": [{"id": MBA, "name": "MBA Teaching AI"}], "tick_allowed": False}
@@ -54,7 +54,7 @@ def _ctx():
 
 def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record():
     html = cpg.render_campaign_html(_ctx())
-    assert "<title>The Campaign</title>" in html and hsp.tab_icon_link(_ctx()["steward"].get("high_seat") or _ctx()["steward"].get("seal"), "test", anchor=False) in html   # the tab: the High Seat's picture (his rule, 2026-10-01)
+    assert "<title>The Chart Room</title>" in html and hsp.tab_icon_link(_ctx()["steward"].get("high_seat") or _ctx()["steward"].get("seal"), "test", anchor=False) in html   # the tab: the High Seat's picture (his rule, 2026-10-01)
     assert "campaign-page.css" in html and "campaign-page.js" in html and 'class="mh-stew"' in html
     # the goal board (W2 v2 of the active set, 2026-09-29): bands Active then the tiers, Tier 1 first; each goal a
     # compact tile — its light and one line — and its place (the area and tier, the Status, the parts) rendered apart
@@ -77,7 +77,8 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert '<section class="seedband" id="seedband"' in html and 'id="seedToggle"' in html and "<b>1</b> idea, not yet goals" in html   # the seeds a closed tile with its count
     assert 'data-pickgo="s3"' in html and "Create it in tier 3" in html and 'data-pickarea="family"' in html
     assert 'id="viewCal"' in html and "beyond the ruler" in html and 'class="tierstrip"' in html
-    assert "<b>Tier 1</b> holds MBA Teaching, Fall 2026." in html and "nearest hard date is <b>Oct 10</b>" in html
+    # the brief is gone (2026-10-03): the look-ahead takes its place, read from the record
+    assert 'id="brief"' not in html and 'id="lookAhead"' in html and "<b>One preparation:</b> the nearest date is" in html
     assert 'class="cview-frame"' in html and "Sample data" not in html   # the conversation: the cockpit's own view (2026-10-02)
     assert "<span id='prefs-here'></span>" in html                       # the model-prefs row stays (version D carries it)
 
