@@ -337,3 +337,30 @@ def test_a_page_written_into_a_blank_pane_stays_beside_its_caller_which_keeps_up
     n = page.evaluate("+document.querySelector('.side iframe').contentDocument.getElementById('n').textContent")
     assert n >= 5                                       # the caller is alive and still writing into it
     assert page.locator(".side .name").text_content() == "Tidy run"
+
+
+def test_ctrl_plus_minus_zero_and_ctrl_wheel_ask_the_host_to_zoom_from_the_strip_and_from_inside_a_frame(base):
+    """The desktop program zooms the whole window (shell/anchor_shell.py ZoomApi); the pages only catch the keys -
+    in the top page AND inside a framed page (keys never cross frames)."""
+    with sync_api.sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 1400, "height": 900})
+        pg.add_init_script("if (window === window.top) { window.__zoom = [];"
+                           " window.pywebview = { api: { zoom: function (s) { window.__zoom.push(s); } } }; }")
+        pg.goto(base + "/static/app.html")
+        pg.wait_for_function("() => { const f = document.querySelector('#stage iframe');"
+                             " return f && f.contentWindow.__anchorFrame; }")
+        pg.locator("#strip").click()
+        for k in ("Control+Equal", "Control+Minus", "Control+0"):
+            pg.keyboard.press(k)
+        _cave(pg).locator("#ck1").focus()                          # focus inside the Cave frame
+        pg.keyboard.press("Control+Equal")
+        pg.mouse.move(600, 500)
+        pg.keyboard.down("Control"); pg.mouse.wheel(0, -100); pg.keyboard.up("Control")
+        pg.wait_for_timeout(200)
+        assert pg.evaluate("window.__zoom") == [1, -1, 0, 1, 1]
+        b.close()
+
+
+def test_in_a_plain_browser_the_zoom_keys_are_left_to_the_browser(page):
+    assert page.evaluate("window.ANCHOR_APP.zoom(1)") is False

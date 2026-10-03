@@ -173,6 +173,25 @@
       if (hit.side) closeSide(hit.tile); else closeTile(hit.tile.id);
     }
   };
+  // Ctrl + / Ctrl - / Ctrl 0 and Ctrl + wheel: the desktop program zooms the whole window (shell/anchor_shell.py).
+  // Only when that program is the host; in a browser the browser's own zoom answers.
+  api.zoom = function (step) {
+    var host = window.pywebview && window.pywebview.api && window.pywebview.api.zoom;
+    if (!host) return false;
+    host(step);
+    return true;
+  };
+  api.zoomKeys = function (doc) {
+    doc.addEventListener("keydown", function (ev) {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+      var step = (ev.key === "+" || ev.key === "=") ? 1 : (ev.key === "-" || ev.key === "_") ? -1 : ev.key === "0" ? 0 : null;
+      if (step !== null && api.zoom(step)) ev.preventDefault();
+    }, true);
+    doc.addEventListener("wheel", function (ev) {
+      if (ev.ctrlKey && ev.deltaY && api.zoom(ev.deltaY < 0 ? 1 : -1)) ev.preventDefault();
+    }, { capture: true, passive: false });
+  };
+  api.zoomKeys(document);
   window.ANCHOR_APP = api;
 
   // a caller's w.close() on a window that is still blank (a failed create) closes its tile; the property

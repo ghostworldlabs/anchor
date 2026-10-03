@@ -50,6 +50,8 @@
     var opener = app.openerOf(window);
     if (opener) Object.defineProperty(window, "opener", { configurable: true, get: function () { return opener; } });
   } catch (e) { /* the page keeps its own opener */ }
+  try { app.zoomKeys(document); } catch (e) { /* zoom is a convenience */ }
+
   if (window.parent === window.top) {
     window.close = function () { try { app.closeWindow(window); } catch (e) { /* nothing to close */ } };
   }

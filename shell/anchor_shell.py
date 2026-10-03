@@ -7,7 +7,10 @@ not on the ship list. The service is unchanged; this only opens a window onto it
   - its own taskbar identity (AppUserModelID) and the new anchor as its icon, so it is not "Python";
   - a persistent WebView2 profile, so the token is pasted once and the 30-day cookie is kept;
   - downloads allowed; app links (ms-word:, mailto:) and other sites go to Windows / the default browser;
-  - one instance: a second launch brings the open window forward.
+  - one instance: a second launch brings the open window forward;
+  - Ctrl + / Ctrl - / Ctrl 0 (and Ctrl + wheel) zoom the whole window, remembered for the next start. pywebview
+    turns WebView2's own browser keys off (F5 would reload the app and lose the open tiles), so the pages catch
+    just these keys (static/app.js, app-frame.js) and call zoom() here.
 
 Usage:  pythonw shell/anchor_shell.py [--url URL]
 """
@@ -24,6 +27,8 @@ DEFAULT_URL = "http://127.0.0.1:8777/static/app.html"
 ROOT = Path(__file__).resolve().parent.parent
 ICON = ROOT / "vendor" / "brand" / "anchor-icon.ico"
 PROFILE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "anchor-shell" / "profile"
+ZOOM_FILE = PROFILE.parent / "zoom.txt"
+ZOOM_STEPS = (0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)   # Chrome's ladder
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -53,6 +58,49 @@ def set_window_icon(hwnd, path):
             user32.SendMessageW(hwnd, WM_SETICON, which, h)
 
 
+def _read_zoom():
+    try:
+        z = float(ZOOM_FILE.read_text(encoding="utf-8").strip())
+        return z if ZOOM_STEPS[0] <= z <= ZOOM_STEPS[-1] else 1.0
+    except (OSError, ValueError):
+        return 1.0
+
+
+class ZoomApi:
+    """window.pywebview.api.zoom(step): +1 / -1 along the ladder, 0 = back to 100 %."""
+
+    def __init__(self):
+        self._window = None
+        self._level = _read_zoom()
+
+    def bind(self, window):
+        self._window = window
+
+    def zoom(self, step):
+        step = int(step)
+        if step == 0:
+            z = 1.0
+        else:
+            i = min(range(len(ZOOM_STEPS)), key=lambda k: abs(ZOOM_STEPS[k] - self._level))
+            z = ZOOM_STEPS[max(0, min(len(ZOOM_STEPS) - 1, i + (1 if step > 0 else -1)))]
+        self.apply(z)
+        try:
+            ZOOM_FILE.write_text(str(z), encoding="utf-8")
+        except OSError:
+            pass
+        return z
+
+    def apply(self, z=None):
+        self._level = self._level if z is None else z
+        level = self._level
+        try:
+            from System import Action                   # pythonnet, pywebview's WinForms backend
+            form = self._window.native
+            form.Invoke(Action(lambda: setattr(form.browser.webview, "ZoomFactor", level)))
+        except Exception as exc:                         # zoom is a convenience; the window works without it
+            print("zoom:", exc, file=sys.stderr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default=DEFAULT_URL)
@@ -70,8 +118,11 @@ def main(argv=None):
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # ms-word:, mailto:, other sites -> Windows
     PROFILE.mkdir(parents=True, exist_ok=True)
 
-    win = webview.create_window(TITLE, args.url, width=1500, height=950, min_size=(420, 500),
+    zoom = ZoomApi()
+    win = webview.create_window(TITLE, args.url, js_api=zoom, width=1500, height=950, min_size=(420, 500),
                                 background_color="#0f141c")
+    zoom.bind(win)
+    win.events.loaded += lambda: zoom.apply()           # the remembered level, once the page is up
 
     def on_shown():
         try:
