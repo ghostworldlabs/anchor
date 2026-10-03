@@ -24,8 +24,10 @@
   var tiles = [];                  // {id, kind: "cave"|"page"|"doc", url, title, name, opener, frame}
   var panes = ["cave", null];      // the tile shown in the left and the right pane
   var two = false, active = 0, seq = 0;
+  var hist = [[], []];             // per pane: the tiles it showed before, newest last (a close goes back)
   var pendingDrop = [], dropTimer = null;
-  var narrow = window.matchMedia("(max-width: 760px)");
+  var narrowMq = window.matchMedia("(max-width: 760px)");
+  var narrow = { get matches() { return narrowMq.matches && !document.body.classList.contains("hosted"); } };
 
   // ---------- frames ----------
   function newFrame(src) {
@@ -124,25 +126,34 @@
       var caller = tileOfWindow(fromWin);
       var from = caller ? shownIn(caller.id) : -1;
       if (from < 0) from = two ? active : 0;
+      if (!r.blank && (r.path === "/" || r.path === "/high-seat") && !r.q.toString()) {
+        show("cave", from, true);                              // the Cave is one tile, never a second one
+        active = from; layout(); render();
+        return byId("cave").frame.contentWindow;
+      }
       var asDoc = r.blank ? !!(caller && caller.kind !== "cave") : !isPage(r.path);
       var name = target && !/^_(blank|self|parent|top)$/i.test(String(target)) ? String(target) : "";
 
       var t = null, i;
       for (i = 0; i < tiles.length && !t; i++) {               // a named window, or the same page, is reused
-        if ((name && tiles[i].name === name) || (!r.blank && tiles[i].url === r.url && tiles[i].kind !== "cave")) t = tiles[i];
+        if ((name && tiles[i].name === name) ||
+            (!r.blank && tiles[i].kind !== "cave" && (tiles[i].url === r.url || tiles[i].asked === r.url))) t = tiles[i];
       }
       if (t) {
         if (!t.frame) t.frame = newFrame("");
         if (!r.blank && addressOf(t.frame.contentWindow) !== r.url) t.frame.src = r.url;
       } else {
-        t = { id: "t" + (++seq), kind: asDoc ? "doc" : "page", url: r.blank ? "" : r.url,
+        t = { id: "t" + (++seq), kind: asDoc ? "doc" : "page", url: r.blank ? "" : r.url, asked: r.blank ? "" : r.url,
               title: r.blank ? "Opening…" : labelFor(r), name: name, opener: fromWin || null, frame: null,
               named: !r.blank && !!r.q.get("path") };           // a deliverable file keeps its file name
         tiles.push(t);
         t.frame = newFrame(r.blank ? "" : r.url);
         if (r.blank) guardBlank(t.frame, function () { closeTile(t.id); });
       }
-      if (asDoc) {                                             // the other pane; the caller keeps the focus
+      if (asDoc && caller && caller.kind === "doc" && shownIn(caller.id) >= 0) {
+        show(t.id, from, true);                                // a deliverable's own link: in its pane, the cockpit stays
+        active = from;
+      } else if (asDoc) {                                      // the other pane; the caller keeps the focus
         var to;
         if (!two) { two = true; from = 0; to = 1; }
         else to = from === 0 ? 1 : 0;
@@ -186,6 +197,7 @@
     var prev = panes[k];
     if (other >= 0 && other !== k) panes[other] = prev;       // already on the other side: the two swap
     panes[k] = id;
+    if (prev && prev !== id) { hist[k] = hist[k].filter(function (x) { return x !== prev; }); hist[k].push(prev); }
     if (prev && prev !== id && shownIn(prev) < 0) leave(prev);
     if (!t.frame) t.frame = newFrame(t.url || CAVE_URL);
     if (!fromCall) active = k;
@@ -251,9 +263,15 @@
     var d = pendingDrop.indexOf(id);
     if (d >= 0) pendingDrop.splice(d, 1);
     if (panes[1] === id) panes[1] = null;
+    hist[0] = hist[0].filter(function (x) { return x !== id; });
+    hist[1] = hist[1].filter(function (x) { return x !== id; });
     if (k >= 0) {
       if (two) { panes[0] = panes[k === 0 ? 1 : 0]; panes[1] = null; two = false; active = 0; }
-      else panes[0] = (tiles[i - 1] || tiles[0]).id;
+      else {                                                   // back to what this pane showed before (else the opener's)
+        var back = hist[0].length ? hist[0].pop() : null;
+        var op = t.opener ? tileOfWindow(t.opener) : null;
+        panes[0] = back || (op ? op.id : null) || (tiles[i - 1] || tiles[0]).id;
+      }
       var s = byId(panes[0]);
       if (s && !s.frame) s.frame = newFrame(s.url || CAVE_URL);
     }

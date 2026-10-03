@@ -27,7 +27,7 @@ PAGES = {
     "/": """<!doctype html><html><head><title>Cave of Wonders</title></head><body>
 <a id="ck1" href="/project/p1" target="_blank">cockpit</a>
 <button id="pre" onclick="var w=window.open('about:blank','_blank');w.opener=null;w.location.replace('/project/p2');">resume</button>
-<button id="np" onclick="window.open('/newproj','anchor-new-project','width=640,height=800')">new project</button>
+<button id="np" onclick="window.open('/dashboard?new=1&only=1','anchor-new-project','width=640,height=800')">new project</button>
 <div id="got"></div>
 <script>window.addEventListener('message',function(e){document.getElementById('got').textContent=e.data;});</script>
 </body></html>""",
@@ -45,7 +45,7 @@ PAGES = {
     "/project/p3": "<!doctype html><html><head><title>DARPA proposal</title></head><body>" + SHIM + "<p>darpa</p></body></html>",
     "/steward/v1": "<!doctype html><html><head><title>v1</title></head><body>" + SHIM
                    + '<a id="nested" href="/artifact/p1?path=fig.html" target="_blank">figure</a></body></html>',
-    "/newproj": """<!doctype html><html><head><title>New project</title></head><body>
+    "/dashboard": """<!doctype html><html><head><title>New project</title></head><body>
 <button id="make" onclick="window.opener.postMessage('created','*');window.close();">create</button></body></html>""",
 }
 DOCS = ("/api/steward/deliverable-file", "/steward/report", "/report", "/artifact")
@@ -173,7 +173,7 @@ def test_a_preopened_blank_window_gets_its_page_through_location_replace(page):
 def test_new_project_popup_answers_its_opener_and_closes_its_tile(page):
     _cave(page).locator("#np").click()
     page.wait_for_function("() => [...document.querySelectorAll('#strip .tile .name')].some(n => n.textContent === 'New project')")
-    _focus_frame(page, "/newproj").locator("#make").click()
+    _focus_frame(page, "/dashboard").locator("#make").click()
     page.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 1")
     _settle(page)
     assert _cave(page).locator("#got").text_content() == "created"
@@ -437,3 +437,50 @@ def test_phone_a_deliverable_stacks_under_the_dialogue(phone):
     assert top[4] == "0" and bottom[4] == "1"
     assert bottom[1] >= top[1] + top[3] - 1                     # below the dialogue, not beside it
     assert abs(bottom[2] - top[2]) < 2 and top[2] > 380         # both full width
+
+
+# ---------- the second review (2026-10-03) ----------
+def test_a_link_inside_a_deliverable_opens_in_that_pane_and_the_cockpit_stays(page):
+    p1 = _open_p1(page)
+    p1.locator("#deliv").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
+    page.evaluate("""() => { const f = [...document.querySelectorAll('#stage > iframe')].find(f => f.dataset.pane === '1');
+        ANCHOR_APP.open('/artifact/p1?path=other.html', '_blank', f.contentWindow); }""")
+    _settle(page)
+    assert _painted_frames(page) == ["/project/p1", "/artifact/p1"]
+
+
+def test_closing_the_shown_tile_goes_back_to_what_the_pane_showed_before(page):
+    _open_p1(page)                                         # a cockpit opened earlier sits after the Cave in the strip
+    page.locator("#strip .tile.cave").click()
+    _settle(page)
+    _cave(page).locator("#np").click()                     # the New-project popup replaces the Cave in the pane
+    page.wait_for_function("() => [...document.querySelectorAll('#strip .tile .name')].some(n => n.textContent === 'New project')")
+    _cave_tile = page.locator("#strip .tile.cave")
+    page.locator("#strip .tile", has_text="New project").locator(".x").click()
+    _settle(page)
+    assert _painted_frames(page) == ["/"]
+    assert _cave_tile.evaluate("e => e.classList.contains('focus')")
+
+
+def test_an_open_of_the_cave_shows_the_one_cave_tile(page):
+    p1 = _open_p1(page)
+    page.evaluate("""() => { const f = [...document.querySelectorAll('#stage > iframe')].find(f => f.dataset.pane === '0');
+        ANCHOR_APP.open('/', '_blank', f.contentWindow); }""")
+    _settle(page)
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]
+    assert _painted_frames(page) == ["/"]
+
+
+def test_the_desktop_program_snapped_narrow_keeps_its_desktop_bar(base):
+    with sync_api.sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 640, "height": 800})
+        pg.add_init_script("if (window === window.top) { window.pywebview = { api: { zoom: function () {},"
+                           " window_control: function () {} } }; }")
+        pg.goto(base + "/static/app.html")
+        pg.wait_for_function("() => document.body.classList.contains('hosted')")
+        assert pg.evaluate("getComputedStyle(document.getElementById('two')).display") != "none"
+        assert pg.evaluate("getComputedStyle(document.querySelector('#bar .grab')).display") != "none"
+        b.close()

@@ -80,9 +80,11 @@ def _own_title_bar(hwnd):
     caption and frame nobody draws: WM_NCCALCSIZE gives the page the whole window; WM_NCHITTEST answers the outer
     edges with the resize codes; the bar's app-region is the caption."""
     GWL_STYLE, WS_THICKFRAME, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU = -16, 0x40000, 0x10000, 0x20000, 0x80000
+    WS_CAPTION = 0xC00000
     WM_NCCALCSIZE, WM_NCHITTEST = 0x0083, 0x0084
     style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
-    user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU)
+    user32.SetWindowLongPtrW(hwnd, GWL_STYLE,
+                             style | WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU)
     codes = {(1, 0, 1, 0): 13, (0, 1, 1, 0): 14, (1, 0, 0, 1): 16, (0, 1, 0, 1): 17,
              (1, 0, 0, 0): 10, (0, 1, 0, 0): 11, (0, 0, 1, 0): 12, (0, 0, 0, 1): 15}
 
@@ -90,7 +92,8 @@ def _own_title_bar(hwnd):
         if msg == WM_NCCALCSIZE and wp:
             if user32.IsZoomed(h):                      # maximised: keep the page inside the screen
                 rc = ctypes.cast(lp, ctypes.POINTER(wintypes.RECT)).contents
-                pad = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)   # SM_CXFRAME + SM_CXPADDEDBORDER
+                dpi = user32.GetDpiForWindow(h)         # SM_CXFRAME + SM_CXPADDEDBORDER at this window's DPI
+                pad = user32.GetSystemMetricsForDpi(32, dpi) + user32.GetSystemMetricsForDpi(92, dpi)
                 rc.left += pad
                 rc.top += pad
                 rc.right -= pad
