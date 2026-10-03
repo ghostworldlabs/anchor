@@ -22315,6 +22315,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return "auth-shape unreadable: %s" % e
 
+    def _locked_page(self):
+        """His word, 2026-10-03 ("lock the dashboard and Doctor too", after the Cave): a PAGE that shows the record is
+        answered with the lock page (high_seat_page.render_locked_html: the anchor and a token box) when a token is
+        required and this request carries no valid credential (cookie, header, query token) and is not this machine's
+        own browser (which _local_login_cookie logs in). Returns (locked_html_or_None, cookie_to_set)."""
+        _ck = self._local_login_cookie()
+        if not _paths.expected_token() or _ck or self._term_token_ok():
+            return None, _ck
+        from high_seat_page import render_locked_html
+        return render_locked_html({"build": BUILD_ID}), None
+
     def _local_login_cookie(self):
         """A Set-Cookie value for a PAGE served to this machine's own browser (see _local_browser) that carries no
         valid cookie yet, so its later reads and sends ride the cookie (thirty days) with nothing pasted; None
@@ -22848,9 +22859,13 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 print("  [%s] PAGE / %s set-cookie=%s" % (datetime.now().strftime("%H:%M:%S"), self._auth_shape(), "yes" if _ck else "no"))
                 self._send_html(render_high_seat_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/" or _path_only == "/dashboard":
-                projects, tasks, inbox = gather_all()
-                html = generate_html(projects, tasks, inbox)
-                self._send_html(html)
+                _lock, _ck = self._locked_page()        # the old dashboard: the whole task list (locked 2026-10-03)
+                if _lock:
+                    self._send_html(_lock)
+                else:
+                    projects, tasks, inbox = gather_all()
+                    html = generate_html(projects, tasks, inbox)
+                    self._send_html(html, cookie=_ck)
             elif _path_only == "/high-seat":
                 # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
                 _ck = self._local_login_cookie()
@@ -22863,7 +22878,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # diagnostics tail). The V2 standalone-product mock (fake disk
                 # usage, fake chart, dead nav, f-string {placeholder} bug) is
                 # gone; the doctor gate regression-tests its absence.
-                self._send_html(render_doctor_page_html())
+                _lock, _ck = self._locked_page()        # the Doctor (locked 2026-10-03)
+                self._send_html(_lock or render_doctor_page_html(), cookie=None if _lock else _ck)
             elif _path_only == "/foundry" or _path_only == "/foundry/":
                 # Foundry GUI (folded-in React app): serve the built SPA
                 # (foundry-gui/dist/index.html). Its absolute /assets, /brand
