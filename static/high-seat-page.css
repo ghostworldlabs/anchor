@@ -911,3 +911,15 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cand .cs{flex:none;min-width:26px;text-align:center;font-size:11px;font-weight:700;color:#0b1220;background:var(--accent);border-radius:999px;padding:1px 6px;cursor:help}
 .cand .cd{font-size:10.5px;color:var(--text-dim2);white-space:nowrap}
 .cand[hidden]{display:none}
+
+/* The phone (the Anchor app's 760 px fold, 2026-10-03): the brief and the board come first and the rail (destinations,
+   capacity) follows them, instead of a whole screen of rail before the work; the masthead wraps instead of running
+   off the screen (it ran 39 px past an iPhone's edge). */
+@media(max-width:760px){
+  .rail{order:2;border-right:0;border-top:1px solid var(--border)}
+  .main{order:1}
+  .masthead{flex-wrap:wrap;gap:8px 12px}
+  .mh-div,.mh-sp{display:none}
+  .mh-title{font-size:21px}
+  .mh-stew{flex-basis:100%;margin-right:0}
+}
