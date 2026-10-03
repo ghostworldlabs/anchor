@@ -213,7 +213,18 @@
   });
   // the Projects tile and its folders
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');
-  function setPtile(open) { if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all'; }
+  var ptileLoaded = false;
+  function setPtile(open) {
+    if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all';
+    // the list is built on the server when he first opens it (2026-10-02: it cost every load its 25 tiles' reads)
+    if (open && !ptileLoaded && $('#ptileLoading')) {
+      ptileLoaded = true; $('#ptileLoading').textContent = 'reading the projects…';
+      fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { var f = $('#folders'); if (f && j && j.html) f.innerHTML = j.html; })
+        .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
+    }
+  }
   var ptileToggle = $('#ptileToggle'); if (ptileToggle) ptileToggle.addEventListener('click', function () { setPtile(!ptile.classList.contains('open')); });
   // the old dashboard's list inside the tile: its folder heads and rows call these two by name (every folder starts closed)
   window.rndToggleFolder = function (head) {

@@ -7923,7 +7923,9 @@ def _high_seat_context():
         "campaign_step_dates": step_dates, "relevance_override": relevance_override if isinstance(relevance_override, dict) else {},
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": working, "pickup": pickup,
-        "projects_html": _high_seat_projects_html(groups, facts),
+        # 2026-10-02 (the SLOW samples: the folded list's 25 tiles read sessions and usage on every load): built when he
+        # opens it - GET /api/high-seat/projects
+        "projects_html": '<p class="ptile-note" id="ptileLoading">the list opens when you press Show all</p>',
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
         "lights": lights, "nudge": nudge,
@@ -7977,6 +7979,21 @@ def _goal_last_at(campaign_dir):
     except Exception:
         return {}
     return out
+
+
+def handle_high_seat_projects(handler, path, body):
+    """GET /api/high-seat/projects (token) - the Projects tile's list, built when he opens it (2026-10-02)."""
+    import home_rows as _hr
+    try:
+        everything = list(_rnd.list_projects(include_archived=True, include_future=True, include_retired=True))
+    except Exception:
+        everything = []
+    entries = [e for e in everything if str(e.get("state") or "active") not in ("archived", "future", "retired")]
+    groups = {}
+    for e in sorted(entries, key=lambda x: (int(x.get("priority") or 2), str(x.get("name") or "").lower())):
+        groups.setdefault(str(e.get("group") or "").strip() or "Ungrouped", []).append(e)
+    facts = {f["id"]: f for f in _hr.all_project_facts(entries, datetime.now().date())}
+    handler._send_json({"ok": True, "html": _high_seat_projects_html(groups, facts)})
 
 
 def _high_seat_projects_html(groups, facts):
@@ -21479,6 +21496,7 @@ _MIGRATED_HANDLERS = {
     "handle_high_seat_repair": handle_high_seat_repair,
     "handle_cave_terminal": handle_cave_terminal,
     "handle_debug_threads": handle_debug_threads,
+    "handle_high_seat_projects": handle_high_seat_projects,
     "handle_cave_terminals": handle_cave_terminals,
     "handle_version": handle_version,
     "handle_status": handle_status,

@@ -815,7 +815,21 @@ KIND_LABEL = {"project": "cockpit", "effort": "cockpit within a project", "task"
 _RECORD_FILES = ("ECGBERHT.md", "roadmap.json", "strip.json", ".ecgberht/conversation-log.json", ".ecgberht/status-summary.json")
 
 
+_DATES_CACHE = {}
+
+
 def cockpit_dates(folder):
+    """Cached a minute (the SLOW samples, 2026-10-02: every candidate's record files stat'ed on every load)."""
+    import time as _time
+    hit = _DATES_CACHE.get(folder)
+    if hit and _time.time() - hit[0] < 60:
+        return hit[1]
+    out = _cockpit_dates(folder)
+    _DATES_CACHE[folder] = (_time.time(), out)
+    return out
+
+
+def _cockpit_dates(folder):
     """(created, last worked) of a cockpit's record, as dates: its Face's birth, and the newest of its record files.
     Read-only stats; (None, None) when the folder holds no record."""
     import os as _os

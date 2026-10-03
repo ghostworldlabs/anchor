@@ -209,8 +209,9 @@ def test_home_dashboard_panel_shows_imported(server, tmp_path):
     pid = proj["id"]
     eh.adopt_discovered(folder, pid, bscan.scan(str(folder)))
 
-    code, body = _get(base + "/")
+    # 2026-10-02: the Cave builds its Projects list when he opens it (the list cost every load its tiles' reads)
+    code, body = _get(base + "/api/high-seat/projects")
     assert code == 200
-    html = body.decode("utf-8")
+    html = json.loads(body.decode("utf-8"))["html"]
     # The home R&D panel tile shows the imported count.
     assert "1 imported" in html
