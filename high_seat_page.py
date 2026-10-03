@@ -1112,8 +1112,44 @@ def _panel(ctx):
          esc(ctx["brief_when"]), bullets, nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]))
 
 
+def render_locked_html(ctx) -> str:
+    """The Cave with no login (his word, 2026-10-03: "lock the Cave too"): over Tailscale the page showed the whole
+    portfolio before any token, only the steward's words were refused. Now a request with neither the login cookie nor
+    a valid token sees the anchor and a token box, nothing of the record. A token this device already saved logs in by
+    itself; a pasted one is checked by POST /api/auth/login (which mints the 30-day cookie) and the page reloads into
+    the Cave. PUTER's own browser and program are logged in by the server (the loopback cookie), so they never see it."""
+    b = ctx.get("build") or ""
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>Anchor - locked</title>%s'
+        '<style>:root{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f141c;color:#e6ebf2;'
+        'font:15px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;padding:16px;box-sizing:border-box}'
+        '.card{width:min(440px,100%%);background:#161d29;border:1px solid #2b3546;border-radius:12px;padding:26px 28px;text-align:center}'
+        '.card img{width:56px;height:56px;border-radius:12px}h1{font-size:19px;margin:12px 0 4px}p{color:#98a4b8;margin:0 0 16px}'
+        'input{width:100%%;box-sizing:border-box;font:15px system-ui;padding:9px 11px;border-radius:8px;border:1px solid #3a4658;background:#0f141c;color:#e6ebf2}'
+        'input:focus{outline:2px solid #e0a836;outline-offset:1px}button{margin-top:12px;font:600 14px system-ui;padding:8px 18px;border-radius:8px;'
+        'border:1px solid #e0a836;background:#e0a836;color:#1a1a1a;cursor:pointer}#msg{min-height:22px;margin-top:10px;color:#e0a836;font-size:14px}</style>'
+        '</head><body><div class="card"><img src="/vendor/brand/anchor-icon-180.png?v=%s" alt="">'
+        '<h1>Anchor is locked</h1><p>Paste your Anchor token to open the Cave of Wonders on this device. You only do this once.</p>'
+        '<input id="tok" type="password" autocomplete="off" placeholder="paste the token here" aria-label="Anchor token">'
+        '<button id="go" type="button">Open the Cave</button><div id="msg" role="status"></div></div>'
+        '<script>(function(){var tok=document.getElementById("tok"),go=document.getElementById("go"),msg=document.getElementById("msg");'
+        'function login(t,quiet){go.disabled=true;if(!quiet)msg.textContent="Checking…";'
+        'return fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json","X-Anchor-Token":t},body:JSON.stringify({token:t})})'
+        '.then(function(r){go.disabled=false;if(r.ok){try{localStorage.setItem("anchor_token",t)}catch(e){}location.reload();return}'
+        'try{localStorage.removeItem("anchor_token")}catch(e){}msg.textContent=r.status===401?(quiet?"The token saved here is out of date - paste the current one.":"That token was refused - it is not the current one."):"That did not go through; try again."})'
+        '.catch(function(){go.disabled=false;msg.textContent="Anchor did not answer; try again."})}'
+        'go.addEventListener("click",function(){var t=tok.value.trim();if(!t){msg.textContent="Paste the token first.";return}login(t)});'
+        'tok.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();go.click()}});'
+        'var saved="";try{saved=localStorage.getItem("anchor_token")||""}catch(e){}if(saved)login(saved,true);else tok.focus();})();</script>'
+        '</body></html>'
+    ) % (tab_icon_link(None, b), esc(b))
+
+
 def render_high_seat_html(ctx) -> str:
     """The whole page from the context dict (see the module docstring)."""
+    if ctx.get("auth_required") and not ctx.get("logged_in"):
+        return render_locked_html(ctx)                  # no login, no record (2026-10-03)
     facts = ctx["facts"]
     entries = ctx.get("entries") or []
     by_id = {e.get("id"): e for e in entries}

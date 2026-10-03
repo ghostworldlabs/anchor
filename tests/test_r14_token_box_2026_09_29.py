@@ -32,7 +32,7 @@ def test_the_high_seat_has_a_login_box_and_no_browser_prompt():
 def test_the_page_carries_the_box_and_tells_the_script_whether_a_token_is_required():
     sys.path.insert(0, os.path.join(ROOT, "tests"))
     import test_high_seat_page_2026_09_26 as t
-    ctx = t._ctx(); ctx["auth_required"] = True
+    ctx = t._ctx(); ctx["auth_required"] = True; ctx["logged_in"] = True   # (2026-10-03) a page with no login is the lock page
     html = hsp.render_high_seat_html(ctx)
     assert '<div class="loginbox" id="loginBox" hidden>' in html and 'id="loginTok" type="password"' in html and 'id="loginGo"' in html
     assert "auth_required: true" in html

@@ -19,8 +19,9 @@ def test_the_boot_says_whether_this_request_was_logged_in_and_the_box_follows_it
     ctx = base._ctx(); ctx["auth_required"] = True; ctx["logged_in"] = True
     html = hsp.render_high_seat_html(ctx)
     assert "auth_required: true, logged_in: true," in html and 'id="loginBox" hidden' in html
-    ctx["logged_in"] = False
-    assert "auth_required: true, logged_in: false," in hsp.render_high_seat_html(ctx)
+    ctx["logged_in"] = False                     # (2026-10-03, his word "lock the Cave too") no login -> the lock page, no record
+    locked = hsp.render_high_seat_html(ctx)
+    assert "Anchor is locked" in locked and "/api/auth/login" in locked and "ANCHOR_BOOT" not in locked
     js = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('No login found in this browser at load" in js, "the box only when the server did not know this browser"
     src = open(os.path.join(HERE, "anchor_gui.py"), encoding="utf-8").read()
@@ -44,3 +45,16 @@ def test_a_draft_never_pins_a_stale_page():
         # W3b (2026-10-01): one gate - a key or dictated text in the last ten seconds, or a box he is IN with words in it; a box that merely holds a forgotten draft never pins the page
         assert "function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()); }" in js and "document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);" in js, f
         assert "(a.value || '').trim()" not in js and "function typing()" not in js, "the old rule (any box holding text) is gone: it pinned a tab with a draft to the old build"
+
+
+def test_the_cave_with_no_login_shows_nothing_of_the_record():
+    """His word, 2026-10-03: "lock the Cave too" - over Tailscale the whole portfolio rendered before any token."""
+    ctx = base._ctx(); ctx["auth_required"] = True; ctx["logged_in"] = False
+    locked = hsp.render_high_seat_html(ctx)
+    full = dict(ctx, logged_in=True)
+    names = [e.get("title") or e.get("name") for e in (ctx.get("initiatives") or [])][:3]
+    for n in [x for x in names if x]:
+        assert n in hsp.render_high_seat_html(full) and n not in locked
+    assert 'type="password"' in locked and 'localStorage.getItem("anchor_token")' in locked
+    ctx["auth_required"] = False                 # no token configured: nothing to lock
+    assert "Anchor is locked" not in hsp.render_high_seat_html(ctx)
