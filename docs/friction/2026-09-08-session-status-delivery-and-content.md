@@ -170,6 +170,8 @@ The canonical intake retains John's words verbatim and appears in the generated 
 
 ## 3 October: Doctor progress disappears when changing desktop app tiles
 
+An additional observed child-cockpit ownership gap is documented in `2026-10-03-cave-inherited-status.md`: Cave status renders an empty local plan despite its Face delegating to the populated parent Campaign map. Actual acknowledgement does not prove the repair facts are in that pane. A canonical friction capture accompanies the evidence; the ownership/status repair remains open and is outside Doctor continuity repair v1.
+
 New source-backed intake: `2026-10-03-01-anchor-doctor-loses-visible-progress-whe` preserves Cave turn `009cedae-66b4-487e-9092-4ce06a51483c` verbatim. [The diagnosis and proposed real-use checks](2026-10-03-doctor-app-continuity.md) distinguish a discarded/rebuilt iframe from stopped server work. Actually served app/Doctor pages reproduced missing session identity and visible progress after return; a simulated launch prevented paid activity. The actual latest healthcheck completed exit 0 with all 32 correctness checks passing and one non-blocking timing warning. The earlier paid-session history remains unproved.
 
 Restore server-owned state and exact session/permission identity on return without implicitly launching a paid session. Verify during and after a controlled run inside the actual desktop window, with no duplicate launch and truthful completion. This is a proposed Doctor continuity repair, not a timer delivery outage, completed implementation or authorization to restart live sessions. Diagnosis v1 opens through the real Cave Deliverables bar and survives reopening; shared Anchor renderer and service code were unchanged.
