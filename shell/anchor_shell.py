@@ -16,7 +16,11 @@ not on the ship list. The service is unchanged; this only opens a window onto it
     which WebView2 (non-client region support) turns into a real caption - smooth moves, snap, double-click to
     maximize. Windows 11 rounds the corners; the window's outer edges resize it.
 
-Usage:  pythonw shell/anchor_shell.py [--url URL]
+  - (every-device D1, 2026-10-03) it finds Anchor itself (shell/connect.py): PUTER's own copy, else the address he
+    typed once; a plain page when that address does not answer; packaged for his other PCs as Anchor.zip
+    (shell/build_exe.ps1), whose first run puts its own Start-menu shortcut in place.
+
+Usage:  pythonw shell/anchor_shell.py [--url ADDRESS] [--setup]      (or the packaged Anchor.exe, same flags)
 """
 import argparse
 import ctypes
@@ -28,9 +32,17 @@ from pathlib import Path
 APP_ID = "GhostWorldLabs.Anchor"
 TITLE = "Anchor"
 DEFAULT_URL = "http://127.0.0.1:8777/static/app.html"
+FROZEN = bool(getattr(sys, "frozen", False))           # the packaged Anchor.exe
 ROOT = Path(__file__).resolve().parent.parent
-ICON = ROOT / "vendor" / "brand" / "anchor-icon.ico"
-PROFILE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "anchor-shell" / "profile"
+ICON = (Path(sys._MEIPASS) / "anchor-icon.ico") if FROZEN else ROOT / "vendor" / "brand" / "anchor-icon.ico"
+# ANCHOR_SHELL_TEST=<name>: a test copy beside his running Anchor - its own settings and profile, window title and
+# single-instance lock, and it never touches his Start-menu shortcut.
+TEST = os.environ.get("ANCHOR_SHELL_TEST", "")
+DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / ("anchor-shell" + ("-test-" + TEST if TEST else ""))
+if TEST:
+    TITLE = "Anchor (test %s)" % TEST
+PROFILE = DATA / "profile"
+WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 ZOOM_FILE = PROFILE.parent / "zoom.txt"
 ZOOM_STEPS = (0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)   # Chrome's ladder
 
@@ -116,6 +128,38 @@ def _own_title_bar(hwnd):
     user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0027)    # SWP_FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER
 
 
+def ensure_shortcut():
+    """The packaged program's first run (and any run after it moved): the Start-menu Anchor.lnk points at THIS exe,
+    with the app ID, so the pinned icon and the running window are one taskbar button."""
+    if not FROZEN or TEST:
+        return
+    link = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Anchor.lnk"
+    try:
+        import pythoncom
+        from win32com.propsys import propsys, pscon
+        from win32com.shell import shell
+        lnk = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink)
+        if link.is_file():
+            lnk.QueryInterface(pythoncom.IID_IPersistFile).Load(str(link))
+            if Path(lnk.GetPath(0)[0]).resolve() == Path(sys.executable).resolve():
+                return
+        lnk.SetPath(sys.executable)
+        lnk.SetArguments("")
+        lnk.SetWorkingDirectory(str(Path(sys.executable).parent))
+        lnk.SetIconLocation(sys.executable, 0)
+        lnk.SetDescription("Anchor")
+        store = lnk.QueryInterface(propsys.IID_IPropertyStore)
+        store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(APP_ID))
+        store.Commit()
+        lnk.QueryInterface(pythoncom.IID_IPersistFile).Save(str(link), 0)
+    except Exception as exc:                             # the program still runs; he can pin the exe itself
+        print("shortcut:", exc, file=sys.stderr)
+
+
+def _message(text, title="Anchor"):
+    user32.MessageBoxW(None, text, title, 0x40)
+
+
 def _read_zoom():
     try:
         z = float(ZOOM_FILE.read_text(encoding="utf-8").strip())
@@ -131,6 +175,8 @@ class HostApi:
     def __init__(self):
         self._window = None
         self._level = _read_zoom()
+        self._address = ""
+        self._html = ""                                  # the page the program drew itself (setup / offline), if any
 
     def bind(self, window):
         self._window = window
@@ -171,6 +217,40 @@ class HostApi:
         elif act == "close":
             w.destroy()
 
+    # ---------- finding Anchor (the setup and offline pages call these) ----------
+    def connect(self, text):
+        import connect
+        address, why = connect.normalize(text)
+        if not address:
+            return why
+        if not connect.reachable(address):
+            return "No answer from %s. Is Tailscale on here, and is Anchor running there?" % address
+        connect.save_address(DATA, address)
+        self._open(address)
+        return ""
+
+    def retry(self):
+        import connect
+        if connect.reachable(self._address):
+            self._open(self._address)
+            return ""
+        return "Still no answer. Check Tailscale and PUTER, then Retry."
+
+    def change_address(self):
+        import connect
+        self._show(connect.setup_page(self._address))
+        return ""
+
+    def _show(self, page):
+        self._html = page
+        self._window.load_html(page)
+
+    def _open(self, address):
+        import connect
+        self._address = address
+        self._html = ""
+        self._window.load_url(address + connect.APP_PATH)
+
     def _frame(self):
         """WebView2's app-region support on; True when it was off (the page then reloads once so it takes)."""
         from System import Action
@@ -189,31 +269,47 @@ class HostApi:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=DEFAULT_URL)
+    ap.add_argument("--url", default="", help="Anchor's address (else PUTER's own, else the saved one)")
+    ap.add_argument("--setup", action="store_true", help="ask for the address again")
     args = ap.parse_args(argv)
 
-    mutex = kernel32.CreateMutexW(None, False, "Local\\" + APP_ID)
+    mutex = kernel32.CreateMutexW(None, False, "Local\\" + APP_ID + ("." + TEST if TEST else ""))
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         bring_forward_existing()
         return 0
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    ensure_shortcut()
 
+    import connect
     import webview                                      # the venv's; imported after the single-instance check
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # ms-word:, mailto:, other sites -> Windows
     PROFILE.mkdir(parents=True, exist_ok=True)
 
     host = HostApi()
-    win = webview.create_window(TITLE, args.url, js_api=host, width=1500, height=950, min_size=(420, 500),
-                                background_color="#0f141c", frameless=True, easy_drag=False)
+    address = "" if args.setup else connect.choose(DATA, args.url.rstrip("/").replace(connect.APP_PATH, ""))
+    host._address = address or connect.load_address(DATA)
+    if not address:
+        host._html = connect.setup_page(host._address)
+        page = dict(html=host._html)
+    elif address != connect.LOCAL and not connect.reachable(address):
+        host._html = connect.offline_page(address)
+        page = dict(html=host._html)
+    else:
+        page = dict(url=address + connect.APP_PATH)
+    win = webview.create_window(TITLE, js_api=host, width=1500, height=950, min_size=(420, 500),
+                                background_color="#0f141c", frameless=True, easy_drag=False, **page)
     host.bind(win)
 
     def on_loaded():
         host.apply()                                    # the remembered zoom
         try:
-            if host._frame():
-                win.evaluate_js("location.reload()")
+            if host._frame():                           # a page drawn here is drawn again; Anchor's page reloads
+                if host._html:
+                    win.load_html(host._html)
+                else:
+                    win.evaluate_js("location.reload()")
         except Exception as exc:                         # without it the bar does not move the window
             print("app-region:", exc, file=sys.stderr)
 
@@ -242,7 +338,12 @@ def main(argv=None):
             print("frame:", exc, file=sys.stderr)
 
     win.events.shown += on_shown
-    webview.start(private_mode=False, storage_path=str(PROFILE))
+    try:
+        webview.start(gui="edgechromium", private_mode=False, storage_path=str(PROFILE))
+    except Exception as exc:                             # no WebView2 runtime (rare: Windows 11 / current Edge have it)
+        _message("Anchor needs Microsoft's WebView2 runtime, which this PC doesn't have yet.\n\n"
+                 "Install it from %s and start Anchor again.\n\n(%s)" % (WEBVIEW2_URL, exc))
+        return 1
     kernel32.CloseHandle(mutex)
     return 0
 
