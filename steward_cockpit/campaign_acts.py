@@ -374,7 +374,7 @@ def restore(project, step, navigation, seed=None):
 
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
-        "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again"}
+        "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again", "seat_new"}
 
 
 # ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
@@ -625,6 +625,37 @@ def nudge_again(project, key):
     return _ok("the nudge may speak again", undo={"act": "not_now", "key": key, "fact": str(was.get("fact") or ""), "text": str(was.get("text") or "")})
 
 
+def seat_new(project, ref, name, seat_to):
+    """A candidate not yet on the Campaign - a cockpit (project:<pid>) or a cockpit within a project
+    (effort:<pid>/<dir>) - put on the desk in one act (his word, 2026-10-02: "a tile ... right below the on deck that
+    shows all of the candidates ... anything with an AI Cockpit"): it becomes a component in no goal, then takes the
+    seat. One receipt; the undo withdraws it. A ref already on the map is seated as it is (never a second card)."""
+    from steward_cockpit.campaign_parts import parse_ref
+    ref = str(ref or "").strip()
+    p = parse_ref(ref)
+    if p is None or p.get("kind") not in ("project", "effort"):
+        return _no("a candidate is a cockpit (project:) or a cockpit within a project (effort:)")
+    seat_to = str(seat_to or "").strip().lower()
+    if seat_to not in SEATS:
+        return _no("a seat is active or deck")
+    there = next((x for x in _projection(project) if str(x.get("ref") or "") == ref and x.get("status") not in ("done",)), None)
+    if there is not None:
+        return seat(project, there["id"], seat_to)
+    name = " ".join(str(name or "").split())[:120] or ref
+    sid, n = _slug(name, "cand"), 2
+    while _step(project, sid) is not None:
+        sid, n = "%s-%d" % (_slug(name, "cand"), n), n + 1
+    r = _cli(project, "roadmap-propose", "--step", sid, "--name", name, "--ref", ref)
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    out = seat(project, sid, seat_to)
+    if not out.get("ok"):
+        withdraw(project, sid)
+        return out
+    out["undo"] = {"act": "withdraw", "step": sid}
+    return out
+
+
 def act(project, body):
     """Dispatch one act from the page; every answer is a receipt sentence, ok or refused."""
     body = body if isinstance(body, dict) else {}
@@ -678,6 +709,8 @@ def act(project, body):
             return not_now(project, body.get("key"), body.get("fact"), body.get("text"))
         if a == "nudge_again":
             return nudge_again(project, body.get("key"))
+        if a == "seat_new":
+            return seat_new(project, body.get("ref"), body.get("name"), body.get("seat"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")

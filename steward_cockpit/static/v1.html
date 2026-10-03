@@ -172,7 +172,7 @@ if (grip) grip.addEventListener("pointerdown", (e) => {
   grip.addEventListener("pointerup", up);
 });
 function fitConversation(){
-  if(app.classList.contains('tileview')){app.classList.add('railhide');if(innerWidth<640)app.classList.remove('statusopen');else app.classList.add('statusopen');
+  if(app.classList.contains('tileview')){if(!app.dataset.tilefit){app.dataset.tilefit='1';app.classList.add('railhide');}if(innerWidth<640)app.classList.remove('statusopen');else app.classList.add('statusopen');
     document.documentElement.style.setProperty('--statusw',Math.min(380,Math.max(260,Math.round(innerWidth*0.38)))+'px');return;}
   if(innerWidth<850){app.classList.add('railhide');app.classList.remove('statusopen');}
   else {

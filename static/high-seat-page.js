@@ -128,8 +128,17 @@
     var s = e.target.closest('[data-seat][data-step]');
     if (s) { e.preventDefault(); e.stopPropagation(); act({ act: 'seat', step: s.getAttribute('data-step'), seat: s.getAttribute('data-seat') }); return; }
     var h = e.target.closest('[data-home]');
-    if (h) { e.preventDefault(); e.stopPropagation(); act({ act: 'home', step: h.getAttribute('data-home') }); }
+    if (h) { e.preventDefault(); e.stopPropagation(); act({ act: 'home', step: h.getAttribute('data-home') }); return; }
+    // a candidate not yet on the Campaign: on the map and in the seat in one act (2026-10-02)
+    var c = e.target.closest('[data-cand-seat]');
+    if (c) { e.preventDefault(); e.stopPropagation(); act({ act: 'seat_new', ref: c.getAttribute('data-ref'), name: c.getAttribute('data-name'), seat: c.getAttribute('data-cand-seat') }); }
   });
+  // the Candidates tile stays open across the reload an act makes (2026-10-02)
+  (function () {
+    var t = document.getElementById('candsTile'); if (!t) return;
+    try { if (sessionStorage.getItem('hs_cands_open') === '1') t.open = true; } catch (e) {}
+    t.addEventListener('toggle', function () { try { sessionStorage.setItem('hs_cands_open', t.open ? '1' : '0'); } catch (e) {} });
+  })();
   // the drags: a card or a goal's initiative (data-step) onto a shelf — its place among the cards — or onto the goals
   // tile (home); a registry project (data-proj) onto a goal's row (a component of that goal)
   var drag = null;

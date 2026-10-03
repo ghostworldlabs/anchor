@@ -578,7 +578,5 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .navstep-land{box-shadow:0 0 0 2px var(--accent,#6c9cfc);border-radius:4px}
 
 /* the Cave tile's view of this cockpit (2026-10-02): the conversation and the status, no plan, no goal bar, no frame chrome */
-.app.tileview .leftcol,.app.tileview .railtab,.app.tileview .goalbar,.app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}
-.app3.tileview{grid-template-columns:minmax(0,1fr) auto}
-.app3.tileview .main{grid-column:1}
-.app3.tileview .rightcol{grid-column:2}
+/* his word 2026-10-02: the tile has the same information as the cockpit - the plan opens from its tab (folded at first), the goal bar stays */
+.app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}

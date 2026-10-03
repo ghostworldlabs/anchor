@@ -7832,6 +7832,9 @@ def _high_seat_context():
                       for f in facts_list if f.get("folder") and f.get("projection") is not None}
             resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=True)   # a project part's lead line feeds the initiative's Status
             initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
+            _loose = _hsp.loose_initiative(m.get("steps") or [], resolved)     # a cockpit seated from the Candidates, in no goal yet (2026-10-02)
+            if _loose:
+                initiatives.append(_loose)
             campaign = {"pid": entry.get("id"), "name": entry.get("name")}
             try:
                 from steward_cockpit.campaign_seeds import read_seeds as _read_seeds

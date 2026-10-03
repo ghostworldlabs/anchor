@@ -123,6 +123,39 @@ def part_name(part):
     return str(part.get("target") or part.get("text") or "")
 
 
+NOGOAL_ID = "__nogoal__"
+
+
+def loose_initiative(steps, resolved=None):
+    """The components with no goal yet - a cockpit or an effort put on the desk from the Candidates (2026-10-02) -
+    as ONE hidden initiative (nogoal=True) so the shelves, the head and the pick-up see them; it is never drawn or
+    counted as a goal. None when there are none."""
+    steps = [s for s in (steps or ()) if isinstance(s, dict)]
+    heads = {s.get("id") for s in steps for g in ((s.get("navigation") or {}).get("groups") or []) if isinstance(g, dict) and g.get("id") == s.get("id") and g.get("parent_id") is None}
+    loose = []
+    for s in steps:
+        nav = s.get("navigation") if isinstance(s.get("navigation"), dict) else {}
+        ref = str(s.get("ref") or "")
+        if s.get("id") in heads or (nav.get("path") or []) or ref.split(":", 1)[0] not in ("project", "effort"):
+            continue
+        x = dict(s); x["navigation"] = {"path": [NOGOAL_ID]}
+        loose.append(x)
+    if not loose:
+        return None
+    head = {"id": NOGOAL_ID, "name": "no goal yet", "status": "active", "tier": 9, "order": 999,
+            "navigation": {"groups": [{"id": NOGOAL_ID, "parent_id": None}]}}
+    out = campaign_initiatives([head] + loose, resolved)
+    if not out:
+        return None
+    out[0]["nogoal"] = True
+    return out[0]
+
+
+def goals_only(initiatives):
+    """The goals - never the hidden no-goal group."""
+    return [i for i in initiatives or () if not i.get("nogoal")]
+
+
 def seated(initiatives, seat):
     """The components sitting in a seat — (goal, part) pairs in his order (seat_order; then the goal's tier and
     order; then the name). The one sort for Active and On deck (the head, the pick-up, the shelves)."""
@@ -344,7 +377,7 @@ def capacity_row_html(c):
 def _rail(ctx):
     st = ctx["steward"]
     counts = ctx.get("counts") or {}
-    n_camp = len(ctx.get("initiatives") or [])
+    n_camp = len(goals_only(ctx.get("initiatives")))
     live_inits = [i for i in ctx.get("initiatives") or [] if i.get("status") not in ("done", "parked")]
     n_active, n_deck = len(seated(live_inits, "active")), len(seated(live_inits, "deck"))     # W2c: the shelves
     n_bench = int(ctx.get("terms_open") or 0)      # the Cave's plain terminals open now (the Workbench retired 2026-10-02)
@@ -439,7 +472,7 @@ def _goal_rows(ctx, live, camp_pid):
     a seated one is marked and comes back; an element (a step, a deliverable, a date) rides inside its goal."""
     working = ctx.get("working") or set()
     rows = []
-    for i in live:
+    for i in goals_only(live):
         comps = [p for p in i["parts"] if not p.get("closed")]
         out = [p for p in comps if p.get("seat")]
         home = [p for p in comps if not p.get("seat")]      # what is still inside the goal: every open component with no seat (Grok's read of W2c)
@@ -487,9 +520,9 @@ def _campaign_tile(ctx):
                 '<span class="d">&middot; not stood up yet &mdash; the record arrives with the import, after your seed check</span>'
                 '<span class="sp"></span></div></section>')
     live = [i for i in inits if i["status"] not in ("done", "parked")]
-    t1 = [i for i in live if i["tier"] == 1]
+    t1 = [i for i in goals_only(live) if i["tier"] == 1]
     t2 = [i for i in live if i["tier"] == 2]
-    seedy = [i for i in live if i["tier"] not in (1, 2)]
+    seedy = [i for i in goals_only(live) if i["tier"] not in (1, 2)]
     act = seated(live, "active")
     deck = seated(live, "deck")
     line = ('&middot; <b>Tier 1:</b> %s &middot; <b>Tier 2:</b> %d &middot; <b>seed goals:</b> %d &middot; <b>out:</b> %d active, %d on deck' % (
@@ -778,6 +811,81 @@ def _terminal(ctx):
     ) % (opts, ('<div class="bench-sys">%s</div>' % sys_html) if sys_html else "")
 
 
+KIND_LABEL = {"project": "cockpit", "effort": "cockpit within a project", "task": "desk item"}
+
+
+def candidates(ctx):
+    """Everything he could put on deck or make active (his word, 2026-10-02: "a tile that can be expanded, right below
+    the on deck that shows all of the candidates -- those would be anything with an AI Cockpit as well as any open
+    tasks/efforts, e.g. of an admin nature in the desk"): (1) the open components inside a goal with no seat yet - a
+    cockpit, an effort, a desk item; (2) every AI cockpit (a project, or one of its efforts, with a steward record)
+    that is not on the Campaign at all. Read from the page's own context; nothing new is read from disk."""
+    inits = [i for i in ctx.get("initiatives") or () if i.get("status") not in ("done", "parked")]
+    in_goal = []
+    on_map = set()
+    for i in ctx.get("initiatives") or ():
+        for p in i.get("parts") or ():
+            if p.get("kind") in ("project", "effort") and p.get("pid"):
+                on_map.add((p["pid"], p.get("dir") or ""))
+                if p.get("kind") == "project":
+                    on_map.add((p["pid"], "*"))
+    for i in goals_only(inits):
+        for p in i.get("parts") or ():
+            if p.get("kind") in KIND_LABEL and not p.get("seat") and not p.get("closed") and not p.get("broken"):
+                in_goal.append((i, p))
+    facts = ctx.get("facts") or {}
+    camp = (ctx.get("campaign") or {}).get("pid")
+    loose = []
+    for e in ctx.get("entries") or ():
+        pid = e.get("id")
+        f = facts.get(pid) or {}
+        if not pid or pid == camp or not f.get("has_record") or (pid, "*") in on_map:
+            continue
+        effs = [x for x in (f.get("efforts") or []) if isinstance(x, dict)]
+        if not effs:
+            if (pid, "") not in on_map:
+                loose.append({"ref": "project:%s" % pid, "name": f.get("name") or e.get("name") or pid[:8], "where": "a project", "needs": bool(f.get("needs_you"))})
+            continue
+        for x in effs:
+            rel = str(x.get("rel") or "")
+            if (pid, rel) in on_map:
+                continue
+            nm = f.get("name") or e.get("name") or pid[:8]
+            loose.append({"ref": ("effort:%s/%s" % (pid, _quote(rel))) if rel else ("project:%s" % pid),
+                          "name": ("%s · %s" % (nm, x.get("name") or rel)) if rel else nm,
+                          "where": ("an effort of %s" % nm) if rel else "a project", "needs": bool(x.get("needs_you"))})
+    return in_goal, loose
+
+
+def _candidates_tile(ctx):
+    in_goal, loose = candidates(ctx)
+    n = len(in_goal) + len(loose)
+    if not n:
+        return ""
+
+    def acts_step(sid):
+        return ('<span class="acts"><button class="mini" data-seat="deck" data-step="%s">&rarr; on deck</button>'
+                '<button class="mini" data-seat="active" data-step="%s">&rarr; active</button></span>') % (esc(sid), esc(sid))
+
+    def acts_new(c):
+        return ('<span class="acts"><button class="mini" data-cand-seat="deck" data-ref="%s" data-name="%s">&rarr; on deck</button>'
+                '<button class="mini" data-cand-seat="active" data-ref="%s" data-name="%s">&rarr; active</button></span>') % (
+            esc(c["ref"]), esc(c["name"]), esc(c["ref"]), esc(c["name"]))
+    rows_a = "".join('<li class="cand"><span class="cn">%s%s</span><span class="cw">%s &middot; in %s</span>%s</li>' % (
+        '<span class="wm">&#9873;</span> ' if p.get("needs_you") else "", esc(part_name(p)), esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or ""), acts_step(p.get("id") or ""))
+        for i, p in in_goal)
+    rows_b = "".join('<li class="cand"><span class="cn">%s%s</span><span class="cw">%s &middot; in no goal</span>%s</li>' % (
+        '<span class="wm">&#9873;</span> ' if c["needs"] else "", esc(c["name"]), esc(c["where"]), acts_new(c)) for c in loose)
+    return (
+        '<section class="shelf cands" id="shCands"><details class="cands-tile" id="candsTile"><summary class="shelf-h">'
+        '<h3>Candidates</h3><span class="c">%d</span><span class="rule"></span>'
+        '<span class="sub">every cockpit and desk item you could put on deck or make active</span></summary>'
+        '%s%s</details></section>'
+    ) % (n,
+         ('<div class="cand-group"><div class="k">In a goal, not on the desk &middot; %d</div><ul>%s</ul></div>' % (len(in_goal), rows_a)) if in_goal else "",
+         ('<div class="cand-group"><div class="k">AI cockpits in no goal &middot; %d</div><ul>%s</ul></div>' % (len(loose), rows_b)) if loose else "")
+
+
 def _seed_panel(ctx):
     """What the Seeds button opens (John, 2026-09-27: "nothing happens. Something should happen"): the Campaign's
     seeds, each with Make it an initiative — which puts the steward's own verb into the composer ("make <seed> an
@@ -914,7 +1022,7 @@ def render_high_seat_html(ctx) -> str:
     ctx["orphans"] = [e for e in entries if e.get("id") and e["id"] not in in_goal and e["id"] != camp_pid and e["id"] not in parked_ids]
     ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
     ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("deck", "active") for g, p in seated(live_inits, seat) if p.get("pid")}      # Active wins when a project has cards on both (Grok's read of W2c)
-    board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _projects_tile(ctx)
+    board = ('<div class="board">' + _campaign_tile(ctx) + _seat_shelves(ctx) + _candidates_tile(ctx) + _projects_tile(ctx)
              + _desk_line(ctx) + _ruler(ctx) + _terminal(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'

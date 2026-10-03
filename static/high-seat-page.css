@@ -888,3 +888,16 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cdlg .cframe-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0a0c11;height:66vh;min-height:360px;resize:vertical}
 .cdlg .cframe{display:block;width:100%;height:100%;border:0;background:#0a0c11}
 .cdlg.thin .cframe-wrap{display:none}
+
+/* the Candidates tile under On deck (2026-10-02, his word): everything he could put on deck or make active */
+.cands-tile{border:1px solid var(--border);border-radius:11px;background:var(--surface);padding:6px 12px 8px}
+.cands-tile>summary{cursor:pointer;list-style:none}
+.cands-tile>summary::-webkit-details-marker{display:none}
+.cands-tile .sub{font-size:11px;color:var(--text-dim2);margin-left:8px}
+.cand-group{margin-top:8px}
+.cand-group .k{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);font-weight:700;margin-bottom:3px}
+.cand-group ul{list-style:none;margin:0;padding:0}
+.cand{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-top:1px solid #1e2330;font-size:13px}
+.cand .cn{flex:1;min-width:0;color:var(--text)}
+.cand .cw{font-size:11px;color:var(--text-dim2);white-space:nowrap}
+.cand .acts{display:flex;gap:5px;flex:none}
