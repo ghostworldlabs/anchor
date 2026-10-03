@@ -269,6 +269,15 @@
     load();
     setInterval(function () { if (!document.hidden) load(); }, 60000);   // a new deliverable shows within a minute
   }
-  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox };
+  // Match the AI cockpit: show the growing draft, leaving room for the conversation.
+  // A hidden goal composer is measured again when its place opens.
+  function fitComposer(box) {
+    if (!box || !box.getClientRects().length) return;
+    box.style.height = 'auto';
+    var minimum = parseFloat(getComputedStyle(box).minHeight) || 0;
+    box.style.height = Math.max(minimum, Math.min(box.scrollHeight + 2, window.innerHeight * 0.4)) + 'px';
+    box.style.overflowY = box.scrollHeight > box.clientHeight ? 'auto' : 'hidden';
+  }
+  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox, fitComposer: fitComposer };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', deliverablesBar); else deliverablesBar();   // authHeaders: the one way a GET on these pages carries the token; loginBox: the one login script
 })();

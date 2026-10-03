@@ -88,6 +88,7 @@
     if (cal) cal.style.display = isCal ? '' : 'none';
     if (viewBtn) viewBtn.innerHTML = isCal ? '&#9707; Grouped view' : '&#128197; Calendar view';
     if (title) title.textContent = isCal ? 'Tiers against the five-week ruler' : 'Initiatives by tier';
+    applyAreaFilter();
   }
   if (viewBtn) viewBtn.addEventListener('click', function () { setView(cal && cal.style.display === 'none' ? 'cal' : 'grouped'); });
 
@@ -106,6 +107,7 @@
     try { var u = new URL(location.href); u.searchParams.set('open', id); history.replaceState(null, '', u.toString()); } catch (e) {}
     if (boardEl) boardEl.scrollTop = 0;   // the list of goals stays in view on top, shortened to names; the place opens right under it
     var th = $('.gthread', p); if (th) th.scrollTop = th.scrollHeight;
+    fitComposer($('.gsay', p));
   }
   $$('button[data-open]').forEach(function (b) { b.addEventListener('click', function () { var id = b.getAttribute('data-open'); openPlace(openedId === id ? null : id); }); });
   $$('[data-close]').forEach(function (b) { b.addEventListener('click', function () { openPlace(null); try { var u = new URL(location.href); u.searchParams.delete('open'); history.replaceState(null, '', u.toString()); } catch (e) {} }); });
@@ -115,13 +117,70 @@
   $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openPlace(g.getAttribute('data-goto')); }); });
   if (boardEl && boardEl.getAttribute('data-place')) openPlace(boardEl.getAttribute('data-place'));
 
-  // the area filter: dims, never removes, so the numbers stay true
+  // Grouped view keeps its context; Calendar shows only the selected area.
+  // Its ruler and tier counts describe the visible lanes, not the hidden portfolio.
+  var selectedArea = '', calendarHeads = $$('.rl-head > div', cal), calendarTiers = [];
+  var boardCount = $('#boardCount'), originalBoardCount = boardCount ? boardCount.innerHTML : '';
+  calendarHeads.forEach(function (h) { var n = $('.cn', h); if (n) h.originalCount = n.textContent; });
+  $$('.tierstrip', cal).forEach(function (t) {
+    var lanes = [], next = t.nextElementSibling;
+    while (next && !next.classList.contains('tierstrip')) { if (next.classList.contains('lane')) lanes.push(next); next = next.nextElementSibling; }
+    calendarTiers.push({ node: t, lanes: lanes, original: $('.tm', t).innerHTML });
+  });
+  var calendarEmpty = document.createElement('p');
+  calendarEmpty.className = 'calendar-empty'; calendarEmpty.hidden = true;
+  if (cal && $('#boardScroll', cal)) $('#boardScroll', cal).appendChild(calendarEmpty);
+  function areaOf(t) {
+    var pl = t.classList.contains('gtile') ? $('#place-' + t.getAttribute('data-lane')) : t, label = pl && $('.larea', pl);
+    return label ? label.textContent.trim().toLowerCase() : '';
+  }
+  function applyAreaFilter() {
+    if (!calendarTiers) return;
+    $$('.gtile').forEach(function (t) { t.classList.toggle('dimmed', !!selectedArea && areaOf(t) !== selectedArea); });
+    var visible = [];
+    $$('.lane', cal).forEach(function (l) {
+      var show = !selectedArea || areaOf(l) === selectedArea;
+      l.classList.remove('dimmed'); l.style.display = show ? '' : 'none';
+      if (show) visible.push(l);
+    });
+    if (boardCount) {
+      if (!selectedArea || !cal || cal.style.display === 'none') boardCount.innerHTML = originalBoardCount;
+      else {
+        var parts = 0, needsParts = 0, datedParts = 0;
+        visible.forEach(function (l) {
+          parts += $$('.pc', l).length; needsParts += $$('.pc.need', l).length;
+          var m = $('.lmeta', l).textContent.match(/(\d+)\s+dated/); datedParts += m ? Number(m[1]) : 0;
+        });
+        boardCount.textContent = selectedArea.charAt(0).toUpperCase() + selectedArea.slice(1) + ' · ' + visible.length + (visible.length === 1 ? ' goal' : ' goals') + ' · ' + parts + (parts === 1 ? ' part' : ' parts') + ' · ' + datedParts + ' dated' + (needsParts ? ' · ' + needsParts + (needsParts === 1 ? ' part needs you' : ' parts need you') : '');
+      }
+    }
+    calendarTiers.forEach(function (t) {
+      var mine = t.lanes.filter(function (l) { return visible.indexOf(l) !== -1; }), meta = $('.tm', t.node);
+      t.node.style.display = selectedArea && !mine.length ? 'none' : '';
+      if (!selectedArea) { meta.innerHTML = t.original; return; }
+      var needs = mine.filter(function (l) { return !!$('.fl', l); }).length;
+      var dated = mine.reduce(function (sum, l) { var m = $('.lmeta', l).textContent.match(/(\d+)\s+dated/); return sum + (m ? Number(m[1]) : 0); }, 0);
+      meta.textContent = mine.length + (mine.length === 1 ? ' goal · ' : ' goals · ');
+      var flag = document.createElement('span'); flag.className = needs ? 'am' : '';
+      flag.textContent = needs ? needs + (needs === 1 ? ' goal needs you' : ' goals need you') : 'no goal needs you';
+      meta.appendChild(flag); meta.appendChild(document.createTextNode(' · ' + dated + (dated === 1 ? ' dated part' : ' dated parts')));
+    });
+    calendarHeads.forEach(function (h, index) {
+      var label = $('.cn', h); if (!label) return;
+      if (!selectedArea) { label.textContent = h.originalCount; return; }
+      var count = visible.reduce(function (sum, l) { var c = $$('.track > .cell', l)[index]; return sum + (c ? $$('.pc', c).length : 0); }, 0);
+      label.textContent = index === 0 ? count + ' undated or parked' : h.classList.contains('over') ? count + ' past dates' : count ? count + ' dated' : 'nothing dated';
+    });
+    calendarEmpty.hidden = !selectedArea || !!visible.length;
+    calendarEmpty.textContent = 'No ' + selectedArea + ' goals on the Calendar.';
+  }
   $$('.ac[data-area]').forEach(function (b) {
+    b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', function () {
       var a = b.getAttribute('data-area'), was = b.classList.contains('on');
-      $$('.ac').forEach(function (x) { x.classList.remove('on'); });
-      $$('.gtile, .lane').forEach(function (t) { t.classList.remove('dimmed'); });
-      if (!was) { b.classList.add('on'); $$('.gtile, .lane').forEach(function (t) { var pl = t.classList.contains('gtile') ? $('#place-' + t.getAttribute('data-lane')) : t; if (((pl && pl.querySelector('.larea')) || {}).textContent.trim().toLowerCase() !== a) t.classList.add('dimmed'); }); }
+      selectedArea = was ? '' : a;
+      $$('.ac').forEach(function (x) { var on = x === b && !was; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      applyAreaFilter();
     });
   });
 
@@ -286,10 +345,14 @@
     you: YOU, onStamp: function (st) { renew('The steward changed the record \u2014 the page is renewed.', st); }   // W3b: never while he types
   }) : null;
   function sendToSteward(text, goal, list, btn, box, DK) { if (dlg) dlg.send(text, goal, list, btn, box, DK); else receipt('The dialogue script did not load \u2014 reload the page.', true); }
+  function fitComposer(box) { if (window.StewardDialogue) StewardDialogue.fitComposer(box); }
+  function wireComposer(box) { if (!box) return; box.addEventListener('input', function () { fitComposer(box); }); fitComposer(box); }
+  window.addEventListener('resize', function () { $$('.gsay, #say').forEach(fitComposer); });
   $$('.place .gsay').forEach(function (box) {
     var goal = box.getAttribute('data-goal'), btn = $('.gsend[data-goal="' + goal + '"]'), list = $('.gthread[data-thread="' + goal + '"]');
     var DK = 'anchor:draft:goal:' + PID + ':' + goal, dt = null;
     try { var kept = localStorage.getItem(DK); if (kept && kept.trim() && !box.value.trim()) box.value = kept; } catch (e) {}
+    wireComposer(box);
     box.addEventListener('input', function () { clearTimeout(dt); dt = setTimeout(function () { try { if (box.value.trim()) localStorage.setItem(DK, box.value); else localStorage.removeItem(DK); } catch (e) {} }, 250); });
     function go(text) { text = (text || box.value || '').trim(); if (!text || btn.disabled) return; sendToSteward(text, goal, list, btn, box, DK); }
     btn.addEventListener('click', function () { go(); });
@@ -318,6 +381,7 @@
     say.addEventListener('input', function () { clearTimeout(_draftT); _draftT = setTimeout(saveDraft, 250); });
     window.addEventListener('beforeunload', saveDraft);
     try { var keptDraft = localStorage.getItem(DRAFT_KEY); if (keptDraft && keptDraft.trim() && !say.value.trim()) { say.value = keptDraft; receipt('Your unsent text is back in the box.'); } } catch (e) {}
+    wireComposer(say);
   }
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;

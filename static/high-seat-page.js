@@ -723,6 +723,7 @@
     g.addEventListener('click', function () {
       if (!say) return;
       say.value = 'make ' + g.getAttribute('data-seed-text') + ' an initiative in tier 3';
+      say.dispatchEvent(new Event('input'));
       say.focus(); say.scrollIntoView({ behavior: 'smooth', block: 'center' });
       receipt('The verb is in the composer — add the tier or the life area if you want, then Send.');
     });
@@ -741,7 +742,7 @@
   }) : null;
   // the box he types into is always in view (his word, 2026-10-02): the column ends at the window's foot wherever the
   // page is scrolled (sticky alone left the composer ~150 px below the fold until he scrolled), and the box grows with
-  // his dictation up to a third of the window - the conversation above gives way, shifted up, never the box
+  // his dictation like the AI cockpit - the conversation above gives way, shifted up, never the box
   (function () {
     var panel = document.querySelector('.panel');
     function fit() {
@@ -752,9 +753,7 @@
     }
     function grow() {
       if (!say) return;
-      say.style.height = 'auto';
-      say.style.height = Math.min(Math.max(42, say.scrollHeight), Math.round(window.innerHeight / 3)) + 'px';
-      say.style.overflowY = say.scrollHeight > say.clientHeight ? 'auto' : 'hidden';
+      if (window.StewardDialogue) StewardDialogue.fitComposer(say);
       var ex = document.getElementById('exScroll'); if (ex) ex.scrollTop = ex.scrollHeight;
     }
     fit(); grow();
