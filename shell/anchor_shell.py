@@ -53,7 +53,7 @@ comctl32.SetWindowSubclass.argtypes = (wintypes.HWND, SUBCLASSPROC, ctypes.c_siz
 comctl32.DefSubclassProc.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 comctl32.DefSubclassProc.restype = ctypes.c_ssize_t
 ERROR_ALREADY_EXISTS = 183
-EDGE = 6                                                # px of the window's edge that resize it
+EDGE = 5                                                # px of the window's edge that resize it
 
 
 def bring_forward_existing():
@@ -220,8 +220,21 @@ def main(argv=None):
         try:
             hwnd = int(str(win.native.Handle))
             set_window_icon(hwnd, ICON)
-            from System import Action
-            win.native.Invoke(Action(lambda: _own_title_bar(hwnd)))
+            from System import Action, EventHandler
+            import System.Windows.Forms as WinForms
+            form = win.native
+
+            def inset(*_):                              # the page stops EDGE px short of the edges, so the edges
+                pad = 0 if user32.IsZoomed(hwnd) else EDGE      # are the window's and resize it (not when maximised)
+                if form.Padding.Left != pad:
+                    form.Padding = WinForms.Padding(pad)
+
+            def on_ui():
+                _own_title_bar(hwnd)
+                inset()
+                form.Resize += EventHandler(inset)
+
+            form.Invoke(Action(on_ui))
         except Exception as exc:                         # the window still works with the defaults
             print("frame:", exc, file=sys.stderr)
 
