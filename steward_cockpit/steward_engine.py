@@ -1889,6 +1889,9 @@ class Engine:
             msg["system_prompt"] = self._bridge_system_prompt
         if self.cli in ("chatgpt", "grok"):
             msg["standing_rules"] = CONTRACT   # every bridge turn is a new process: the rules ride each one
+            if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
+                # the Star Chart's remit rides every bridge turn too, resumed or not (Grok code R1 F4)
+                msg["standing_rules"] = campaign_mode_remit(self.steward) + CONTRACT
         # No CLI call under the stdin arbiter. A producer captures its exact
         # context through the lifecycle CLI; automatic fallback remains unknown.
         refinement_context = None

@@ -309,6 +309,11 @@ def promote(project, seed_id, tier, area, done_when=None):
         return _no("the heading was written but not grouped: %s" % r2.get("error"))
     r3 = _cli(project, "grasscatch", "--deferred", text, "--reason", "promoted seed %s → the initiative %s, by John on the Campaign" % (seed["id"], sid))
     spent = " — but the seed could not be spent on the strip: %s" % r3.get("error") if not r3.get("ok") else ""
+    try:   # a goal made from a seed asks its premortem too (2026-10-03, Grok code R1 F3)
+        from . import nudges as _n
+        _n.ask_premortem(project, sid, "a new goal")
+    except Exception:
+        pass
     return _ok("%s is now a goal in tier %d%s%s" % (text, tier, (" · " + str(area)) if area else "", spent),
                undo={"act": "withdraw", "step": sid, "seed": seed["id"]}, step=sid)
 

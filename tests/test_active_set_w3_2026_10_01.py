@@ -128,10 +128,14 @@ def test_the_nudge_sits_under_the_brief_and_in_the_goal_s_conversation_with_its_
     ctx["nudge"] = None
     assert '<div class="nudge' not in hsp.render_high_seat_html(ctx), "no nudge, no line"
     cctx = w2._ctx()
-    cctx["nudges"] = {"trusts": {"kind": "dated", "key": "dated:pkg:1", "fact": "2026-10-02", "text": "Excuse me: Stanford package is due tomorrow (The trusts).", "why": "the part's date on the Campaign record: 2026-10-02", "acts": [{"act": "open", "href": "/project/c1?open=trusts", "label": "open the goal"}]}}
+    # one lane per item (2026-10-03): the goal's place shows a non-dated nudge; a dated one is the Cave's interrupt lane
+    cctx["nudges"] = {"trusts": {"kind": "starving", "key": "starving:trusts:1", "fact": "1", "text": "The trusts is a Tier-1 goal untouched for 9 days — pick it up?", "why": "the days since its last turn: 9", "acts": [{"act": "open", "href": "/project/c1?open=trusts", "label": "open the goal"}]}}
     chtml = cpg.render_campaign_html(cctx, open_id="trusts")
     place = chtml[chtml.index('id="place-trusts"'):chtml.index("</article>", chtml.index('id="place-trusts"'))]
-    assert '<div class="gconv"><div class="nudge goal" data-nudge="dated:pkg:1"' in place and "is due tomorrow" in place and 'data-nudge-act="not_now"' in place, "the goal's conversation opens with its nudge"
+    assert '<div class="gconv"><div class="nudge goal" data-nudge="starving:trusts:1"' in place and "untouched for 9 days" in place and 'data-nudge-act="not_now"' in place, "the goal's conversation opens with its nudge"
+    cctx["nudges"] = {"trusts": {"kind": "dated", "key": "dated:pkg:1", "fact": "2026-10-02", "text": "Excuse me: Stanford package is due tomorrow (The trusts).", "why": "x", "acts": []}}
+    chtml = cpg.render_campaign_html(cctx, open_id="trusts")
+    assert 'data-nudge="dated:pkg:1"' not in chtml, "a dated nudge is never painted in a goal's place"
     assert 'class="nudge' not in chtml[chtml.index('id="place-magi"'):chtml.index("</article>", chtml.index('id="place-magi"'))] if 'id="place-magi"' in chtml else True
     for f in ("high-seat-page.js", "campaign-page.js"):
         js = open(os.path.join(HERE, "static", f), encoding="utf-8").read()

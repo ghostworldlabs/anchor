@@ -137,6 +137,11 @@ def _gtile(i, ctx, band, draggable=True):
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
 
 
+def _not_dated(n):
+    """One lane per item (2026-10-03): a dated nudge is the Cave's interrupt lane, never a goal place's here."""
+    return n if isinstance(n, dict) and n.get("kind") != "dated" else None
+
+
 PREMORTEM_Q = "It is three months on and this goal fell short: what went wrong?"
 
 
@@ -263,7 +268,7 @@ def _place(i, ctx):
         '<div class="k">Where it stands</div><div class="stand">%s</div>%s'
         '<div class="facts3"><div class="fact"><div class="k">Pace</div><span class="v click" data-pace="%s">%s</span></div>'
         '<div class="fact"><div class="k">Deadlines</div><span class="v">%s</span></div></div>'
-        '<div class="k">The guide <span class="h">(the steward writes it on your word &mdash; &ldquo;write the guide&rdquo; in the conversation &mdash; from what you dictate there and the record; revise it here; its history keeps every change)</span></div>%s'
+        '<div class="pfold">%s</div><div class="k">The guide <span class="h">(the steward writes it on your word &mdash; &ldquo;write the guide&rdquo; in the conversation &mdash; from what you dictate there and the record; revise it here; its history keeps every change)</span></div>%s'
         '<div class="obody"><div class="plist"><div class="pl-h"><h4>The plan &middot; the parts in order</h4><span class="c">%d &middot; %d dated%s</span>'
         '<span class="hint">Click a name to rename, a date to move it. A project or a step of one is read from its own record.</span></div>'
         '<ul class="rows">%s</ul>'
@@ -288,11 +293,11 @@ def _place(i, ctx):
          stands, initiative_status_html(i),
          esc(i["id"]), ("by " + esc(_short(i["pace"]))) if i.get("pace") else "set a pace",
          "<br>".join('<span class="%s">%s</span> %s' % ("over" if (_hr._iso(p["date"]) or today) < today else ("soon" if (_hr._iso(p["date"]) - today).days <= 7 else ""), esc(_short(p["date"])), esc(p["text"][:36]) + ("&hellip;" if len(p["text"]) > 36 else "")) for p in dated[:4]) or "none dated",
-         _guide_block(i, ctx),
+         _ifthen(i) + _premortem(i, ctx), _guide_block(i, ctx),
          n, len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]),
          proj_html,
-         nudge_html((ctx.get("nudges") or {}).get(i["id"]), "goal"), esc(i["id"]), _thread(i, ctx), esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["id"]))
+         nudge_html(_not_dated((ctx.get("nudges") or {}).get(i["id"])), "goal"), esc(i["id"]), _thread(i, ctx), esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["id"]))
 
 
 def _places(ctx):

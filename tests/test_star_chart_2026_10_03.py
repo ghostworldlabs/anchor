@@ -79,6 +79,10 @@ def test_a_tier_one_goal_carries_its_if_then_and_a_premortem_ask():
     tile = tile[:tile.index("</article>")]
     assert 'class="gift" data-ifthen="%s"' % g["id"] in tile and "&#8627; If it is Monday 9:00, then I send the trust questions" in tile
     assert 'class="gpm" data-pm="%s"' % g["id"] in tile and "its pace moved from 2026-10-10 to 2026-10-24" in tile and 'data-pm-answer="%s"' % g["id"] in tile
+    opened = cpg.render_campaign_html(ctx, open_id=g["id"])
+    place = opened[opened.index('id="place-%s"' % g["id"]):]
+    place = place[:place.index("</article>")]
+    assert 'data-ifthen="%s"' % g["id"] in place and 'data-pm-answer="%s"' % g["id"] in place, "an open goal carries both (Grok code R1 F2)"
     g["if_then"] = ""
     assert "If-then step not written yet &middot; add one in your words" in cpg.render_campaign_html(ctx), "unwritten, it asks in his words"
     t2 = next(i for i in ctx["initiatives"] if i["tier"] == 2)
@@ -156,3 +160,67 @@ def test_the_remit_rides_only_the_campaign_conversation():
     assert "THE CHART ROOM" in se.campaign_mode_remit("Jarvis") and "THE BEACON" in se.campaign_mode_remit("Ecgberht")
     src = open(os.path.join(HERE, "steward_cockpit", "steward_engine.py"), encoding="utf-8").read()
     assert "if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):\n                persona += campaign_mode_remit(self.steward)" in src
+
+
+# ── the acts against a real record (Grok code R1 F6: not source substrings) ──────────────────────────────────────────
+import pytest  # noqa: E402
+import test_campaign_page_2026_09_26 as cp  # noqa: E402
+import test_active_set_w1_2026_09_29 as w1  # noqa: E402
+from steward_cockpit import campaign_seeds as seeds_mod  # noqa: E402
+
+record = cp.record      # the throwaway Campaign record the engine CLI writes (skips when the engine is absent)
+BRANCH_SPINE = "file:///C:/dev/Ecgberht-starchart-wt/engine/ledger-spine.mjs"
+
+
+def test_a_promoted_seed_asks_its_premortem(record):
+    seed = seeds_mod.read_seeds(record)[0]
+    pr = acts.act(record, {"act": "promote", "seed": seed["id"], "tier": "1", "area": "professional"})
+    assert pr["ok"], pr
+    assert N.read_premortems(record)[pr["step"]]["reason"] == "a new goal"
+    skip = acts.act(record, {"act": "premortem_skip", "step": pr["step"]})
+    assert skip["ok"] and pr["step"] not in N.read_premortems(record) and skip["undo"]["act"] == "premortem_ask"
+    assert acts.act(record, skip["undo"])["ok"] and pr["step"] in N.read_premortems(record), "its undo asks it again"
+
+
+def test_the_premortem_answer_goes_into_the_guide_before_its_history(record):
+    from steward_cockpit.steward_campaign import read_guide, write_guide
+    assert write_guide(record, "a", "# Initiative A\n\nWhat done looks like.\n\n## History\n- 2026-10-01 - written", who="the steward")["ok"]
+    N.ask_premortem(record, "a", "a new goal")
+    r = acts.act(record, {"act": "premortem", "step": "a", "text": "the counsel never answered and I did not chase"})
+    assert r["ok"], r
+    g = read_guide(record, "a")["text"]
+    assert g.index("## Premortem, ") < g.index("## History"), "the answer sits above the history"
+    assert "It is three months on and this goal fell short: what went wrong?\nthe counsel never answered and I did not chase" in g
+    assert "What done looks like." in g and "- 2026-10-01 - written" in g, "nothing he wrote is lost"
+    assert "a" not in N.read_premortems(record)
+    assert acts.act(record, {"act": "premortem", "step": "a", "text": " "})["ok"] is False
+
+
+def test_a_slipped_pace_asks_the_premortem_and_an_earlier_one_does_not(tmp_path, monkeypatch):
+    d = w1._record(tmp_path)
+    monkeypatch.setattr(acts, "_cli", w1._fake_cli(tmp_path))
+    assert acts.act(d, {"act": "pace", "step": "magi", "when": "2026-12-01"})["ok"]      # earlier than Dec 15
+    assert "magi" not in N.read_premortems(d)
+    assert acts.act(d, {"act": "pace", "step": "magi", "when": "2027-01-31"})["ok"]      # later: it slipped
+    assert N.read_premortems(d)["magi"]["reason"] == "its pace moved from 2026-12-01 to 2027-01-31"
+
+
+def test_the_if_then_is_written_on_the_record_and_read_back(record, monkeypatch):
+    if not os.path.isfile(r"C:\dev\Ecgberht-starchart-wt\engine\ledger-spine.mjs"):
+        pytest.skip("the engine branch carrying if_then is not on this machine")
+    monkeypatch.setattr(acts, "SPINE", BRANCH_SPINE)
+    words = "If it is Monday 9:00, then I send the trust questions"
+    r = acts.act(record, {"act": "if_then", "step": "a", "text": words})
+    assert r["ok"], r
+    a = {i["id"]: i for i in hsp.campaign_initiatives(acts._projection(record))}["a"]
+    assert a["if_then"] == words, "the projection carries it to the page"
+    assert acts.act(record, {"act": "if_then", "step": "a", "text": words})["ok"] is False, "already reads so"
+    u = acts.act(record, r["undo"])
+    assert u["ok"] and {i["id"]: i for i in hsp.campaign_initiatives(acts._projection(record))}["a"]["if_then"] == ""
+
+
+def test_the_remit_rides_every_bridge_turn_of_the_campaign_only():
+    src = open(os.path.join(HERE, "steward_cockpit", "steward_engine.py"), encoding="utf-8").read()
+    i = src.index('msg["standing_rules"] = CONTRACT')
+    assert 'msg["standing_rules"] = campaign_mode_remit(self.steward) + CONTRACT' in src[i:i + 500]
+    assert "_is_campaign_dir(self.dir) and not _is_cave_dir(self.dir)" in src[i:i + 500]
