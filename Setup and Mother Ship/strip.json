@@ -1,275 +1,285 @@
 {
-  "schema": "ecgberht-strip-v0",
-  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
-  "face_path": "ECGBERHT.md",
-  "as_of": "2026-10-04",
-  "phase": "planning",
-  "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
-  "effort_status": "PENDING",
-  "tool_depth_cell": "LITE",
-  "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
-  "capacity": "unknown",
-  "negative_heartbeat": {
-    "no_attention_needed": false,
-    "why": null,
-    "until": null
+ "schema": "ecgberht-strip-v0",
+ "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+ "face_path": "ECGBERHT.md",
+ "as_of": "2026-10-04",
+ "phase": "planning",
+ "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
+ "effort_status": "PENDING",
+ "tool_depth_cell": "LITE",
+ "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+ "capacity": "unknown",
+ "negative_heartbeat": {
+  "no_attention_needed": false,
+  "why": null,
+  "until": null
+ },
+ "anti_starvation_age_days": 0,
+ "grasscatch": [
+  {
+   "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+   "when": "2026-10-04T18:54:12.271688Z",
+   "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+   "status": "caught"
+  }
+ ],
+ "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+ "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+ "uncertainty_flags": [],
+ "instruments": [
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "next_recommended": "",
+   "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+   "phase": "planning",
+   "tool_depth_cell": "LITE",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
   },
-  "anti_starvation_age_days": 0,
-  "grasscatch": [
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "next_recommended": "",
+   "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+   "phase": "planning",
+   "tool_depth_cell": "LITE",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "next_recommended": "Settle whether a mother ship belongs to one person or a shared group.",
+   "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+   "phase": "planning",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
+   "current_step_id": "gwl-host-client"
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+   "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+   "horizon_source_seq": 16,
+   "horizon_focus": "gwl-host-client",
+   "horizon_steps": [
+    "gwl-host-client",
+    "gwl-mapping"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+   "why_next": "step set One mother ship and connected client computers",
+   "horizon_source_seq": 16,
+   "horizon_focus": "gwl-host-client",
+   "horizon_steps": [
+    "gwl-host-client",
+    "gwl-mapping"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "active_effort": "Discovery: personal ownership settled; clarify who may connect to the mother ship.",
+   "next_recommended": "Clarify owner access versus invited collaborator access.",
+   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+   "phase": "planning",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "current_step_id": "gwl-access"
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+   "horizon_source_seq": 19,
+   "horizon_focus": "gwl-access",
+   "horizon_steps": [
+    "gwl-access",
+    "gwl-accounts"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+   "horizon_source_seq": 21,
+   "horizon_focus": "gwl-access",
+   "horizon_steps": [
+    "gwl-access",
+    "gwl-accounts"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
+   "next_recommended": "Choose backups kept on another device or a remote storage service.",
+   "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+   "phase": "planning",
+   "grasscatch": [
     {
-      "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
-      "when": "2026-10-04T18:54:12.271688Z",
-      "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
-      "status": "caught"
+     "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+     "when": "2026-10-04T18:54:12.271688Z",
+     "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+     "status": "caught"
     }
-  ],
-  "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-  "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
-  "uncertainty_flags": [],
-  "instruments": [
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "next_recommended": "",
-      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
-      "phase": "planning",
-      "tool_depth_cell": "LITE",
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "next_recommended": "",
-      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
-      "phase": "planning",
-      "tool_depth_cell": "LITE",
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "next_recommended": "Settle whether a mother ship belongs to one person or a shared group.",
-      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
-      "phase": "planning",
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
-      "current_step_id": "gwl-host-client"
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
-      "horizon_source_seq": 16,
-      "horizon_focus": "gwl-host-client",
-      "horizon_steps": [
-        "gwl-host-client",
-        "gwl-mapping"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-      "why_next": "step set One mother ship and connected client computers",
-      "horizon_source_seq": 16,
-      "horizon_focus": "gwl-host-client",
-      "horizon_steps": [
-        "gwl-host-client",
-        "gwl-mapping"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "active_effort": "Discovery: personal ownership settled; clarify who may connect to the mother ship.",
-      "next_recommended": "Clarify owner access versus invited collaborator access.",
-      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-      "phase": "planning",
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "current_step_id": "gwl-access"
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
-      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-      "horizon_source_seq": 19,
-      "horizon_focus": "gwl-access",
-      "horizon_steps": [
-        "gwl-access",
-        "gwl-accounts"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
-      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-      "horizon_source_seq": 21,
-      "horizon_focus": "gwl-access",
-      "horizon_steps": [
-        "gwl-access",
-        "gwl-accounts"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
-      "next_recommended": "Choose backups kept on another device or a remote storage service.",
-      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
-      "phase": "planning",
-      "grasscatch": [
-        {
-          "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
-          "when": "2026-10-04T18:54:12.271688Z",
-          "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
-          "status": "caught"
-        }
-      ],
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "current_step_id": "gwl-backup"
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Backups and restore; then Review Setup before building it",
-      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
-      "horizon_source_seq": 26,
-      "horizon_focus": "gwl-backup",
-      "horizon_steps": [
-        "gwl-backup",
-        "gwl-review"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
-      "next_recommended": "Review the provider mockup and refine its controls before implementation.",
-      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-      "phase": "planning",
-      "horizon_source_seq": null,
-      "horizon_focus": null,
-      "current_step_id": "gwl-provider-status"
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-      "horizon_source_seq": 34,
-      "horizon_focus": "gwl-provider-status",
-      "horizon_steps": [
-        "gwl-provider-status",
-        "gwl-mapping"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-      "horizon_source_seq": 35,
-      "horizon_focus": "gwl-provider-status",
-      "horizon_steps": [
-        "gwl-provider-status",
-        "gwl-mapping"
-      ]
-    },
-    {
-      "_kind": "instrument",
-      "kind": "update",
-      "as_of": "2026-10-04",
-      "source": "verb_update",
-      "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
-      "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
-      "wait_ref": "decision:provider-initial-layout",
-      "next_recommended": "Review the compact Cave tile and shared provider detail panel.",
-      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
-      "phase": "planning",
-      "horizon_source_seq": null,
-      "horizon_focus": null
-    },
-    {
-      "_kind": "instrument",
-      "kind": "horizon",
-      "as_of": "2026-10-04",
-      "source": "verb_update:horizon",
-      "derived": true,
-      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
-      "horizon_source_seq": 36,
-      "horizon_focus": "gwl-provider-status",
-      "horizon_steps": [
-        "gwl-provider-status",
-        "gwl-mapping"
-      ]
-    }
-  ],
-  "receipts": [
-    {
-      "schema": "ecgberht-receipt-v0",
-      "kind": "face_confirm",
-      "as_of": "2026-10-04",
-      "who": "John",
-      "when": "2026-10-04",
-      "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
-    },
-    {
-      "at": "2026-10-04T16:01:57Z",
-      "source": "engine",
-      "step_id": "gwl-host-client",
-      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-      "kind": "journal_update",
-      "path": "journal/0002-host-ownership-discovery.md",
-      "entry_id": "0002-host-ownership-discovery",
-      "summary": "Mother ship ownership discovery — 2026-10-04"
-    }
-  ],
-  "horizon_source_seq": 36,
-  "horizon_focus": "gwl-provider-status",
-  "current_step_id": "gwl-provider-status",
-  "wait_ref": "decision:provider-initial-layout"
+   ],
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "current_step_id": "gwl-backup"
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Backups and restore; then Review Setup before building it",
+   "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+   "horizon_source_seq": 26,
+   "horizon_focus": "gwl-backup",
+   "horizon_steps": [
+    "gwl-backup",
+    "gwl-review"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
+   "next_recommended": "Review the provider mockup and refine its controls before implementation.",
+   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+   "phase": "planning",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "current_step_id": "gwl-provider-status"
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+   "horizon_source_seq": 34,
+   "horizon_focus": "gwl-provider-status",
+   "horizon_steps": [
+    "gwl-provider-status",
+    "gwl-mapping"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+   "horizon_source_seq": 35,
+   "horizon_focus": "gwl-provider-status",
+   "horizon_steps": [
+    "gwl-provider-status",
+    "gwl-mapping"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-04",
+   "source": "verb_update",
+   "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
+   "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+   "wait_ref": "decision:provider-initial-layout",
+   "next_recommended": "Review the compact Cave tile and shared provider detail panel.",
+   "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+   "phase": "planning",
+   "horizon_source_seq": null,
+   "horizon_focus": null
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-04",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+   "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+   "horizon_source_seq": 36,
+   "horizon_focus": "gwl-provider-status",
+   "horizon_steps": [
+    "gwl-provider-status",
+    "gwl-mapping"
+   ]
+  }
+ ],
+ "receipts": [
+  {
+   "schema": "ecgberht-receipt-v0",
+   "kind": "face_confirm",
+   "as_of": "2026-10-04",
+   "who": "John",
+   "when": "2026-10-04",
+   "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+  },
+  {
+   "at": "2026-10-04T16:01:57Z",
+   "source": "engine",
+   "step_id": "gwl-host-client",
+   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+   "kind": "journal_update",
+   "path": "journal/0002-host-ownership-discovery.md",
+   "entry_id": "0002-host-ownership-discovery",
+   "summary": "Mother ship ownership discovery — 2026-10-04"
+  },
+  {
+   "at": "2026-10-04T19:23:57Z",
+   "source": "engine",
+   "step_id": "gwl-provider-status",
+   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+   "kind": "journal_update",
+   "path": "journal/0004-provider-mockup-initial.md",
+   "entry_id": "0004-provider-mockup-initial",
+   "summary": "Provider setup mockup — Initial draft, 2026-10-04"
+  }
+ ],
+ "horizon_source_seq": 36,
+ "horizon_focus": "gwl-provider-status",
+ "current_step_id": "gwl-provider-status",
+ "wait_ref": "decision:provider-initial-layout"
 }
