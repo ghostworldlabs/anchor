@@ -40,6 +40,6 @@ Tailored terms would distinguish a product containing Anchor's covered code from
 
 The next decision is the licensing mechanism: I recommend custom source-available terms as the candidate for review, with final text and publication still subject to their own acceptance and rights/legal review. The table of accepted boundaries in the scope makes the policy concrete without drafting license text.
 
-This comparison supplies the requested explanation. It does not draft or apply a custom license, accept the earlier guide or authorize a release. Rights and legal review of any proposed final text remain prerequisites to publication already recorded in the scope.
+This comparison supplies the requested explanation. The separately authorized Ghost World Lab License v1 now supplies the custom draft; this comparison does not apply it, accept the earlier guide or authorize a release. Rights and legal review of final text remain prerequisites to publication already recorded in the scope.
 
 This is an addendum to Licensing and IP guide v1 and Distribution scope v1, Refinement 1. Those earlier reviews stay available. The independently accepted first-trial order remains connect-first, with installation retained as a separate path.

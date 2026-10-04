@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T20:42:44.985Z",
+  "as_of": "2026-10-04T21:02:50.587Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -602,6 +602,21 @@
         "why": "Original turns 2122dc15-8520-47c6-9b54-a13aa880f380, f95c8ec4-2b07-4607-a9d3-4068814c5bb3, c34fd8f9-3d47-4825-a4f3-3e78bf68b2c9 and 77589eef-ee23-48d3-9330-c852da1dae0b: custom candidate accepted within Distribution scope v1, Refinement 1; named draft, Legal-Beagle review and journal requested. No final license or slice acceptance."
       },
       "seq": 38
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Ghost World Lab License v1 draft is registered and opens in the live reader. Complete the requested Legal-Beagle review and resolve policy edges; John reviews final text separately. Owner, governing law and dependency/contributor rights must be established before publication."
+      },
+      "at": "2026-10-04T21:02:50.587Z",
+      "client_event_id": "gwl-license-v1-live-reader-verified",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T21:02:50.587Z",
+        "why": "Named candidate drafted under John’s explicit authorization; Current work pin opened through normal authentication in the intended report reader. Independent review pending; no acceptance or close."
+      },
+      "seq": 39
     }
   ],
   "roadmap_projection": [
@@ -662,7 +677,7 @@
       "id": "gwl-license",
       "name": "Licensing and hosting",
       "status": "active",
-      "done_when": "Draft Ghost World Lab License v1 from free internal business use, broad modification, voluntary contributions, no third-party sales of covered Anchor software and permission for third-party paid hosting; obtain Legal-Beagle review. John reviews final terms separately; owner, governing law and dependency/contributor rights must be established before publication.",
+      "done_when": "Ghost World Lab License v1 draft is registered and opens in the live reader. Complete the requested Legal-Beagle review and resolve policy edges; John reviews final text separately. Owner, governing law and dependency/contributor rights must be established before publication.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "research",

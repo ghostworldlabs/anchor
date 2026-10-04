@@ -8,4 +8,8 @@ The requested Legal-Beagle regular-tier textual review is underway with the conf
 
 The draft and initial analysis are registered. Normal launcher authentication minted an HttpOnly browser cookie. The first fresh browser URL used an incorrect effort binding and showed an empty map; this is not proof of the intended workflow. Verify the exact existing route and actual product-opening link before claiming delivery.
 
+Live delivery verification subsequently passed through the actual `pid` plus effort binding, Current work pin and report reader. The ten-clause instrument, companion and examples appeared with no horizontal overflow. This verifies a fresh driven browser, not John's existing native window. The contained conversation target also returned the license. Screenshots and the reader proof are in `.ecgberht/license-v1-browser/`.
+
+The independent reviewer returned a schema-nonconforming response at 21:01 UTC; the installed driver is making its single automatic strict retry. No review verdict is claimed from that first response. Scope and comparison wording now consistently distinguish the selected draft candidate from unapplied final terms.
+
 Campaign is unmanaged at spine sequence 38; the conditional lifecycle producer handoff does not apply. Original conversation IDs, text and cumulative feedback are retained. Your overhead this session: 0.
