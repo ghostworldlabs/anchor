@@ -3,7 +3,7 @@
   "scope_version": 2,
   "own_screen_claim": false,
   "ok": true,
-  "prior_checks": "First check had no receipt; second assumed internal-reader links exposed file paths in href, but their href is #.",
+  "prior_checks": "First check had no receipt; second assumed internal-reader links exposed file paths in href, but their href is #. Final direct-reader check initially read before async content painted; waited for its actual scope text.",
   "workflow_visible": true,
   "surfaces": [
     {
@@ -17,5 +17,8 @@
       "head": "SCOPE-v2.md\nclose\nSetup and Mother Ship \u2014 discovery scope v2\n\nEach person has one mother ship, and their other computers connect to it. John explicitly accepted that ownership choice on October 4, 2026. This version carries it into the existing scope; access for other people, backups and provider usage discovery remain open.\n\nTailscale is the dictated connection service. June and July onboarding records report completed modules and tests; those are starting evidence, not proof that the newly req"
     }
   ],
-  "workflow_opened_reader": true
+  "workflow_opened_reader": true,
+  "final_scope_checked_at": "2026-10-04T19:00:20.365039+00:00",
+  "final_scope_own_computer_and_parked_collaboration": true,
+  "exact_conversation_link_checked": true
 }
