@@ -1,0 +1,361 @@
+{
+  "schema": "ecgberht-roadmap-v0",
+  "project_id": null,
+  "as_of": "2026-10-04T15:18:43.099Z",
+  "roadmap_events": [
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-platforms",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-platforms",
+      "name": "Windows, Linux and macOS downloads",
+      "status": "proposed",
+      "part": "slice",
+      "done_when": "Provide a version for each platform, entering the shared Setup flow.",
+      "seq": 1
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-platforms-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-platforms",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ],
+          "groups": [
+            {
+              "id": "gwl-distribution",
+              "label": "Distribution and Collaboration",
+              "order": 0,
+              "parent_id": null
+            }
+          ]
+        }
+      },
+      "seq": 2
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-repositories",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-repositories",
+      "name": "Ghost World Labs repositories",
+      "status": "proposed",
+      "part": "slice",
+      "done_when": "Use the proposed Ghost World Labs GitHub identity with separate engine and Foundry-skills repositories.",
+      "seq": 3
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-repositories-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-repositories",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ]
+        }
+      },
+      "seq": 4
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-site",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-site",
+      "name": "Download site and collaboration",
+      "status": "proposed",
+      "part": "integrate",
+      "done_when": "Offer the releases from the proposed Ghost World Labs web home.",
+      "seq": 5
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-site-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-site",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ]
+        }
+      },
+      "seq": 6
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-license",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-license",
+      "name": "License choice: open source and sharing changes",
+      "status": "proposed",
+      "part": "research",
+      "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+      "seq": 7
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-license-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ]
+        }
+      },
+      "seq": 8
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-release",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-release",
+      "name": "Install and use from a collaborator’s computer",
+      "status": "proposed",
+      "part": "harden",
+      "done_when": "Verify installation, connection and release behavior on the supported platforms.",
+      "seq": 9
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-release-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-release",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ]
+        }
+      },
+      "seq": 10
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-review",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-review",
+      "name": "Review releases and public terms before publication",
+      "status": "proposed",
+      "part": "rigor",
+      "done_when": "Keep platform verification, public publishing and license acceptance independently visible.",
+      "seq": 11
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-distribution-review-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-review",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ]
+        }
+      },
+      "seq": 12
+    },
+    {
+      "at": "2026-10-04T15:18:43.099Z",
+      "client_event_id": "gwl-org-v1-delivery-3c476265-7142-441c-a934-a7a37d5a1e98-license-question",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T15:18:43.099Z",
+        "why": "Delivery of John's authorized organization, source turn 3c476265-7142-441c-a934-a7a37d5a1e98; preserves reviews and records one unresolved license direction. No slice close."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": "John: open or restricted? Recommendation: AGPLv3 as the open-source candidate; refine Distribution scope v1 only.",
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ],
+          "current": true
+        }
+      },
+      "seq": 13
+    },
+    {
+      "at": "2026-10-04T15:18:43.099Z",
+      "client_event_id": "gwl-org-v1-delivery-3c476265-7142-441c-a934-a7a37d5a1e98-license-wait",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T15:18:43.099Z",
+        "why": "Delivery of John's authorized organization, source turn 3c476265-7142-441c-a934-a7a37d5a1e98; preserves reviews and records one unresolved license direction. No slice close."
+      },
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "proposed",
+      "to": "waiting",
+      "seq": 14
+    }
+  ],
+  "roadmap_projection": [
+    {
+      "id": "gwl-platforms",
+      "name": "Windows, Linux and macOS downloads",
+      "status": "proposed",
+      "done_when": "Provide a version for each platform, entering the shared Setup flow.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "slice",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ],
+        "groups": [
+          {
+            "id": "gwl-distribution",
+            "label": "Distribution and Collaboration",
+            "order": 0,
+            "parent_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "gwl-repositories",
+      "name": "Ghost World Labs repositories",
+      "status": "proposed",
+      "done_when": "Use the proposed Ghost World Labs GitHub identity with separate engine and Foundry-skills repositories.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "slice",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ]
+      }
+    },
+    {
+      "id": "gwl-site",
+      "name": "Download site and collaboration",
+      "status": "proposed",
+      "done_when": "Offer the releases from the proposed Ghost World Labs web home.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "integrate",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ]
+      }
+    },
+    {
+      "id": "gwl-license",
+      "name": "License choice: open source and sharing changes",
+      "status": "waiting",
+      "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+      "waiting_on": "John: open or restricted? Recommendation: AGPLv3 as the open-source candidate; refine Distribution scope v1 only.",
+      "commissioned_as": null,
+      "part": "research",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ],
+        "current": true
+      }
+    },
+    {
+      "id": "gwl-release",
+      "name": "Install and use from a collaborator’s computer",
+      "status": "proposed",
+      "done_when": "Verify installation, connection and release behavior on the supported platforms.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "harden",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ]
+      }
+    },
+    {
+      "id": "gwl-review",
+      "name": "Review releases and public terms before publication",
+      "status": "proposed",
+      "done_when": "Keep platform verification, public publishing and license acceptance independently visible.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "rigor",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-distribution"
+        ]
+      }
+    }
+  ]
+}

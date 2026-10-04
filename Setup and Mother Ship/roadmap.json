@@ -1,0 +1,375 @@
+{
+  "schema": "ecgberht-roadmap-v0",
+  "project_id": null,
+  "as_of": "2026-10-04T14:54:54.041Z",
+  "roadmap_events": [
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-host-client",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-host-client",
+      "name": "One mother ship and connected client computers",
+      "status": "proposed",
+      "part": "slice",
+      "done_when": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+      "seq": 1
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-host-client-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-host-client",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "groups": [
+            {
+              "id": "gwl-setup",
+              "label": "Setup and Mother Ship",
+              "order": 0,
+              "parent_id": null
+            }
+          ]
+        }
+      },
+      "seq": 2
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-mapping",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-mapping",
+      "name": "Projects, folders and recommended organization",
+      "status": "proposed",
+      "part": "research",
+      "done_when": "Recommend project and goal mappings from folders nominated by the user, with C:/dev as John’s preferred home.",
+      "seq": 3
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-mapping-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-mapping",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 4
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-access",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-access",
+      "name": "Token sharing and secure local authentication",
+      "status": "proposed",
+      "part": "integrate",
+      "done_when": "Set up access tokens and normal provider authentication on the mother ship.",
+      "seq": 5
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-access-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 6
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-accounts",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-accounts",
+      "name": "Email and calendars",
+      "status": "proposed",
+      "part": "integrate",
+      "done_when": "Set up Outlook and Gmail accounts and calendars.",
+      "seq": 7
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-accounts-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-accounts",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 8
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-provider-status",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-provider-status",
+      "name": "Provider health, capacity and chosen model",
+      "status": "proposed",
+      "part": "slice",
+      "done_when": "Show whether providers work, green/amber/red remaining service, actual model and reasoning level, and the selected model policy.",
+      "seq": 9
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-provider-status-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 10
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-backup",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-backup",
+      "name": "Backups and restore",
+      "status": "proposed",
+      "part": "harden",
+      "done_when": "Set up backups from the chosen project mapping and main directory.",
+      "seq": 11
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-backup-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-backup",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 12
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-review",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_create",
+      "step_id": "gwl-review",
+      "name": "Review Setup before building it",
+      "status": "proposed",
+      "part": "rigor",
+      "done_when": "Settle load-bearing choices and review the user-facing Setup flow.",
+      "seq": 13
+    },
+    {
+      "at": "2026-10-04T14:54:54.041Z",
+      "client_event_id": "gwl-org-v1-3c476265-7142-441c-a934-a7a37d5a1e98-gwl-setup-review-nav",
+      "receipt": {
+        "who": "Aladdin, acting on John",
+        "when": "2026-10-04T14:54:54.041Z",
+        "why": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+      },
+      "kind": "step_set",
+      "step_id": "gwl-review",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "seq": 14
+    }
+  ],
+  "roadmap_projection": [
+    {
+      "id": "gwl-host-client",
+      "name": "One mother ship and connected client computers",
+      "status": "proposed",
+      "done_when": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "slice",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ],
+        "groups": [
+          {
+            "id": "gwl-setup",
+            "label": "Setup and Mother Ship",
+            "order": 0,
+            "parent_id": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "gwl-mapping",
+      "name": "Projects, folders and recommended organization",
+      "status": "proposed",
+      "done_when": "Recommend project and goal mappings from folders nominated by the user, with C:/dev as John’s preferred home.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "research",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-access",
+      "name": "Token sharing and secure local authentication",
+      "status": "proposed",
+      "done_when": "Set up access tokens and normal provider authentication on the mother ship.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "integrate",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-accounts",
+      "name": "Email and calendars",
+      "status": "proposed",
+      "done_when": "Set up Outlook and Gmail accounts and calendars.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "integrate",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-provider-status",
+      "name": "Provider health, capacity and chosen model",
+      "status": "proposed",
+      "done_when": "Show whether providers work, green/amber/red remaining service, actual model and reasoning level, and the selected model policy.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "slice",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-backup",
+      "name": "Backups and restore",
+      "status": "proposed",
+      "done_when": "Set up backups from the chosen project mapping and main directory.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "harden",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-review",
+      "name": "Review Setup before building it",
+      "status": "proposed",
+      "done_when": "Settle load-bearing choices and review the user-facing Setup flow.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "rigor",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    }
+  ]
+}

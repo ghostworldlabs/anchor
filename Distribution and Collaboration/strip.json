@@ -1,0 +1,141 @@
+{
+  "schema": "ecgberht-strip-v0",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "face_path": "ECGBERHT.md",
+  "as_of": "2026-10-04",
+  "phase": "planning",
+  "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "effort_status": "PENDING",
+  "tool_depth_cell": "LITE",
+  "human_wait": "none",
+  "capacity": "unknown",
+  "negative_heartbeat": {
+    "no_attention_needed": false,
+    "why": null,
+    "until": null
+  },
+  "anti_starvation_age_days": 0,
+  "grasscatch": [],
+  "next_recommended": "License choice: open source and sharing changes; then Install and use from a collaborator’s computer",
+  "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "uncertainty_flags": [],
+  "instruments": [
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "phase": "planning",
+      "tool_depth_cell": "LITE",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "phase": "planning",
+      "tool_depth_cell": "LITE",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License choice: open source and sharing changes; then Install and use from a collaborator’s computer",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "horizon_source_seq": 14,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    }
+  ],
+  "receipts": [
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "face_confirm",
+      "as_of": "2026-10-04",
+      "who": "John",
+      "when": "2026-10-04",
+      "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-04",
+      "at": "2026-10-04T14:57:38Z",
+      "current_step_id": null,
+      "last_event_seq": 12,
+      "last_event_at": "2026-10-04T14:54:54.041Z",
+      "last_event_kind": "step_set",
+      "last_event_step_id": "gwl-review",
+      "presentation_id": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "wait_ref": null,
+      "human_wait": "none",
+      "_kind": "receipt"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-04",
+      "at": "2026-10-04T15:02:04Z",
+      "current_step_id": null,
+      "last_event_seq": 12,
+      "last_event_at": "2026-10-04T14:54:54.041Z",
+      "last_event_kind": "step_set",
+      "last_event_step_id": "gwl-review",
+      "presentation_id": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "wait_ref": null,
+      "human_wait": "none",
+      "_kind": "receipt"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-04",
+      "at": "2026-10-04T15:22:52Z",
+      "current_step_id": null,
+      "last_event_seq": 14,
+      "last_event_at": "2026-10-04T15:18:43.099Z",
+      "last_event_kind": "status_flip",
+      "last_event_step_id": "gwl-license",
+      "presentation_id": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "wait_ref": null,
+      "human_wait": "none",
+      "_kind": "receipt"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-04",
+      "at": "2026-10-04T15:24:30Z",
+      "current_step_id": null,
+      "last_event_seq": 14,
+      "last_event_at": "2026-10-04T15:18:43.099Z",
+      "last_event_kind": "status_flip",
+      "last_event_step_id": "gwl-license",
+      "presentation_id": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "wait_ref": null,
+      "human_wait": "none",
+      "_kind": "receipt"
+    }
+  ],
+  "horizon_source_seq": 14,
+  "horizon_focus": "gwl-license"
+}

@@ -604,10 +604,10 @@ function openEffort(rel, step) {
   if (fsframe.dataset.rel !== rel || _step) { fsframe.src = src; fsframe.dataset.rel = rel; }
 }
 // W5 (2026-09-28): this page opened with ?step= (a Resume from the home) opens that effort's plan cockpit at
-// once with the step forwarded; once per load. A bare ?dir= (the cockpit's own address) changes nothing.
+// once with the step forwarded; once per load. An explicit effort directory is its cockpit address.
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.has("step") && q.get("open") !== "effort") return;   // 2026-10-02: the Cave tile's cockpit link names its effort explicitly
+  if (!q.has("step") && q.get("open") !== "effort" && !q.get("dir")) return;
   const open = () => { if (window._resumedOnce) return; window._resumedOnce = true; openEffort(q.get("dir") || "", q.get("step") || ""); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", open); else open();
 })();
