@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 14:36",
-  "status_id": "01791146190681525300",
+  "at": "2026-10-04 15:49",
+  "status_id": "01791150542751903200",
   "effort": "Distribution and Collaboration",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30",
+    "activity": "nothing running - attention unknown",
     "latest_event": null,
     "next": [
       "Licensing and hosting"
     ],
-    "question": "",
+    "question": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
     "facts": [
       {
         "label": "Summary",
-        "value": "Licensing and hosting \u2014 Compare candidate licenses against free internal business use, broad modification,\u2026"
+        "value": "Licensing and hosting \u2014 Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report."
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30"
+        "value": "nothing running - attention unknown"
       },
       {
         "label": "Status",
-        "value": "research: Licensing and hosting \u00b7 0/6 done \u00b7 quiet"
+        "value": "research: Licensing and hosting \u00b7 0/6 done \u00b7 unknown"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "none"
+        "value": "waiting on you: John: allow paid private development?"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0008-paid-hosting-permission-2026-10-04: Paid-hosting permission recorded"
+        "value": "0009-ghost-world-lab-license-2026-10-04: Ghost World Lab License v1 \u2014 4 October 2026"
       },
       {
         "label": "ETA",
@@ -53,15 +53,15 @@
       }
     ]
   },
-  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license",
+  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John. \u00b7 waiting on you: John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
   "now": [
-    "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30"
+    "nothing running - attention unknown"
   ],
   "running": {
-    "kind": "steward",
-    "label": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30",
+    "kind": "none",
+    "label": "nothing running - attention unknown",
     "skill": "",
-    "source": "engine",
+    "source": "",
     "age": ""
   },
   "slice": {
@@ -70,12 +70,12 @@
     "id": "gwl-license",
     "name": "Licensing and hosting",
     "part": "research",
-    "summary": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based\u2026",
+    "summary": "Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report.",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0008-paid-hosting-permission-2026-10-04: Paid-hosting permission recorded",
+  "journal": "0009-ghost-world-lab-license-2026-10-04: Ghost World Lab License v1 \u2014 4 October 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,9 +85,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0008-paid-hosting-permission-2026-10-04.md",
-      "entry_id": "0008-paid-hosting-permission-2026-10-04",
-      "at": "2026-10-04T19:59:50Z",
+      "path": "journal/0009-ghost-world-lab-license-2026-10-04.md",
+      "entry_id": "0009-ghost-world-lab-license-2026-10-04",
+      "at": "2026-10-04T21:34:02Z",
       "step_id": "gwl-license",
       "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
       "run_id": null
@@ -110,7 +110,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Paid-hosting permission recorded; choosing the licensing candidate in Distribution scope v1, Refinement 1.",
+    "text": "Ghost World Lab License v1, Refinement 1 and Legal-Beagle review are ready; paid private delivery remains undecided.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
@@ -120,11 +120,11 @@
     "step": "research: Licensing and hosting",
     "steps_done": 0,
     "steps_total": 6,
-    "waiting_on_you": "",
+    "waiting_on_you": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
     "waiting_since": null,
     "next": "Licensing and hosting; then Install and use from a collaborator\u2019s computer",
-    "why": "The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license",
-    "attention": "quiet",
+    "why": "Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John.",
+    "attention": "unknown",
     "goal_reread": true
   },
   "map": [
@@ -146,9 +146,9 @@
           "id": "gwl-license",
           "name": "Licensing and hosting",
           "status": "waiting",
-          "done_when": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based software and permission for third-party paid hosted access. John chooses the candidate and final terms; rights/legal review precedes publication. Enterprise and model services remain proposals.",
+          "done_when": "Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report. John decides paid private deliveries and final proposed terms; owner, governing law and dependency/contributor rights remain prerequisites before any publication.",
           "if_then": "",
-          "waiting_on": "John: use custom source-available terms as the license candidate? Recommend yes; Distribution scope v1, Refinement 1.",
+          "waiting_on": "John: allow paid private development separately delivering changes for a customer\u2019s own use? Recommend yes; Ghost World Lab License v1, Refinement 1.",
           "due": null,
           "ref": null,
           "tier": null,
@@ -325,5 +325,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 10
+  "deliverables_count": 13
 }
