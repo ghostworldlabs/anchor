@@ -310,7 +310,7 @@
   // 2026-10-02 (his word: "if I had both open I'd be able to see exactly the same information flowing into the dialog
   // ... and the status bar should be doing the same thing in both"; ChatGPT's diagnosis in review/CODEX-TILE-PARITY):
   // the open tile's conversation IS the cockpit's own view of this effort - /steward/v1?view=tile, the same renderer,
-  // the same engine stream, the same status pane - not a second copy that drifted (it cleared its list under a live
+  // the same engine stream, with Plan and Status in the full cockpit (John, 2026-10-04), not a second copy that drifted (it cleared its list under a live
   // reply, skipped a reply in flight, cut turns at 1600 characters, merged the blocks and never showed the status).
   // The tile hears the view through a bridge scoped to this instance and this origin: state (the light and the chip),
   // the last turn (the bar's one line), the record's stamp (the brief re-read), typing (the page never renews under his
@@ -318,7 +318,7 @@
   var TILE_SEQ = 0;
   function talkHtml(id) {
     return '<div class="cdlg big" id="' + id + '"><button class="dlg-bar" type="button" aria-expanded="true" title="fold or open the conversation"><span class="dlg-h">' + STEWARD_NAME + ' — this cockpit</span><span class="exstate" data-state="">…</span><span class="dlg-gist">reading the conversation…</span><span class="dlg-caret">&#9662;</span></button>'
-      + '<div class="cframe-wrap"><iframe class="cframe" title="' + STEWARD_NAME + ' — this cockpit’s conversation and status"></iframe></div></div>';
+      + '<div class="cframe-wrap"><iframe class="cframe" title="' + STEWARD_NAME + ' — this cockpit’s conversation"></iframe></div></div>';
   }
   function grow(card) {
     var d = $('.cdlg', card); if (!d) return;

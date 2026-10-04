@@ -577,8 +577,13 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 /* W5 (2026-09-28): the row Resume lands on — one ring for a moment */
 .navstep-land{box-shadow:0 0 0 2px var(--accent,#6c9cfc);border-radius:4px}
 
-/* the Cave tile's view of this cockpit (2026-10-02): the conversation and the status, no plan, no goal bar, no frame chrome */
-/* his word 2026-10-02: the tile has the same information as the cockpit - the plan opens from its tab (folded at first), the goal bar stays */
+/* The initiative tile is a conversation, not a miniature cockpit (John, 2026-10-04).
+   Its host keeps Deliverables below it; Plan and Status belong in the full cockpit.
+   Only the presentation changes: the dialogue, composer and engine stream are shared. */
+.app.tileview:not(.talkview){grid-template-columns:minmax(0,1fr) !important;grid-template-rows:minmax(0,1fr) !important}
+.app.tileview:not(.talkview) .bar,.app.tileview:not(.talkview) .leftcol,.app.tileview:not(.talkview) .railtab,
+.app.tileview:not(.talkview) .goalbar,.app.tileview:not(.talkview) .rightcol,.app.tileview:not(.talkview) .statustab{display:none !important}
+.app.tileview:not(.talkview) .main{grid-column:1 !important;grid-row:1 !important}
 .app.tileview [data-boneyard],.app.tileview [data-min]{display:none !important}
 /* the Campaign's conversation on the Cave and the Campaign page (2026-10-02): the cockpit view, the page's own box below it */
 .app.nocompose .main .composer{display:none !important}
