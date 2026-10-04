@@ -5,7 +5,7 @@
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
-  // John, 2026-10-04: scan small cards, hover for details, click for the full cockpit.
+  // John, 2026-10-04: scan small cards, hover for details, click expands here; the cockpit link opens the full view.
   function positionPeek(card) {
     var peek = $('.t-peek', card); if (!peek || !card.classList.contains('peeking')) return;
     var r = card.getBoundingClientRect(), below = Math.max(0, innerHeight - r.bottom - 8), above = Math.max(0, r.top - 8);
@@ -29,6 +29,10 @@
     card.classList.add('peeking'); positionPeek(card);
     var trigger = $('.t-peek-open', card); if (trigger) trigger.setAttribute('aria-expanded', 'true');
   }
+  function toggleInlineTile(card) {
+    if (card.classList.contains('open')) closeTile(card);
+    else openTile(card, card.getAttribute('data-tile'), card.getAttribute('data-dir') || '');
+  }
   function compactTiles(root) {
     $$('.tile[data-tile]', root).forEach(function (card) {
       if (card._compact || !$('.t-body', card)) return;
@@ -45,7 +49,8 @@
       $('.t-top', card).insertBefore(trigger, $('.t-go', card));
       trigger.addEventListener('click', function () { if (card.classList.contains('peek-pinned')) { hidePeek(card); card.classList.add('peek-dismissed'); } else { card.classList.remove('peek-dismissed'); showPeek(card); card.classList.add('peek-pinned'); } });
       card.tabIndex = 0;
-      card.setAttribute('aria-label', ($('.t-name', card).textContent || '').trim() + ': hover for details, Enter opens the full cockpit');
+      card.setAttribute('aria-label', ($('.t-name', card).textContent || '').trim() + ': hover for details, Enter expands the dialogue here');
+      card.setAttribute('aria-expanded', 'false');
       card.addEventListener('pointerenter', function (e) { if (e.pointerType === 'touch') return; card.classList.remove('peek-dismissed'); showPeek(card); });
       card.addEventListener('pointerleave', function () { card.classList.remove('peek-dismissed'); if (!card.classList.contains('peek-pinned') && !card.contains(document.activeElement)) hidePeek(card); });
       card.addEventListener('focusin', function () { showPeek(card); });
@@ -53,13 +58,13 @@
       card.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && card.classList.contains('peeking')) {
           e.preventDefault(); e.stopPropagation(); hidePeek(card); card.classList.add('peek-dismissed'); card.focus();
-        } else if (e.key === 'Enter' && e.target === card) { e.preventDefault(); var a = $('.t-go', card); if (a) a.click(); }
+        } else if (e.key === 'Enter' && e.target === card) { e.preventDefault(); toggleInlineTile(card); }
       });
       $('.t-peek-close', card).addEventListener('click', function () { hidePeek(card); card.classList.add('peek-dismissed'); card.focus(); });
       card.addEventListener('dragstart', function () { hidePeek(card); card.classList.add('peek-dismissed'); });
       card.addEventListener('click', function (e) {
         if (e.target.closest('a, button, .t-body, .t-peek') || drag || card.classList.contains('dragging') || String(window.getSelection() || '').trim()) return;
-        e.preventDefault(); var a = $('.t-go', card); if (a) a.click();
+        e.preventDefault(); toggleInlineTile(card);
       });
     });
   }
@@ -567,7 +572,7 @@
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
     hidePeek(card);
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });   // one tile open, one dialogue polling (Grok's read of W2e)
-    card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
+    card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('aria-expanded', 'true'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
     rememberTile(card, false);
     // the opened tile goes to the TOP of its shelf (his word, 2026-10-01) and comes back to its place on close
     var grid = card.parentNode;
@@ -582,7 +587,7 @@
   function rememberTile(card, big) { try { if (!card.classList.contains('open')) return; sessionStorage.setItem('highseat_open_tile', JSON.stringify({ id: card.id, dir: openDir(card), big: !!big })); } catch (e) {} }
   function forgetTile() { try { sessionStorage.removeItem('highseat_open_tile'); } catch (e) {} }
   function closeTile(card, another) {
-    stopTalk(card); card.classList.remove('open', 'talking'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile(); card._heldSaid = false;
+    stopTalk(card); card.classList.remove('open', 'talking'); card.setAttribute('aria-expanded', 'false'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile(); card._heldSaid = false;
     if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); } card._moved = false; card._homeNext = null; }
     var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
@@ -620,7 +625,7 @@
   $$('.tile[data-tile]').forEach(function (card) {
     var pid = card.getAttribute('data-tile');
     card.addEventListener('click', function (e) {
-      if (card._compact) return;   // the compact card's click follows its full-cockpit link
+      if (card._compact) return;   // the compact card's own handler toggles its inline dialogue
       if (e.target.closest('a, button, .t-body')) return;
       if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
     });
