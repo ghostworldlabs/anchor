@@ -1,15 +1,15 @@
 {
-  "at": "2026-10-04 13:59",
-  "status_id": "01791143991169215700",
+  "at": "2026-10-04 14:36",
+  "status_id": "01791146190681525300",
   "effort": "Distribution and Collaboration",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - quiet",
+    "activity": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30",
     "latest_event": null,
     "next": [
       "Licensing and hosting"
     ],
-    "question": "Custom?",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - quiet"
+        "value": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30"
       },
       {
         "label": "Status",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: John: custom source-available candidate?"
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -53,15 +53,15 @@
       }
     ]
   },
-  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 Paid-hosting permission is settled; the licensing candidate remains the next decision. \u00b7 waiting on you: John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.",
+  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license",
   "now": [
-    "nothing running - quiet"
+    "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - quiet",
+    "kind": "steward",
+    "label": "steward mid-turn since 14:36 (0 min) \u00b7 last status 14:30",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
@@ -120,10 +120,10 @@
     "step": "research: Licensing and hosting",
     "steps_done": 0,
     "steps_total": 6,
-    "waiting_on_you": "John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.",
+    "waiting_on_you": "",
     "waiting_since": null,
     "next": "Licensing and hosting; then Install and use from a collaborator\u2019s computer",
-    "why": "Paid-hosting permission is settled; the licensing candidate remains the next decision.",
+    "why": "The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license",
     "attention": "quiet",
     "goal_reread": true
   },
