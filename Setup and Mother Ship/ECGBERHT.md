@@ -10,20 +10,20 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Creating the initial provider sign-in, capacity, cost and model-control mockup; scope v3 records provider-first ordering.
+Provider setup mockup Initial draft is ready for review and refinement; scope v3 records provider-first ordering.
 
 ## Why next
 
-John wants the provider mockup refined before email/calendars. Personal hosts are settled; collaboration between hosts is parked.
+Review the compact Cave tile opening one detail panel shared with Setup. Personal hosts are settled; collaboration between hosts is parked.
 
 ## Human wait
 
-- **Waiting on:** none
-- **Until / unblock:** none recorded in this new cockpit. Open choices are described in SCOPE-v1.md.
+- **Waiting on:** John's layout review of Provider setup mockup Initial draft: keep the compact Cave tile and shared details panel?
+- **Until / unblock:** a layout answer or requested changes; reversible recommendation proceeds four hours after the actual question is sent. No slice closes without John's explicit instruction.
 
 ## Why stakes
 
-Scope recorded; work awaits its own cockpit discovery and review.
+The mockup makes provider sign-in, allowance, API cost and model controls tangible before an implementation plan; email and calendars follow later.
 
 
 ## Existing work

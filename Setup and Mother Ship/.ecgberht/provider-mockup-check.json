@@ -1,0 +1,129 @@
+{
+  "checked_at": "2026-10-04T19:20:06.695530+00:00",
+  "surface": "normal authenticated fresh Chromium, exact Anchor Current work click and sandboxed HTML route",
+  "route": "/api/steward/deliverable-file?pid=f69f6d66171f4dbd95c8c45db6846d97&dir=Setup%20and%20Mother%20Ship&path=mockups%2FPROVIDER-SETUP-initial.html",
+  "checks": [
+    {
+      "check": "exact Initial draft visible in Current work",
+      "passed": true
+    },
+    {
+      "check": "workflow opens exact HTML route and effort",
+      "passed": true
+    },
+    {
+      "check": "example labels and best-available default",
+      "passed": true
+    },
+    {
+      "check": "initial subscription allowance and separate unknown API cost",
+      "passed": true
+    },
+    {
+      "check": "Cave capacity and model controls stay within the desktop viewport",
+      "passed": true
+    },
+    {
+      "check": "near changes the compact tile",
+      "passed": true
+    },
+    {
+      "check": "out changes the compact tile",
+      "passed": true
+    },
+    {
+      "check": "exhausted subscription offers a connected alternate",
+      "passed": true
+    },
+    {
+      "check": "unknown changes the compact tile",
+      "passed": true
+    },
+    {
+      "check": "unknown capacity remains separate from signed-in state",
+      "passed": true
+    },
+    {
+      "check": "usable changes the compact tile",
+      "passed": true
+    },
+    {
+      "check": "subscription and API sign-in states separate",
+      "passed": true
+    },
+    {
+      "check": "API demo connects without credentials",
+      "passed": true
+    },
+    {
+      "check": "API capacity explicitly means own budget",
+      "passed": true
+    },
+    {
+      "check": "missing report leaves cost and capacity unknown",
+      "passed": true
+    },
+    {
+      "check": "provider authentication state independent",
+      "passed": true
+    },
+    {
+      "check": "chosen model and reasoning update Cave control",
+      "passed": true
+    },
+    {
+      "check": "manual exhausted provider excluded from confirmed capacity",
+      "passed": true
+    },
+    {
+      "check": "alternate switches model provider",
+      "passed": true
+    },
+    {
+      "check": "Setup reuses connected providers",
+      "passed": true
+    },
+    {
+      "check": "Setup completion and reopening use same demo",
+      "passed": true
+    },
+    {
+      "check": "Escape dismisses detail and returns focus",
+      "passed": true
+    },
+    {
+      "check": "keyboard navigation selects next provider",
+      "passed": true
+    },
+    {
+      "check": "desktop has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "phone has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "interactive prototype made no network requests",
+      "passed": true
+    },
+    {
+      "check": "no JavaScript errors during interactions",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "prototype_requests": [],
+  "document_requests": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8777/api/steward/deliverable-file?pid=f69f6d66171f4dbd95c8c45db6846d97&dir=Setup%20and%20Mother%20Ship&path=mockups%2FPROVIDER-SETUP-initial.html",
+      "resource_type": "document"
+    }
+  ],
+  "screenshots": [
+    ".ecgberht/provider-mockup-desktop.png",
+    ".ecgberht/provider-mockup-mobile.png"
+  ],
+  "limitations": "Fresh driven browser; not a capture of John's already-open client. Example values only; no live provider authentication/usage tested. Human design acceptance remains open."
+}

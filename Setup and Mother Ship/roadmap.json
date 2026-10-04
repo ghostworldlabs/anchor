@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04",
+  "as_of": "2026-10-04T19:22:11.026Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -571,6 +571,43 @@
       },
       "seq": 34,
       "at": "2026-10-04"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "client_event_id": "provider-initial-current-9205de17",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "mockups/PROVIDER-SETUP-initial.html",
+            "SCOPE-v3.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Pin the requested interactive provider Initial draft for John to inspect and refine before implementation."
+      },
+      "seq": 35,
+      "at": "2026-10-04T19:17:08.399Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "client_event_id": "provider-initial-layout-review-9205de17",
+      "fields": {
+        "waiting_on": "Keep the compact Cave tile opening one provider detail panel shared with Setup, in Provider mockup Initial draft?"
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "The requested interactive draft is checked and delivered; John reviews the layout before further refinement or any implementation plan."
+      },
+      "seq": 36,
+      "at": "2026-10-04T19:22:11.026Z"
     }
   ],
   "roadmap_projection": [
@@ -621,7 +658,7 @@
       "name": "Provider capacity, cost and model controls",
       "status": "active",
       "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization.",
-      "waiting_on": null,
+      "waiting_on": "Keep the compact Cave tile opening one provider detail panel shared with Setup, in Provider mockup Initial draft?",
       "commissioned_as": null,
       "part": "slice",
       "gate": null,
@@ -629,7 +666,11 @@
         "path": [
           "gwl-setup"
         ],
-        "current": true
+        "current": true,
+        "featured_paths": [
+          "mockups/PROVIDER-SETUP-initial.html",
+          "SCOPE-v3.md"
+        ]
       }
     },
     {

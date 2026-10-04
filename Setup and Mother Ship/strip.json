@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
+  "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-  "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+  "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -202,6 +202,50 @@
         "gwl-provider-status",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "horizon_source_seq": 35,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
+      "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+      "wait_ref": "decision:provider-initial-layout",
+      "next_recommended": "Review the compact Cave tile and shared provider detail panel.",
+      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+      "horizon_source_seq": 36,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -224,7 +268,8 @@
       "summary": "Mother ship ownership discovery — 2026-10-04"
     }
   ],
-  "horizon_source_seq": 34,
+  "horizon_source_seq": 36,
   "horizon_focus": "gwl-provider-status",
-  "current_step_id": "gwl-provider-status"
+  "current_step_id": "gwl-provider-status",
+  "wait_ref": "decision:provider-initial-layout"
 }
