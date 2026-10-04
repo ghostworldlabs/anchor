@@ -267,8 +267,8 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tlight.red{background:#e05f5f;box-shadow:0 0 7px #e05f5f}
 .tlight.gray{background:#8995a7;box-shadow:none}
 .tile.ready{border-color:var(--amber);animation:readyedge 2.4s ease-in-out infinite}
-@keyframes readyedge{0%,100%{box-shadow:0 0 0 1px var(--amber-edge)}50%{box-shadow:0 0 0 2px var(--amber),0 0 14px rgba(226,169,63,.5)}}
-@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;box-shadow:0 0 0 2px var(--amber)}}
+@keyframes readyedge{0%,100%{border-color:rgba(226,169,63,.3);box-shadow:none}50%{border-color:var(--amber);box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:var(--amber);box-shadow:none}}
 .cbrief{margin-top:6px;padding:8px 10px;border:1px solid var(--amber-edge);border-radius:8px;background:linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--surface);font-size:12.5px;line-height:1.45}
 .cbrief .k,.cmat .k{display:inline-block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:6px}
 .cb-wait{color:var(--text-dim)}.cb-wait.on{color:var(--amber-t);font-weight:650}
