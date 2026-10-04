@@ -136,6 +136,52 @@ RESUME_QUIET = (
 JOIN_PICKUP = "\n\nJOHN SAYS (give the short pickup first, then answer this):\n"
 JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\n"
 
+# R2 (steward responsiveness, Ecgberht journals 2069/2070, John 2026-10-04): the duty that comes first. In the Cave's
+# 51-minute turn about 5 of 56 steps changed code; the rest was ceremony. Small is the default.
+SMALL_DUTY = (
+    "SIZE THE REQUEST FIRST. A SMALL change is a reversible change John asked for, about three files or fewer, "
+    "no new effort: make the edit, run one check that can fail, commit, and reply in one or two plain sentences. "
+    "For a small change write NO plan page, NO new verify or record scripts, NO report, NO DELIVERABLES row, and "
+    "do not touch .ecgberht/attention.json. Anything LARGER (many files, a feature, an unknown cause, hours of work) "
+    "is handed to a code job and you stay free to talk: write a short brief and run "
+    "`python C:/dev/Anchor/tools/steward_code_job.py start --repo <the repo that owns the files> --brief-file <brief.md> "
+    "[--check \"<a command that fails when the work is wrong>\"]`, then tell John in one line what the coder is doing. "
+    "The code job runs on the best model at full effort in its own worktree, lands its work when clean, and wakes you "
+    "with the result; report it in two or three sentences. While a code job runs on a repository, do not write there "
+    "yourself. When John says stop, run `python C:/dev/Anchor/tools/steward_code_job.py stop`. A swarm only when he "
+    "asks for one. The engine ends any small-mode turn that passes 15 tool calls. "
+)
+
+# while an effort is on (his word, or a cockpit mid-effort): the full discipline, with the hand-off for big build work
+EFFORT_DUTY = (
+    "THIS IS AN EFFORT: the plan discipline below applies in full. Keep the dialogue responsive: hand any long "
+    "build work to a code job (`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file "
+    "<brief.md> [--check \"<cmd>\"]`, best model, full effort, its own worktree) and tell John in one line; do "
+    "not write in a repository while a code job owns it. "
+)
+
+# the coder of a code job: no steward duties, the work itself
+CODER_CONTRACT = (
+    "You are a code job commissioned by John's steward, not the steward: no campaign duties, no plan pages, no "
+    "journals, no status files, no questions back. Do the brief completely and well, check it, and end with a plain "
+    "summary of what you changed and how you checked it. "
+)
+
+_WRITE_VERBS = re.compile(r"(apply_patch|WriteAllText|WriteAllBytes|Set-Content|Add-Content|Out-File|Copy-Item|Move-Item|Remove-Item|"
+                          r"New-Item|git (?:commit|merge|checkout|reset|apply|am|cherry-pick|rebase)|\bsed -i|\.write_text\(|"
+                          r"\.write_bytes\(|open\([^)]*['\"][wa]['\"]|writeFileSync|(?<![=<>\-])\d?>>?\s*(?![&=>])[\w./\\$'\"~:-])", re.I)
+_SHELL_TOOLS = {"exec_command", "command_execution", "Bash", "PowerShell", "shell", "local_shell_call", "exec"}
+_STOP_CODER = re.compile(r"^\s*(?:please\s+)?stop (?:the )?(?:coder|code job|job)\b", re.I)
+def _is_machine_text(text):
+    """Queued text the engine or a code job wrote, not John's words (delivered as control: no receipt, no cap)."""
+    t = str(text or "").lstrip()
+    return t.startswith("(interface - not John)") or (t.startswith("(code job ") and "not John)" in t[:80])
+
+
+STEP_CAP = int(os.environ.get("STEWARD_SMALL_STEP_CAP", "15"))
+_EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full process|treat (?:this|it) as an effort)\b", re.I)
+_EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
+
 CONTRACT = (
     "Before framing a substantial new plan, use adaptive discovery: ask one load-bearing "
     "question at a time with context and an explicit recommendation. Usually three or four "
@@ -190,6 +236,11 @@ CONTRACT = (
     "asks - the target is zero; (12) commit as you go IS enforced: every cadence "
     "tick that finds the working tree dirty gets a commit with a sensible "
     "message before you continue; "
+    ""
+)
+
+# R2 (steward responsiveness, 2026-10-04): the effort rules ride only while an effort is on
+EFFORT_RULES = (
     "(13) SLICE LOOP (2026-08-28): you own the overall plan. Tag every roadmap "
     "step with part=research|slice|rigor|integrate|harden (the product map is "
     "those tags, not a second file). Pass 1 of a new effort: a substantial draft "
@@ -729,6 +780,9 @@ class Engine:
         self.broken = False         # bad exit / failed delivery -> red light
         self.last_say = 0.0
         self.turn_started = 0.0     # when the current model turn began (0 = idle)
+        self.on_turn_done = None    # R3: a code job's report-back (called with {"text", "error"} when its turn ends)
+        self.code_job = None        # R3: {"cdir", "id"} when this engine is a code job's coder
+        self._turn_tools = 0        # R2: tool calls this turn (the small-mode step cap)
         self.woke_at = 0.0
         self.john_msgs = 0          # ease-metric floor: his message count
         self.open_question = stored_entry.get("open_question", "")
@@ -1242,7 +1296,7 @@ class Engine:
                        "--effort", selection["effort"], "--permission-mode", self.permission_mode]
                 if stored:
                     cmd += ["--resume", stored]
-                self._bridge_system_prompt = persona + CONTRACT + "\n" + history_reference
+                self._bridge_system_prompt = persona + self._contract() + "\n" + history_reference
             elif self.cli == "claude":
                 cmd = base + [
                 "-p", "--verbose",
@@ -1251,7 +1305,7 @@ class Engine:
                 "--include-partial-messages",
                 "--permission-mode", self.permission_mode,
                 "--disallowedTools", "AskUserQuestion",
-                "--append-system-prompt", persona + CONTRACT + "\n" + history_reference,
+                "--append-system-prompt", persona + self._contract() + "\n" + history_reference,
                 "--name", "steward-proto",
                 ] + model_policy.launch_args(selection)
                 if stored:
@@ -1589,6 +1643,20 @@ class Engine:
                 goal_name = ""
             if not goal_name:
                 goal = None
+        if human and not self.general and not self.code_job:
+            # R2/R3 (2026-10-04): his words set the mode and stop a code job; the message still goes to the steward
+            if _EFFORT_ON.search(text) or _EFFORT_OFF.search(text):
+                on = bool(_EFFORT_ON.search(text))
+                _update_state(self.skey(), {"effort_mode": on})
+                self._emit({"t": "sys", "text": "effort rules on - the full plan discipline applies here" if on else "small mode - small changes stay small; real work goes to a code job"})
+            if _STOP_CODER.match(text):
+                try:
+                    from steward_cockpit import code_jobs as _cj
+                    from steward_cockpit import steward_routes as _sr
+                    r = _cj.stop(self.dir, engine_lookup=lambda wt: _sr.get_engine(wt, general=True, tid="1", create=False))
+                    self._emit({"t": "sys", "text": ("code job stopped; its work so far stays on branch " + r["branch"]) if r.get("ok") else ("no code job to stop: " + str(r.get("error")))})
+                except Exception as e:
+                    self._emit({"t": "sys", "text": "the code job could not be stopped: %s" % e})
         answer_context = None
         if question_id:
             answer_context = next((q for q in self._question_contexts(self._attention()) if q["id"] == question_id), None)
@@ -1733,7 +1801,12 @@ class Engine:
                     if not ok:
                         self._emit({"t": "sys", "text": "steward could not resume after the interruption: " + str(why) + "; your message is queued"})
                     return {"ok": True, "queued": bool(self.queue), "interrupted": True}
-                self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
+                # R1 (steward responsiveness, 2026-10-04): the receipt names what the steward is on and since
+                # when, and carries "Take this now" (interrupt, then deliver his message at once)
+                if human:
+                    self._emit({"t": "sys", "text": self._queued_receipt(), "take_now": True})
+                else:
+                    self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
                 return {"ok": True, "queued": True}
             from steward_cockpit import maintenance
             if human and maintenance.is_active():
@@ -1745,7 +1818,7 @@ class Engine:
                     return {"ok": False, "error": "could not durably queue your text"}
                 self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
                 return {"ok": True, "queued": True, "maintenance": True}
-            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""),
+            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general and self.effort_on()) else ""),
                                    origin="human" if human else "control")
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
@@ -1888,10 +1961,10 @@ class Engine:
         if self._bridge_system_prompt:
             msg["system_prompt"] = self._bridge_system_prompt
         if self.cli in ("chatgpt", "grok"):
-            msg["standing_rules"] = CONTRACT   # every bridge turn is a new process: the rules ride each one
+            msg["standing_rules"] = self._contract()   # every bridge turn is a new process: the rules ride each one
             if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
                 # the Star Chart's remit rides every bridge turn too, resumed or not (Grok code R1 F4)
-                msg["standing_rules"] = campaign_mode_remit(self.steward) + CONTRACT
+                msg["standing_rules"] = campaign_mode_remit(self.steward) + self._contract()
         # No CLI call under the stdin arbiter. A producer captures its exact
         # context through the lifecycle CLI; automatic fallback remains unknown.
         refinement_context = None
@@ -1920,6 +1993,7 @@ class Engine:
             self._last_submitted = text
             self._turn_had_tools = False
             if not self.busy:
+                self._turn_tools = 0
                 self._turn_wrote_files = False
                 self._turn_output_refs = []
                 self._refinement_dispatch_context = refinement_context
@@ -1952,8 +2026,9 @@ class Engine:
         if maintenance.is_active():
             return False  # Wave 1.6: held until activation
         queued = self.queue[0]
-        suffix = "" if self.general else self._plan_drift_suffix()
-        if self._send_locked(queued + suffix, origin="human"):
+        machine = _is_machine_text(queued)
+        suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
+        if self._send_locked(queued + suffix, origin="control" if machine else "human"):
             self.queue.pop(0)
         if not self._persist_queue():
             self.broken = True
@@ -2003,6 +2078,131 @@ class Engine:
         self._hold_queue("turn interrupted")
         return {"ok": True}
 
+    def effort_on(self):
+        """R2: the effort rules ride while an effort is on: John's word ("make this an effort" / "small mode") wins;
+        else a project cockpit whose plan has an open step is an effort; the Cave and the Star Chart conversations
+        (one_conversation) and workbench terminals are small by default."""
+        entry = _read_state_entry(self.skey())
+        if isinstance(entry.get("effort_mode"), bool):
+            return entry["effort_mode"]
+        if self.general or self.one_conversation or self.code_job:
+            return False
+        # his word not given: a project cockpit with a step in progress NOW is mid-effort (read fresh, never stored)
+        try:
+            rm = json.loads((Path(self.dir) / "roadmap.json").read_text(encoding="utf-8"))
+            steps = rm.get("roadmap_projection") if isinstance(rm, dict) else None
+            return any(isinstance(x, dict) and str(x.get("status") or "") in ("active", "in_progress", "running")
+                       for x in (steps or []))
+        except Exception:
+            return False
+
+    def _contract(self):
+        if self.code_job:
+            return CODER_CONTRACT
+        if self.effort_on():
+            return EFFORT_DUTY + CONTRACT + EFFORT_RULES
+        return SMALL_DUTY + CONTRACT
+
+    def _fire_turn_done(self, result):
+        cb, self.on_turn_done = self.on_turn_done, None
+        if cb is None:
+            return
+        try:
+            cb(result)
+        except Exception:
+            pass
+
+    def _guard_turn(self, block):
+        """R2/R3: end a small-mode turn that has grown past the step cap (it is handed to a code job), and a turn
+        that writes into a repository a running code job owns (one writer). True when the turn was ended."""
+        if self.general or self.code_job or self.fake or not self.busy:
+            return False
+        reason, note = "", ""
+        inp = block.get("input") or {}
+        paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
+        try:
+            from steward_cockpit import code_jobs as _cj
+            owned = _cj.active_repos()
+        except Exception:
+            owned = []
+        hit = []
+        if owned:
+            name = block.get("name") or ""
+            absolute = [p if os.path.isabs(p) else os.path.join(self.dir, p) for p in paths]
+            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
+                hit = [p for p in absolute if any(_cj.inside(p, r) for r in owned)]
+            elif name in _SHELL_TOOLS:
+                # a shell or exec call: a write when it runs inside a busy repository, or names one with a writing verb
+                cmd = json.dumps(inp, ensure_ascii=False)[:6000]
+                if any(_cj.inside(self.dir, r) for r in owned) and _WRITE_VERBS.search(cmd):
+                    hit = [self.dir]
+                else:
+                    flat = cmd.replace("\\\\", "/").replace("\\", "/").lower()
+                    for r in owned:
+                        rr = str(r).replace("\\", "/").lower().rstrip("/")
+                        if re.search(re.escape(rr) + r"(?:/|[\"' ]|$)", flat) and _WRITE_VERBS.search(cmd):
+                            hit = [r]
+                            break
+            if hit:
+                reason = "one writer: a code job is working on that repository"
+                note = ("(interface - not John) Your last turn was ended: it wrote %s while a code job owns that "
+                        "repository. Do not write there until the job reports; tell John in one line." % hit[0])
+        if not reason and getattr(self, "_turn_origin", "human") == "human" and self._turn_tools > STEP_CAP and not self.effort_on():
+            reason = "past %d tool calls: larger than a small change" % STEP_CAP
+            note = ("(interface - not John) Your last turn was ended after %d tool calls: this is larger than a small "
+                    "change. Hand it to a code job now (tools/steward_code_job.py start, with a short brief and a check), "
+                    "then tell John in one line what the coder is doing." % self._turn_tools)
+        if not reason:
+            return False
+        with self._lock:
+            self._emit({"t": "sys", "text": "%s ended its turn (%s)" % (self.steward or "The steward", reason)})
+            out = self._interrupt_turn_locked(reason)
+            if isinstance(out, dict) and out.get("ok"):
+                self.queue.insert(0, note)
+                self._persist_queue()
+                self._wake_locked(fresh=False, seed=None)
+        return True
+
+    def _turn_activity(self):
+        """What the running turn is on, in its own words: the first sentence the steward spoke this turn, else his
+        message it is answering."""
+        said = " ".join(str(getattr(self, "turn_text", "") or "").split())
+        if said:
+            first = re.split(r"(?<=[.!?])\s", said, maxsplit=1)[0]
+            return first[:110] + ("\u2026" if len(first) > 110 else "")
+        asked = " ".join(str(getattr(self, "_last_submitted", "") or "").split())
+        asked = re.sub(r"^\(.*?\)\s*", "", asked)
+        return ("your message \u201c%s\u201d" % (asked[:80] + ("\u2026" if len(asked) > 80 else ""))) if asked else "a turn"
+
+    def _queued_receipt(self):
+        started = getattr(self, "turn_started", 0) or 0
+        since = ""
+        if started:
+            mins = int(max(0, time.time() - started) // 60)
+            since = ", since %s (%d min)" % (time.strftime("%H:%M", time.localtime(started)), mins)
+        ahead = max(0, len(self.queue) - 1)
+        nxt = "Your message is next." if not ahead else "Your message is queued after %d other%s." % (ahead, "" if ahead == 1 else "s")
+        return "%s is on: %s%s. %s" % (self.steward or "The steward", self._turn_activity(), since, nxt)
+
+    def take_now(self):
+        """R1: his "Take this now" - the running turn ends (outcome uncertain, partial work kept, as a Stop turn) and
+        the steward wakes on the same thread to answer the queue at once, the sequence the self-started branch of
+        say() already uses."""
+        with self._lock:
+            if not (self.busy and self.queue):
+                return {"ok": False, "error": "nothing is waiting behind a running turn"}
+            out = self._interrupt_turn_locked("John: take this now")
+            if not (isinstance(out, dict) and out.get("ok")):
+                return out
+            ok, why = self._wake_locked(fresh=False, seed=None)
+            if not ok:
+                self._emit({"t": "sys", "text": "steward could not resume after the interruption: " + str(why) + "; your message is queued"})
+        try:
+            self._journal_receipt("turn_interrupted", "John: take this now")
+        except Exception:
+            pass
+        return {"ok": bool(ok), "why": "" if ok else str(why)}
+
     def interrupt_turn(self, reason="stopped by John"):
         with self._lock:
             out = self._interrupt_turn_locked(reason)
@@ -2040,6 +2240,9 @@ class Engine:
         with self._lock:
             self.busy = False
             self._hold_queue("session ended")
+            # R3 (Grok code F4): a coder that dies without a result still finishes its job, as a failure
+            if self.on_turn_done is not None:
+                self._fire_turn_done({"text": self.turn_text.strip(), "error": "the coder's session ended (exit %s) without a result" % code})
         self._status_update(emit=True)
 
     def _read_stderr(self, proc):
@@ -2446,6 +2649,9 @@ class Engine:
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
                     self._turn_had_tools = True
+                    self._turn_tools = getattr(self, "_turn_tools", 0) + 1
+                    if self._guard_turn(block):
+                        return
                     inp = block.get("input") or {}
                     fp = inp.get("file_path")
                     # a Claude edit names one file_path; a Codex file_change names its paths
@@ -2684,6 +2890,10 @@ class Engine:
                     if txt:
                         self._human_asked = False
                     self._maybe_drive_locked(was_tick, txt)
+                # R3 (Grok code F4): a code job's coder is finished when its turn ended and nothing follows it (a
+                # failover that keeps working returned above; a queued or driven turn keeps it busy)
+                if self.on_turn_done is not None and not self.busy and not self.queue:
+                    self._fire_turn_done({"text": txt, "error": err_text or ""})
 
             # Publish the post-arbitration truth (including a just-started
             # queued/nudge/drive turn) without holding the stdin arbiter lock.

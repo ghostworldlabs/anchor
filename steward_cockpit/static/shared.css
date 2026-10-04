@@ -594,3 +594,7 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .app.talkview .main{grid-column:1 !important}
 .app.talkview .bar{padding:3px 10px;min-height:0;font-size:11.5px}
 .app.talkview .bar .title{display:none}
+/* R1 (steward responsiveness, 2026-10-04): the queued receipt's "Take this now" */
+.blk.sys .take-now { font: inherit; font-style: normal; font-size: 12px; margin-left: 6px; padding: 1px 10px; border-radius: 999px;
+  border: 1px solid var(--accent, #6c9cfc); background: transparent; color: var(--accent, #9ec0ff); cursor: pointer; }
+.blk.sys .take-now:disabled { opacity: .6; cursor: default; }

@@ -91,7 +91,8 @@ def test_the_engine_sends_standing_rules_to_bridge_families_only(env, monkeypatc
         sent = json.loads(engine.proc.stdin.getvalue().strip().splitlines()[-1])
         assert ("standing_rules" in sent) is expected, cli
         if expected:
-            assert sent["standing_rules"] == engine_mod.CONTRACT          # the one contract, every turn
+            assert sent["standing_rules"] == engine._contract()          # the one contract, every turn (small duty first, 2026-10-04)
+            assert sent["standing_rules"].startswith(engine_mod.SMALL_DUTY) and engine_mod.CONTRACT in sent["standing_rules"]
 
 
 # ── Codex file paths ──────────────────────────────────────────────────────────

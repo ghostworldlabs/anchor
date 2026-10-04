@@ -1552,6 +1552,21 @@ def handle_post(cdir, verb, body):
             from steward_cockpit import horizon as _horizon2
             _horizon2.refresh(cdir, "refined")
         return result, 200 if result.get("ok") else 409
+    if verb == "code_job":
+        # R3 (steward responsiveness, 2026-10-04): the steward hands real work to a code job and stays free to talk
+        from steward_cockpit import code_jobs as _cj
+        action = body.get("action") or "list"
+        if action == "start":
+            eng = get_engine(cdir)
+            out = _cj.start(cdir, body.get("repo") or "", body.get("brief") or "", body.get("check") or "",
+                            engine_factory=lambda wt: get_engine(wt, general=True, tid="1"),
+                            steward=(eng.steward if eng else ""))
+            if out.get("ok") and eng is not None:
+                eng._emit({"t": "sys", "text": "code job %s started on %s (best model, full effort); the steward stays free to talk" % (out["job"], body.get("repo"))})
+            return out, (200 if out.get("ok") else 400)
+        if action == "stop":
+            return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False)), 200
+        return {"ok": True, "jobs": list(_cj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "engine":
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)
@@ -1567,6 +1582,9 @@ def handle_post(cdir, verb, body):
             eng.set_drive(action == "drive_on"); return {"ok": True, "drive": eng.drive}, 200
         if action == "switch":
             return eng.switch_cli(body.get("cli", "")), 200
+        if action == "take_now":
+            # R1 (2026-10-04): his queued message goes now - interrupt the running turn, then wake on the queue
+            return eng.take_now(), 200
         if action == "interrupt":
             # codex-discipline-2026-09-15 Wave 1.3: Stop turn (not park).
             return eng.interrupt_turn(str(body.get("reason") or "stopped by John")[:120]), 200

@@ -1600,6 +1600,19 @@ const Proto = (() => {
       // tick-tagged housekeeping (drive continues, cadence commits) rides
       // the status pane; plain sys lines stay in the conversation
       addLine("sys", ev.text, ev.tick ? ev : undefined);
+      // R1 (2026-10-04): a queued receipt carries "Take this now" - the running turn ends, his message goes at once
+      if (ev.take_now) {
+        const s = targetFor(ev), line = s && s.lastElementChild;
+        if (line) {
+          const b = el("button", "take-now", "Take this now");
+          b.type = "button";
+          b.onclick = async () => { b.disabled = true; b.textContent = "Taking it now\u2026";
+            let ok = false;
+            try { const r = await post("/api/engine", { action: "take_now" }); const j = await r.json(); ok = r.ok && j && j.ok; } catch (e) { ok = false; }
+            if (!ok) { b.disabled = false; b.textContent = "Take this now"; b.title = "the turn could not be taken over - try again"; } };
+          line.appendChild(document.createTextNode(" ")); line.appendChild(b);
+        }
+      }
     }
     if (opts.onEvent) opts.onEvent(ev);
   }

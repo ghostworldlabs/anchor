@@ -220,6 +220,6 @@ def test_the_if_then_is_written_on_the_record_and_read_back(record, monkeypatch)
 
 def test_the_remit_rides_every_bridge_turn_of_the_campaign_only():
     src = open(os.path.join(HERE, "steward_cockpit", "steward_engine.py"), encoding="utf-8").read()
-    i = src.index('msg["standing_rules"] = CONTRACT')
-    assert 'msg["standing_rules"] = campaign_mode_remit(self.steward) + CONTRACT' in src[i:i + 500]
+    i = src.index('msg["standing_rules"] = self._contract()')
+    assert 'msg["standing_rules"] = campaign_mode_remit(self.steward) + self._contract()' in src[i:i + 500]
     assert "_is_campaign_dir(self.dir) and not _is_cave_dir(self.dir)" in src[i:i + 500]
