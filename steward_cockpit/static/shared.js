@@ -821,7 +821,7 @@ const Proto = (() => {
   function navFile(it, surface, readOnly=false) {
     const box=el('div','navfile');box.dataset.navPath=it.path||it.route||it.what;box.dataset.productId=it.product_id||'';
     const shown={...it,date:String(it.date||'').split('T')[0]};
-    if(it.managed)shown.what=String(it.what||it.product_id).replace(/-/g,' ');
+    if(it.managed && !it.open_path)shown.what=String(it.what||it.product_id).replace(/-/g,' ');
     const row=delivRow(shown);row.classList.add('navfilelink');box.appendChild(row);
     if(it.managed) {
       const round=it.round===0?'Initial draft':Number.isInteger(it.round)?'Refinement '+it.round:'';
@@ -869,7 +869,7 @@ const Proto = (() => {
     if(!stepRows) {
       const p=el('div','navpin');p.appendChild(el('div','naveyebrow','Current work and review'));
       const current=items.filter(i=>i.is_current===true)   // the server's one rule (current_review_items)
-        .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+        .sort((a,b)=>Number(/^START HERE\b/.test(b.what||''))-Number(/^START HERE\b/.test(a.what||'')) || String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
         p.appendChild(el('div','naveyebrow','Files awaiting you \u00b7 '+current.length));
         current.forEach(it=>p.appendChild(navFile(it,surface+':pin',true)));
@@ -1184,6 +1184,43 @@ const Proto = (() => {
     li.appendChild(el("div", "planlegend", "\u2713 done \u00b7 \u25cf now \u00b7 \u2691 waiting on you"));
     return li;
   }
+  // Readable opening copies are bound to exact immutable revisions in the ONE
+  // DELIVERABLES register: `named file` review: `immutable file`. The route
+  // still checks the revision hash; labels never change lifecycle identity.
+  function registeredReviewNames(items, approved = [], acts = []) {
+    const key = p => String(p || '').replace(/\\/g, '/');
+    const contained = p => typeof p === 'string' && p.length > 0 && p.length <= 1000 &&
+      !/[\\:\x00-\x1f]/.test(p) && !p.startsWith('/') &&
+      p.split('/').every(x => x && x !== '.' && x !== '..');
+    const aliases = new Map();
+    for (const row of items) {
+      if (row.managed || !row.openable || !contained(row.path)) continue;
+      const match = /\breview:\s*`([^`]+)`/.exec(row.where_text || '');
+      if (!match || !contained(match[1]) || key(match[1]) === key(row.path)) continue;
+      const binding = key(match[1]);
+      const owner = row.owner_step_id || row.step;
+      if (!owner || !row.what) continue;
+      const entry = {owner, label: row.what, open_path: row.path};
+      if (aliases.has(binding) && JSON.stringify(aliases.get(binding)) !== JSON.stringify(entry))
+        aliases.set(binding, null); // Ambiguous labels cannot replace an exact revision.
+      else if (!aliases.has(binding)) aliases.set(binding, entry);
+    }
+    const decorate = item => {
+      const a = item && aliases.get(key(item.path));
+      const owner = item && (item.owner_step_id || item.step || item.step_id);
+      const ext = p => key(p).split('/').pop().split('.').pop().toLowerCase();
+      const named = item && item.managed && /^[a-f0-9]{64}$/i.test(item.hash || '') &&
+        a && a.owner === owner && ext(item.path) === ext(a.open_path)
+        ? {...item, what: a.label, open_path: a.open_path} : {...item};
+      if (item && item.history) named.history = item.history.map(decorate);
+      return named;
+    };
+    const decorated = items.map(decorate);
+    const openingCopies = new Set(decorated.filter(i => i.managed && i.open_path && i.is_current)
+      .map(i => key(i.open_path)));
+    return {items: decorated.filter(i => i.managed || !openingCopies.has(key(i.path))), approved: approved.map(decorate),
+      acts: acts.map(a => a.item ? {...a, item: decorate(a.item), label: decorate(a.item).what} : a)};
+  }
   async function renderDeliverablesTile() {
     if (_delivBusy) return;
     _delivBusy = true;
@@ -1191,9 +1228,10 @@ const Proto = (() => {
     try { d = await (await fetch(api("/api/deliverables"))).json(); }
     catch (e) { _delivBusy = false; return; }
     _delivBusy = false;
-    const items = (d && d.items) || [];
+    const named = registeredReviewNames((d && d.items) || [], (d && d.approved) || [], (d && d.acts) || []);
+    const items = named.items;
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
-    _deliv = {items, approved: (d && d.approved) || [], acts: (d && d.acts) || [], warning: (d && d.current_warning) || ""};
+    _deliv = {...named, warning: (d && d.current_warning) || ""};
     renderNextStepsTile();
     // repaint the plan so step-tagged deliverables land under their steps
     if (_lastMap) { try { paintStepsList(_lastMap); } catch (e) {} }
@@ -1204,7 +1242,8 @@ const Proto = (() => {
       let tile = s.querySelector(".blk.deliv");
       const priorScroll=tile && tile.querySelector(".body") ? tile.querySelector(".body").scrollTop : 0;
       // starts CLOSED so the status keeps the room; his choice then sticks
-      const currentNow = items.filter(i => i.is_current === true);
+      const currentNow = items.filter(i => i.is_current === true)
+        .sort((a,b) => Number(/^START HERE\b/.test(b.what||''))-Number(/^START HERE\b/.test(a.what||'')) || String(b.date || '').localeCompare(String(a.date || '')));
       const wasOpen = tile ? !tile.classList.contains("folded")
                            : (_delivOpen === null ? currentNow.length > 0 : _delivOpen === true);
       if (!tile) {
@@ -1278,6 +1317,7 @@ const Proto = (() => {
   }
   function delivRow(it) {
     const row = el("div", "snow drow");
+    const openPath = it.open_path || it.path;
     if (it.notebook_product && window.AnchorNotebooks) {
       row.appendChild(window.AnchorNotebooks.render(it, it.dir !== undefined ? it.dir : DIR));
       return row;
@@ -1306,17 +1346,17 @@ const Proto = (() => {
       // text docs (.md/.txt/.csv/.json/.log) through the report VIEWER so
       // they render human-readable instead of as raw bytes.
       const dirRel = it.dir !== undefined ? it.dir : DIR;
-      const isText = /\.(md|txt|csv|json|log)$/i.test(it.path);
+      const isText = /\.(md|txt|csv|json|log)$/i.test(openPath) && !(it.managed && it.open_path && it.hash);
       if (isText) {
         a.href = "#";
         a.onclick = (ev) => { ev.preventDefault();
           window.open("/report?dir=" + encodeURIComponent(dirRel) +
-                      "&path=" + encodeURIComponent(it.path)); };
+                      "&path=" + encodeURIComponent(openPath)); };
       } else {
         a.href = "/api/steward/deliverable-file?pid=" +
           encodeURIComponent(window.STEWARD_PID || "") +
           "&dir=" + encodeURIComponent(dirRel) +
-          "&path=" + encodeURIComponent(it.path) +
+          "&path=" + encodeURIComponent(openPath) +
           (it.hash ? "&hash=" + encodeURIComponent(it.hash) : "") +
           (/\.(docx|pptx|xlsx)$/i.test(it.path) ? "&view=1" : "") +
           (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
@@ -1331,7 +1371,7 @@ const Proto = (() => {
       if (/\.docx$/i.test(it.path) && it.dir === undefined && _lastMap && _lastMap.dir) {
         // (Wave D0) one click opens the manuscript in desktop Word, track changes and all
         const word = el('a', 'sdmeta', ' Open in Word');
-        word.href = "ms-word:ofe|u|" + fileUrl(_lastMap.dir) + "/" + String(it.path).split(/[\\/]/).map(encodeURIComponent).join("/");
+        word.href = "ms-word:ofe|u|" + fileUrl(_lastMap.dir) + "/" + String(openPath).split(/[\\/]/).map(encodeURIComponent).join("/");
         row.appendChild(word);
       }
       if (it.managed && it.presentation_id) {
@@ -1343,7 +1383,7 @@ const Proto = (() => {
           // 2026-09-14 and 2026-09-18: managed Current work opened about:blank,
           // waited on a slow view write, then closed the window).
           const preview = window.open("about:blank", "_blank");
-          const target = isText ? "/steward/report?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(dirRel) + "&path=" + encodeURIComponent(it.path) + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "") : href;
+          const target = isText ? "/steward/report?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(dirRel) + "&path=" + encodeURIComponent(openPath) + (it.hash ? "&hash=" + encodeURIComponent(it.hash) : "") + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "") : href;
           if (preview) { preview.opener = null; preview.location = target; }
           else window.location.assign(target);
           try {
