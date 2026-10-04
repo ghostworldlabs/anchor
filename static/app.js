@@ -15,6 +15,7 @@
   "use strict";
   var CAVE_URL = "/";
   var CAVE_ICON = "/vendor/brand/aladdin-high-seat-cave.png";
+  var STAR_CHART_ICON = "/vendor/brand/campaign-aladdin-star-chart.jpg";
   var FRAME_SCRIPT = "/static/app-frame.js";
   var DROP_AFTER_MS = 15000;
 
@@ -87,6 +88,8 @@
 
   function byId(id) { for (var i = 0; i < tiles.length; i++) if (tiles[i].id === id) return tiles[i]; return null; }
   function shownIn(id) { return id && panes[0] === id ? 0 : (two && id && panes[1] === id ? 1 : -1); }
+  function isStarChart(t) { return t.kind === "page" && /^(?:The )?Star Chart$/.test(t.title || ""); }
+  function displayTitle(t) { return t.kind === "cave" ? "Cave of Wonders" : isStarChart(t) ? "Star Chart" : (t.title || "Page"); }
 
   // ---------- what an address is ----------
   function resolve(u, fromWin) {
@@ -291,7 +294,7 @@
       h.hidden = !two;
       h.classList.toggle("active", two && k === active);
       var t = byId(panes[k]);
-      h.querySelector(".name").textContent = t ? (t.kind === "cave" ? "Cave of Wonders" : t.title) : "";
+      h.querySelector(".name").textContent = t ? displayTitle(t) : "";
     });
     document.getElementById("one").setAttribute("aria-pressed", String(!two));
     document.getElementById("two").setAttribute("aria-pressed", String(two));
@@ -309,12 +312,15 @@
       el.tabIndex = 0;
       el.setAttribute("role", "button");
       el.dataset.id = t.id;
-      if (t.kind === "cave") {
-        var img = document.createElement("img"); img.src = CAVE_ICON; img.alt = "";
-        el.appendChild(img);
+      if (t.kind === "cave" || isStarChart(t)) {
+        var img = document.createElement("img"); img.src = t.kind === "cave" ? CAVE_ICON : STAR_CHART_ICON; img.alt = "";
+        if (isStarChart(t)) {
+          var icon = document.createElement("span"); icon.className = "tile-icon star-chart";
+          icon.appendChild(img); el.appendChild(icon);
+        } else el.appendChild(img);
       }
       var name = document.createElement("span"); name.className = "name";
-      name.textContent = t.kind === "cave" ? "Cave of Wonders" : (t.title || "Page");
+      name.textContent = displayTitle(t);
       el.title = name.textContent;
       el.appendChild(name);
       if (two && k >= 0) {

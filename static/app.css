@@ -33,7 +33,9 @@ body.hosted { border: 1px solid #2f3a4d; box-sizing: border-box; }
            width: 20px; height: 20px; border-radius: 10px; padding: 0; }
 .tile .x:hover, .tile .x:focus-visible { color: var(--text); background: #2a3344; }
 .tile.cave { background: var(--cave); border-color: var(--caveline); padding-right: 11px; color: #e9d9a8; }
-.tile.cave img { width: 18px; height: 18px; border-radius: 4px; }
+.tile img { width: 18px; height: 18px; border-radius: 4px; flex: none; }
+.tile-icon { display: block; width: 18px; height: 18px; border-radius: 4px; overflow: hidden; flex: none; }
+.tile-icon.star-chart img { width: 30px; height: 30px; max-width: none; transform: translate(-6px, -6px); }
 .tile.doc { border-style: dashed; }
 .tile.shown { color: var(--text); border-color: #4a5a75; }
 .tile.focus { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(224, 168, 54, .18); }
