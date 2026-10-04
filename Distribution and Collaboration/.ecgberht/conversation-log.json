@@ -225,6 +225,12 @@
       "text": "Accept recommendation: For paid Anchor hosting, I recommend requiring permission to protect your proposed service.",
       "turn_id": "54353a3f-f66f-4138-8c33-b1acdb7957d8",
       "at": "2026-10-04T19:47:51.189280+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll record paid Anchor hosting as requiring permission in Distribution scope v1, Refinement 1, and clear the answered question.\nYour answer settles the paid-hosting boundary. I’ll carry it into the scope and comparison alongside free internal use, voluntary sharing and restricted sales of Anchor-based software; the license wording remains undecided.\nThe plan now records paid hosting as requiring permission. I’m finishing the saved summary and next decision; one summary line exceeded the page’s length limit, so I’m shortening it.\nPaid Anchor hosting now requires permission in Distribution scope v1, Refinement 1, and the plan reflects your answer. Free internal use, voluntary contributions and restricted sales of Anchor-based software remain the other boundaries.\n\nI recommend a custom source-available license candidate because one draft can express all those choices.\n\n[MIT plus Commons Clause](https://commonsclause.com/): ready-made, but can permit value-added paid products; defer: leave the candidate undecided.\n\nThis authorizes: refine Distribution scope v1, Refinement 1 around a custom source-available license candidate for review.\n\nReversible: yes - undo: remove the custom candidate from the scope.\n\nCustom?",
+      "turn_id": "chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:7",
+      "at": "2026-10-04T19:59:50.706989+00:00"
     }
   ]
 }

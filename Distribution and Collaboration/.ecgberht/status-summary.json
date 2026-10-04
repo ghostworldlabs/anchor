@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 10:07",
-  "status_id": "01791130066658147500",
+  "at": "2026-10-04 13:59",
+  "status_id": "01791143991169215700",
   "effort": "Distribution and Collaboration",
   "latest_event": null,
   "compact": {
-    "activity": "The Campaign session is preparing the requested license and intellectual property comparison.",
+    "activity": "nothing running - quiet",
     "latest_event": null,
     "next": [
-      "License and intellectual property \u2014 restricted preference"
+      "Licensing and hosting"
     ],
-    "question": "Connect or install?",
+    "question": "Custom?",
     "facts": [
       {
         "label": "Summary",
-        "value": "License and intellectual property \u2014 restricted preference \u2014 Compare the requested modification-sharing and\u2026"
+        "value": "Licensing and hosting \u2014 Compare candidate licenses against free internal business use, broad modification,\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "The Campaign session is preparing the requested license and intellectual property comparison."
+        "value": "nothing running - quiet"
       },
       {
         "label": "Status",
-        "value": "research: License and intellectual property \u2014 restricted preference \u00b7 0/6 done \u00b7 working"
+        "value": "research: Licensing and hosting \u00b7 0/6 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "none"
+        "value": "waiting on you: John: custom source-available candidate?"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0003-first-trial-discovery-2026-10-04: First collaborator trial discovery \u2014 2026-10-04"
+        "value": "0008-paid-hosting-permission-2026-10-04: Paid-hosting permission recorded"
       },
       {
         "label": "ETA",
@@ -49,33 +49,33 @@
       },
       {
         "label": "To do",
-        "value": "License and intellectual property \u2014 restricted preference"
+        "value": "Licensing and hosting"
       }
     ]
   },
-  "lead_line": "Next: License and intellectual property \u2014 restricted preference; then Install and use from a collaborator\u2019s computer \u2014 Both connection and installation remain required; their trial order is unsettled.",
+  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 Paid-hosting permission is settled; the licensing candidate remains the next decision. \u00b7 waiting on you: John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.",
   "now": [
-    "The Campaign session is preparing the requested license and intellectual property comparison."
+    "nothing running - quiet"
   ],
   "running": {
-    "kind": "commissioned",
-    "label": "The Campaign session is preparing the requested license and intellectual property comparison.",
+    "kind": "none",
+    "label": "nothing running - quiet",
     "skill": "",
-    "source": ".ecgberht/attention.json",
+    "source": "",
     "age": ""
   },
   "slice": {
     "n": 4,
     "total": 6,
     "id": "gwl-license",
-    "name": "License and intellectual property \u2014 restricted preference",
+    "name": "Licensing and hosting",
     "part": "research",
-    "summary": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+    "summary": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0003-first-trial-discovery-2026-10-04: First collaborator trial discovery \u2014 2026-10-04",
+  "journal": "0008-paid-hosting-permission-2026-10-04: Paid-hosting permission recorded",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,10 +85,10 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0003-first-trial-discovery-2026-10-04.md",
-      "entry_id": "0003-first-trial-discovery-2026-10-04",
-      "at": "2026-10-04T16:07:46Z",
-      "step_id": null,
+      "path": "journal/0008-paid-hosting-permission-2026-10-04.md",
+      "entry_id": "0008-paid-hosting-permission-2026-10-04",
+      "at": "2026-10-04T19:59:50Z",
+      "step_id": "gwl-license",
       "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
       "run_id": null
     },
@@ -98,37 +98,37 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "License and intellectual property \u2014 restricted preference",
+    "Licensing and hosting",
     "then Install and use from a collaborator\u2019s computer"
   ],
   "project": {
     "brief": "\"make it a open source tool that many collaborators can use That can be helpful to a lot of people for improving their productivity\"",
-    "parts": "slice \u00b7 integrate \u00b7 research \u25b6 \u00b7 harden \u00b7 rigor",
+    "parts": "slice \u00b7 integrate \u00b7 research \u00b7 harden \u00b7 rigor",
     "steps_done": 0,
     "steps_total": 6
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Comparing licensing in Campaign and choosing the first collaborator trial here.",
+    "text": "Paid-hosting permission recorded; choosing the licensing candidate in Distribution scope v1, Refinement 1.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "research: License and intellectual property \u2014 restricted preference",
+    "step": "research: Licensing and hosting",
     "steps_done": 0,
     "steps_total": 6,
-    "waiting_on_you": "",
+    "waiting_on_you": "John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.",
     "waiting_since": null,
-    "next": "License and intellectual property \u2014 restricted preference; then Install and use from a collaborator\u2019s computer",
-    "why": "Both connection and installation remain required; their trial order is unsettled.",
-    "attention": "working",
+    "next": "Licensing and hosting; then Install and use from a collaborator\u2019s computer",
+    "why": "Paid-hosting permission is settled; the licensing candidate remains the next decision.",
+    "attention": "quiet",
     "goal_reread": true
   },
   "map": [
-    "research: License and intellectual property \u2014 restricted preference (active)",
+    "research: Licensing and hosting (waiting)",
     "slice: Windows, Linux and macOS downloads (proposed) \u00b7 no gate",
     "slice: Ghost World Labs repositories (proposed) \u00b7 no gate",
     "rigor: Review releases and public terms before publication (proposed) \u00b7 no gate",
@@ -144,11 +144,11 @@
       "steps": [
         {
           "id": "gwl-license",
-          "name": "License and intellectual property \u2014 restricted preference",
-          "status": "active",
-          "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+          "name": "Licensing and hosting",
+          "status": "waiting",
+          "done_when": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based software and permission for third-party paid hosted access. John chooses the candidate and final terms; rights/legal review precedes publication. Enterprise and model services remain proposals.",
           "if_then": "",
-          "waiting_on": null,
+          "waiting_on": "John: use custom source-available terms as the license candidate? Recommend yes; Distribution scope v1, Refinement 1.",
           "due": null,
           "ref": null,
           "tier": null,
@@ -271,7 +271,7 @@
           "id": "gwl-site",
           "name": "Download site and collaboration",
           "status": "proposed",
-          "done_when": "Offer the releases from the proposed Ghost World Labs web home.",
+          "done_when": "Offer the releases from the proposed Ghost World Labs web home; clarify the proposed Anchor exchange for sharing modifications and the proposed paid enterprise, managed-mother-ship and open-model token services. No offering or fee is selected.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -302,9 +302,9 @@
           "id": "gwl-release",
           "name": "Install and use from a collaborator\u2019s computer",
           "status": "proposed",
-          "done_when": "Verify installation, connection and release behavior on the supported platforms.",
+          "done_when": "First verify a collaborator connects to the existing mother ship; then independently verify installation. Cover the supported platforms through the shared Setup flow.",
           "if_then": "",
-          "waiting_on": "John: connect or install first? Recommendation: connect to the existing mother ship. Exact scope v1 question in DISCOVERY-v1.md.",
+          "waiting_on": null,
           "due": null,
           "ref": null,
           "tier": null,
@@ -325,5 +325,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 6
+  "deliverables_count": 10
 }
