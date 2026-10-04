@@ -5,6 +5,67 @@
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  // John, 2026-10-04: scan small cards, hover for details, click for the full cockpit.
+  function positionPeek(card) {
+    var peek = $('.t-peek', card); if (!peek || !card.classList.contains('peeking')) return;
+    var r = card.getBoundingClientRect(), below = Math.max(0, innerHeight - r.bottom - 8), above = Math.max(0, r.top - 8);
+    peek.style.width = Math.min(r.width, innerWidth - 16) + 'px';
+    peek.style.left = Math.max(8, Math.min(r.left, innerWidth - r.width - 8)) + 'px';
+    peek.style.maxHeight = Math.max(1, Math.min(500, Math.max(below, above), innerHeight - 16)) + 'px';
+    var up = below < Math.min(peek.scrollHeight, 200) && above > below;
+    peek.style.top = up ? 'auto' : Math.max(0, r.bottom - 1) + 'px';
+    peek.style.bottom = up ? Math.max(0, innerHeight - r.top - 1) + 'px' : 'auto';
+  }
+  function hidePeek(card) {
+    card.classList.remove('peeking', 'peek-pinned');
+    var trigger = $('.t-peek-open', card); if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    card.removeAttribute('data-open'); card.removeAttribute('data-open-dir');
+    var detail = $('.t-peek-detail', card); if (detail) { detail.hidden = true; detail.innerHTML = ''; }
+    $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
+  }
+  function showPeek(card) {
+    if (drag || card.classList.contains('open') || card.classList.contains('peek-dismissed')) return;
+    $$('.tile.peeking').forEach(function (other) { if (other !== card && !other.contains(document.activeElement)) hidePeek(other); });
+    card.classList.add('peeking'); positionPeek(card);
+    var trigger = $('.t-peek-open', card); if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  }
+  function compactTiles(root) {
+    $$('.tile[data-tile]', root).forEach(function (card) {
+      if (card._compact || !$('.t-body', card)) return;
+      card._compact = true;
+      var peek = document.createElement('div'); peek.className = 't-peek';
+      peek.innerHTML = '<div class="t-peek-head"><span>Details</span><button type="button" class="t-peek-close" aria-label="Close details">\u00d7</button></div>';
+      ['.t-face', '.t-acts'].forEach(function (s) { var el = $(s, card); if (el) peek.appendChild(el); });
+      var dialogue = document.createElement('button'); dialogue.type = 'button'; dialogue.className = 't-inline-talk'; dialogue.textContent = 'Dialogue';
+      $('.t-acts', peek).appendChild(dialogue);
+      dialogue.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); openTile(card, card.getAttribute('data-tile'), card.getAttribute('data-dir') || ''); });
+      var detail = document.createElement('div'); detail.className = 't-peek-detail'; detail.hidden = true; peek.appendChild(detail);
+      card.insertBefore(peek, $('.t-body', card));
+      var trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 't-peek-open'; trigger.textContent = '\u22ef'; trigger.setAttribute('aria-label', 'Show initiative details'); trigger.setAttribute('aria-expanded', 'false');
+      $('.t-top', card).insertBefore(trigger, $('.t-go', card));
+      trigger.addEventListener('click', function () { if (card.classList.contains('peek-pinned')) { hidePeek(card); card.classList.add('peek-dismissed'); } else { card.classList.remove('peek-dismissed'); showPeek(card); card.classList.add('peek-pinned'); } });
+      card.tabIndex = 0;
+      card.setAttribute('aria-label', ($('.t-name', card).textContent || '').trim() + ': hover for details, Enter opens the full cockpit');
+      card.addEventListener('pointerenter', function (e) { if (e.pointerType === 'touch') return; card.classList.remove('peek-dismissed'); showPeek(card); });
+      card.addEventListener('pointerleave', function () { card.classList.remove('peek-dismissed'); if (!card.classList.contains('peek-pinned') && !card.contains(document.activeElement)) hidePeek(card); });
+      card.addEventListener('focusin', function () { showPeek(card); });
+      card.addEventListener('focusout', function () { setTimeout(function () { if (!card.contains(document.activeElement) && !card.matches(':hover') && !card.classList.contains('peek-pinned')) hidePeek(card); }, 0); });
+      card.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && card.classList.contains('peeking')) {
+          e.preventDefault(); e.stopPropagation(); hidePeek(card); card.classList.add('peek-dismissed'); card.focus();
+        } else if (e.key === 'Enter' && e.target === card) { e.preventDefault(); var a = $('.t-go', card); if (a) a.click(); }
+      });
+      $('.t-peek-close', card).addEventListener('click', function () { hidePeek(card); card.classList.add('peek-dismissed'); card.focus(); });
+      card.addEventListener('dragstart', function () { hidePeek(card); card.classList.add('peek-dismissed'); });
+      card.addEventListener('click', function (e) {
+        if (e.target.closest('a, button, .t-body, .t-peek') || drag || card.classList.contains('dragging') || String(window.getSelection() || '').trim()) return;
+        e.preventDefault(); var a = $('.t-go', card); if (a) a.click();
+      });
+    });
+  }
+  compactTiles(document);
+  window.addEventListener('resize', function () { $$('.tile.peeking').forEach(positionPeek); });
+  document.addEventListener('scroll', function () { $$('.tile.peeking').forEach(positionPeek); }, true);
   // Initiative dialogue and full cockpit bind the same project and effort. Older
   // services still emit a project-index link; keep the loaded page's door direct.
   function initiativeCockpitLinks(root) {
@@ -254,7 +315,7 @@
       ptileLoaded = true; $('#ptileLoading').textContent = 'reading the projects…';
       fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
         .then(function (r) { return r.json(); })
-        .then(function (j) { var f = $('#folders'); if (f && j && j.html) { f.innerHTML = j.html; initiativeCockpitLinks(f); } })
+        .then(function (j) { var f = $('#folders'); if (f && j && j.html) { f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f); } })
         .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
     }
   }
@@ -463,7 +524,7 @@
         var doc = new DOMParser().parseFromString(html, 'text/html');
         $$('.tile[data-tile]').forEach(function (card) {
           var fresh = doc.getElementById(card.id); if (!fresh) return;
-          var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
+          var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && !f0.contains(document.activeElement) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
           var l0 = $('.tlight', card), l1 = $('.tlight', fresh); if (l0 && l1) { l0.className = l1.className; l0.title = l1.title; }
           var r1 = fresh.getAttribute('data-ready'); if (r1) card.setAttribute('data-ready', r1); else card.removeAttribute('data-ready');
         });
@@ -485,6 +546,7 @@
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
+    hidePeek(card);
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });   // one tile open, one dialogue polling (Grok's read of W2e)
     card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
     rememberTile(card, false);
@@ -512,6 +574,17 @@
     // and the open state is keyed by part AND effort so the same part on another effort opens rather than closes
     var dir = (btn && btn.getAttribute && btn.getAttribute('data-dir') !== null) ? btn.getAttribute('data-dir') : (card.getAttribute('data-dir') || '');
     var key = part + '|' + dir;
+    if (card._compact && !card.classList.contains('open')) {
+      var detail = $('.t-peek-detail', card), same = card.getAttribute('data-open') === key;
+      if (same) { hidePeek(card); card.classList.add('peek-dismissed'); return; }
+      card.classList.remove('peek-dismissed'); showPeek(card); card.classList.add('peek-pinned'); seen(card);
+      card.setAttribute('data-open', key); card.setAttribute('data-open-dir', dir);
+      $$('.t-acts button, .t-eff-open', card).forEach(function (b) { b.classList.toggle('on', b === btn); });
+      detail.hidden = false; detail.innerHTML = '<div class="cp-quiet">Reading the record\u2026</div>'; positionPeek(card);
+      fetchPart(pid, part, dir, false, false).then(function (html) { if (card.getAttribute('data-open') === key) { detail.innerHTML = html; positionPeek(card); } })
+        .catch(function () { if (card.getAttribute('data-open') === key) detail.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+      return;
+    }
     // the tile opens on the act's OWN effort (a button naming another effort's wait): its brief and dialogue are that
     // cockpit's, never a different cockpit from the detail beside it (Grok's read of W2e-3)
     if (!card.classList.contains('open')) openTile(card, pid, dir);
@@ -528,6 +601,7 @@
   $$('.tile[data-tile]').forEach(function (card) {
     var pid = card.getAttribute('data-tile');
     card.addEventListener('click', function (e) {
+      if (card._compact) return;   // the compact card's click follows its full-cockpit link
       if (e.target.closest('a, button, .t-body')) return;
       if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');   // the tile itself opens to its brief and its dialogue
     });
@@ -549,6 +623,7 @@
     if (!kept || !kept.id) return;
     var card = document.getElementById(kept.id);
     if (!card || !card.getAttribute('data-tile')) { forgetTile(); return; }
+    if (card._compact) { forgetTile(); return; }   // the new overview starts small; conversation drafts remain saved
     openTile(card, card.getAttribute('data-tile'), kept.dir || '');
     if (kept.big) grow(card);
   })();
@@ -558,7 +633,7 @@
     var a = e.target.closest('.cb-ask');
     if (a) { e.preventDefault(); e.stopPropagation(); var bd = a.parentNode.querySelector('.cb-body'); if (!bd) return; var open = bd.hidden; bd.hidden = !open; a.setAttribute('aria-expanded', open ? 'true' : 'false'); a.classList.toggle('open', open); return; }
     var t = e.target.closest('.cb-talk');
-    if (t) { e.preventDefault(); e.stopPropagation(); var card = t.closest('.tile'); if (!card || !card._talk || !card._talk.prefill) return; card._talk.prefill('About: ' + (t.getAttribute('data-ask') || '') + ' \u2014 ', true); }   // into the cockpit's own box (2026-10-02)
+    if (t) { e.preventDefault(); e.stopPropagation(); var card = t.closest('.tile'); if (!card) return; if (card._compact && !card._talk) openTile(card, card.getAttribute('data-tile'), card.getAttribute('data-open-dir') || card.getAttribute('data-dir') || ''); if (!card._talk || !card._talk.prefill) return; card._talk.prefill('About: ' + (t.getAttribute('data-ask') || '') + ' \u2014 ', true); }   // an explicit talk action retains the dialogue-only embedded conversation
   });
   // Accept in the brief: one click, the answer said to the steward as the cockpit says it, the dialogue takes the tile
   document.addEventListener('click', function (e) {
