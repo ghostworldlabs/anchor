@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "active_effort": "Comparing licensing in Campaign and choosing the first collaborator trial here.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "none",
@@ -16,8 +16,8 @@
   },
   "anti_starvation_age_days": 0,
   "grasscatch": [],
-  "next_recommended": "License choice: open source and sharing changes; then Install and use from a collaborator’s computer",
-  "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+  "why_next": "Both connection and installation remain required; their trial order is unsettled.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -55,6 +55,63 @@
       "next_recommended": "License choice: open source and sharing changes; then Install and use from a collaborator’s computer",
       "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
       "horizon_source_seq": 14,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "horizon_source_seq": 16,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "horizon_source_seq": 17,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "Choose the first collaborator trial while Campaign prepares the license comparison.",
+      "why_next": "Both connection and installation remain required; their trial order is unsettled.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Comparing licensing in Campaign and choosing the first collaborator trial here."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Both connection and installation remain required; their trial order is unsettled.",
+      "horizon_source_seq": 17,
       "horizon_focus": "gwl-license",
       "horizon_steps": [
         "gwl-license",
@@ -134,8 +191,18 @@
       "wait_ref": null,
       "human_wait": "none",
       "_kind": "receipt"
+    },
+    {
+      "at": "2026-10-04T16:00:25Z",
+      "source": "engine",
+      "step_id": null,
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
+      "kind": "journal_update",
+      "path": "journal/0002-pickup-license-preference-2026-10-04.md",
+      "entry_id": "0002-pickup-license-preference-2026-10-04",
+      "summary": "Distribution and Collaboration pickup — 2026-10-04"
     }
   ],
-  "horizon_source_seq": 14,
+  "horizon_source_seq": 17,
   "horizon_focus": "gwl-license"
 }

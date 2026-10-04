@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T15:18:43.099Z",
+  "as_of": "2026-10-04",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -255,6 +255,45 @@
       "from": "proposed",
       "to": "waiting",
       "seq": 14
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "name": "License and intellectual property — restricted preference",
+        "waiting_on": null
+      },
+      "at": "2026-10-04T15:58:08.592Z",
+      "client_event_id": "gwl-feedback-52eadd74-2b48-4381-ae92-d255c5042d21-gwl-license",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T15:58:08.592Z",
+        "why": "Source turn 52eadd74-2b48-4381-ae92-d255c5042d21: restricted is a provisional preference; explain standard licensing/IP options, distinguish initiative titles, associate the original brainstorming with its goal. No final license or slice close."
+      },
+      "seq": 15
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "waiting",
+      "to": "active",
+      "at": "2026-10-04T15:58:08.592Z",
+      "client_event_id": "gwl-feedback-52eadd74-2b48-4381-ae92-d255c5042d21-active",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T15:58:08.592Z",
+        "why": "Source turn 52eadd74-2b48-4381-ae92-d255c5042d21: restricted is a provisional preference; explain standard licensing/IP options, distinguish initiative titles, associate the original brainstorming with its goal. No final license or slice close."
+      },
+      "seq": 16
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-release",
+      "fields": {
+        "waiting_on": "John: connect or install first? Recommendation: connect to the existing mother ship. Exact scope v1 question in DISCOVERY-v1.md."
+      },
+      "at": "2026-10-04",
+      "seq": 17
     }
   ],
   "roadmap_projection": [
@@ -313,10 +352,10 @@
     },
     {
       "id": "gwl-license",
-      "name": "License choice: open source and sharing changes",
-      "status": "waiting",
+      "name": "License and intellectual property — restricted preference",
+      "status": "active",
       "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
-      "waiting_on": "John: open or restricted? Recommendation: AGPLv3 as the open-source candidate; refine Distribution scope v1 only.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "research",
       "gate": null,
@@ -332,7 +371,7 @@
       "name": "Install and use from a collaborator’s computer",
       "status": "proposed",
       "done_when": "Verify installation, connection and release behavior on the supported platforms.",
-      "waiting_on": null,
+      "waiting_on": "John: connect or install first? Recommendation: connect to the existing mother ship. Exact scope v1 question in DISCOVERY-v1.md.",
       "commissioned_as": null,
       "part": "harden",
       "gate": null,
