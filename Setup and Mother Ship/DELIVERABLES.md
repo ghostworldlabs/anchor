@@ -2,8 +2,9 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| START HERE — ecgberht Provider setup mockup — Initial draft; try sign-in, allowance, API cost and model controls | `mockups/PROVIDER-SETUP-initial.html` | 2026-10-04 | gwl-provider-status |
-| Current ecgberht Setup scope v4 — mother ship, providers, Star Chart; Refinement 1 underway | `SCOPE-v4.md` | 2026-10-04 | gwl-provider-status |
+| START HERE — ecgberht Setup mockup — Refinement 1; mother ship, provider accounts, Star Chart and optional email/calendar | `mockups/SETUP-refinement-1.html` | 2026-10-04 | gwl-provider-status |
+| Current ecgberht Setup scope v4 — first-launch sequence and cumulative feedback | `SCOPE-v4.md` | 2026-10-04 | gwl-provider-status |
+| Previous ecgberht Provider setup mockup — Initial draft; superseded review, retained for comparison | `mockups/PROVIDER-SETUP-initial.html` | 2026-10-04 | gwl-provider-status |
 | Previous ecgberht Setup scope v3 — provider mockup first; email and calendars later | `SCOPE-v3.md` | 2026-10-04 | gwl-provider-status |
 | Previous ecgberht Setup scope v2 — personal hosts settled; future collaboration parked | `SCOPE-v2.md` | 2026-10-04 | gwl-host-client |
 | Previous ecgberht organization scope v1 — original requirements and placement | `SCOPE-v1.md` | 2026-10-04 | gwl-host-client |

@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T19:48:29.641Z",
+  "as_of": "2026-10-04T20:10:58.999Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -713,6 +713,43 @@
       "client_event_id": "setup-r1-scope-v4-current-ebd5e8b3",
       "seq": 42,
       "at": "2026-10-04T19:48:29.641Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "mockups/SETUP-refinement-1.html",
+            "SCOPE-v4.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "John’s first-launch feedback is embodied in Setup mockup Refinement 1; pin the exact version and retain the previous prototype in history."
+      },
+      "client_event_id": "setup-r1-prototype-current-ebd5e8b3",
+      "seq": 43,
+      "at": "2026-10-04T19:58:11.852Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "waiting_on": "Setup mockup Refinement 1: keep full strength and warn at low allowance, or automatically reduce model strength?"
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this is separate from the superseded Initial draft layout question."
+      },
+      "client_event_id": "setup-r1-warning-review-ebd5e8b3",
+      "seq": 44,
+      "at": "2026-10-04T20:10:58.999Z"
     }
   ],
   "roadmap_projection": [
@@ -763,7 +800,7 @@
       "name": "Provider capacity, cost and model controls",
       "status": "active",
       "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build.",
-      "waiting_on": null,
+      "waiting_on": "Setup mockup Refinement 1: keep full strength and warn at low allowance, or automatically reduce model strength?",
       "commissioned_as": null,
       "part": "slice",
       "gate": null,
@@ -773,7 +810,7 @@
         ],
         "current": true,
         "featured_paths": [
-          "mockups/PROVIDER-SETUP-initial.html",
+          "mockups/SETUP-refinement-1.html",
           "SCOPE-v4.md"
         ]
       }

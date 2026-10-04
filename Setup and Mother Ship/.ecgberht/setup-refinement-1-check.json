@@ -1,0 +1,259 @@
+{
+  "checked_at": "2026-10-04T20:09:46.723268+00:00",
+  "surface": "normal authenticated fresh Chromium, exact Anchor Current work link and sandboxed interactive HTML",
+  "route": "/api/steward/deliverable-file?pid=f69f6d66171f4dbd95c8c45db6846d97&dir=Setup%20and%20Mother%20Ship&path=mockups%2FSETUP-refinement-1.html",
+  "checks": [
+    {
+      "check": "Refinement 1 visible in exact Current work",
+      "passed": true
+    },
+    {
+      "check": "workflow opens exact effort/version HTML route",
+      "passed": true
+    },
+    {
+      "check": "first question is host choice with neither selected",
+      "passed": true
+    },
+    {
+      "check": "provider step cannot precede host preparation",
+      "passed": true
+    },
+    {
+      "check": "new host exposes host installation and gates service start",
+      "passed": true
+    },
+    {
+      "check": "host installation and service checklist becomes ready",
+      "passed": true
+    },
+    {
+      "check": "provider checklist is second",
+      "passed": true
+    },
+    {
+      "check": "optional integrations wait until a provider connection exists",
+      "passed": true
+    },
+    {
+      "check": "provider enrollment gate explains missing connection",
+      "passed": true
+    },
+    {
+      "check": "two Claude subscriptions are independently visible",
+      "passed": true
+    },
+    {
+      "check": "default uses frontier and maximum reasoning",
+      "passed": true
+    },
+    {
+      "check": "default warning preserves quality",
+      "passed": true
+    },
+    {
+      "check": "unsigned-in subscription cannot be tested",
+      "passed": true
+    },
+    {
+      "check": "sign-in does not invent a usage report",
+      "passed": true
+    },
+    {
+      "check": "host test reports example allowance separately from API",
+      "passed": true
+    },
+    {
+      "check": "resolved missing-provider notice clears promptly",
+      "passed": true
+    },
+    {
+      "check": "second subscription retains separate disconnected/unknown state",
+      "passed": true
+    },
+    {
+      "check": "second account has its own near-limit report",
+      "passed": true
+    },
+    {
+      "check": "chosen account is in model readout",
+      "passed": true
+    },
+    {
+      "check": "warning is about selected account and chosen threshold",
+      "passed": true
+    },
+    {
+      "check": "tier reduction requires explicit application",
+      "passed": true
+    },
+    {
+      "check": "explicit tier change retains reasoning choice",
+      "passed": true
+    },
+    {
+      "check": "unknown allowance excludes confirmed route and stays unreported",
+      "passed": true
+    },
+    {
+      "check": "failed test is distinct and unusable",
+      "passed": true
+    },
+    {
+      "check": "exhausted allowance is explicit and excluded",
+      "passed": true
+    },
+    {
+      "check": "first subscription report survives tests on the second",
+      "passed": true
+    },
+    {
+      "check": "a provider accepts another independent subscription",
+      "passed": true
+    },
+    {
+      "check": "optional API reports separate tokens and monthly cost",
+      "passed": true
+    },
+    {
+      "check": "API route has own model identity",
+      "passed": true
+    },
+    {
+      "check": "unknown API report is not zero cost or usable",
+      "passed": true
+    },
+    {
+      "check": "calendar/email panel is optional and host-bound",
+      "passed": true
+    },
+    {
+      "check": "optional sign-in is illustrative",
+      "passed": true
+    },
+    {
+      "check": "optional modal Escape returns focus",
+      "passed": true
+    },
+    {
+      "check": "third step is new-host Star Chart organization",
+      "passed": true
+    },
+    {
+      "check": "empty organization cannot be populated",
+      "passed": true
+    },
+    {
+      "check": "Star Chart demonstrates brainstorming with Aladdin",
+      "passed": true
+    },
+    {
+      "check": "example conversation proposes editable goal and initiative",
+      "passed": true
+    },
+    {
+      "check": "new work requires no existing material",
+      "passed": true
+    },
+    {
+      "check": "Aladdin preview populates both surfaces without moving files",
+      "passed": true
+    },
+    {
+      "check": "Cave contains the same goal and initiative",
+      "passed": true
+    },
+    {
+      "check": "desktop #capacity-control remains in viewport",
+      "passed": true
+    },
+    {
+      "check": "desktop #model-control remains in viewport",
+      "passed": true
+    },
+    {
+      "check": "Cave shared provider panel returns focus on Escape",
+      "passed": true
+    },
+    {
+      "check": "desktop has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "client branch has no host installation",
+      "passed": true
+    },
+    {
+      "check": "secure client pairing displays only masked example token",
+      "passed": true
+    },
+    {
+      "check": "client tests are explicitly on its mother ship",
+      "passed": true
+    },
+    {
+      "check": "paired client reuses two host subscription reports",
+      "passed": true
+    },
+    {
+      "check": "existing second subscription is independently retained",
+      "passed": true
+    },
+    {
+      "check": "existing host skips new-goal and storage initialization",
+      "passed": true
+    },
+    {
+      "check": "client Cave has existing mother-ship projects",
+      "passed": true
+    },
+    {
+      "check": "phone client has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "phone provider surface remains host-bound",
+      "passed": true
+    },
+    {
+      "check": "tablet client has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "phone first-launch question fits without overflow",
+      "passed": true
+    },
+    {
+      "check": "phone completes host pairing with masked token",
+      "passed": true
+    },
+    {
+      "check": "phone follows existing-host organization reuse",
+      "passed": true
+    },
+    {
+      "check": "phone completes the client walkthrough into existing Cave",
+      "passed": true
+    },
+    {
+      "check": "mockup interactions send no network requests",
+      "passed": true
+    },
+    {
+      "check": "no JavaScript errors during all flows",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "prototype_requests": [],
+  "screenshots": [
+    ".ecgberht/setup-r1-first-launch.png",
+    ".ecgberht/setup-r1-providers.png",
+    ".ecgberht/setup-r1-brainstorm.png",
+    ".ecgberht/setup-r1-star-chart.png",
+    ".ecgberht/setup-r1-cave.png",
+    ".ecgberht/setup-r1-phone-client.png",
+    ".ecgberht/setup-r1-tablet-client.png"
+  ],
+  "limitations": "Fresh driven browser, not a capture of John's open client. Illustrative interactions only; no provider capabilities, secure storage, real install or acceptance certified."
+}

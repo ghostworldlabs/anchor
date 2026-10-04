@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Refining first-launch Setup, multiple provider subscriptions and Star Chart organization.",
+  "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "Choose warning versus automatic model-strength reduction in Setup mockup Refinement 1.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-  "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
+  "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -290,6 +290,62 @@
         "gwl-provider-status",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Checking Setup mockup Refinement 1 through its actual Anchor link.",
+      "next_recommended": "Review the mother ship, provider and Star Chart walkthrough before implementation.",
+      "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
+      "horizon_source_seq": 43,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
+      "human_wait": "Choose warning versus automatic model-strength reduction in Setup mockup Refinement 1.",
+      "wait_ref": "decision:setup-r1-warning-policy",
+      "next_recommended": "Review Refinement 1 and choose its low-allowance warning policy.",
+      "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
+      "horizon_source_seq": 44,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -322,8 +378,8 @@
       "summary": "Provider setup mockup — Initial draft, 2026-10-04"
     }
   ],
-  "horizon_source_seq": 42,
+  "horizon_source_seq": 44,
   "horizon_focus": "gwl-provider-status",
   "current_step_id": "gwl-provider-status",
-  "wait_ref": "none"
+  "wait_ref": "decision:setup-r1-warning-policy"
 }
