@@ -412,6 +412,10 @@
       name.textContent = displayTitle(t);
       el.title = name.textContent;
       el.appendChild(name);
+      if (cockpitTarget(t)) {
+        var dot = document.createElement("span"); dot.className = "activity-dot gray"; dot.setAttribute("role", "img");
+        el.appendChild(dot);
+      }
       if (two && k >= 0) {
         var side = document.createElement("span"); side.className = "side" + (k ? " r" : "");
         side.textContent = k ? "R" : "L";
@@ -429,6 +433,7 @@
       el.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); show(t.id, two ? active : 0); } });
       if (t.kind !== "cave") el.addEventListener("pointerdown", startDrag);
       strip.appendChild(el);
+      paintFeedback(t);
     });
   }
 
@@ -553,6 +558,57 @@
   if (host()) wireWindow(); else window.addEventListener("pywebviewready", wireWindow);
 
   window.ANCHOR_APP = api;
+
+  // A cockpit's work continues after its pane/frame is left. Poll only its scoped read-only
+  // state and existing review records; neither opening a tile nor selecting it is acceptance.
+  function cockpitTarget(t) {
+    if (!t || t.kind !== "page") return null;
+    var r = resolve(t.url || t.asked);
+    if (!r || !/^\/steward\/v\d+$/.test(r.path) || !r.q.get("pid")) return null;
+    return {pid:r.q.get("pid"),dir:r.q.get("dir") || "",general:r.q.get("general")==="1",term:r.q.get("term") || ""};
+  }
+  function paintFeedback(t) {
+    var el = Array.from(strip.children).find(function (c) { return c.dataset.id === t.id; });
+    if (!el) return;
+    var dot = el.querySelector(".activity-dot"); if (!dot) return;
+    var target = cockpitTarget(t), key = target && window.AnchorCockpitFeedback.identity(target);
+    if (t.feedbackKey !== key) { t.feedbackKey = key; t.feedback = null; t.feedbackRecord = null; }
+    var f = t.feedback, light = f ? window.AnchorCockpitFeedback.color(f.light, f.ready) : "gray";
+    var word = !f ? "reading activity" : light === "green" ? "working" : light === "orange" ? "needs your attention" : light === "red" ? "a problem" : "idle";
+    dot.className = "activity-dot " + light; dot.title = word; dot.setAttribute("aria-label", word);
+    el.classList.toggle("ready", !!(f && f.ready));
+    el.title = displayTitle(t) + "; " + word + (f && f.reason ? "; " + f.reason : "");
+  }
+  var feedbackBusy = false, feedbackAgain = false;
+  function refreshFeedback() {
+    if (document.hidden || !window.AnchorCockpitFeedback) return;
+    if (feedbackBusy) { feedbackAgain = true; return; }
+    feedbackBusy = true;
+    var list = tiles.filter(cockpitTarget), next = 0;
+    function worker() {
+      var t = list[next++]; if (!t) return Promise.resolve();
+      var target = cockpitTarget(t), key = window.AnchorCockpitFeedback.identity(target);
+      function current() { var now = cockpitTarget(byId(t.id)); return !!now && key === window.AnchorCockpitFeedback.identity(now); }
+      return window.AnchorCockpitFeedback.read(target,t.feedbackRecord,{},function (st, question) {
+        if (!current()) return;
+        t.feedback = {light:st.light,ready:question || !!(t.feedback && t.feedback.ready),reason:question?"needs your answer":(t.feedback && t.feedback.reason) || ""};
+        paintFeedback(t);
+      }).then(function (value) {
+        if (!current()) return;
+        var before = t.feedback || {};
+        t.feedback = {light:value.state.light,ready:value.ready===null?!!before.ready:value.ready,reason:value.ready===null?before.reason:value.reason};
+        if (value.record) t.feedbackRecord = value.record;
+        paintFeedback(t);
+      }).catch(function () {}).then(worker);
+    }
+    Promise.all([worker(),worker(),worker(),worker()]).finally(function () {
+      feedbackBusy = false;
+      if (feedbackAgain) { feedbackAgain = false; refreshFeedback(); }
+    });
+  }
+  setInterval(refreshFeedback,5000);
+  document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshFeedback(); });
+  window.addEventListener("focus",refreshFeedback);
 
   // ---------- start: the Cave alone ----------
   var cave = { id: "cave", kind: "cave", url: CAVE_URL, title: "Cave of Wonders", name: "", opener: null, frame: null };

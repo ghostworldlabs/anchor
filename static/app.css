@@ -40,6 +40,13 @@ body.hosted { border: 1px solid #2f3a4d; box-sizing: border-box; }
 .tile.shown { color: var(--text); border-color: #4a5a75; }
 .tile.focus { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(224, 168, 54, .18); }
 .tile .side { font: 700 9.5px var(--sans); color: var(--amber); border: 1px solid rgba(224,168,54,.5); border-radius: 4px; padding: 0 4px; }
+.tile .activity-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#8995a7}
+.tile .activity-dot.green{background:#4ade80;box-shadow:0 0 6px #4ade80}
+.tile .activity-dot.orange{background:#fbbf24;box-shadow:0 0 5px rgba(251,191,36,.6)}
+.tile .activity-dot.red{background:#e05f5f}
+.tile.ready{border-color:var(--amber);animation:cockpitready 2.4s ease-in-out infinite}
+@keyframes cockpitready{0%,100%{box-shadow:0 0 0 1px rgba(224,168,54,.4)}50%{box-shadow:0 0 0 2px var(--amber),0 0 10px rgba(224,168,54,.5)}}
+@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;box-shadow:0 0 0 2px var(--amber)}}
 .tile .side.r { color: var(--blue); border-color: rgba(111,162,255,.5); }
 .tile .pos { display: none; }
 .tile.dragging { opacity: .6; outline: 1px dashed var(--faint); }
