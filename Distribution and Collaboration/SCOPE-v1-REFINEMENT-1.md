@@ -51,6 +51,18 @@ The [Licensing and IP guide v1](/artifact/df56858063ac4025982d0c36038509d2?path=
 
 The next load-bearing distinction is free internal business use versus third-party commercialization. An answer refines this same scope; it does not apply terms or authorize a public release. Original goal words are retained until John rewrites them. Copyright ownership, third-party licenses, contributor rights and brand availability must be established before applying a final license.
 
+## MIT comparison requested — same scope, no license selected
+
+John's later local turn `9644fd33-97d1-4223-b5f9-9d080890ba70`, 2026-10-04T18:51:43Z, asks how the proposed choices compare with standard open-source licenses, especially MIT, and clarifies broad use and modification with no sale of Anchor or a product built on it. [MIT comparison v1](MIT-COMPARISON-v1.md) answers that question alongside the original Licensing and IP guide v1. The existing license step carries the comparison requirement; no final terms or commercial permission are inferred from this request.
+
+MIT permits commercial derivatives and requires notices without mandatory publication of modifications. GPL/AGPL also permit sale, with applicable source-sharing requirements. The desired no-sales rule needs source-available permissions. Shield and Noncommercial retain the mismatches explained in the comparison; earlier improvement-sharing and ownership requirements remain active. The earlier internal-business-use question below is preserved as part of the pending licensing review, not re-asked as a condition for this requested explanation.
+
+## Accepted first trial order — independent of licensing
+
+John accepted connecting to the existing mother ship first, rather than proving a fresh independent installation first. Source: local turn `44f8b822-bfb8-413d-b5b1-f2c5cca3d98b`, 2026-10-04T18:47:01Z, scoped to the recommendation in `DISCOVERY-v1.md`. Both onboarding paths remain required; the first collaborator trial will prove connection, and independent installation follows separately. The existing release-verification step now carries that order and its answered wait is cleared.
+
+This acceptance refines Distribution scope v1's trial order only. Independently authorized installation work can still proceed in parallel. It does not accept this refinement's licensing choices, choose the internal-business-use policy, authorize a build or close a slice. The distinct pending licensing question below retains its existing scope and version.
+
 ## Current decision — internal business use
 
 Your restriction on commercial versions leaves one boundary open: a business using Anchor for its own staff. Shield permits that while restricting competing products; Noncommercial restricts ordinary business use too.

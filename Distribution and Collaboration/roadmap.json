@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T16:17:54.226Z",
+  "as_of": "2026-10-04",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -359,6 +359,40 @@
         "why": "Guide v1 explains the distinct, still-unresolved internal-use boundary after John's restricted preference 52eadd74-2b48-4381-ae92-d255c5042d21. Not a repeat of open-or-restricted; no slice close."
       },
       "seq": 21
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-release",
+      "fields": {
+        "done_when": "First verify a collaborator connects to the existing mother ship; then independently verify installation. Cover the supported platforms through the shared Setup flow.",
+        "waiting_on": "none"
+      },
+      "at": "2026-10-04",
+      "seq": 22
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-release",
+      "fields": {
+        "waiting_on": null
+      },
+      "at": "2026-10-04T18:49:11.271Z",
+      "client_event_id": "connect-first-44f8b822-bfb8-413d-b5b1-f2c5cca3d98b-clear-wait",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T18:49:11.271Z",
+        "why": "Scoped acceptance of the connect-first recommendation for Distribution scope v1. Clear only the trial-order wait; retain the independent internal-business-use decision. The CLI stored literal none, so this event clears it with null through the same writer."
+      },
+      "seq": 23
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Compare MIT and other standard open-source licenses against broad use/modification, restricted sale of Anchor-based products, and sharing improvements; settle remaining boundaries before John selects terms."
+      },
+      "at": "2026-10-04",
+      "seq": 24
     }
   ],
   "roadmap_projection": [
@@ -419,7 +453,7 @@
       "id": "gwl-license",
       "name": "License and intellectual property — restricted preference",
       "status": "waiting",
-      "done_when": "Compare standard licensing and IP options against John’s restricted commercial-version preference; settle internal-business use and sharing obligations before John selects terms.",
+      "done_when": "Compare MIT and other standard open-source licenses against broad use/modification, restricted sale of Anchor-based products, and sharing improvements; settle remaining boundaries before John selects terms.",
       "waiting_on": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.",
       "commissioned_as": null,
       "part": "research",
@@ -435,8 +469,8 @@
       "id": "gwl-release",
       "name": "Install and use from a collaborator’s computer",
       "status": "proposed",
-      "done_when": "Verify installation, connection and release behavior on the supported platforms.",
-      "waiting_on": "John: connect or install first? Recommendation: connect to the existing mother ship. Exact scope v1 question in DISCOVERY-v1.md.",
+      "done_when": "First verify a collaborator connects to the existing mother ship; then independently verify installation. Cover the supported platforms through the shared Setup flow.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "harden",
       "gate": null,

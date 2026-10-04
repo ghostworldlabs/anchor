@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Comparing licensing in Campaign and choosing the first collaborator trial here.
+Connect-first order recorded; MIT comparison v1 and licensing guide v1 ready to read.
 
 ## Why next
 
-Both onboarding paths remain required; choosing their trial order guides the first release checks.
+The trial order is settled; MIT permits the sales John wants to restrict.
 
 ## Human wait
 
