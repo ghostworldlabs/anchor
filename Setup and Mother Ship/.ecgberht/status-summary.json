@@ -1,15 +1,15 @@
 {
-  "at": "2026-10-04 10:03",
-  "status_id": "01791129819625991300",
+  "at": "2026-10-04 12:46",
+  "status_id": "01791139609422198700",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - quiet",
+    "activity": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33",
     "latest_event": null,
     "next": [
       "One mother ship and connected client computers"
     ],
-    "question": "Personal or shared?",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - quiet"
+        "value": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33"
       },
       {
         "label": "Status",
@@ -53,15 +53,15 @@
       }
     ]
   },
-  "lead_line": "Next: One mother ship and connected client computers; then Projects, folders and recommended organization \u2014 Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+  "lead_line": "Next: One mother ship and connected client computers; then Projects, folders and recommended organization \u2014 step set One mother ship and connected client computers",
   "now": [
-    "nothing running - quiet"
+    "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - quiet",
+    "kind": "steward",
+    "label": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
@@ -123,7 +123,7 @@
     "waiting_on_you": "",
     "waiting_since": null,
     "next": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-    "why": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+    "why": "step set One mother ship and connected client computers",
     "attention": "quiet",
     "goal_reread": true
   },
