@@ -426,10 +426,10 @@ def _masthead(ctx, mode=False):
     b = ctx["build"]
     st = ctx.get("steward") or {}
     if st and mode:
-        stew = '<div class="mh-stew" title="your steward in its goals-and-foresight mode">%s<div><b>The %s</b><span>%s &middot; goals and foresight</span></div></div>' % (
+        stew = '<div class="mh-stew" title="your steward in its goals-and-foresight mode">%s<div><b>%s</b><span>%s &middot; goals and foresight</span></div></div>' % (
             _brand_img(b, st.get("campaign_icon") or st.get("high_seat") or "", "mh-seat"), esc(mode_name(st)), esc(st.get("label") or "the steward"))
     else:
-        stew = ('<div class="mh-stew" title="your steward">%s<div><b>The %s</b><span>%s &middot; your steward</span></div></div>' % (
+        stew = ('<div class="mh-stew" title="your steward">%s<div><b>%s</b><span>%s &middot; your steward</span></div></div>' % (
             _brand_img(b, st.get("high_seat") or "", "mh-seat"), esc(st.get("high_seat_name") or "High Seat"), esc(st.get("label") or "the steward"))) if st else ""
     return (
         '<div class="masthead"><div class="mh-title">%sAnchor</div><div class="mh-div"></div>'
@@ -1059,13 +1059,13 @@ def conversation_view(label, camp_pid, inst="main", dir_="", title="the conversa
     src = "/steward/v1?embed=1&amp;view=talk&amp;inst=%s&amp;pid=%s&amp;dir=%s" % (esc(inst), esc(camp_pid), esc(_quote(dir_)))
     return (
         '<section class="exwrap cview" id="dialogue" data-dir="%s"><div class="exhead"><h3>%s &mdash; %s</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
-        '<a class="note" href="/project/%s?doc=1%s" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">open in the cockpit &#8599;</a></div>'
+        '<a class="note" href="/steward/v1?pid=%s&amp;dir=%s" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">open in the cockpit &#8599;</a></div>'
         '<iframe class="cview-frame" src="%s" title="%s &mdash; %s"></iframe>'
         '<ul class="ex" id="exList" hidden></ul></section>'
         '<section class="delivbar" id="delivBar" data-pid="%s" data-dir="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
         '<span class="db-t">Deliverables</span><span class="db-c" id="delivCount">&hellip;</span><span class="db-caret">&#9662;</span></button>'
         '<ul class="db-list" id="delivList" hidden></ul></section>'
-    ) % (esc(dir_), esc(label), esc(title), esc(camp_pid), ("&amp;dir=%s&amp;open=effort" % esc(_quote(dir_))) if dir_ else "",
+    ) % (esc(dir_), esc(label), esc(title), esc(camp_pid), esc(_quote(dir_)),
          src, esc(label), esc(title), esc(camp_pid), esc(dir_))
 
 
@@ -1185,6 +1185,18 @@ def render_locked_html(ctx) -> str:
     ) % (tab_icon_link(None, b), esc(b))
 
 
+def _tile_names(ctx):
+    """The names and pictures the app's tiles carry (his rule, 2026-10-03): the Cave, the Campaign board in its mode
+    (Star Chart / Chart Room / Beacon) and the two conversations' cockpits are named for what they show."""
+    import json as _json
+    st = ctx.get("steward") or {}
+    b = ctx.get("build") or ""
+    pic = lambda name: ("/vendor/brand/%s?v=%s" % (name, b)) if name else ""
+    return "seat_name: %s, seat_icon: %s, mode_name: %s, mode_icon: %s" % (
+        _json.dumps(st.get("high_seat_name") or "Cave of Wonders"), _json.dumps(pic(st.get("high_seat"))),
+        _json.dumps(mode_name(st)), _json.dumps(pic(st.get("campaign_icon"))))
+
+
 def render_high_seat_html(ctx) -> str:
     """The whole page from the context dict (see the module docstring)."""
     if ctx.get("auth_required") and not ctx.get("logged_in"):
@@ -1211,13 +1223,13 @@ def render_high_seat_html(ctx) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s", you: "%s"};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s", you: "%s"};window.ANCHOR_TILES = {%s};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<link rel="stylesheet" href="/vendor/xterm/xterm.css"><script src="/vendor/xterm/xterm.js"></script>'
         '<script src="/steward-static/md.js?v=%s"></script><script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script><script src="/static/cave-terminal.js?v=%s"></script></body></html>'
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
-         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
+         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _tile_names(ctx), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
     return page

@@ -406,8 +406,17 @@ const usageLine = (u) => {
 async function refresh() {
   try {
     const j = await (await fetch("/api/efforts")).json();
-    document.querySelector("[data-project]").textContent = j.project;
+    if (j.project === "Campaign") {
+      const q = new URLSearchParams(location.search);
+      const target = new URL("/steward/v1", location.origin);
+      target.searchParams.set("pid", window.STEWARD_PID || "");
+      target.searchParams.set("dir", q.get("dir") || "");
+      if (q.get("step")) target.searchParams.set("step", q.get("step"));
+      location.replace(target.href);
+      return;
+    }
     document.title = j.project + " — AI Cockpit";
+    document.querySelector("[data-project]").textContent = j.project;
     const greens = j.efforts.filter(e => e.light === "green").length;
     const flags = j.efforts.filter(e => e.attention === "needs_you").length;
     const chips = document.querySelector("[data-chips]");

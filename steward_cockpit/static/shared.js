@@ -2030,9 +2030,9 @@ const Proto = (() => {
       opts.stewardLabel = map.steward.toUpperCase();
       opts._labelSet = true;
     }
-    document.title = (map.attention.state === "needs_you" ? "⚑ " :
-                      map.attention.state === "working" ? "▶ " : "") +
-                     map.name + " — steward";
+    const cockpitName = !DIR && map.name === "Campaign" ? (window.STEWARD_MODE || (map.steward === "Aladdin" ? "Star Chart" : map.name)) : map.name;
+    const cockpitTitle = cockpitName + " — AI Cockpit";
+    document.title = GENERAL ? map.name + " — steward" : cockpitTitle;
     if (opts.renderMap) { opts.renderMap(map); return; }
     // goal tile (one sentence; expands to the full bold-led description)
     const gb = $("[data-goalbrief]");
@@ -2083,7 +2083,7 @@ const Proto = (() => {
                att.title = map.attention.state +
                  (map.attention.reason ? " - " + map.attention.reason : ""); }
     const name = $("[data-name]");
-    if (name) name.textContent = map.name;
+    if (name) name.textContent = GENERAL ? map.name : cockpitTitle;
     if(lastState)updateState(lastState);
     if (opts.afterMap) opts.afterMap(map);
   }
@@ -2139,6 +2139,7 @@ const Proto = (() => {
     const saveDraft = () => { try { if (ta.value.trim()) localStorage.setItem(DRAFT_KEY, ta.value); else localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
     const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} };
     ta.addEventListener("input", () => { clearTimeout(_draftT); _draftT = setTimeout(saveDraft, 250); });
+    ta.addEventListener("blur", saveDraft);  // the app blurs a composer before dropping its inactive frame
     window.addEventListener("beforeunload", saveDraft);
     try {
       const kept = localStorage.getItem(DRAFT_KEY);

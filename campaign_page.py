@@ -578,14 +578,14 @@ def render_campaign_html(ctx, open_id=None) -> str:
     ) % (esc(mode_name(st)), esc(open_id or ""), len(live), sum(1 for i in live if i["tier"] == 1), sum(1 for i in live if i["tier"] == 2), n_seedy, n_bone, n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _areas(ctx), _bands(ctx), _places(ctx), _calendar(ctx))
     hdr = (
-        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2 class="modeh">The %s</h2>'
+        '<div class="hdr"><h2 class="modeh">%s</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
-        '<a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(st["high_seat_name"]), esc(mode_name(st)),
-         _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["today_str"]))
+        '<a class="tool" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">%s — AI Cockpit</a><div class="date">%s</div></div>'
+    ) % (esc(mode_name(st)),
+         _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(mode_name(st)), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>The %s</title>%s'
+        '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/campaign-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s", you: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'

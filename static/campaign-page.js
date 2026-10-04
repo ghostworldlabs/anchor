@@ -7,6 +7,23 @@
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  // Apply the board/conversation distinction to older service markup as well as the current renderer.
+  var modeHeading = $('.modeh');
+  var modeName = modeHeading ? modeHeading.textContent.trim().replace(/^The /, '').replace(/ \u2014 AI Cockpit$/, '') : '';
+  if (modeName === 'Star Chart') {
+    document.title = 'Star Chart';
+    modeHeading.textContent = 'Star Chart';
+    var modeBrand = $('.masthead .mh-stew b');
+    if (modeBrand) modeBrand.textContent = 'Star Chart';
+    var caveBack = $('.hdr .back');
+    if (caveBack) caveBack.remove();
+    var chartPid = (window.ANCHOR_BOOT || {}).campaign_pid || '';
+    if (chartPid) $$('.hdr a.tool[href*="doc=1"], #dialogue .exhead a.note').forEach(function (link) {
+      link.href = '/steward/v1?pid=' + encodeURIComponent(chartPid) + '&dir=';
+      link.target = '_blank';
+      if (link.classList.contains('tool')) link.textContent = 'Star Chart \u2014 AI Cockpit';
+    });
+  }
   function token() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
   function headers() {
     var h = { 'Content-Type': 'application/json' };

@@ -5,6 +5,15 @@
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  // Keep loaded-page names and links correct while an older service finishes its active turns.
+  var seatBrand = $('.masthead .mh-stew b');
+  if (seatBrand && seatBrand.textContent.trim().replace(/^The /, '') === 'Cave of Wonders') {
+    document.title = 'Cave of Wonders';
+    seatBrand.textContent = 'Cave of Wonders';
+    var cavePid = (window.ANCHOR_BOOT || {}).campaign_pid || '';
+    var caveLink = $('#dialogue .exhead a.note');
+    if (cavePid && caveLink) caveLink.href = '/steward/v1?pid=' + encodeURIComponent(cavePid) + '&dir=' + encodeURIComponent('Cave of Wonders');
+  }
   function token() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
   // the hand-off the old dashboard did: /?token=<t> stores the token for this origin and drops it from the address
   try {
@@ -86,6 +95,9 @@
   $$('#railNav button').forEach(function (b) {
     b.addEventListener('click', function () {
       var key = b.getAttribute('data-rail'), sel = DEST[key], el = sel && $(sel);
+      // the Star Chart (his word, 2026-10-03): the rail opens its page - one tile in the app, reused when open
+      var camp = (window.ANCHOR_BOOT || {}).campaign_pid;
+      if (key === 'campaign' && camp) { window.open('/project/' + camp, '_blank'); return; }
       $$('#railNav button').forEach(function (x) { x.classList.toggle('on', x === b); });
       if (!el) return;
       if (key === 'campaign') $('#camp') && $('#camp').classList.add('open');

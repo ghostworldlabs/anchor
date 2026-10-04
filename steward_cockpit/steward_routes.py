@@ -196,6 +196,7 @@ def serve_static(name):
 _CLIENT_SHIM = """<script src="/static/app-frame.js"></script><script>
 window.STEWARD_PID = %s;
 window.STEWARD_BUILD = %s;
+window.STEWARD_MODE = %s;
 (function(){
   // token: prefer one arriving in the URL (the beta-link / bounce), else the
   // stored one; persist a URL token so later fetches stay authed
@@ -264,6 +265,15 @@ _PAGES = {"v1": "v1.html", "v3": "v3.html", "report": "report.html",
           "cockpit": "cockpit.html"}
 
 
+def _mode_name():
+    """The Campaign's mode name for the persona (Star Chart / Chart Room / Beacon, 2026-10-03); "" when unreadable."""
+    try:
+        import anchor_settings as _aset
+        return str(_aset.steward_profile().get("campaign_name") or "")
+    except Exception:
+        return ""
+
+
 def serve_page_doc(page, pid=""):
     fname = _PAGES.get(page)
     if not fname:
@@ -275,7 +285,7 @@ def serve_page_doc(page, pid=""):
                 # rewrite both the static hrefs and the JS "/brand/" base
                 .replace('/brand/', '/vendor/brand/'))
     shim = _CLIENT_SHIM % (json.dumps(pid),
-                           json.dumps(CONFIG.get("build") or ""))
+                           json.dumps(CONFIG.get("build") or ""), json.dumps(_mode_name()))
     return html.replace("<script", shim + '<script src="/steward-static/notebook-actions.js"></script><script', 1)
 
 

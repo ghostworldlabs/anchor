@@ -14,8 +14,8 @@
 (function () {
   "use strict";
   var CAVE_URL = "/";
-  var CAVE_ICON = "/vendor/brand/aladdin-high-seat-cave.png";
-  var STAR_CHART_ICON = "/vendor/brand/campaign-aladdin-star-chart.jpg";
+  var CAVE_EFFORT = "Cave of Wonders";       // the Cave's own conversation folder (high_seat_page.CAVE_EFFORT)
+  var COCKPIT = " \u2014 AI Cockpit";
   var FRAME_SCRIPT = "/static/app-frame.js";
   var DROP_AFTER_MS = 15000;
 
@@ -57,6 +57,7 @@
   function titleOf(win, fallback) {
     try {
       var t = (win.document.title || "").trim();
+      if (win.location.pathname === "/steward/v1" && t === "Steward \u2014 V1") return fallback;
       if (t) return t;
       var p = win.location.pathname;
       return p && p !== "blank" ? decodeURIComponent(p.split("/").filter(Boolean).pop() || fallback) : fallback;
@@ -69,6 +70,28 @@
     arm(f.contentWindow);
     var url = addressOf(f.contentWindow);
     if (url) t.url = url;
+    var route = resolve(url);
+    // A blank window can navigate to a real page, or receive a generated document at its caller's address.
+    // Only the former acquires a page identity; the generated report must keep its own tile.
+    if (t.kind !== "cave" && !t.asked && route && !route.blank && url !== t.blankFrom) {
+      t.asked = url;
+      t.kind = isPage(route.path) ? "page" : "doc";
+    }
+    // one tile per page (his rule, 2026-10-03): a tile that navigated onto a page already open in another tile
+    // gives way to it. A page written into a blank window (document.open) carries its CALLER's address and is
+    // not that page, so only a tile opened at a real address is merged.
+    if (t.kind === "page" && t.asked && route && !route.blank) {
+      var key = pageKey(route), existing = key === "cave" ? byId("cave") : tiles.find(function (other) {
+        return other !== t && other.kind === "page" && pageKey(resolve(other.url)) === key;
+      });
+      if (existing) {
+        var pane = shownIn(t.id);
+        if (pane >= 0) show(existing.id, pane, true);
+        if ((route.q.has("step") || route.q.has("open")) && existing.frame) existing.frame.src = route.url;
+        closeTile(t.id);
+        return;
+      }
+    }
     if (t.kind !== "cave" && !t.named) t.title = titleOf(f.contentWindow, t.title || "Page");
     if (shownIn(t.id) >= 0) settle();
     layout(); render();
@@ -88,10 +111,35 @@
 
   function byId(id) { for (var i = 0; i < tiles.length; i++) if (tiles[i].id === id) return tiles[i]; return null; }
   function shownIn(id) { return id && panes[0] === id ? 0 : (two && id && panes[1] === id ? 1 : -1); }
-  function isStarChart(t) {
-    return t.kind === "page" && /^(?:(?:The )?Star Chart(?:\s+(?:--|[-\u2013\u2014])\s+AI Cockpit)?|Campaign\s+(?:--|[-\u2013\u2014])\s+AI Cockpit)$/.test(t.title || "");
+  // His rule (2026-10-03): a tile is named for WHAT it shows, read from its address - the Cave (its persona's name
+  // and picture), the Campaign board (the mode's: Star Chart / Chart Room / Beacon), and the two conversations'
+  // cockpits ("<name> - AI Cockpit"). Everything else keeps its page's own title.
+  function names() {
+    var b = {}, w = null;
+    try { w = byId("cave").frame.contentWindow; b = w.ANCHOR_TILES || {}; b.campaign_pid = (w.ANCHOR_BOOT || {}).campaign_pid; } catch (e) {}
+    var doc = null; try { doc = w && w.document; } catch (e) {}
+    var q = function (sel) { try { return doc ? doc.querySelector(sel) : null; } catch (e) { return null; } };
+    var rail = q('#railNav [data-rail="campaign"] .n'), seatImg = q(".mh-stew img");
+    return {
+      pid: b.campaign_pid || "",
+      seat: b.seat_name || "Cave of Wonders",
+      seatIcon: b.seat_icon || (seatImg ? seatImg.getAttribute("src") : "") || "/vendor/brand/aladdin-high-seat-cave.png",
+      mode: b.mode_name || (rail ? rail.textContent.trim() : "") || "Star Chart",
+      modeIcon: b.mode_icon || "/vendor/brand/campaign-aladdin-star-chart.jpg"
+    };
   }
-  function displayTitle(t) { return t.kind === "cave" ? "Cave of Wonders" : isStarChart(t) ? "Star Chart \u2014 AI Cockpit" : (t.title || "Page"); }
+  function identity(t) {                                       // {title, icon} for the tiles his rule names, else null
+    if (t.kind === "cave") { var c = names(); return { title: c.seat, icon: c.seatIcon }; }
+    if (t.kind !== "page") return null;
+    var r = resolve(t.url || t.asked), n = names();
+    if (!r || r.blank || !n.pid) return null;
+    var key = pageKey(r);
+    if (key === "board:/project/" + n.pid + ":") return { title: n.mode, icon: n.modeIcon, mode: true };
+    if (key === "conversation:" + n.pid + ":") return { title: n.mode + COCKPIT, icon: n.modeIcon, mode: true };
+    if (key === "conversation:" + n.pid + ":" + CAVE_EFFORT) return { title: n.seat + COCKPIT, icon: n.seatIcon };
+    return null;
+  }
+  function displayTitle(t) { var id = identity(t); return id ? id.title : (t.title || "Page"); }
 
   // ---------- what an address is ----------
   function resolve(u, fromWin) {
@@ -101,6 +149,35 @@
     catch (e) { return null; }
     if (x.origin !== location.origin || !/^https?:$/.test(x.protocol)) return null;
     return { url: x.href, path: x.pathname, q: x.searchParams };
+  }
+
+  // The board and its conversation are different items. Conversation identity comes from pid + dir,
+  // never its display title, instance bridge, query order or embedded/full-size presentation.
+  function pageKey(r) {
+    if (!r || r.blank) return "";
+    if ((r.path === "/" || r.path === "/high-seat") && !r.q.has("view")) return "cave";
+    if (r.path === "/steward/v1") return "conversation:" + r.q.get("pid") + ":" + (r.q.get("dir") || "") +
+      (r.q.get("general") === "1" ? ":terminal:" + (r.q.get("term") || "") : "");
+    if (/^\/project\/[^/]+\/?$/.test(r.path) && !r.q.has("doc") && !r.q.has("classic") && !r.q.has("chamber"))
+      return "board:" + r.path.replace(/\/$/, "") + ":" + (r.q.get("view") || "");
+    return r.url;
+  }
+
+  function campaignPid() {
+    var home = byId("cave"), pid = "";
+    try { pid = home.frame.contentWindow.ANCHOR_BOOT.campaign_pid || ""; } catch (e) {}
+    return pid;
+  }
+
+  function conversationAlias(r) {
+    var pid = campaignPid();
+    if (pid && r.path === "/project/" + pid && r.q.get("doc") === "1") {
+      var u = new URL("/steward/v1", location.href);
+      u.searchParams.set("pid", pid); u.searchParams.set("dir", r.q.get("dir") || "");
+      if (r.q.get("step")) u.searchParams.set("step", r.q.get("step"));
+      return resolve(u.href);
+    }
+    return r;
   }
 
   function isDownload(r) {
@@ -119,6 +196,11 @@
   function labelFor(r) {
     var p = r.q.get("path");
     if (p) return p.split(/[\\/]/).pop();
+    if (r.path === "/steward/v1" && r.q.get("general") !== "1") {
+      var dir = r.q.get("dir") || "";
+      var name = dir ? dir.split(/[\\/]/).pop() : (r.q.get("pid") === campaignPid() ? "Star Chart" : "Conversation");
+      return name + " \u2014 AI Cockpit";
+    }
     return decodeURIComponent(r.path.split("/").filter(Boolean).pop() || "Page");
   }
 
@@ -128,10 +210,11 @@
       var r = resolve(u, fromWin);
       if (!r || (!r.blank && isDownload(r))) return null;      // the native call
       if (!r.blank && r.path === "/static/app.html") return null;
+      if (!r.blank) r = conversationAlias(r);
       var caller = tileOfWindow(fromWin);
       var from = caller ? shownIn(caller.id) : -1;
       if (from < 0) from = two ? active : 0;
-      if (!r.blank && (r.path === "/" || r.path === "/high-seat") && !r.q.toString()) {
+      if (!r.blank && pageKey(r) === "cave") {
         show("cave", from, true);                              // the Cave is one tile, never a second one
         active = from; layout(); render();
         return byId("cave").frame.contentWindow;
@@ -139,16 +222,18 @@
       var asDoc = r.blank ? !!(caller && caller.kind !== "cave") : !isPage(r.path);
       var name = target && !/^_(blank|self|parent|top)$/i.test(String(target)) ? String(target) : "";
 
-      var t = null, i;
+      var key = pageKey(r), t = null, i;
       for (i = 0; i < tiles.length && !t; i++) {               // a named window, or the same page, is reused
         if ((name && tiles[i].name === name) ||
-            (!r.blank && tiles[i].kind !== "cave" && (tiles[i].url === r.url || tiles[i].asked === r.url))) t = tiles[i];
+            (!r.blank && tiles[i].kind !== "cave" && (pageKey(resolve(tiles[i].url)) === key || pageKey(resolve(tiles[i].asked)) === key))) t = tiles[i];
       }
       if (t) {
         if (!t.frame) t.frame = newFrame("");
-        if (!r.blank && addressOf(t.frame.contentWindow) !== r.url) t.frame.src = r.url;
+        var current = resolve(addressOf(t.frame.contentWindow));
+        if (!r.blank && (pageKey(current) !== key || r.q.has("step") || r.q.has("open"))) t.frame.src = r.url;
       } else {
         t = { id: "t" + (++seq), kind: asDoc ? "doc" : "page", url: r.blank ? "" : r.url, asked: r.blank ? "" : r.url,
+              blankFrom: r.blank ? addressOf(fromWin) : "",
               title: r.blank ? "Opening…" : labelFor(r), name: name, opener: fromWin || null, frame: null,
               named: !r.blank && !!r.q.get("path") };           // a deliverable file keeps its file name
         tiles.push(t);
@@ -215,6 +300,7 @@
   function leave(id) {                                         // a tile left the panes: its frame goes later
     var t = byId(id);
     if (!t || t.kind === "cave") return;
+    if (t.frame && !t.named) t.title = titleOf(t.frame.contentWindow, t.title);
     try { var ae = t.frame && t.frame.contentDocument && t.frame.contentDocument.activeElement; if (ae && ae.blur) ae.blur(); }
     catch (e) { /* the draft keeps itself */ }
     if (pendingDrop.indexOf(id) < 0) pendingDrop.push(id);
@@ -229,7 +315,7 @@
     pendingDrop = pendingDrop.filter(function (id) {
       var t = byId(id);
       if (!t || shownIn(id) >= 0) return false;
-      if (t.frame) { t.url = addressOf(t.frame.contentWindow) || t.url; t.frame.remove(); t.frame = null; }
+      if (t.frame) { t.url = addressOf(t.frame.contentWindow) || t.url; if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title); t.frame.remove(); t.frame = null; }
       return false;
     });
   }
@@ -314,9 +400,10 @@
       el.tabIndex = 0;
       el.setAttribute("role", "button");
       el.dataset.id = t.id;
-      if (t.kind === "cave" || isStarChart(t)) {
-        var img = document.createElement("img"); img.src = t.kind === "cave" ? CAVE_ICON : STAR_CHART_ICON; img.alt = "";
-        if (isStarChart(t)) {
+      var who = identity(t);
+      if (who && who.icon) {
+        var img = document.createElement("img"); img.src = who.icon; img.alt = "";
+        if (who.mode) {                                        // the mode's art is framed: shown cropped to its centre
           var icon = document.createElement("span"); icon.className = "tile-icon star-chart";
           icon.appendChild(img); el.appendChild(icon);
         } else el.appendChild(img);
