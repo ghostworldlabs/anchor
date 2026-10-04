@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 12:46",
-  "status_id": "01791139609422198700",
+  "at": "2026-10-04 13:43",
+  "status_id": "01791143000010803100",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33",
+    "activity": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26",
     "latest_event": null,
     "next": [
-      "One mother ship and connected client computers"
+      "Provider capacity, cost and model controls"
     ],
-    "question": "",
+    "question": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
     "facts": [
       {
         "label": "Summary",
-        "value": "One mother ship and connected client computers \u2014 Detect the service host, install it when needed, register\u2026"
+        "value": "Provider capacity, cost and model controls \u2014 Produce and refine a usable mockup of subscription/API setup,\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33"
+        "value": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26"
       },
       {
         "label": "Status",
-        "value": "slice: One mother ship and connected client computers \u00b7 0/7 done \u00b7 quiet"
+        "value": "slice: Provider capacity, cost and model controls \u00b7 0/7 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "none"
+        "value": "waiting on you: Choose whether to keep the shared provider-panel layout in the Initial draft."
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0002-host-ownership-discovery: Mother ship ownership discovery \u2014 2026-10-04"
+        "value": "0004-provider-mockup-initial: Provider setup mockup \u2014 Initial draft, 2026-10-04"
       },
       {
         "label": "ETA",
@@ -49,46 +49,46 @@
       },
       {
         "label": "To do",
-        "value": "One mother ship and connected client computers"
+        "value": "Provider capacity, cost and model controls"
       }
     ]
   },
-  "lead_line": "Next: One mother ship and connected client computers; then Projects, folders and recommended organization \u2014 step set One mother ship and connected client computers",
+  "lead_line": "Next: Provider capacity, cost and model controls; then Projects, folders and recommended organization \u2014 The requested prototype is ready; refine its layout before an implementation plan. \u00b7 waiting on you: Choose whether to keep the shared provider-panel layout in the Initial draft.",
   "now": [
-    "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33"
+    "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26"
   ],
   "running": {
     "kind": "steward",
-    "label": "steward mid-turn since 12:46 (0 min) \u00b7 last status 10:33",
+    "label": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26",
     "skill": "",
     "source": "engine",
     "age": ""
   },
   "slice": {
-    "n": 1,
+    "n": 3,
     "total": 7,
-    "id": "gwl-host-client",
-    "name": "One mother ship and connected client computers",
+    "id": "gwl-provider-status",
+    "name": "Provider capacity, cost and model controls",
     "part": "slice",
-    "summary": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+    "summary": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0002-host-ownership-discovery: Mother ship ownership discovery \u2014 2026-10-04",
+  "journal": "0004-provider-mockup-initial: Provider setup mockup \u2014 Initial draft, 2026-10-04",
   "evidence": {
     "source": {
       "path": "strip.json",
-      "step_id": "gwl-host-client",
+      "step_id": "gwl-provider-status",
       "session_id": "01a1079f-04e1-74e0-883e-6b273389021a"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0002-host-ownership-discovery.md",
-      "entry_id": "0002-host-ownership-discovery",
-      "at": "2026-10-04T16:01:57Z",
-      "step_id": "gwl-host-client",
+      "path": "journal/0004-provider-mockup-initial.md",
+      "entry_id": "0004-provider-mockup-initial",
+      "at": "2026-10-04T19:23:57Z",
+      "step_id": "gwl-provider-status",
       "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
       "run_id": null
     },
@@ -98,41 +98,41 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "One mother ship and connected client computers",
+    "Provider capacity, cost and model controls",
     "then Projects, folders and recommended organization"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u00b7 research \u00b7 integrate \u00b7 harden \u00b7 rigor",
+    "parts": "slice \u25b6 \u00b7 integrate \u00b7 research \u00b7 harden \u00b7 rigor",
     "steps_done": 0,
     "steps_total": 7
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Discovery: clarify who shares a mother ship before drafting Setup.",
+    "text": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "slice: One mother ship and connected client computers",
+    "step": "slice: Provider capacity, cost and model controls",
     "steps_done": 0,
     "steps_total": 7,
-    "waiting_on_you": "",
+    "waiting_on_you": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
     "waiting_since": null,
-    "next": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-    "why": "step set One mother ship and connected client computers",
+    "next": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+    "why": "The requested prototype is ready; refine its layout before an implementation plan.",
     "attention": "quiet",
     "goal_reread": true
   },
   "map": [
     "research: Projects, folders and recommended organization (proposed)",
-    "slice: One mother ship and connected client computers (proposed) \u00b7 no gate",
-    "slice: Provider health, capacity and chosen model (proposed) \u00b7 no gate",
+    "slice: One mother ship per person and connected client computers (proposed) \u00b7 no gate",
+    "slice: Provider capacity, cost and model controls (active) \u00b7 no gate",
     "rigor: Review Setup before building it (proposed) \u00b7 no gate",
-    "integrate: Token sharing and secure local authentication (proposed) \u00b7 no gate",
+    "integrate: Subscription sign-in and optional API keys (proposed) \u00b7 no gate",
     "integrate: Email and calendars (proposed) \u00b7 no gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
   ],
@@ -176,11 +176,11 @@
       "steps": [
         {
           "id": "gwl-host-client",
-          "name": "One mother ship and connected client computers",
+          "name": "One mother ship per person and connected client computers",
           "status": "proposed",
-          "done_when": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+          "done_when": "Detect each person's chosen mother ship on their own computer, install and register it when needed, and connect their other computers through Tailscale without accidental duplicate hosts.",
           "if_then": "",
-          "waiting_on": "Choose personal or shared mother ship ownership for Setup scope v1.",
+          "waiting_on": null,
           "due": null,
           "ref": null,
           "tier": null,
@@ -203,16 +203,18 @@
                 "parent_id": null
               }
             ],
-            "current": true
+            "featured_paths": [
+              "SCOPE-v2.md"
+            ]
           }
         },
         {
           "id": "gwl-provider-status",
-          "name": "Provider health, capacity and chosen model",
-          "status": "proposed",
-          "done_when": "Show whether providers work, green/amber/red remaining service, actual model and reasoning level, and the selected model policy.",
+          "name": "Provider capacity, cost and model controls",
+          "status": "active",
+          "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization.",
           "if_then": "",
-          "waiting_on": null,
+          "waiting_on": "Keep the compact Cave tile opening one provider detail panel shared with Setup, in Provider mockup Initial draft?",
           "due": null,
           "ref": null,
           "tier": null,
@@ -226,6 +228,11 @@
           "navigation": {
             "path": [
               "gwl-setup"
+            ],
+            "current": true,
+            "featured_paths": [
+              "mockups/PROVIDER-SETUP-initial.html",
+              "SCOPE-v3.md"
             ]
           }
         }
@@ -270,9 +277,9 @@
       "steps": [
         {
           "id": "gwl-access",
-          "name": "Token sharing and secure local authentication",
+          "name": "Subscription sign-in and optional API keys",
           "status": "proposed",
-          "done_when": "Set up access tokens and normal provider authentication on the mother ship.",
+          "done_when": "Set up normal subscription sign-in and optional user API keys on the personal mother ship, distinguishing subscription allowances from paid API usage; do this before email and calendar setup.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -288,7 +295,8 @@
           "navigation": {
             "path": [
               "gwl-setup"
-            ]
+            ],
+            "current": false
           }
         },
         {
@@ -342,12 +350,13 @@
           "navigation": {
             "path": [
               "gwl-setup"
-            ]
+            ],
+            "current": false
           }
         }
       ]
     }
   ],
   "swarm": [],
-  "deliverables_count": 6
+  "deliverables_count": 9
 }
