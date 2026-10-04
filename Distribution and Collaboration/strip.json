@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Contractor-payment policy recorded; preparing Ghost World Lab License v1, Refinement 2.",
+  "active_effort": "Ghost World Lab License v1, Refinement 2 and its focused payment review are ready.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "none",
@@ -17,7 +17,7 @@
   "anti_starvation_age_days": 0,
   "grasscatch": [],
   "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
-  "why_next": "John permits programming-time fees; software sales and recurring version fees remain restricted.",
+  "why_next": "Contractor labor is permitted; software sales and recurring version fees remain reserved.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -637,6 +637,35 @@
       "derived": true,
       "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
       "why_next": "John permits programming-time fees; software sales and recurring version fees remain restricted.",
+      "horizon_source_seq": 44,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "next_recommended": "Review Ghost World Lab License v1, Refinement 2 and its payment check.",
+      "why_next": "Contractor labor is permitted; software sales and recurring version fees remain reserved.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Ghost World Lab License v1, Refinement 2 and its focused payment review are ready.",
+      "human_wait": "none",
+      "current_step_id": "gwl-license"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "Contractor labor is permitted; software sales and recurring version fees remain reserved.",
       "horizon_source_seq": 44,
       "horizon_focus": "gwl-license",
       "horizon_steps": [

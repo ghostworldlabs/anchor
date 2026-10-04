@@ -1,0 +1,23 @@
+{
+  "input_sha256": "9f493725a0965236d5fd328530ae7249ff183ddd115ec1b80ef4f81b0bb83bf0",
+  "report_body_sha256": "6ea4054c7c0c322bf0cfdc3605fc7e046543989f13d7bb4d191a8a5bbcc23fc7",
+  "checked": 4,
+  "quotes": [
+    {
+      "quote": "Payment for the custom programming services permitted by section 4 is also not a Sale, including delivery of the resulting changes or modified copy solely for the customer's own use as part of those services.",
+      "matched": true
+    },
+    {
+      "quote": "The restriction includes a one-time price for a copy and recurring license, royalty, subscription or other fees for receiving or continuing to use a modified version.",
+      "matched": true
+    },
+    {
+      "quote": "Payment must buy programming services actually performed for that customer; it must not buy a software product, software-use rights or Hosted Access.",
+      "matched": true
+    },
+    {
+      "quote": "The customer's exercise or retention of these permissions must not depend on continuing payments to the programmer.",
+      "matched": true
+    }
+  ]
+}
