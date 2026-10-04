@@ -1,0 +1,353 @@
+{
+  "at": "2026-10-04 10:03",
+  "status_id": "01791129819625991300",
+  "effort": "Setup and Mother Ship",
+  "latest_event": null,
+  "compact": {
+    "activity": "nothing running - quiet",
+    "latest_event": null,
+    "next": [
+      "One mother ship and connected client computers"
+    ],
+    "question": "Personal or shared?",
+    "facts": [
+      {
+        "label": "Summary",
+        "value": "One mother ship and connected client computers \u2014 Detect the service host, install it when needed, register\u2026"
+      },
+      {
+        "label": "Effort",
+        "value": "Setup and Mother Ship"
+      },
+      {
+        "label": "Doing",
+        "value": "nothing running - quiet"
+      },
+      {
+        "label": "Status",
+        "value": "slice: One mother ship and connected client computers \u00b7 0/7 done \u00b7 quiet"
+      },
+      {
+        "label": "Tests",
+        "value": "Unavailable \u2014 no check receipt for the current work and session"
+      },
+      {
+        "label": "Blocker",
+        "value": "none"
+      },
+      {
+        "label": "Procs",
+        "value": "none"
+      },
+      {
+        "label": "Journal",
+        "value": "0002-host-ownership-discovery: Mother ship ownership discovery \u2014 2026-10-04"
+      },
+      {
+        "label": "ETA",
+        "value": "Unavailable \u2014 no current estimate"
+      },
+      {
+        "label": "To do",
+        "value": "One mother ship and connected client computers"
+      }
+    ]
+  },
+  "lead_line": "Next: One mother ship and connected client computers; then Projects, folders and recommended organization \u2014 Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+  "now": [
+    "nothing running - quiet"
+  ],
+  "running": {
+    "kind": "none",
+    "label": "nothing running - quiet",
+    "skill": "",
+    "source": "",
+    "age": ""
+  },
+  "slice": {
+    "n": 1,
+    "total": 7,
+    "id": "gwl-host-client",
+    "name": "One mother ship and connected client computers",
+    "part": "slice",
+    "summary": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+    "commissioned_as": ""
+  },
+  "eta": "Unavailable \u2014 no current estimate",
+  "tests": "Unavailable \u2014 no check receipt for the current work and session",
+  "journal": "0002-host-ownership-discovery: Mother ship ownership discovery \u2014 2026-10-04",
+  "evidence": {
+    "source": {
+      "path": "strip.json",
+      "step_id": "gwl-host-client",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a"
+    },
+    "checks": [],
+    "journal": {
+      "state": "available",
+      "path": "journal/0002-host-ownership-discovery.md",
+      "entry_id": "0002-host-ownership-discovery",
+      "at": "2026-10-04T16:01:57Z",
+      "step_id": "gwl-host-client",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "run_id": null
+    },
+    "eta": {
+      "state": "unavailable"
+    }
+  },
+  "focus_warning": "",
+  "next_bullets": [
+    "One mother ship and connected client computers",
+    "then Projects, folders and recommended organization"
+  ],
+  "project": {
+    "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
+    "parts": "slice \u00b7 research \u00b7 integrate \u00b7 harden \u00b7 rigor",
+    "steps_done": 0,
+    "steps_total": 7
+  },
+  "lookthrough": null,
+  "halt": null,
+  "effort_line": {
+    "text": "Discovery: clarify who shares a mother ship before drafting Setup.",
+    "as_of": "2026-10-04",
+    "newest_work": "2026-10-04",
+    "behind_days": 0,
+    "stale": false
+  },
+  "plan": {
+    "step": "slice: One mother ship and connected client computers",
+    "steps_done": 0,
+    "steps_total": 7,
+    "waiting_on_you": "",
+    "waiting_since": null,
+    "next": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+    "why": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+    "attention": "quiet",
+    "goal_reread": true
+  },
+  "map": [
+    "research: Projects, folders and recommended organization (proposed)",
+    "slice: One mother ship and connected client computers (proposed) \u00b7 no gate",
+    "slice: Provider health, capacity and chosen model (proposed) \u00b7 no gate",
+    "rigor: Review Setup before building it (proposed) \u00b7 no gate",
+    "integrate: Token sharing and secure local authentication (proposed) \u00b7 no gate",
+    "integrate: Email and calendars (proposed) \u00b7 no gate",
+    "harden: Backups and restore (proposed) \u00b7 no gate"
+  ],
+  "work_map": [
+    {
+      "tag": "research",
+      "label": "Background",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-mapping",
+          "name": "Projects, folders and recommended organization",
+          "status": "proposed",
+          "done_when": "Recommend project and goal mappings from folders nominated by the user, with C:/dev as John\u2019s preferred home.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "research",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "slice",
+      "label": "The product",
+      "done": 0,
+      "total": 2,
+      "steps": [
+        {
+          "id": "gwl-host-client",
+          "name": "One mother ship and connected client computers",
+          "status": "proposed",
+          "done_when": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
+          "if_then": "",
+          "waiting_on": "Choose personal or shared mother ship ownership for Setup scope v1.",
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "slice",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ],
+            "groups": [
+              {
+                "id": "gwl-setup",
+                "label": "Setup and Mother Ship",
+                "order": 0,
+                "parent_id": null
+              }
+            ],
+            "current": true
+          }
+        },
+        {
+          "id": "gwl-provider-status",
+          "name": "Provider health, capacity and chosen model",
+          "status": "proposed",
+          "done_when": "Show whether providers work, green/amber/red remaining service, actual model and reasoning level, and the selected model policy.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "slice",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "rigor",
+      "label": "Prove it",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-review",
+          "name": "Review Setup before building it",
+          "status": "proposed",
+          "done_when": "Settle load-bearing choices and review the user-facing Setup flow.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "rigor",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "integrate",
+      "label": "Join",
+      "done": 0,
+      "total": 2,
+      "steps": [
+        {
+          "id": "gwl-access",
+          "name": "Token sharing and secure local authentication",
+          "status": "proposed",
+          "done_when": "Set up access tokens and normal provider authentication on the mother ship.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "integrate",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        },
+        {
+          "id": "gwl-accounts",
+          "name": "Email and calendars",
+          "status": "proposed",
+          "done_when": "Set up Outlook and Gmail accounts and calendars.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "integrate",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "harden",
+      "label": "Finish",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-backup",
+          "name": "Backups and restore",
+          "status": "proposed",
+          "done_when": "Set up backups from the chosen project mapping and main directory.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "harden",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "swarm": [],
+  "deliverables_count": 6
+}
