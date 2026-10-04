@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Connect-first order recorded; MIT comparison v1 and licensing guide v1 ready to read.",
+  "active_effort": "Free internal use recorded; licensing and business-model discussion transferred here.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.",
+  "human_wait": "none",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -17,7 +17,7 @@
   "anti_starvation_age_days": 0,
   "grasscatch": [],
   "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
-  "why_next": "Broad use and modification with restricted sales need a more precise license boundary.",
+  "why_next": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -321,6 +321,69 @@
       "source": "verb_update",
       "wait_ref": "decision:gwl-internal-business-use-v1",
       "human_wait": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Free internal use recorded; licensing and business-model discussion transferred here.",
+      "why_next": "Final public terms remain undecided; Anchor exchange and paid services remain proposals.",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Final public terms remain undecided; Anchor exchange and paid services remain proposals.",
+      "horizon_source_seq": 28,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1.",
+      "horizon_source_seq": 28,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "human_wait": "none",
+      "wait_ref": "none"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1.",
+      "horizon_source_seq": 29,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
     }
   ],
   "receipts": [
@@ -431,9 +494,29 @@
       "wait_ref": "none",
       "human_wait": "none",
       "_kind": "receipt"
+    },
+    {
+      "at": "2026-10-04T19:06:53Z",
+      "source": "engine",
+      "step_id": null,
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
+      "kind": "journal_update",
+      "path": "journal/0004-connect-first-answer-2026-10-04.md",
+      "entry_id": "0004-connect-first-answer-2026-10-04",
+      "summary": "Connect-first answer recorded — 2026-10-04"
+    },
+    {
+      "at": "2026-10-04T19:10:50Z",
+      "source": "engine",
+      "step_id": null,
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
+      "kind": "journal_update",
+      "path": "journal/0005-internal-use-and-transferred-discussion-2026-10-04.md",
+      "entry_id": "0005-internal-use-and-transferred-discussion-2026-10-04",
+      "summary": "Internal-use answer and transferred licensing discussion"
     }
   ],
-  "horizon_source_seq": 26,
+  "horizon_source_seq": 29,
   "horizon_focus": "gwl-license",
-  "wait_ref": "decision:gwl-internal-business-use-v1"
+  "wait_ref": "none"
 }

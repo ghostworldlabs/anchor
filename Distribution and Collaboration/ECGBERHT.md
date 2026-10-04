@@ -10,15 +10,15 @@ John's Campaign dictation, 2026-10-04, turn `3c476265-7142-441c-a934-a7a37d5a1e9
 
 ## Active effort
 
-Connect-first order recorded; MIT comparison v1 and licensing guide v1 ready to read.
+Free internal use recorded; licensing and business-model discussion transferred here.
 
 ## Why next
 
-The trial order is settled; MIT permits the sales John wants to restrict.
+Final public terms remain undecided; Anchor exchange and paid services remain proposals.
 
 ## Human wait
 
-John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.
+none
 
 ## Why stakes
 

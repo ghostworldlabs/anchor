@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04",
+  "as_of": "2026-10-04T19:19:40.334Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -393,6 +393,80 @@
       },
       "at": "2026-10-04",
       "seq": 24
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": null
+      },
+      "at": "2026-10-04T19:02:00.292Z",
+      "client_event_id": "gwl-free-internal-use-00a9229a-71fe-4593-8228-aaab78ef10a6-gwl-license-clear",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:02:00.292Z",
+        "why": "John accepted free internal business use in original turn 00a9229a-71fe-4593-8228-aaab78ef10a6, scoped to Distribution scope v1, Refinement 1. Final terms, publication and slice close remain unapproved."
+      },
+      "seq": 25
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "waiting",
+      "to": "active",
+      "at": "2026-10-04T19:02:00.292Z",
+      "client_event_id": "gwl-free-internal-use-00a9229a-71fe-4593-8228-aaab78ef10a6-gwl-license-resume",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:02:00.292Z",
+        "why": "John accepted free internal business use in original turn 00a9229a-71fe-4593-8228-aaab78ef10a6, scoped to Distribution scope v1, Refinement 1. Final terms, publication and slice close remain unapproved."
+      },
+      "seq": 26
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Compare standard licenses against accepted free internal business use, broad modification, restricted sales of Anchor-based versions and sharing improvements; distinguish proposed paid enterprise/hosting/model services before John selects final terms."
+      },
+      "at": "2026-10-04T19:09:11.424Z",
+      "client_event_id": "gwl-business-model-767aa81f-dfd0-46d4-8274-2ac76f5be137-license",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:09:11.424Z",
+        "why": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1. No build, fees, terms or close selected."
+      },
+      "seq": 27
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-site",
+      "fields": {
+        "done_when": "Offer the releases from the proposed Ghost World Labs web home; clarify the proposed Anchor exchange for sharing modifications and the proposed paid enterprise, managed-mother-ship and open-model token services. No offering or fee is selected."
+      },
+      "at": "2026-10-04T19:09:11.424Z",
+      "client_event_id": "gwl-business-model-767aa81f-dfd0-46d4-8274-2ac76f5be137-exchange",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:09:11.424Z",
+        "why": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1. No build, fees, terms or close selected."
+      },
+      "seq": 28
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Compare standard licenses against accepted free use and modification, voluntary sharing back, and restricted sales of Anchor-based versions; distinguish proposed paid enterprise/hosting/model services before John selects final terms."
+      },
+      "at": "2026-10-04T19:19:40.334Z",
+      "client_event_id": "gwl-voluntary-sharing-bddb9954-a824-4209-9d17-92fc3a432a48",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:19:40.334Z",
+        "why": "John's later original local turn bddb9954-a824-4209-9d17-92fc3a432a48 makes sharing back voluntary, superseding the earlier possible obligation within Distribution scope v1, Refinement 1. Follow-on license comparison belongs in this cockpit."
+      },
+      "seq": 29
     }
   ],
   "roadmap_projection": [
@@ -438,7 +512,7 @@
       "id": "gwl-site",
       "name": "Download site and collaboration",
       "status": "proposed",
-      "done_when": "Offer the releases from the proposed Ghost World Labs web home.",
+      "done_when": "Offer the releases from the proposed Ghost World Labs web home; clarify the proposed Anchor exchange for sharing modifications and the proposed paid enterprise, managed-mother-ship and open-model token services. No offering or fee is selected.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
@@ -452,9 +526,9 @@
     {
       "id": "gwl-license",
       "name": "License and intellectual property — restricted preference",
-      "status": "waiting",
-      "done_when": "Compare MIT and other standard open-source licenses against broad use/modification, restricted sale of Anchor-based products, and sharing improvements; settle remaining boundaries before John selects terms.",
-      "waiting_on": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.",
+      "status": "active",
+      "done_when": "Compare standard licenses against accepted free use and modification, voluntary sharing back, and restricted sales of Anchor-based versions; distinguish proposed paid enterprise/hosting/model services before John selects final terms.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "research",
       "gate": null,
