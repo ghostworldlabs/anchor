@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Setup mockup Refinement 1 is ready for continued feedback; the warning default is settled.",
+  "active_effort": "Setup mockup Refinement 1 remains in review; laptop testing and Cave settings work follow it.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-  "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
+  "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+  "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -390,6 +390,35 @@
         "gwl-provider-status",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 remains in review; laptop testing and Cave settings work follow it.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "next_recommended": "Settle the provider mockup, then test on the laptop and wire Cave settings.",
+      "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
+      "horizon_source_seq": 54,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
     }
   ],
   "receipts": [
@@ -432,7 +461,7 @@
       "summary": "Setup mockup — Refinement 1, October 4, 2026"
     }
   ],
-  "horizon_source_seq": 45,
+  "horizon_source_seq": 54,
   "horizon_focus": "gwl-provider-status",
   "current_step_id": "gwl-provider-status",
   "wait_ref": "none"

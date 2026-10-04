@@ -10,11 +10,11 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Setup mockup Refinement 1 remains open for feedback: mother ship first, providers second, Star Chart organization third. John accepted warnings retaining full model strength; scope v4 records that decision.
+Setup mockup Refinement 1 remains open for feedback, with warnings retaining full strength accepted. Scope v5 adds conditional testing in John's running laptop Anchor, then Cave controls and a gear reopening Setup.
 
 ## Why next
 
-Review the remaining walkthrough before implementation planning; the warning policy is settled. All credentials, tests and usage run on the mother ship.
+Settle the provider mockup before implementation planning, laptop testing and Cave wiring. The gear belongs at the far upper left, with the Anchor icon shifted right; it reopens existing settings in the same Setup page.
 
 ## Human wait
 

@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T20:39:03.386Z",
+  "as_of": "2026-10-04T20:45:31.045Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -766,6 +766,157 @@
       "client_event_id": "setup-r1-warning-accepted-d1766e5a",
       "seq": 45,
       "at": "2026-10-04T20:39:03.386Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-review",
+      "fields": {
+        "name": "Review Setup before laptop integration",
+        "done_when": "Settle the provider mockup and review the Setup walkthrough before implementation planning and live laptop integration. The accepted warning default is only one policy decision; further mockup feedback remains open and a slice closes only on John's explicit instruction."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-0",
+      "seq": 46,
+      "at": "2026-10-04T20:45:31.006Z"
+    },
+    {
+      "kind": "step_create",
+      "step_id": "gwl-laptop-provider-test",
+      "name": "Test providers in the running laptop Anchor",
+      "status": "proposed",
+      "waiting_on": null,
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "part": "rigor",
+      "done_when": "After the provider mockup is settled and implementation work is agreed, test the provider flow in the current Anchor client actually running on John's laptop. Check the selected mother ship, subscriptions and optional API connections, per-account tests and honestly reported allowance/cost, warnings preserving full strength and explicit model changes. Distinguish the actual laptop client from fresh-browser mockup checks; do not reset first-time setup or disrupt ongoing sessions.",
+      "client_event_id": "setup-laptop-cave-49427a76-1",
+      "seq": 47,
+      "at": "2026-10-04T20:45:31.013Z"
+    },
+    {
+      "kind": "step_create",
+      "step_id": "gwl-cave-settings",
+      "name": "Wire Cave controls and reopen Setup",
+      "status": "proposed",
+      "waiting_on": null,
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "part": "integrate",
+      "done_when": "After provider mockup settlement and laptop testing, wire the bottom of the Cave of Wonders left side window to the agreed mother-ship provider/model/reasoning settings. Retain the separately specified lower-right capacity display. After first-time Setup, show a gear at the far upper left and move the Anchor icon slightly right. The gear opens the same Setup page to modify existing settings and preserves completed host/provider/project setup. Verify in the running laptop client; credentials and tests stay on the mother ship.",
+      "client_event_id": "setup-laptop-cave-49427a76-2",
+      "seq": 48,
+      "at": "2026-10-04T20:45:31.018Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-laptop-provider-test",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-3",
+      "seq": 49,
+      "at": "2026-10-04T20:45:31.023Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-4",
+      "seq": 50,
+      "at": "2026-10-04T20:45:31.027Z"
+    },
+    {
+      "kind": "reorder",
+      "step_id": "gwl-review",
+      "after": "gwl-provider-status",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-5",
+      "seq": 51,
+      "at": "2026-10-04T20:45:31.032Z"
+    },
+    {
+      "kind": "reorder",
+      "step_id": "gwl-laptop-provider-test",
+      "after": "gwl-review",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-6",
+      "seq": 52,
+      "at": "2026-10-04T20:45:31.036Z"
+    },
+    {
+      "kind": "reorder",
+      "step_id": "gwl-cave-settings",
+      "after": "gwl-laptop-provider-test",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-7",
+      "seq": 53,
+      "at": "2026-10-04T20:45:31.041Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "mockups/SETUP-refinement-1.html",
+            "SCOPE-v5.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:41:02.161986Z",
+        "why": "Original turn 49427a76-73ad-4823-8c3f-2ee92a922279: after provider mockup settlement, test on the running laptop Anchor, wire the Cave lower-left controls and add an upper-left gear reopening Setup. Record conditional work now; no mockup acceptance, slice close or immediate production changes inferred."
+      },
+      "client_event_id": "setup-laptop-cave-49427a76-8",
+      "seq": 54,
+      "at": "2026-10-04T20:45:31.045Z"
     }
   ],
   "roadmap_projection": [
@@ -827,7 +978,52 @@
         "current": true,
         "featured_paths": [
           "mockups/SETUP-refinement-1.html",
-          "SCOPE-v4.md"
+          "SCOPE-v5.md"
+        ]
+      }
+    },
+    {
+      "id": "gwl-review",
+      "name": "Review Setup before laptop integration",
+      "status": "proposed",
+      "done_when": "Settle the provider mockup and review the Setup walkthrough before implementation planning and live laptop integration. The accepted warning default is only one policy decision; further mockup feedback remains open and a slice closes only on John's explicit instruction.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "rigor",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-laptop-provider-test",
+      "name": "Test providers in the running laptop Anchor",
+      "status": "proposed",
+      "done_when": "After the provider mockup is settled and implementation work is agreed, test the provider flow in the current Anchor client actually running on John's laptop. Check the selected mother ship, subscriptions and optional API connections, per-account tests and honestly reported allowance/cost, warnings preserving full strength and explicit model changes. Distinguish the actual laptop client from fresh-browser mockup checks; do not reset first-time setup or disrupt ongoing sessions.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "rigor",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ]
+      }
+    },
+    {
+      "id": "gwl-cave-settings",
+      "name": "Wire Cave controls and reopen Setup",
+      "status": "proposed",
+      "done_when": "After provider mockup settlement and laptop testing, wire the bottom of the Cave of Wonders left side window to the agreed mother-ship provider/model/reasoning settings. Retain the separately specified lower-right capacity display. After first-time Setup, show a gear at the far upper left and move the Anchor icon slightly right. The gear opens the same Setup page to modify existing settings and preserves completed host/provider/project setup. Verify in the running laptop client; credentials and tests stay on the mother ship.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "integrate",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
         ]
       }
     },
@@ -875,21 +1071,6 @@
           "gwl-setup"
         ],
         "current": false
-      }
-    },
-    {
-      "id": "gwl-review",
-      "name": "Review Setup before building it",
-      "status": "proposed",
-      "done_when": "Settle load-bearing choices and review the user-facing Setup flow.",
-      "waiting_on": null,
-      "commissioned_as": null,
-      "part": "rigor",
-      "gate": null,
-      "navigation": {
-        "path": [
-          "gwl-setup"
-        ]
       }
     }
   ]

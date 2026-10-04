@@ -1,0 +1,49 @@
+{
+  "checked_at": "2026-10-04T20:46:33.906379+00:00",
+  "checks": [
+    {
+      "check": "roadmap order carries provider review then laptop test and Cave wiring",
+      "passed": true
+    },
+    {
+      "check": "all nine steps retain valid product parts",
+      "passed": true
+    },
+    {
+      "check": "no step closed by scope recording",
+      "passed": true
+    },
+    {
+      "check": "warning answer stays settled",
+      "passed": true
+    },
+    {
+      "check": "Refinement 1 remains visible in Current work",
+      "passed": true
+    },
+    {
+      "check": "scope v5 is visible and named in Current work",
+      "passed": true
+    },
+    {
+      "check": "scope click binds exact effort and version",
+      "passed": true
+    },
+    {
+      "check": "scope explains actual running laptop test",
+      "passed": true
+    },
+    {
+      "check": "scope explains gear placement and reused Setup",
+      "passed": true
+    },
+    {
+      "check": "scope retains accepted warning default",
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Fresh normally authenticated browser; not the already-open laptop client.",
+    "Scope/roadmap delivery only; no production integration or account action."
+  ]
+}
