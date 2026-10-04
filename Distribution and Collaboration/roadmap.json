@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T21:26:58.987Z",
+  "as_of": "2026-10-04T22:41:49.639Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -662,6 +662,36 @@
         "why": "Named draft v1 Refinement 1 and requested Legal-Beagle review completed; independent correction check found no new material wording findings. Paid private delivery outside Internal Users remains a decision for John. No final license acceptance or slice close."
       },
       "seq": 42
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "Review Ghost World Lab License v1, Refinement 2: contractor programming labor permitted; one-time software sales and recurring fees for modified versions remain reserved. Preserve paid-hosting permission, voluntary sharing and free internal use. Final text, owner, law and dependency/contributor rights remain for review."
+      },
+      "client_event_id": "gwl-paid-labor-ee1d9c6c-201e-4dc5-adfd-facb4db2d028-recorded",
+      "at": "2026-10-04T22:41:49.639Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T22:41:49.639Z",
+        "why": "Original turn ee1d9c6c-201e-4dc5-adfd-facb4db2d028 accepts contractor programming time and rejects sales or recurring software-use fees for modified Anchor. Refine the same license draft; final terms, publication and slice close remain unapproved."
+      },
+      "seq": 43
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "waiting",
+      "to": "active",
+      "client_event_id": "gwl-paid-labor-ee1d9c6c-201e-4dc5-adfd-facb4db2d028-resume",
+      "at": "2026-10-04T22:41:49.639Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T22:41:49.639Z",
+        "why": "Original turn ee1d9c6c-201e-4dc5-adfd-facb4db2d028 accepts contractor programming time and rejects sales or recurring software-use fees for modified Anchor. Refine the same license draft; final terms, publication and slice close remain unapproved."
+      },
+      "seq": 44
     }
   ],
   "roadmap_projection": [
@@ -721,9 +751,9 @@
     {
       "id": "gwl-license",
       "name": "Licensing and hosting",
-      "status": "waiting",
-      "done_when": "Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report. John decides paid private deliveries and final proposed terms; owner, governing law and dependency/contributor rights remain prerequisites before any publication.",
-      "waiting_on": "John: allow paid private development separately delivering changes for a customer’s own use? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+      "status": "active",
+      "done_when": "Review Ghost World Lab License v1, Refinement 2: contractor programming labor permitted; one-time software sales and recurring fees for modified versions remain reserved. Preserve paid-hosting permission, voluntary sharing and free internal use. Final text, owner, law and dependency/contributor rights remain for review.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "research",
       "gate": null,

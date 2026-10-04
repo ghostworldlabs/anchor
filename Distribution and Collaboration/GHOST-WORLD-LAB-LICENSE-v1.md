@@ -1,6 +1,6 @@
 # Ghost World Lab License
 
-Version 1, Refinement 1 — draft for review, 4 October 2026
+Version 1, Refinement 2 — draft for review, 4 October 2026
 
 **Status: proposed instrument, not an applied license.** John authorized this named draft and Legal-Beagle review within Distribution scope v1, Refinement 1. He has not approved its final text or publication. The permissions below would operate only after an authorized rights holder adopts the completed instrument for identified software. Bracketed fields must be resolved before that happens.
 
@@ -26,7 +26,7 @@ Only sections 1 through 10 below are proposed operative terms. The surrounding s
 
 “Sale” means supplying a copy of Covered Software, a modification, a product containing Covered Software, or rights to use any of them in exchange for required payment, barter or other consideration. It includes licenses, rentals, subscriptions, paid bundles and transactions through an intermediary. Giving the covered component a separate price of zero does not exempt a paid bundle containing it. A voluntary donation is not a Sale when neither receipt of the software nor the permissions granted here depend on donating.
 
-Paying Internal Users for work on a copy that remains under Your control for Your own operations is not a Sale or Paid Hosted Access. This includes wages and contractor compensation for creating, maintaining or modifying that copy. It does not exempt supplying a paid product, a separately delivered paid modification, or Paid Hosted Access to customers or other third parties.
+Paying Internal Users for work on a copy that remains under Your control for Your own operations is not a Sale or Paid Hosted Access. This includes wages and contractor compensation for creating, maintaining or modifying that copy. Payment for the custom programming services permitted by section 4 is also not a Sale, including delivery of the resulting changes or modified copy solely for the customer's own use as part of those services. Neither exception authorizes a software-product sale, a fee for software-use rights or Paid Hosted Access.
 
 “Hosted Access” means enabling another person to use the functionality of Covered Software running on a computer that You or Your provider operates, through an interface, API, intermediary or other service. “Paid Hosted Access” means Hosted Access for which payment, barter or other consideration is required, including access supplied as part of a paid bundle. Merely using Covered Software internally to produce a report, design or other output for a customer, without giving the customer access to its functionality, is not Hosted Access.
 
@@ -46,6 +46,8 @@ You need not publish private modifications, provide their source code to the Lic
 
 This license does not authorize a Sale of Covered Software, modified Covered Software, or a product containing Covered Software. This restriction applies even when the product adds substantial independent functionality, changes its name, or charges indirectly for the covered component.
 
+The restriction includes a one-time price for a copy and recurring license, royalty, subscription or other fees for receiving or continuing to use a modified version. Paying for permitted programming services under section 4 does not give the programmer permission to sell that version to other customers or charge for its software-use rights.
+
 This license does not authorize Paid Hosted Access to original or modified Covered Software. Internal business use under section 2 does not authorize charging customers or other third parties for remote access to its functionality.
 
 Obtain Separate Permission before either activity. A separate agreement may authorize only the activities and parties it identifies. The absence of a response to a permission request is not authorization.
@@ -54,7 +56,11 @@ Obtain Separate Permission before either activity. A separate agreement may auth
 
 You may charge for independently created software and outputs that contain no Covered Software. You may use Anchor internally in a business that sells such work. This instrument does not claim rights in Your data, reports, designs, prompts, model outputs or independently written programs merely because You used Anchor to create them; any Covered Software actually incorporated into an output remains subject to this license.
 
-You may charge for standalone training, consulting, installation assistance or support when payment purchases the service rather than a copy, software-use rights or Hosted Access, and the customer's receipt and continued use of Covered Software are not conditional on purchasing that service. Paid Hosted Access supplied by the service provider still requires Separate Permission. Work performed by Internal Users on Your controlled copy has the exception in section 1. Outside that exception, delivering a paid custom modification is not automatically exempt as consulting: if the transaction supplies modified Covered Software for required consideration, section 3 applies.
+You may charge for standalone training, consulting, installation assistance or support when payment purchases the service rather than a copy, software-use rights or Hosted Access, and the customer's receipt and continued use of Covered Software are not conditional on purchasing that service. Paid Hosted Access supplied by the service provider still requires Separate Permission.
+
+You may charge for programming labor to create or modify Covered Software for a customer's own use. This permission includes delivering the customer-specific changes or modified copy as part of the agreed programming work. Payment must buy programming services actually performed for that customer; it must not buy a software product, software-use rights or Hosted Access. Deliver Covered Software under this license, with the notices required by section 5. The customer's exercise or retention of these permissions must not depend on continuing payments to the programmer.
+
+Fees for actual later programming or maintenance services may be charged when those services are requested; this does not permit recurring fees merely for access to, possession of or use of the modified version. Calling a software price, royalty, version subscription or paid hosting charge “programming time,” “maintenance” or “support” does not make it a permitted service. Selling a ready-made or generally offered Anchor-based software product remains subject to section 3, even if some customization is included.
 
 ### 5. Redistribution and modifications
 
@@ -100,8 +106,8 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 | --- | --- |
 | 1 | Identify the actual owner and covered code. Renaming a paid fork or bundling Anchor for “free” does not remove the restriction. Connecting independent software does not automatically make it covered. |
 | 2 | Use Anchor at home or inside a business, change it privately, share a free fork, or offer free hosted access. You do not owe upstream contributions or publication of your modified source. |
-| 3 | Selling Anchor-based software or charging for hosted access needs separate written permission. Adding more features does not create a value-added exception. |
-| 4 | Sell work produced with Anchor when it contains no covered code and provides no hosted access to Anchor. Staff and contractors can be paid to work on your controlled private copy. Separately delivering a paid custom modification still requires permission in this candidate; John has not settled that edge. |
+| 3 | Selling Anchor-based software or charging for hosted access needs separate written permission. A one-time software price and recurring fees for a modified version are both restricted. Adding more features does not create a value-added exception. |
+| 4 | Sell independent work produced with Anchor when it contains no covered code and provides no hosted access. Staff and contractors may charge for programming labor, including delivering customer-specific changes for the customer's own use. The customer keeps the license's permissions without recurring version payments; selling an Anchor product remains restricted. |
 | 5 | Keep notices and the license with copies, label changes, and respect third-party terms. This is not a source-disclosure requirement. |
 | 6 | Contributors keep their rights. A free or paid edition needs permission to redistribute contributed material; a commercial edition also needs the applicable commercial rights. |
 | 7 | This draft grants no brand or explicit patent license. Patent coverage and naming rules need review before release. |
@@ -118,13 +124,16 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 | A company rents generic computing infrastructure for its own Anchor installation | Allowed; the provider is not selling Anchor functionality merely by renting infrastructure |
 | A collaborator gives away a modified version with notices | Allowed, including a free competing fork |
 | A company sells a renamed Anchor fork with substantial new features | Requires Separate Permission |
+| A coder charges a one-time software price for a modified Anchor copy | Requires Separate Permission; a one-time sale is still a software sale |
+| A coder charges a monthly fee merely to keep using a modified Anchor version | Requires Separate Permission; recurring version fees are restricted |
 | A vendor includes Anchor in a paid software bundle and calls Anchor itself free | Requires Separate Permission |
 | A provider charges for access through a hosted UI, API or paid intermediary | Requires Separate Permission |
 | A community runs an Anchor host with optional donations unrelated to access | Allowed as drafted; donation boundary is a proposed clarification |
 | A consultant uses Anchor privately to make a paid report without covered code | Allowed |
 | A developer sells an independently written plugin that includes no Anchor code | Allowed by this license; other rights may still apply |
 | A consultant charges for support while the customer controls its own free installation | Allowed if software/use/access is not conditional on buying the support |
-| Someone is paid to separately deliver a private Anchor modification outside the Internal Users exception | Requires Separate Permission as drafted; this edge is not yet settled by John |
+| An outside contractor bills programming time and delivers customer-specific changes for the customer's own use | Allowed as programming services under section 4; the delivered Covered Software carries this license |
+| A customer later pays for additional programming or maintenance work | Allowed for actual requested services; the customer's continued use of the version cannot depend on those payments |
 | Ghost World Labs incorporates someone else's patch into a paid edition | Needs adequate rights from that contributor; a voluntary patch is not an assignment |
 
 ## Review boundaries and unresolved facts
@@ -133,10 +142,12 @@ The core user policy is accepted. The definitions, notices, service exception, d
 
 The named owner is unverified, covered files have not been inventoried, governing law has not been selected, and dependency/contributor permissions have not been cleared. No public repository license is changed by this draft. Any Legal-Beagle analysis is drafting support rather than a lawyer's opinion on enforceability; licensed counsel should review the completed instrument before publication.
 
-Refinement 1 implements Legal-Beagle's wording corrections for internal compensation, private confidentiality, rented infrastructure, contribution permission and consistent termination mechanics. The independent review of the original v1 is preserved in `legal-review-v1/INDEPENDENT-REVIEW.md`. Paid custom deliveries, recipient protection after an unauthorized sale, patents, naming and the full range of noncash consideration remain proposed edges for later acceptance. The original input is retained as `legal-review-v1/INPUT-LICENSE-v1.md`; no earlier review receipt is represented as covering these changed bytes.
+Refinement 1 implemented Legal-Beagle's wording corrections for internal compensation, private confidentiality, rented infrastructure, contribution permission and consistent termination mechanics. Refinement 2 carries John's accepted distinction: contractors may be paid for programming work, while sales of modified Anchor and recurring payments for a modified version remain restricted. The prior independent review covered Refinement 1; its receipt does not cover this later revision. A focused check of the changed wording is recorded separately. Recipient protection after an unauthorized sale, patents, naming, the full range of noncash consideration and other supporting terms remain proposed for later acceptance.
 
 The live comparison and this draft should be read independently. Accepting the custom candidate did not accept the earlier licensing guide, comparison, scope artifact or this text as complete.
 
 ## Authorization sources
 
 The original messages remain in the durable cockpit dialogue: custom candidate acceptance `2122dc15-8520-47c6-9b54-a13aa880f380`; exact name and drafting request `f95c8ec4-2b07-4607-a9d3-4068814c5bb3`; Legal-Beagle request `c34fd8f9-3d47-4825-a4f3-3e78bf68b2c9`; journal request `77589eef-ee23-48d3-9330-c852da1dae0b`. Earlier policy answers and timestamps are retained in [Distribution scope v1, Refinement 1](SCOPE-v1-REFINEMENT-1.md).
+
+John's original turn `ee1d9c6c-201e-4dc5-adfd-facb4db2d028`, 2026-10-04T22:38:04.629046Z, accepts paying a contractor to modify while rejecting sale of modified Anchor and recurring payments for that version. This refines the contractor-payment boundary only; final text and publication remain unaccepted. [Earlier license Refinement 1](/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2Fversions%2FGHOST-WORLD-LAB-LICENSE-v1-REFINEMENT-1.md&render=1) is preserved unchanged, as is the original review input at `legal-review-v1/INPUT-LICENSE-v1.md`.

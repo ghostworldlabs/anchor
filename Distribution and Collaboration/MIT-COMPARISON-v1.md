@@ -43,3 +43,5 @@ The next decision is the licensing mechanism: I recommend custom source-availabl
 This comparison supplies the requested explanation. The separately authorized Ghost World Lab License v1 now supplies the custom draft; this comparison does not apply it, accept the earlier guide or authorize a release. Rights and legal review of final text remain prerequisites to publication already recorded in the scope.
 
 This is an addendum to Licensing and IP guide v1 and Distribution scope v1, Refinement 1. Those earlier reviews stay available. The independently accepted first-trial order remains connect-first, with installation retained as a separate path.
+
+Later accepted clarification, original turn `ee1d9c6c-201e-4dc5-adfd-facb4db2d028`, 4 October 2026: contractors may charge for programming labor for a customer's own use, including delivering the changes. Selling a modified Anchor product for a one-time price or charging recurring fees for that version remains restricted. Ghost World Lab License v1, Refinement 2 carries that distinction; the earlier paid-private-development question is answered. Final text and adoption remain unapproved.

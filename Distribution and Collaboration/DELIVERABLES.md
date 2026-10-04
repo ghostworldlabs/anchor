@@ -2,8 +2,9 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| START HERE — ecgberht Ghost World Lab License v1, Refinement 1 — corrected draft for review; final terms not accepted | `GHOST-WORLD-LAB-LICENSE-v1.md` | 2026-10-04 | gwl-license |
-| FOR REVIEW — Legal-Beagle Ghost World Lab License v1 review — findings applied; correction check complete; policy choices open | `LEGAL-BEAGLE-REVIEW-v1.md` | 2026-10-04 | gwl-license |
+| START HERE — ecgberht Ghost World Lab License v1, Refinement 2 — contractor programming time allowed; software sales and recurring version fees restricted; wording check pending | `GHOST-WORLD-LAB-LICENSE-v1.md` | 2026-10-04 | gwl-license |
+| Earlier Legal-Beagle Ghost World Lab License v1, Refinement 1 review — completed; does not cover later changed text | `LEGAL-BEAGLE-REVIEW-v1.md` | 2026-10-04 | gwl-license |
+| Earlier ecgberht Ghost World Lab License v1, Refinement 1 — preserved before the contractor-payment decision | `versions/GHOST-WORLD-LAB-LICENSE-v1-REFINEMENT-1.md` | 2026-10-04 | gwl-license |
 | FOR REVIEW — ecgberht MIT comparison v1 — custom candidate accepted for drafting, not final terms | `MIT-COMPARISON-v1.md` | 2026-10-04 | gwl-license |
 | FOR REVIEW — ecgberht Licensing and IP guide v1: earlier candidate comparison; later voluntary-sharing clarification is in the addendum | /artifact/df56858063ac4025982d0c36038509d2?path=goals%2Fanchor-steward%2FLICENSING-IP-v1.html | 2026-10-04 | gwl-license |
 | FOR REVIEW — ecgberht Distribution scope v1, Refinement 1 — custom candidate and named draft/review authorized | `SCOPE-v1-REFINEMENT-1.md` | 2026-10-04 | gwl-license |

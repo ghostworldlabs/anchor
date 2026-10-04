@@ -2,7 +2,7 @@
 
 This cockpit owns portable releases, the public distribution home and license choice. Existing distribution/onboarding work is retained. The earlier July record reserved rights; today’s open-source direction is a new proposal whose exact license remains undecided.
 
-Distribution scope v1, Refinement 1 — policy answers recorded 4 October 2026: **ordinary internal business use is free, sharing modifications is voluntary, and third-party paid Anchor hosting requires permission**. John's separate no-sales requirement remains active. **The custom candidate is accepted for drafting and review:** [Ghost World Lab License v1](GHOST-WORLD-LAB-LICENSE-v1.md). The draft's final terms are not accepted or applied.
+Distribution scope v1, Refinement 1 — policy answers recorded 4 October 2026: **ordinary internal business use is free, sharing modifications is voluntary, third-party paid Anchor hosting requires permission, and contractors may charge for programming labor while software sales and recurring version fees remain restricted**. John's separate no-sales requirement remains active. **The custom candidate is accepted for drafting and review:** [Ghost World Lab License v1, Refinement 2](GHOST-WORLD-LAB-LICENSE-v1.md). The draft's final terms are not accepted or applied.
 
 ## Accepted licensing boundaries
 
@@ -128,7 +128,7 @@ The custom candidate is selected for drafting and review; final terms are not ac
 
 The named license's **v1, Refinement 1** applies received Legal-Beagle wording corrections for free internal use, private modifications, generic computing rental and contribution/termination clarity. [Legal-Beagle review v1](LEGAL-BEAGLE-REVIEW-v1.md) records the findings and completed independent correction check, with no new material wording findings. This does not create a new scope refinement, accept proposed supporting clauses, settle paid private deliveries or license public releases.
 
-The next proposed policy refinement concerns a developer separately delivering a paid modification for a customer's own private use, outside the already-permitted Internal Users exception. Recommendation: allow that private development service while retaining permission for paid products and hosted access. Requiring permission would preserve broader control but add friction for ordinary business customization; deferring leaves the candidate's current restriction proposed and undecided. This would refine **Ghost World Lab License v1, Refinement 1** within the same Distribution scope v1, Refinement 1; no acceptance of other terms or publication is inferred.
+The earlier paid-private-development question is now answered below. Its historical recommendation was to allow private development services while retaining permission for paid products and hosted access; it is not a pending request or a restriction newly imposed on contractors.
 
 John then explicitly requested the draft name **Ghost World Lab License** in turn `f95c8ec4-2b07-4607-a9d3-4068814c5bb3`, a **Legal-Beagle** review in turn `c34fd8f9-3d47-4825-a4f3-3e78bf68b2c9`, and a journal entry in turn `77589eef-ee23-48d3-9330-c852da1dae0b`. These authorize producing **Ghost World Lab License v1 — draft for review**, its legal analysis, and the work journal within this same scope refinement. They do not authorize publication, applying a repository license, changing the North Star, accepting any other artifact or closing a slice. The legal owner, governing law and dependency/contributor rights remain unverified prerequisites to publication.
 
@@ -139,3 +139,9 @@ Recommendation: use custom source-available terms as the candidate because they 
 This authorizes: refine Distribution scope v1, Refinement 1 around a custom source-available license candidate for review.
 Reversible: yes - undo: remove the custom candidate from the scope.
 Custom?
+
+## Accepted decision — contractor programming time
+
+John's original local turn `ee1d9c6c-201e-4dc5-adfd-facb4db2d028`, at `2026-10-04T22:38:04.629046Z`, says: “Okay, paying a contractor to modify is fine; having a coder sell Anchor that they have modified is not (so they can be paid for their time to modify, but they cannot get a recuring payment for a version that they have modified).”
+
+This answers the paid-private-development question for **Ghost World Lab License v1** and authorizes **Refinement 2** within this same Distribution scope v1, Refinement 1. Contractors may charge for programming labor for a customer's own use, including delivering the resulting changes. A one-time software sale and a recurring fee for a modified version remain restricted under the free license; paid Anchor hosting still requires separate written permission. Genuine later programming/maintenance work remains a service, and cannot be used as a label for selling software or charging for continued use. The answered Face/Strip/roadmap wait is cleared. Final operative wording, other supporting terms, ownership, governing law, publication and slice close are not accepted by this policy answer.
