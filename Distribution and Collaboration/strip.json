@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Drafting Ghost World Lab License v1 and obtaining the requested Legal-Beagle review.",
+  "active_effort": "Ghost World Lab License v1, Refinement 1 and Legal-Beagle review are ready; paid private delivery remains undecided.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "none",
+  "human_wait": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -17,7 +17,7 @@
   "anti_starvation_age_days": 0,
   "grasscatch": [],
   "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
-  "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
+  "why_next": "Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -533,6 +533,66 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
+      "horizon_source_seq": 39,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
+      "horizon_source_seq": 40,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:gwl-paid-private-development-license-v1",
+      "next_recommended": "Allow paid private development while reserving software-product sales and paid hosted access.",
+      "why_next": "Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Ghost World Lab License v1, Refinement 1 and Legal-Beagle review are ready; paid private delivery remains undecided.",
+      "human_wait": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+      "current_step_id": "gwl-license"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John.",
+      "horizon_source_seq": 42,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
     }
   ],
   "receipts": [
@@ -695,8 +755,8 @@
       "summary": "Paid-hosting permission recorded"
     }
   ],
-  "horizon_source_seq": 38,
+  "horizon_source_seq": 42,
   "horizon_focus": "gwl-license",
-  "wait_ref": "none",
+  "wait_ref": "decision:gwl-paid-private-development-license-v1",
   "current_step_id": "gwl-license"
 }

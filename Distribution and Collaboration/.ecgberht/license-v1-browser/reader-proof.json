@@ -11,5 +11,13 @@
   "conversation_target_has_license": true,
   "conversation_target_heading": [
     "Ghost World Lab License"
-  ]
+  ],
+  "review_pin_opened": true,
+  "review_completed_visible": true,
+  "review_receipt_visible": true,
+  "review_has_no_overflow": true,
+  "review_conversation_link": "/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FLEGAL-BEAGLE-REVIEW-v1.md&render=1",
+  "review_conversation_status": 200,
+  "review_conversation_has_heading": true,
+  "refinement_visible": true
 }

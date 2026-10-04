@@ -6,9 +6,9 @@
 
 The candidate expresses John's accepted free-use and commercial-control policy. Legal-Beagle found wording that could restrict staff compensation, private workplace changes and self-hosting on generic rented computers; those conflicts have been corrected in Refinement 1. Paid delivery of a custom modification outside the internal-work exception remains a choice for John. Legal ownership, covered files, contribution/dependency rights and governing law remain prerequisites to adopting the license.
 
-**Review status:** the independent written analysis of the original draft completed. A fresh independent check of the corrected wording is underway. This report is therefore not yet a completed correction receipt or approval of final terms.
+**Review status:** the independent written analysis and the fresh correction check completed. The correction check found **no new material wording findings**; the companion and examples matched the operative clauses. Open policy choices and adoption prerequisites remain, so this is a completed drafting review, not approval of final terms or publication.
 
-[Open the current draft]( /artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md&render=1)
+[Open the current draft](/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md&render=1)
 
 ## Findings and treatment
 
@@ -72,7 +72,13 @@ Current clause quote: “it does not grant a separate patent license”. The ins
 
 The classification and MIT comparison use the supplied primary excerpts from the [Open Source Definition](https://opensource.org/osd) and [MIT License](https://opensource.org/license/mit). The [Copyright Office explanation](https://www.copyright.gov/what-is-copyright/) is identified as U.S. guidance, not governing law or a contribution grant. No case-law research or local-law certification is claimed. The original independent review abbreviates some placeholder quotations; this report uses operative quotations from the retained input or revised draft rather than treating abbreviated placeholders as exact text.
 
-The citation engine's receipt will distinguish its deterministic citation checks from the actual independent textual review. A clean check with no recognized legal-citation patterns does not establish enforceability or semantic correctness.
+The citation engine's footer receipt distinguishes its deterministic citation checks from the actual independent textual review. A clean check with no recognized legal-citation patterns does not establish enforceability or semantic correctness. The report's operative quotations are also checked directly against the preserved input, corrected draft and source pack.
+
+## Correction check result
+
+The fresh check completed at 21:22 UTC on 4 October. It found no new material wording findings, confirmed the internal-use clarifications did not create a software-sale or paid-hosting permission, and confirmed the companion and examples matched the clauses. It kept the recipient-protection alternatives, paid private deliveries, patent/naming/noncash boundaries, supporting enforcement terms and blank adoption fields explicitly open. Its raw reply and attested subscription receipt are preserved at `legal-review-v1/CORRECTION-CHECK.md` and `legal-review-v1/CORRECTION-SEAT-RECEIPT.json`.
+
+The review stops after this check; no extra review cycle or public application is authorized or needed for this drafting pass. John's next decision is whether paid development that separately delivers modifications for a customer's private use should be allowed. That would refine this draft while keeping paid products and hosted access reserved; it would not accept the other proposed terms or authorize publication.
 
 ## Independent review and preserved inputs
 
@@ -81,3 +87,9 @@ The original named draft is preserved at `legal-review-v1/INPUT-LICENSE-v1.md`, 
 The configured Grok subscription review returned an attested `grok-4.7-build` model, requested as the driver's current `grok-4.7` frontier. The original structured response failed after its one automatic retry; the same configured driver then delivered the independent written report. Aladdin's drafting used the ChatGPT-family interface; its exact served model is not attested by this interface. This is a cross-family textual check, not a licensed lawyer's sign-off, and no fallback to another review family is claimed.
 
 The current refinement and each earlier licensing artifact retain independent acceptance. No slice is closed. Final wording and publication remain unapproved.
+
+## Citation receipt
+
+The receipt binds the memo before this footer, preserved in legal-review-v1/REVIEW-BODY.md. The engine ran citation checks only; the independent textual reviews are recorded above. Recognized legal citation patterns: 0. This is not a legal certification.
+
+legal-beagle receipt 9a291b3451dc · gates: token CLEAN / proposition CLEAN (0 checked) · sources 5b66c1c1909c · 2026-10-04T21:25:19.383Z

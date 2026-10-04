@@ -1,0 +1,20 @@
+node:internal/modules/cjs/loader:1505
+  throw err;
+  ^
+
+Error: Cannot find module 'C:\dev\Anchor\Distribution and Collaboration\"C:\dev\Anchor\Distribution and Collaboration\legal-review-v1\run-review.mjs"'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1502:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1073:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1097:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1118:12)
+    at Module._load (node:internal/modules/cjs/loader:1287:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v26.1.0
+   !! review:legal-beagle-ghost-world-lab-license-v1 reply was schema-nonconforming — retrying once (strict reprompt)
+Legal-Beagle review did not complete: trio seat verification_fail_closed: review:legal-beagle-ghost-world-lab-license-v1

@@ -51,6 +51,28 @@ with sync_playwright() as p:
     report['conversation_target_has_license'] = 'Ghost World Lab License' in artifact.locator('body').inner_text()
     report['conversation_target_heading'] = artifact.locator('h1').all_text_contents()
     artifact.screenshot(path=str(out/'conversation-target.png'), full_page=True)
+    review_link = page.locator('[data-nav-focus="deliverables:pin:file:LEGAL-BEAGLE-REVIEW-v1.md"]')
+    review_link.wait_for(state='visible', timeout=10000)
+    with page.expect_popup(timeout=10000) as review_opening:
+        review_link.click()
+    review_reader = review_opening.value
+    review_reader.wait_for_load_state('domcontentloaded')
+    review_reader.wait_for_function("document.body.innerText.includes('Citation receipt')", timeout=15000)
+    review_text = review_reader.locator('body').inner_text()
+    report['review_pin_opened'] = True
+    report['review_completed_visible'] = 'no new material wording findings' in review_text.lower()
+    report['review_receipt_visible'] = 'legal-beagle receipt' in review_text
+    report['review_has_no_overflow'] = review_reader.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    review_reader.screenshot(path=str(out/'review-reader.png'),full_page=True)
+    review_exact = '/artifact/' + pid + '?path=Distribution%20and%20Collaboration%2FLEGAL-BEAGLE-REVIEW-v1.md&render=1'
+    review_target = context.new_page()
+    review_response = review_target.goto(origin+review_exact,wait_until='domcontentloaded',timeout=20000)
+    report['review_conversation_link'] = review_exact
+    report['review_conversation_status'] = review_response.status
+    report['review_conversation_has_heading'] = any('Legal-Beagle' in h for h in review_target.locator('h1').all_text_contents())
+    report['refinement_visible'] = 'Version 1, Refinement 1' in reader_text
+    assert all(report[k] for k in ('refinement_visible','review_pin_opened','review_completed_visible','review_receipt_visible','review_has_no_overflow','review_conversation_has_heading'))
+    assert report['conversation_target_status']==report['review_conversation_status']==200
     (out/'reader-proof.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report))
     browser.close()
