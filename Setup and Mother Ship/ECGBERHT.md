@@ -10,11 +10,11 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Scope recorded; work awaits its own cockpit discovery and review.
+Discovery: clarify who shares a mother ship before drafting Setup.
 
 ## Why next
 
-Scope recorded; work awaits its own cockpit discovery and review.
+Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.
 
 ## Human wait
 

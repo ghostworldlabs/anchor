@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T14:54:54.041Z",
+  "as_of": "2026-10-04",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -255,6 +255,37 @@
         }
       },
       "seq": 14
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-host-client",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "groups": [
+            {
+              "id": "gwl-setup",
+              "label": "Setup and Mother Ship",
+              "order": 0,
+              "parent_id": null
+            }
+          ],
+          "current": true
+        }
+      },
+      "seq": 15,
+      "at": "2026-10-04"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-host-client",
+      "fields": {
+        "waiting_on": "Choose personal or shared mother ship ownership for Setup scope v1."
+      },
+      "at": "2026-10-04",
+      "seq": 16
     }
   ],
   "roadmap_projection": [
@@ -263,7 +294,7 @@
       "name": "One mother ship and connected client computers",
       "status": "proposed",
       "done_when": "Detect the service host, install it when needed, register it and connect clients through Tailscale without accidental duplicate hosts.",
-      "waiting_on": null,
+      "waiting_on": "Choose personal or shared mother ship ownership for Setup scope v1.",
       "commissioned_as": null,
       "part": "slice",
       "gate": null,
@@ -278,7 +309,8 @@
             "order": 0,
             "parent_id": null
           }
-        ]
+        ],
+        "current": true
       }
     },
     {

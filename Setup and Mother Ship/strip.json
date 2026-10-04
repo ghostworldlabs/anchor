@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "none",
@@ -16,8 +16,8 @@
   },
   "anti_starvation_age_days": 0,
   "grasscatch": [],
-  "next_recommended": "",
-  "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+  "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+  "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -45,6 +45,34 @@
       "horizon_source_seq": null,
       "horizon_focus": null,
       "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "Settle whether a mother ship belongs to one person or a shared group.",
+      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
+      "current_step_id": "gwl-host-client"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+      "horizon_source_seq": 16,
+      "horizon_focus": "gwl-host-client",
+      "horizon_steps": [
+        "gwl-host-client",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -57,6 +85,7 @@
       "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
     }
   ],
-  "horizon_source_seq": null,
-  "horizon_focus": null
+  "horizon_source_seq": 16,
+  "horizon_focus": "gwl-host-client",
+  "current_step_id": "gwl-host-client"
 }
