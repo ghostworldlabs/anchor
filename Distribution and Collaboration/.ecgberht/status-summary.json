@@ -1,6 +1,6 @@
 {
-  "at": "2026-10-04 15:49",
-  "status_id": "01791150542751903200",
+  "at": "2026-10-04 17:02",
+  "status_id": "01791154925766431900",
   "effort": "Distribution and Collaboration",
   "latest_event": null,
   "compact": {
@@ -9,11 +9,11 @@
     "next": [
       "Licensing and hosting"
     ],
-    "question": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Licensing and hosting \u2014 Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report."
+        "value": "Licensing and hosting \u2014 Review Ghost World Lab License v1, Refinement 2: contractor programming labor\u2026"
       },
       {
         "label": "Effort",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: John: allow paid private development?"
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -53,7 +53,7 @@
       }
     ]
   },
-  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John. \u00b7 waiting on you: John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+  "lead_line": "Next: Licensing and hosting; then Install and use from a collaborator\u2019s computer \u2014 Contractor labor is permitted; software sales and recurring version fees remain reserved.",
   "now": [
     "nothing running - attention unknown"
   ],
@@ -70,7 +70,7 @@
     "id": "gwl-license",
     "name": "Licensing and hosting",
     "part": "research",
-    "summary": "Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report.",
+    "summary": "Review Ghost World Lab License v1, Refinement 2: contractor programming labor permitted; one-time software sales and recurring fees for\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
@@ -103,14 +103,14 @@
   ],
   "project": {
     "brief": "\"make it a open source tool that many collaborators can use That can be helpful to a lot of people for improving their productivity\"",
-    "parts": "slice \u00b7 integrate \u00b7 research \u00b7 harden \u00b7 rigor",
+    "parts": "slice \u00b7 integrate \u00b7 research \u25b6 \u00b7 harden \u00b7 rigor",
     "steps_done": 0,
     "steps_total": 6
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Ghost World Lab License v1, Refinement 1 and Legal-Beagle review are ready; paid private delivery remains undecided.",
+    "text": "Ghost World Lab License v1, Refinement 2 and its focused payment review are ready.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
@@ -120,15 +120,15 @@
     "step": "research: Licensing and hosting",
     "steps_done": 0,
     "steps_total": 6,
-    "waiting_on_you": "John: allow paid private development? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+    "waiting_on_you": "",
     "waiting_since": null,
     "next": "Licensing and hosting; then Install and use from a collaborator\u2019s computer",
-    "why": "Legal-Beagle wording fixes passed; private delivery remains a separate policy choice for John.",
+    "why": "Contractor labor is permitted; software sales and recurring version fees remain reserved.",
     "attention": "unknown",
     "goal_reread": true
   },
   "map": [
-    "research: Licensing and hosting (waiting)",
+    "research: Licensing and hosting (active)",
     "slice: Windows, Linux and macOS downloads (proposed) \u00b7 no gate",
     "slice: Ghost World Labs repositories (proposed) \u00b7 no gate",
     "rigor: Review releases and public terms before publication (proposed) \u00b7 no gate",
@@ -145,10 +145,10 @@
         {
           "id": "gwl-license",
           "name": "Licensing and hosting",
-          "status": "waiting",
-          "done_when": "Review Ghost World Lab License v1, Refinement 1 and completed Legal-Beagle report. John decides paid private deliveries and final proposed terms; owner, governing law and dependency/contributor rights remain prerequisites before any publication.",
+          "status": "active",
+          "done_when": "Review Ghost World Lab License v1, Refinement 2: contractor programming labor permitted; one-time software sales and recurring fees for modified versions remain reserved. Preserve paid-hosting permission, voluntary sharing and free internal use. Final text, owner, law and dependency/contributor rights remain for review.",
           "if_then": "",
-          "waiting_on": "John: allow paid private development separately delivering changes for a customer\u2019s own use? Recommend yes; Ghost World Lab License v1, Refinement 1.",
+          "waiting_on": null,
           "due": null,
           "ref": null,
           "tier": null,
@@ -325,5 +325,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 13
+  "deliverables_count": 15
 }

@@ -303,6 +303,18 @@
       "text": "I’ll check the original question and the draft’s wording so I can answer it directly.\nBy “staff,” I meant employees of the organization using Anchor—for example, Penn State’s programmers. The draft lets Penn State pay those employees to modify its own private installation. That is already covered by your free internal-use policy.\n\nThe separate case I was asking about is an outside developer charging a client to receive a customized Anchor copy. That delivery currently requires your permission in the draft.",
       "turn_id": "chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:13",
       "at": "2026-10-04T21:49:02.376078+00:00"
+    },
+    {
+      "role": "john",
+      "text": "Okay, paying a contractor to modify is fine; having a coder sell Anchor that they have modified is not (so they can be paid for their time to modify, but they cannot get a recuring payment for a version that they have modified).",
+      "turn_id": "ee1d9c6c-201e-4dc5-adfd-facb4db2d028",
+      "at": "2026-10-04T22:38:04.629046+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll check the saved draft and review, then carry your distinction between paid programming work and selling modified Anchor into the same license.\nGhost World Lab License v1 and its Legal-Beagle review are complete and journaled; the last open policy question concerned paid customization. Your answer settles that question: contractors may charge for their programming time, while software sales and recurring fees for a modified Anchor version remain restricted. I’ll carry that into Refinement 2 and clear the answered wait.\nThe plan now records your answer and the old question is cleared. Refinement 2 permits contractor programming work, including delivering the changes, while keeping one-time software sales and recurring version fees restricted. I’ll have Legal-Beagle check that the service exception preserves that boundary.\nLegal-Beagle found no new material wording problems in Refinement 2: contractors can charge for actual programming work, while software sales and recurring fees to keep using a modified version still require permission. I’m saving that check beside the draft and recording your answer in the journal.\nRefinement 2 and its focused review are saved and registered, with the earlier draft preserved. Your answer is now in the visible plan and journal; I’m checking the opening links before handing them back.\nRecorded in [Ghost World Lab License v1, Refinement 2](/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md&render=1): contractors may charge for actual programming work; selling modified Anchor or charging recurring fees to use it requires separate permission.\n\n[Legal-Beagle’s focused review](/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FLEGAL-BEAGLE-REVIEW-v1-REFINEMENT-2.md&render=1) found no new material wording problems. The plan and journal are updated; the license remains a draft for review.",
+      "turn_id": "chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:14",
+      "at": "2026-10-04T23:02:04.823936+00:00"
     }
   ]
 }
