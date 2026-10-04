@@ -1,0 +1,329 @@
+{
+  "at": "2026-10-04 10:07",
+  "status_id": "01791130066658147500",
+  "effort": "Distribution and Collaboration",
+  "latest_event": null,
+  "compact": {
+    "activity": "The Campaign session is preparing the requested license and intellectual property comparison.",
+    "latest_event": null,
+    "next": [
+      "License and intellectual property \u2014 restricted preference"
+    ],
+    "question": "Connect or install?",
+    "facts": [
+      {
+        "label": "Summary",
+        "value": "License and intellectual property \u2014 restricted preference \u2014 Compare the requested modification-sharing and\u2026"
+      },
+      {
+        "label": "Effort",
+        "value": "Distribution and Collaboration"
+      },
+      {
+        "label": "Doing",
+        "value": "The Campaign session is preparing the requested license and intellectual property comparison."
+      },
+      {
+        "label": "Status",
+        "value": "research: License and intellectual property \u2014 restricted preference \u00b7 0/6 done \u00b7 working"
+      },
+      {
+        "label": "Tests",
+        "value": "Unavailable \u2014 no check receipt for the current work and session"
+      },
+      {
+        "label": "Blocker",
+        "value": "none"
+      },
+      {
+        "label": "Procs",
+        "value": "none"
+      },
+      {
+        "label": "Journal",
+        "value": "0003-first-trial-discovery-2026-10-04: First collaborator trial discovery \u2014 2026-10-04"
+      },
+      {
+        "label": "ETA",
+        "value": "Unavailable \u2014 no current estimate"
+      },
+      {
+        "label": "To do",
+        "value": "License and intellectual property \u2014 restricted preference"
+      }
+    ]
+  },
+  "lead_line": "Next: License and intellectual property \u2014 restricted preference; then Install and use from a collaborator\u2019s computer \u2014 Both connection and installation remain required; their trial order is unsettled.",
+  "now": [
+    "The Campaign session is preparing the requested license and intellectual property comparison."
+  ],
+  "running": {
+    "kind": "commissioned",
+    "label": "The Campaign session is preparing the requested license and intellectual property comparison.",
+    "skill": "",
+    "source": ".ecgberht/attention.json",
+    "age": ""
+  },
+  "slice": {
+    "n": 4,
+    "total": 6,
+    "id": "gwl-license",
+    "name": "License and intellectual property \u2014 restricted preference",
+    "part": "research",
+    "summary": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+    "commissioned_as": ""
+  },
+  "eta": "Unavailable \u2014 no current estimate",
+  "tests": "Unavailable \u2014 no check receipt for the current work and session",
+  "journal": "0003-first-trial-discovery-2026-10-04: First collaborator trial discovery \u2014 2026-10-04",
+  "evidence": {
+    "source": {
+      "path": "strip.json",
+      "step_id": "gwl-license",
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be"
+    },
+    "checks": [],
+    "journal": {
+      "state": "available",
+      "path": "journal/0003-first-trial-discovery-2026-10-04.md",
+      "entry_id": "0003-first-trial-discovery-2026-10-04",
+      "at": "2026-10-04T16:07:46Z",
+      "step_id": null,
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
+      "run_id": null
+    },
+    "eta": {
+      "state": "unavailable"
+    }
+  },
+  "focus_warning": "",
+  "next_bullets": [
+    "License and intellectual property \u2014 restricted preference",
+    "then Install and use from a collaborator\u2019s computer"
+  ],
+  "project": {
+    "brief": "\"make it a open source tool that many collaborators can use That can be helpful to a lot of people for improving their productivity\"",
+    "parts": "slice \u00b7 integrate \u00b7 research \u25b6 \u00b7 harden \u00b7 rigor",
+    "steps_done": 0,
+    "steps_total": 6
+  },
+  "lookthrough": null,
+  "halt": null,
+  "effort_line": {
+    "text": "Comparing licensing in Campaign and choosing the first collaborator trial here.",
+    "as_of": "2026-10-04",
+    "newest_work": "2026-10-04",
+    "behind_days": 0,
+    "stale": false
+  },
+  "plan": {
+    "step": "research: License and intellectual property \u2014 restricted preference",
+    "steps_done": 0,
+    "steps_total": 6,
+    "waiting_on_you": "",
+    "waiting_since": null,
+    "next": "License and intellectual property \u2014 restricted preference; then Install and use from a collaborator\u2019s computer",
+    "why": "Both connection and installation remain required; their trial order is unsettled.",
+    "attention": "working",
+    "goal_reread": true
+  },
+  "map": [
+    "research: License and intellectual property \u2014 restricted preference (active)",
+    "slice: Windows, Linux and macOS downloads (proposed) \u00b7 no gate",
+    "slice: Ghost World Labs repositories (proposed) \u00b7 no gate",
+    "rigor: Review releases and public terms before publication (proposed) \u00b7 no gate",
+    "integrate: Download site and collaboration (proposed) \u00b7 no gate",
+    "harden: Install and use from a collaborator\u2019s computer (proposed) \u00b7 no gate"
+  ],
+  "work_map": [
+    {
+      "tag": "research",
+      "label": "Background",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-license",
+          "name": "License and intellectual property \u2014 restricted preference",
+          "status": "active",
+          "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "research",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ],
+            "current": true
+          }
+        }
+      ]
+    },
+    {
+      "tag": "slice",
+      "label": "The product",
+      "done": 0,
+      "total": 2,
+      "steps": [
+        {
+          "id": "gwl-platforms",
+          "name": "Windows, Linux and macOS downloads",
+          "status": "proposed",
+          "done_when": "Provide a version for each platform, entering the shared Setup flow.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "slice",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ],
+            "groups": [
+              {
+                "id": "gwl-distribution",
+                "label": "Distribution and Collaboration",
+                "order": 0,
+                "parent_id": null
+              }
+            ]
+          }
+        },
+        {
+          "id": "gwl-repositories",
+          "name": "Ghost World Labs repositories",
+          "status": "proposed",
+          "done_when": "Use the proposed Ghost World Labs GitHub identity with separate engine and Foundry-skills repositories.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "slice",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "rigor",
+      "label": "Prove it",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-review",
+          "name": "Review releases and public terms before publication",
+          "status": "proposed",
+          "done_when": "Keep platform verification, public publishing and license acceptance independently visible.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "rigor",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "integrate",
+      "label": "Join",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-site",
+          "name": "Download site and collaboration",
+          "status": "proposed",
+          "done_when": "Offer the releases from the proposed Ghost World Labs web home.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "integrate",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "tag": "harden",
+      "label": "Finish",
+      "done": 0,
+      "total": 1,
+      "steps": [
+        {
+          "id": "gwl-release",
+          "name": "Install and use from a collaborator\u2019s computer",
+          "status": "proposed",
+          "done_when": "Verify installation, connection and release behavior on the supported platforms.",
+          "if_then": "",
+          "waiting_on": "John: connect or install first? Recommendation: connect to the existing mother ship. Exact scope v1 question in DISCOVERY-v1.md.",
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "harden",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-distribution"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "swarm": [],
+  "deliverables_count": 6
+}
