@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T19:19:40.334Z",
+  "as_of": "2026-10-04T19:23:03.083Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -467,6 +467,52 @@
         "why": "John's later original local turn bddb9954-a824-4209-9d17-92fc3a432a48 makes sharing back voluntary, superseding the earlier possible obligation within Distribution scope v1, Refinement 1. Follow-on license comparison belongs in this cockpit."
       },
       "seq": 29
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "name": "License and intellectual property — free use, voluntary sharing, restricted sales",
+        "done_when": "Compare standard licenses against accepted free internal business use, broad modification, voluntary sharing and restricted sales of Anchor-based software; settle paid hosted access before John selects final public terms. Enterprise and model services remain proposals.",
+        "waiting_on": "John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1."
+      },
+      "at": "2026-10-04T19:21:34.061Z",
+      "client_event_id": "gwl-voluntary-sharing-bddb9954-license-and-hosting-question",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:21:34.061Z",
+        "why": "Later original local turn bddb9954-a824-4209-9d17-92fc3a432a48 makes sharing optional. Local answer 8d14fadb-ef38-409d-930d-87b3bb6eb249 confirms already accepted free internal use. Same scope v1, Refinement 1; hosting recommendation remains pending; no final license or slice close."
+      },
+      "seq": 30
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "active",
+      "to": "waiting",
+      "at": "2026-10-04T19:21:34.061Z",
+      "client_event_id": "gwl-paid-hosting-question-bddb9954-wait",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:21:34.061Z",
+        "why": "The bounded license comparison is ready; the next policy question is paid hosted access. Free internal use and voluntary contributions are settled, and final terms remain undecided. No step is closed."
+      },
+      "seq": 31
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "name": "Licensing and hosting"
+      },
+      "at": "2026-10-04T19:23:03.083Z",
+      "client_event_id": "gwl-license-readable-name-bddb9954",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:23:03.083Z",
+        "why": "Keep the visible next-action sentence readable; accepted free use and voluntary sharing remain in the same step criterion. Paid-hosting permission is still the pending question."
+      },
+      "seq": 32
     }
   ],
   "roadmap_projection": [
@@ -525,10 +571,10 @@
     },
     {
       "id": "gwl-license",
-      "name": "License and intellectual property — restricted preference",
-      "status": "active",
-      "done_when": "Compare standard licenses against accepted free use and modification, voluntary sharing back, and restricted sales of Anchor-based versions; distinguish proposed paid enterprise/hosting/model services before John selects final terms.",
-      "waiting_on": null,
+      "name": "Licensing and hosting",
+      "status": "waiting",
+      "done_when": "Compare standard licenses against accepted free internal business use, broad modification, voluntary sharing and restricted sales of Anchor-based software; settle paid hosted access before John selects final public terms. Enterprise and model services remain proposals.",
+      "waiting_on": "John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1.",
       "commissioned_as": null,
       "part": "research",
       "gate": null,

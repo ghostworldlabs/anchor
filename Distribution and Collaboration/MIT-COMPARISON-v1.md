@@ -2,7 +2,7 @@
 
 MIT does not meet the rule John described. It allows people to use and modify software, sell copies and sell products incorporating the MIT-covered code. It requires retention of the copyright and permission notices, but does not require publication of modifications. [MIT license](https://opensource.org/license/mit)
 
-John's latest request is broad permission to use and modify Anchor, with no sale of Anchor or a product built on it. Source: local turn `9644fd33-97d1-4223-b5f9-9d080890ba70`, 2026-10-04T18:51:43Z. This explains the desired boundary; it does not select or apply a license. Earlier requirements about sharing improvements remain active.
+John's request is broad permission to use and modify Anchor, with no sale of Anchor or a product built on its covered code. Source: local turn `9644fd33-97d1-4223-b5f9-9d080890ba70`, 2026-10-04T18:51:43Z. Free internal business use is accepted. His later turn `bddb9954-a824-4209-9d17-92fc3a432a48`, 2026-10-04T19:13:54Z, expressly makes sharing modifications voluntary and asks which license best fits. That replaces the earlier mandatory share-back requirement. These answers refine the same scope; they do not select or apply a license.
 
 ## The example John gave
 
@@ -18,15 +18,24 @@ For MIT-covered code, a developer can take the source, add features, retain the 
 | AGPLv3 | Permitted, including business use | Permitted, subject to AGPL obligations | Distributed covered work needs source; a modified network version must offer its corresponding source to remote users |
 | PolyForm Shield | Permitted for purposes within its competition rules | Restricts competing products, including free competitors; does not prohibit every noncompeting commercial product | No general obligation to publish or return modifications |
 | PolyForm Noncommercial | Permitted for its defined noncommercial purposes and listed organizations | Ordinary commercial use needs separate permission | No general obligation to publish or return modifications |
+| MIT plus Commons Clause | Broad base permissions, subject to its defined selling restriction | Restricts paid products/services whose value derives entirely or substantially from the covered software; its FAQ permits selling larger value-added products containing it | No general obligation to publish or return modifications |
+| Elastic 2.0 | Use, copy and modification allowed within its limitations | Restricts hosted/managed services exposing substantial functionality, rather than imposing a blanket modified-software sales ban | No general obligation to publish or return modifications |
+| FSL 1.1 | Internal use and qualifying professional services expressly allowed | Restricts competing commercial products/services; each version becomes MIT or Apache licensed after two years, permitting sales | No general obligation to publish or return modifications |
 
 Sources: [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0), [GPLv3](https://spdx.org/licenses/GPL-3.0-only.html), [AGPLv3](https://spdx.org/licenses/AGPL-3.0-only.html), [Shield's full terms](https://raw.githubusercontent.com/polyformproject/polyform-licenses/1.0.0/PolyForm-Shield-1.0.0.md), [Noncommercial](https://polyformproject.org/licenses/noncommercial/1.0.0), and the MIT sources above. GPL and AGPL source-sharing obligations do not require sending every private change back to John.
 
+Additional primary sources: [Commons Clause terms and FAQ](https://commonsclause.com/), [Elastic 2.0 terms](https://www.elastic.co/licensing/elastic-license), [FSL 1.1 terms](https://raw.githubusercontent.com/getsentry/fsl.software/main/FSL-1.1-ALv2.template.md) and [FSL version transition explanation](https://fsl.software/).
+
 ## Recommendation for the same scope
 
-Keep the requested distinction explicit: broad use and modification, with third-party sales of Anchor and products containing its covered code restricted. MIT and GPL/AGPL do not provide that sales prohibition. Standard OSI open-source licenses permit commercial redistribution; a no-sales restriction belongs to source-available terms. [Open Source Definition, sections 1 and 6](https://opensource.org/osd)
+I recommend tailored source-available terms for the exact policy: free use including internal business use, modification, optional sharing of improvements, and restricted third-party sales of Anchor and products containing its covered code. MIT and GPL/AGPL do not provide that sales prohibition. Standard OSI open-source licenses permit commercial redistribution; a no-sales restriction belongs to source-available terms. [Open Source Definition, sections 1 and 6](https://opensource.org/osd)
 
 Shield is a comparison candidate, with two important mismatches: it restricts free competitors too, and can permit noncompeting commercial products. Noncommercial can restrict ordinary business use more broadly than a ban on selling the software. Neither standard option automatically supplies all of John's active requirements.
 
-The wording still needs to distinguish incorporating Anchor's code into a sold product from merely using Anchor to do work. Paid hosting and the earlier improvement-sharing requirement also need precise treatment before selecting public terms. This comparison supplies the requested explanation; it does not draft or apply a custom license, resolve all remaining permission boundaries, accept the earlier guide or authorize a release.
+Commons Clause is closer to a resale restriction, but its value-based test can permit substantial value-added products that John wants covered. Its definition also reaches some paid hosting, consulting and support, so it cannot be described as a simple ban on selling software copies. Elastic focuses on hosted access; FSL's two-year transition ends its commercial restriction for each version. None of these checked licenses precisely matches the whole requested policy; this is not an exhaustive finding about every license in existence.
+
+Tailored terms would distinguish a product containing Anchor's covered code from merely using Anchor to perform paid work. They should preserve voluntary contributions and free internal use. Whether third parties may sell hosted access is still open: I recommend requiring permission to protect the proposed Ghost World Labs managed-mother-ship offering. That recommendation is pending and separate from the accepted software no-sales policy.
+
+This comparison supplies the requested explanation. It does not draft or apply a custom license, accept the earlier guide or authorize a release. Rights and legal review of any proposed final text remain prerequisites to publication already recorded in the scope.
 
 This is an addendum to Licensing and IP guide v1 and Distribution scope v1, Refinement 1. Those earlier reviews stay available. The independently accepted first-trial order remains connect-first, with installation retained as a separate path.

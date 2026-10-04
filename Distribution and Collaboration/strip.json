@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Free internal use recorded; licensing and business-model discussion transferred here.",
+  "active_effort": "License comparison updated for voluntary sharing; paid-hosting permission boundary remains open.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "none",
+  "human_wait": "John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -16,8 +16,8 @@
   },
   "anti_starvation_age_days": 0,
   "grasscatch": [],
-  "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
-  "why_next": "Carry John's accepted free internal use, no-sales clarification and proposed business model 767aa81f-dfd0-46d4-8274-2ac76f5be137 into the same scope v1, Refinement 1.",
+  "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+  "why_next": "Voluntary sharing is settled; the proposed managed service leaves a separate paid-hosting boundary.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -384,6 +384,50 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:gwl-paid-hosting-v1",
+      "next_recommended": "Decide whether paid Anchor hosting requires permission.",
+      "why_next": "Voluntary sharing is settled; the proposed managed service leaves a separate paid-hosting boundary.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "License comparison updated for voluntary sharing; paid-hosting permission boundary remains open.",
+      "human_wait": "John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — free use,; then Install and use from a collaborator’s computer",
+      "why_next": "Voluntary sharing is settled; the proposed managed service leaves a separate paid-hosting boundary.",
+      "horizon_source_seq": 31,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "Voluntary sharing is settled; the proposed managed service leaves a separate paid-hosting boundary.",
+      "horizon_source_seq": 32,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
     }
   ],
   "receipts": [
@@ -516,7 +560,7 @@
       "summary": "Internal-use answer and transferred licensing discussion"
     }
   ],
-  "horizon_source_seq": 29,
+  "horizon_source_seq": 32,
   "horizon_focus": "gwl-license",
-  "wait_ref": "none"
+  "wait_ref": "decision:gwl-paid-hosting-v1"
 }

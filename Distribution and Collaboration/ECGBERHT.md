@@ -10,15 +10,15 @@ John's Campaign dictation, 2026-10-04, turn `3c476265-7142-441c-a934-a7a37d5a1e9
 
 ## Active effort
 
-Free internal use recorded; licensing and business-model discussion transferred here.
+License comparison updated for voluntary sharing; paid-hosting permission boundary remains open.
 
 ## Why next
 
-Final public terms remain undecided; Anchor exchange and paid services remain proposals.
+Free internal use and optional contributions are settled; tailored source-available terms are recommended, not selected.
 
 ## Human wait
 
-none
+John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1.
 
 ## Why stakes
 
