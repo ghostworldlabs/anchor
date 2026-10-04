@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T19:22:11.026Z",
+  "as_of": "2026-10-04T19:48:29.641Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -608,14 +608,119 @@
       },
       "seq": 36,
       "at": "2026-10-04T19:22:11.026Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-host-client",
+      "fields": {
+        "name": "First: choose or connect to the mother ship",
+        "done_when": "On first launch choose this computer as the personal mother ship or connect to an existing personal host through a guided Tailscale and secure pairing-token flow. Install Anchor and Foundry skills only on a new mother ship; client devices use that host.",
+        "waiting_on": null
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T19:43:09.018076Z",
+        "why": "First-launch feedback, original turn ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48: mother ship first, providers second, organize on Star Chart third; credentials and tests on the mother ship; refine mockup, not production."
+      },
+      "client_event_id": "setup-r1-ebd5e8b3-gwl-host-client",
+      "seq": 37,
+      "at": "2026-10-04T19:45:06.973Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "name": "Second: connect subscriptions and optional API keys",
+        "done_when": "After host connection, show a provider checklist allowing multiple separately named subscriptions per provider and optional API connections. Normal sign-in, credentials, tests and usage reports belong to the mother ship; show per-connection capacity, cost and honest unknowns."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T19:43:09.018076Z",
+        "why": "First-launch feedback, original turn ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48: mother ship first, providers second, organize on Star Chart third; credentials and tests on the mother ship; refine mockup, not production."
+      },
+      "client_event_id": "setup-r1-ebd5e8b3-gwl-access",
+      "seq": 38,
+      "at": "2026-10-04T19:45:06.981Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "name": "Provider capacity, cost and model controls",
+        "waiting_on": null,
+        "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T19:43:09.018076Z",
+        "why": "First-launch feedback, original turn ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48: mother ship first, providers second, organize on Star Chart third; credentials and tests on the mother ship; refine mockup, not production."
+      },
+      "client_event_id": "setup-r1-ebd5e8b3-gwl-provider-status",
+      "seq": 39,
+      "at": "2026-10-04T19:45:06.986Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-mapping",
+      "fields": {
+        "name": "Third: organize goals and initiatives on the Star Chart",
+        "done_when": "For a new mother ship, start in Star Chart with Aladdin as default steward; choose a dev-drive storage directory when available or another location, brainstorm major goals and their initiatives/deliverables, identify source material, and require at least one goal/initiative before previewing populated Star Chart and Cave. Existing-host clients reuse its organization."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T19:43:09.018076Z",
+        "why": "First-launch feedback, original turn ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48: mother ship first, providers second, organize on Star Chart third; credentials and tests on the mother ship; refine mockup, not production."
+      },
+      "client_event_id": "setup-r1-ebd5e8b3-gwl-mapping",
+      "seq": 40,
+      "at": "2026-10-04T19:45:06.991Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-accounts",
+      "fields": {
+        "name": "Optional: connect calendars and email",
+        "done_when": "After provider setup, expose a separate optional calendars/email button for Outlook and Gmail. Secure sign-in and integration run on the mother ship; this does not block independent personal-host or goal organization work."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T19:43:09.018076Z",
+        "why": "First-launch feedback, original turn ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48: mother ship first, providers second, organize on Star Chart third; credentials and tests on the mother ship; refine mockup, not production."
+      },
+      "client_event_id": "setup-r1-ebd5e8b3-gwl-accounts",
+      "seq": 41,
+      "at": "2026-10-04T19:45:06.995Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "mockups/PROVIDER-SETUP-initial.html",
+            "SCOPE-v4.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Keep the existing prototype open while authorized Refinement 1 is produced; scope v4 records John’s first-launch feedback."
+      },
+      "client_event_id": "setup-r1-scope-v4-current-ebd5e8b3",
+      "seq": 42,
+      "at": "2026-10-04T19:48:29.641Z"
     }
   ],
   "roadmap_projection": [
     {
       "id": "gwl-host-client",
-      "name": "One mother ship per person and connected client computers",
+      "name": "First: choose or connect to the mother ship",
       "status": "proposed",
-      "done_when": "Detect each person's chosen mother ship on their own computer, install and register it when needed, and connect their other computers through Tailscale without accidental duplicate hosts.",
+      "done_when": "On first launch choose this computer as the personal mother ship or connect to an existing personal host through a guided Tailscale and secure pairing-token flow. Install Anchor and Foundry skills only on a new mother ship; client devices use that host.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "slice",
@@ -639,9 +744,9 @@
     },
     {
       "id": "gwl-access",
-      "name": "Subscription sign-in and optional API keys",
+      "name": "Second: connect subscriptions and optional API keys",
       "status": "proposed",
-      "done_when": "Set up normal subscription sign-in and optional user API keys on the personal mother ship, distinguishing subscription allowances from paid API usage; do this before email and calendar setup.",
+      "done_when": "After host connection, show a provider checklist allowing multiple separately named subscriptions per provider and optional API connections. Normal sign-in, credentials, tests and usage reports belong to the mother ship; show per-connection capacity, cost and honest unknowns.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
@@ -657,8 +762,8 @@
       "id": "gwl-provider-status",
       "name": "Provider capacity, cost and model controls",
       "status": "active",
-      "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization.",
-      "waiting_on": "Keep the compact Cave tile opening one provider detail panel shared with Setup, in Provider mockup Initial draft?",
+      "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "slice",
       "gate": null,
@@ -669,15 +774,15 @@
         "current": true,
         "featured_paths": [
           "mockups/PROVIDER-SETUP-initial.html",
-          "SCOPE-v3.md"
+          "SCOPE-v4.md"
         ]
       }
     },
     {
       "id": "gwl-mapping",
-      "name": "Projects, folders and recommended organization",
+      "name": "Third: organize goals and initiatives on the Star Chart",
       "status": "proposed",
-      "done_when": "Recommend project and goal mappings from folders nominated by the user, with C:/dev as John’s preferred home.",
+      "done_when": "For a new mother ship, start in Star Chart with Aladdin as default steward; choose a dev-drive storage directory when available or another location, brainstorm major goals and their initiatives/deliverables, identify source material, and require at least one goal/initiative before previewing populated Star Chart and Cave. Existing-host clients reuse its organization.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "research",
@@ -690,9 +795,9 @@
     },
     {
       "id": "gwl-accounts",
-      "name": "Email and calendars",
+      "name": "Optional: connect calendars and email",
       "status": "proposed",
-      "done_when": "Set up Outlook and Gmail accounts and calendars.",
+      "done_when": "After provider setup, expose a separate optional calendars/email button for Outlook and Gmail. Secure sign-in and integration run on the mother ship; this does not block independent personal-host or goal organization work.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",

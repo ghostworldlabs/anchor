@@ -10,16 +10,16 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Provider setup mockup Initial draft is ready for review and refinement; scope v3 records provider-first ordering.
+Creating Setup mockup Refinement 1: mother ship first, providers second, Star Chart organization third; scope v4 carries John's feedback.
 
 ## Why next
 
-Review the compact Cave tile opening one detail panel shared with Setup. Personal hosts are settled; collaboration between hosts is parked.
+John supplied first-launch and provider feedback. Refine the same mockup before implementation; all credentials, tests and usage run on the mother ship.
 
 ## Human wait
 
-- **Waiting on:** John's layout review of Provider setup mockup Initial draft: keep the compact Cave tile and shared details panel?
-- **Until / unblock:** a layout answer or requested changes; reversible recommendation proceeds four hours after the actual question is sent. No slice closes without John's explicit instruction.
+- **Waiting on:** none while the authorized refinement is being produced; the earlier Initial draft layout question is superseded by John's feedback.
+- **Until / unblock:** review the actual Refinement 1 when ready. No slice closes without John's explicit instruction.
 
 ## Why stakes
 
