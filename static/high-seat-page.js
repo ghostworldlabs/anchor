@@ -590,8 +590,9 @@
       if (nav.current === false || nav.role === 'support') return false;
       // These are the existing human review designations, qualified by the register's
       // exact owner/current/acceptance flags. Do not infer a review from prose or an idle dot.
+      var label = String(nav.label || '');
       return /^FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ''))
-        || /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(String(nav.label || ''));
+        || (!/\b(?:not|no longer)\b/i.test(label) && /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(label));
     });
   }
   var feedbackBusy = false, feedbackAgain = false;
@@ -609,23 +610,24 @@
     var cards = $$('.tile[data-tile]').filter(function (c) { return c.getClientRects().length > 0; }), moved = false, next = 0;
     function worker() {
       var card = cards[next++]; if (!card) return Promise.resolve();
-      var epoch = card._feedbackEpoch || 0, pid = card.getAttribute('data-tile'), dir = card.getAttribute('data-dir') || '';
+      var epoch = card._feedbackEpoch || 0, pid = card.getAttribute('data-tile'), dir = openDir(card), identity = pid + '|' + dir;
+      function sameTarget() { return card.isConnected && identity === card.getAttribute('data-tile') + '|' + openDir(card) && epoch === (card._feedbackEpoch || 0); }
       var q = '?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir);
       return feedbackGet('/api/steward/state' + q).then(function (st) {
         if (!st || !DOT_WORDS[st.light] || typeof st.busy !== 'boolean') throw new Error('incomplete feedback');
-        if (!card.isConnected || epoch !== (card._feedbackEpoch || 0)) return;
+        if (!sameTarget()) return;
         // A valid activity read still lands if the independent review reader is unavailable.
         paintDot(card, st.light);
         var question = !!st.open_question || !!((st.pending_questions || []).length) || st.light === 'orange';
         if (question) paintReady(card, true, 'needs your answer');
         var old = card._feedbackRecord, stamp = String(st.stamp || '');
-        var record = old && old.stamp === stamp && Date.now() < old.until ? Promise.resolve(old)
+        var record = old && old.identity === identity && old.stamp === stamp && Date.now() < old.until ? Promise.resolve(old)
           : Promise.all([feedbackGet('/api/steward/map' + q), feedbackGet('/api/steward/deliverables' + q)]).then(function (data) {
             if (!Array.isArray(data[0].steps) || !Array.isArray(data[1].items)) throw new Error('incomplete review record');
-            return { stamp: stamp, until: String(data[0].stamp || '') === stamp ? Date.now() + 15000 : 0, review: designatedReview(data[0], data[1]) };
+            return { identity: identity, stamp: stamp, until: String(data[0].stamp || '') === stamp ? Date.now() + 15000 : 0, review: designatedReview(data[0], data[1]) };
           });
         return record.then(function (rec) {
-          if (!card.isConnected || epoch !== (card._feedbackEpoch || 0)) return; // a newer iframe response wins
+          if (!sameTarget()) return; // a newer iframe response or changed effort wins
           var ready = question || rec.review;
           paintDot(card, st.light);
           paintReady(card, ready, question ? 'needs your answer' : (rec.review ? 'review waiting' : ''));
