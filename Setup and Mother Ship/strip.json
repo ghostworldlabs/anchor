@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Setup mockup Refinement 1 remains in review; laptop testing and Cave settings work follow it.",
+  "active_effort": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-  "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
+  "why_next": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -419,6 +419,102 @@
         "gwl-provider-status",
         "gwl-review"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Building Setup mockup Refinement 2: edit existing settings through the gear and Cave sidebar.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "next_recommended": "Check the refined gear and Cave controls, then show the actual mockup for feedback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "horizon_source_seq": 55,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "horizon_source_seq": 56,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
+      "human_wait": "Review Setup mockup Refinement 2: keep its provider, gear and Cave layout or refine it.",
+      "wait_ref": "decision:setup-r2-layout",
+      "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
+      "next_recommended": "Keep Refinement 2 as the basis for the laptop implementation plan, or refine its layout.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
+      "horizon_source_seq": 57,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
+      "horizon_source_seq": 57,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:setup-r2-layout",
+      "human_wait": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning."
     }
   ],
   "receipts": [
@@ -459,10 +555,57 @@
       "path": "journal/0005-setup-mockup-refinement-1.md",
       "entry_id": "0005-setup-mockup-refinement-1",
       "summary": "Setup mockup — Refinement 1, October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T20:48:29Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0006-laptop-test-and-cave-settings.md",
+      "entry_id": "0006-laptop-test-and-cave-settings",
+      "summary": "Laptop test and Cave settings — October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T21:06:43Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T210643-turn_error",
+      "summary": "turn_error: Selected model is at capacity. Please try a different model."
+    },
+    {
+      "at": "2026-10-04T21:06:46Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T210646-provider_rollover",
+      "summary": "provider_rollover: chatgpt -> grok with a history handoff"
+    },
+    {
+      "at": "2026-10-04T21:07:10Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
+      "kind": "journal_update",
+      "path": "journal/0007-setup-mockup-refinement-2.md",
+      "entry_id": "0007-setup-mockup-refinement-2",
+      "summary": "Setup mockup — Refinement 2, October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T21:36:17Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T213617-provider_rollover",
+      "summary": "provider_rollover: grok -> chatgpt with a history handoff"
     }
   ],
-  "horizon_source_seq": 54,
+  "horizon_source_seq": 57,
   "horizon_focus": "gwl-provider-status",
   "current_step_id": "gwl-provider-status",
-  "wait_ref": "none"
+  "wait_ref": "decision:setup-r2-layout"
 }

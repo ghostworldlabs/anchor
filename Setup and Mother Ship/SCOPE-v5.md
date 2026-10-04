@@ -4,7 +4,7 @@ First launch is now a three-part walkthrough: **choose or connect to the mother 
 
 This scope records John's October 4 feedback, original turn `ebd5e8b3-1fa4-454d-8d80-ab3eeeb30d48`, following the Initial draft. **Setup mockup — Refinement 1** is a separate product version from this scope document's v5. The original dictated text remains complete in the cockpit conversation. Tailscale, Cave of Wonders, Star Chart and Claude resolve the dictated names; no duplicate user speech is invented.
 
-Scope v5 adds John’s next work after the provider mockup is settled: test in the current Anchor running on his laptop, then wire the Cave’s lower-left controls and a permanent return to Setup. The mockup remains **Refinement 1**, with its warning default accepted and its broader review still open.
+Scope v5 adds John’s next work after the provider mockup is settled: test in the current Anchor running on his laptop, then wire the Cave’s lower-left controls and a permanent return to Setup. The current mockup is **Refinement 2**, carrying forward Refinement 1 and its accepted warning default. Refinement 2 demonstrates the gear reopening existing settings and the actual lower-left side window; its human review remains open. Earlier product versions remain preserved.
 
 ## 1. Resolve the mother ship first
 
@@ -51,6 +51,8 @@ Next modify and wire the **bottom of the side window on the left of Cave of Wond
 After the first-time Setup is complete, place a **gear icon at the far upper-left corner**, moving the Anchor icon slightly to its right. Clicking the gear opens the **same Setup page** so existing settings can be modified. It must reopen the configured host/provider/project settings, rather than force a new first-launch enrollment. Keep this return available after initial completion.
 
 These are conditional future integration steps in the existing roadmap, following the provider review and preceding optional email/calendar work. Scope recording does not change the running application now. The first-launch order within Setup remains mother ship → providers → Star Chart. Each deliverable retains its own feedback and explicit acceptance; no step is closed by this addition. No requested scope item is cut.
+
+The visible-controls feedback also belongs in the authorized prototype refinement, independently of later live integration. John’s continuation turn `13a7ff78-dd88-4d79-8bf8-f842af161ecd` exposed the premature stop after scope recording. Refinement 2 now demonstrates post-completion settings editing, preserved host/account/model state, return to Cave, and organization edits without duplicate initiatives. First-launch entry still resolves the host first. These are simulated interactions, not installed laptop functionality or inferred product acceptance.
 
 ## Cumulative sources and review boundary
 

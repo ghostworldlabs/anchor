@@ -1,30 +1,21 @@
-# Setup and Mother Ship
+# Ecgberht — Face
 
 ## North star
 
 > "The service sits on one computer, and you just Tailscale into the other computer"
 
-## Source
-
-John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e98. Obvious speech-to-text names are resolved in SCOPE-v1.md; the dictated goal is retained here.
-
 ## Active effort
 
-Setup mockup Refinement 1 remains open for feedback, with warnings retaining full strength accepted. Scope v5 adds conditional testing in John's running laptop Anchor, then Cave controls and a gear reopening Setup.
+Setup mockup Refinement 2 is ready for review: the gear reopens existing settings and the Cave left sidebar exposes provider/model controls. Actual prototype interactions and desktop/phone views are checked. Warnings retain full strength; scope v5 and earlier versions remain preserved.
 
 ## Why next
 
-Settle the provider mockup before implementation planning, laptop testing and Cave wiring. The gear belongs at the far upper left, with the Anchor icon shifted right; it reopens existing settings in the same Setup page.
+Review the concrete provider/gear/Cave layout before preparing the laptop implementation plan. The authorized mockup refinement is now produced and checked; live laptop integration follows its human review.
 
 ## Human wait
 
-No outstanding question about the warning policy: John explicitly accepted warnings retaining full strength on October 4, turn d1766e5a-bd83-4350-b45d-ff4539a1237b. The whole mockup remains open for feedback; no slice closes without John's explicit instruction.
+Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.
 
 ## Why stakes
 
 The mockup makes provider sign-in, allowance, API cost and model controls tangible before an implementation plan; email and calendars follow later.
-
-
-## Existing work
-
-Tailscale is the dictated connection service. June and July onboarding records report completed modules and tests; those are starting evidence, not proof that the newly requested Setup dialog is delivered.

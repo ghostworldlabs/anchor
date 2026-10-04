@@ -1,1 +1,13 @@
-{"state": "quiet", "reason": "The scope v5 delivery check has finished."}
+{
+  "state": "quiet",
+  "reason": "Saved Setup mockup checks reconciled; Refinement 2 is ready for review",
+  "updated_at": "2026-10-04T21:40:11Z",
+  "state_since": "2026-10-04T21:40:11Z",
+  "provenance": [
+    {
+      "by": "engine",
+      "at": "2026-10-04T15:06:43",
+      "state": "needs_you"
+    }
+  ]
+}

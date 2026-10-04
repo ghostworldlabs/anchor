@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T20:45:31.045Z",
+  "as_of": "2026-10-04T21:06:38.148Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -917,6 +917,59 @@
       "client_event_id": "setup-laptop-cave-49427a76-8",
       "seq": 54,
       "at": "2026-10-04T20:45:31.045Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "done_when": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave left sidebar bottom exposes the selected provider/account and model/reasoning through the same provider surface, with right-side capacity retained. Preserve host pairing, account tests and allowances, accepted warnings retaining full strength, and Star Chart organization. Check actual interactions and pixels, then obtain human feedback before implementation planning or live laptop integration.",
+        "gate": "python .ecgberht/verify-setup-refinement-2.py"
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:53:16.052627Z",
+        "why": "Resume still-authorized mockup refinement from original turns 9205de17, ebd5e8b3 and new visible-controls feedback 49427a76. John turn 13a7ff78 asks why work stopped; continue the prototype, not infer full acceptance or authorize immediate production changes."
+      },
+      "client_event_id": "setup-r2-resume-13a7ff78",
+      "seq": 55,
+      "at": "2026-10-04T20:55:59.937Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "mockups/SETUP-refinement-2.html",
+            "SCOPE-v5.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Concrete mockup Refinement 2 is saved and registered under the same provider slice; check gear/editing/sidebar interactions before human review. Refinement 1 remains historical, not accepted wholesale."
+      },
+      "client_event_id": "setup-r2-delivery-13a7ff78",
+      "seq": 56,
+      "at": "2026-10-04T21:00:08.703Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "waiting_on": "Setup mockup Refinement 2: keep the revised provider, gear and Cave sidebar layout for the laptop implementation plan, or refine it?"
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct from the answered warning policy; no production change, full Setup acceptance or slice close inferred."
+      },
+      "client_event_id": "setup-r2-layout-review-13a7ff78",
+      "seq": 57,
+      "at": "2026-10-04T21:06:38.148Z"
     }
   ],
   "roadmap_projection": [
@@ -966,18 +1019,18 @@
       "id": "gwl-provider-status",
       "name": "Provider capacity, cost and model controls",
       "status": "active",
-      "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, and a configurable warning threshold. John accepted warnings while retaining full model strength until the user explicitly changes it, for Setup mockup Refinement 1. Keep credentials/tests on the selected mother ship. The whole walkthrough remains open for feedback before an implementation plan or build.",
-      "waiting_on": null,
+      "done_when": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave left sidebar bottom exposes the selected provider/account and model/reasoning through the same provider surface, with right-side capacity retained. Preserve host pairing, account tests and allowances, accepted warnings retaining full strength, and Star Chart organization. Check actual interactions and pixels, then obtain human feedback before implementation planning or live laptop integration.",
+      "waiting_on": "Setup mockup Refinement 2: keep the revised provider, gear and Cave sidebar layout for the laptop implementation plan, or refine it?",
       "commissioned_as": null,
       "part": "slice",
-      "gate": null,
+      "gate": "python .ecgberht/verify-setup-refinement-2.py",
       "navigation": {
         "path": [
           "gwl-setup"
         ],
         "current": true,
         "featured_paths": [
-          "mockups/SETUP-refinement-1.html",
+          "mockups/SETUP-refinement-2.html",
           "SCOPE-v5.md"
         ]
       }
