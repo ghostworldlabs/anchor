@@ -10,11 +10,11 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Discovery: clarify who shares a mother ship before drafting Setup.
+Discovery: personal hosts settled in scope v2; collaboration between hosts parked; clarify backups next.
 
 ## Why next
 
-Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.
+Backup recovery is the next independent choice. Sharing between personal mother ships is future work.
 
 ## Human wait
 

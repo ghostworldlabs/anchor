@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
+  "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -15,9 +15,16 @@
     "until": null
   },
   "anti_starvation_age_days": 0,
-  "grasscatch": [],
-  "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-  "why_next": "step set One mother ship and connected client computers",
+  "grasscatch": [
+    {
+      "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+      "when": "2026-10-04T18:54:12.271688Z",
+      "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+      "status": "caught"
+    }
+  ],
+  "next_recommended": "Backups and restore; then Review Setup before building it",
+  "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -88,6 +95,85 @@
         "gwl-host-client",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Discovery: personal ownership settled; clarify who may connect to the mother ship.",
+      "next_recommended": "Clarify owner access versus invited collaborator access.",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "horizon_source_seq": 19,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-accounts"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "horizon_source_seq": 21,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-accounts"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
+      "next_recommended": "Choose backups kept on another device or a remote storage service.",
+      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+      "phase": "planning",
+      "grasscatch": [
+        {
+          "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+          "when": "2026-10-04T18:54:12.271688Z",
+          "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+          "status": "caught"
+        }
+      ],
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-backup"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Backups and restore; then Review Setup before building it",
+      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+      "horizon_source_seq": 26,
+      "horizon_focus": "gwl-backup",
+      "horizon_steps": [
+        "gwl-backup",
+        "gwl-review"
+      ]
     }
   ],
   "receipts": [
@@ -110,7 +196,7 @@
       "summary": "Mother ship ownership discovery — 2026-10-04"
     }
   ],
-  "horizon_source_seq": 16,
-  "horizon_focus": "gwl-host-client",
-  "current_step_id": "gwl-host-client"
+  "horizon_source_seq": 26,
+  "horizon_focus": "gwl-backup",
+  "current_step_id": "gwl-backup"
 }
