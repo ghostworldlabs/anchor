@@ -88,8 +88,10 @@
 
   function byId(id) { for (var i = 0; i < tiles.length; i++) if (tiles[i].id === id) return tiles[i]; return null; }
   function shownIn(id) { return id && panes[0] === id ? 0 : (two && id && panes[1] === id ? 1 : -1); }
-  function isStarChart(t) { return t.kind === "page" && /^(?:The )?Star Chart$/.test(t.title || ""); }
-  function displayTitle(t) { return t.kind === "cave" ? "Cave of Wonders" : isStarChart(t) ? "Star Chart" : (t.title || "Page"); }
+  function isStarChart(t) {
+    return t.kind === "page" && /^(?:(?:The )?Star Chart(?:\s+(?:--|[-\u2013\u2014])\s+AI Cockpit)?|Campaign\s+(?:--|[-\u2013\u2014])\s+AI Cockpit)$/.test(t.title || "");
+  }
+  function displayTitle(t) { return t.kind === "cave" ? "Cave of Wonders" : isStarChart(t) ? "Star Chart \u2014 AI Cockpit" : (t.title || "Page"); }
 
   // ---------- what an address is ----------
   function resolve(u, fromWin) {
