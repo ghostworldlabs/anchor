@@ -144,7 +144,7 @@ def test_the_compact_card_says_one_line_and_puts_status_first_among_the_acts():
     waiting = hsp._card(e, {"has_record": True, "effort": "", "next": "Lecture 4", "needs_you": "approve the Lecture 3 AI supplement"}, " need")
     acts = waiting[waiting.index('class="t-acts"'):waiting.index('class="t-body"')]
     assert re.findall(r'data-part="([a-z]+)"', acts) == ["status", "next", "deliverables", "plan"]      # W2e-2: the opened tile carries its dialogue itself; the acts are the details
-    assert "statusbtn" not in waiting and 'class="t-go" href="/project/p1"' in waiting
+    assert "statusbtn" not in waiting and 'class="t-go" href="/steward/v1?pid=p1&amp;dir="' in waiting
     # the one line is the wait; the description and the next step wait behind the open, before the acts
     assert waiting.index('class="t-line wait"') < waiting.index('class="t-more"') < waiting.index('class="t-next"') < waiting.index('class="t-acts"')
     assert "Needs you:</span>approve the Lecture 3 AI supplement" in waiting and "Next</span>Lecture 4" in waiting and "The course." in waiting

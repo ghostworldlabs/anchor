@@ -5,6 +5,16 @@
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  // Initiative dialogue and full cockpit bind the same project and effort. Older
+  // services still emit a project-index link; keep the loaded page's door direct.
+  function initiativeCockpitLinks(root) {
+    $$('.tile[data-tile] a.t-go', root).forEach(function (a) {
+      var card = a.closest('.tile[data-tile]');
+      a.href = '/steward/v1?pid=' + encodeURIComponent(card.getAttribute('data-tile'))
+        + '&dir=' + encodeURIComponent(card.getAttribute('data-dir') || '');
+    });
+  }
+  initiativeCockpitLinks(document);
   // Keep loaded-page names and links correct while an older service finishes its active turns.
   var seatBrand = $('.masthead .mh-stew b');
   if (seatBrand && seatBrand.textContent.trim().replace(/^The /, '') === 'Cave of Wonders') {
@@ -244,7 +254,7 @@
       ptileLoaded = true; $('#ptileLoading').textContent = 'reading the projects…';
       fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
         .then(function (r) { return r.json(); })
-        .then(function (j) { var f = $('#folders'); if (f && j && j.html) f.innerHTML = j.html; })
+        .then(function (j) { var f = $('#folders'); if (f && j && j.html) { f.innerHTML = j.html; initiativeCockpitLinks(f); } })
         .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
     }
   }

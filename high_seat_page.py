@@ -730,13 +730,14 @@ def _card(e, f, cls, goal=None, step=None, light=None):
                  '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">see</button></div>') % (n, "" if n == 1 else "s", pid, rel)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     acts += _resume_act(pid, rel, f.get("resume"))
+    cockpit_href = "/steward/v1?pid=%s&amp;dir=%s" % (pid, esc(_quote(str(f.get("effort") or ""))))
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top">%s<h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
         '<a class="t-go" href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div><div class="t-face">%s'
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div></div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", esc(step["href"]) if (step and step.get("kind") == "effort" and step.get("href")) else (("/project/%s?dir=%s&amp;open=effort" % (pid, esc(_quote(rel)))) if rel else "/project/%s" % pid), xbtn, goal_line,
+    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", cockpit_href, xbtn, goal_line,
          line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 

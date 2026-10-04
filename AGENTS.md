@@ -4,7 +4,7 @@ Follow `C:/Users/john/.claude/AGENTS.md` and `C:/dev/AGENTS.md` for the canonica
 
 ## Initiative tile dialogue — John, October 4, 2026
 
-An expanded initiative tile on the Cave shows its steward dialogue and composer, with the tile's existing Deliverables access retained below. Do not squeeze Plan, Status, the goal bar or cockpit controls into that dialogue frame, even when the frame is wide or saved full-cockpit panel preferences are open. The full cockpit retains those panels and its normal preferences. Reuse the same conversation renderer, history, engine stream and effort binding; this is a presentation change, not a second conversation. Verify the actual expanded tile, deliverable opening, resizing and the full-cockpit link. Source: Cave turn `1f29487d-3ace-4f85-9f09-5a5de826f537`.
+An expanded initiative tile on the Cave shows its steward dialogue and composer, with the tile's existing Deliverables access retained below. Do not squeeze Plan, Status, the goal bar or cockpit controls into that dialogue frame, even when the frame is wide or saved full-cockpit panel preferences are open. The full cockpit retains those panels and its normal preferences. Its link opens `/steward/v1` directly with the same project and effort directory as the tile, rather than the project index or another effort. Reuse the same conversation renderer, history, engine stream and effort binding; this is a presentation change, not a second conversation. Verify the actual expanded tile, deliverable opening, resizing and the full-cockpit link. Source: Cave turn `1f29487d-3ace-4f85-9f09-5a5de826f537`.
 
 ## Star Chart tile — John, October 3, 2026
 
