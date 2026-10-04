@@ -390,10 +390,17 @@
         return r.json().then(function (jr) { return (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'); });
       });
   }
-  // W2e (2026-09-30, his words): the mark "ready for you" — a card whose wait he has not looked at pulses its edge;
-  // opening any part of it is the look (kept in this browser, by the wait's own words: a new wait pulses again)
-  function seen(card) { var tok = card.getAttribute('data-ready'); card.classList.remove('ready'); if (!tok) return; try { localStorage.setItem('hs_seen_' + card.id, tok); } catch (e) {} }
-  $$('.tile[data-ready]').forEach(function (c) { var tok = c.getAttribute('data-ready'), was = ''; try { was = localStorage.getItem('hs_seen_' + c.id) || ''; } catch (e) {} if (was !== tok) c.classList.add('ready'); });
+  // Refinement 3 (John, 2026-10-04): looking is not answering or accepting. The unresolved
+  // request/review, rather than a browser's seen marker, owns the flashing amber edge.
+  function seen(card) {}
+  function paintReady(card, ready, why) {
+    card.classList.toggle('ready', !!ready);
+    if (ready) { card.setAttribute('data-ready', 'pending'); card.setAttribute('data-attention', why || 'needs your attention'); }
+    else { card.removeAttribute('data-ready'); card.removeAttribute('data-attention'); }
+    var l = $('.tlight', card);
+    if (l) { l.setAttribute('role', 'img'); l.setAttribute('aria-label', (l.title || 'idle') + (ready ? '; ' + (why || 'needs your attention') : '')); }
+  }
+  $$('.tile[data-ready]').forEach(function (c) { paintReady(c, true, 'needs your attention'); });
   // W2e-2 (2026-09-30, his word on the W2e preview): the tile OPENS to its decision brief — what waits on him, the
   // decision with the recommendation and one Accept, the material to review, the next step — and its dialogue, a
   // small window always there that grows to take the tile when a dialogue starts; the acts add a detail under the
@@ -442,6 +449,7 @@
       if (ev.origin !== location.origin || ev.source !== frame.contentWindow || !m || m.proto !== 'anchor-tile' || m.inst !== inst) return;
       if (m.kind === 'ready') { ready = true; var q = held; held = []; q.forEach(function (x) { try { frame.contentWindow.postMessage(x, location.origin); } catch (e) {} }); return; }
       if (m.kind === 'state') {
+        card._feedbackEpoch = (card._feedbackEpoch || 0) + 1;
         paintDot(card, m.light);
         if (chip) { chip.textContent = m.word || (m.busy ? 'working…' : (m.alive ? 'listening' : 'parked')); chip.setAttribute('data-state', m.busy ? 'busy' : (m.alive ? 'idle' : 'parked')); }   // the cockpit's own word (ChatGPT 2026-10-02)
         heard = true;
@@ -549,8 +557,8 @@
         $$('.tile[data-tile]').forEach(function (card) {
           var fresh = doc.getElementById(card.id); if (!fresh) return;
           var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && !f0.contains(document.activeElement) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
-          var l0 = $('.tlight', card), l1 = $('.tlight', fresh); if (l0 && l1) { l0.className = l1.className; l0.title = l1.title; }
-          var r1 = fresh.getAttribute('data-ready'); if (r1) card.setAttribute('data-ready', r1); else card.removeAttribute('data-ready');
+          // Activity and attention have their own continuing read below. A face render must
+          // not overwrite a newer cockpit state or clear an independent review border.
         });
         // the steward's nudge follows the record too (W3b; the brief is gone, 2026-10-03) - unless he is in that section
         var s0 = $('#nudgeSlot'), s1 = doc.getElementById('nudgeSlot');
@@ -567,6 +575,75 @@
       .catch(function () {})
       .then(function () { facesBusy = false; if (facesAgain) { facesAgain = false; refreshFaces(); } });
   }
+  // Closed tiles have no dialogue stream. Read the same exact-effort cockpit state every
+  // five seconds, with no wake/send/model call, and refresh review metadata on change or
+  // within fifteen seconds (managed lifecycle changes need not move the map's stamp).
+  // Use only current, explicitly designated reviews; an ordinary work pin is not a request.
+  function designatedReview(map, delivery) {
+    var steps = (map && map.steps) || [], items = (delivery && delivery.items) || [];
+    return items.some(function (it) {
+      if (!it.is_current || it.accepted || it.accepted_current) return false;
+      if (it.managed) return it.phase === 'awaiting_review';
+      var owner = steps.find(function (s) { return s.id === it.owner_step_id; });
+      if (!owner || owner.status === 'done' || owner.status === 'parked' || (owner.refinement || {}).phase === 'done') return false;
+      var nav = owner.navigation || {};
+      if (nav.current === false || nav.role === 'support') return false;
+      // These are the existing human review designations, qualified by the register's
+      // exact owner/current/acceptance flags. Do not infer a review from prose or an idle dot.
+      return /^FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ''))
+        || /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(String(nav.label || ''));
+    });
+  }
+  var feedbackBusy = false, feedbackAgain = false;
+  function feedbackGet(url) {
+    var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 12000);
+    return fetch(url, { cache: 'no-store', signal: controller.signal, headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+      .then(function (r) { if (!r.ok) throw new Error('feedback unavailable'); return r.json(); })
+      .finally(function () { clearTimeout(timeout); });
+  }
+  function refreshFeedback() {
+    var boot = window.ANCHOR_BOOT || {};
+    if (document.hidden || (boot.auth_required && !boot.logged_in)) return;
+    if (feedbackBusy) { feedbackAgain = true; return; }
+    feedbackBusy = true;
+    var cards = $$('.tile[data-tile]').filter(function (c) { return c.getClientRects().length > 0; }), moved = false, next = 0;
+    function worker() {
+      var card = cards[next++]; if (!card) return Promise.resolve();
+      var epoch = card._feedbackEpoch || 0, pid = card.getAttribute('data-tile'), dir = card.getAttribute('data-dir') || '';
+      var q = '?pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir);
+      return feedbackGet('/api/steward/state' + q).then(function (st) {
+        if (!st || !DOT_WORDS[st.light] || typeof st.busy !== 'boolean') throw new Error('incomplete feedback');
+        if (!card.isConnected || epoch !== (card._feedbackEpoch || 0)) return;
+        // A valid activity read still lands if the independent review reader is unavailable.
+        paintDot(card, st.light);
+        var question = !!st.open_question || !!((st.pending_questions || []).length) || st.light === 'orange';
+        if (question) paintReady(card, true, 'needs your answer');
+        var old = card._feedbackRecord, stamp = String(st.stamp || '');
+        var record = old && old.stamp === stamp && Date.now() < old.until ? Promise.resolve(old)
+          : Promise.all([feedbackGet('/api/steward/map' + q), feedbackGet('/api/steward/deliverables' + q)]).then(function (data) {
+            if (!Array.isArray(data[0].steps) || !Array.isArray(data[1].items)) throw new Error('incomplete review record');
+            return { stamp: stamp, until: String(data[0].stamp || '') === stamp ? Date.now() + 15000 : 0, review: designatedReview(data[0], data[1]) };
+          });
+        return record.then(function (rec) {
+          if (!card.isConnected || epoch !== (card._feedbackEpoch || 0)) return; // a newer iframe response wins
+          var ready = question || rec.review;
+          paintDot(card, st.light);
+          paintReady(card, ready, question ? 'needs your answer' : (rec.review ? 'review waiting' : ''));
+          if (old && old.stamp !== stamp) moved = true;
+          card._feedbackRecord = rec;
+        });
+      }).catch(function () { /* A failed/incomplete read retains the last known activity and attention. */ }).then(worker);
+    }
+    Promise.all([worker(), worker(), worker(), worker()]).finally(function () {
+      feedbackBusy = false;
+      if (moved) refreshFaces();
+      if (feedbackAgain) { feedbackAgain = false; refreshFeedback(); }
+    });
+  }
+  setInterval(refreshFeedback, 5000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshFeedback(); });
+  window.addEventListener('focus', refreshFeedback);
+  setTimeout(refreshFeedback, 0);
   function openTile(card, pid, dir) {
     var body = $('.t-body', card);
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
