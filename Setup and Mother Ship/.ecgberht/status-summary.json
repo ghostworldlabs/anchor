@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 14:34",
-  "status_id": "01791146090596829700",
+  "at": "2026-10-04 15:42",
+  "status_id": "01791150151444909600",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13",
+    "activity": "nothing running - quiet",
     "latest_event": null,
     "next": [
-      "Provider capacity, cost and model"
+      "Provider capacity, cost and model controls"
     ],
-    "question": "",
+    "question": "Keep or refine?",
     "facts": [
       {
         "label": "Summary",
-        "value": "Provider capacity, cost and model controls \u2014 Refine the interactive Setup sequence and shared provider\u2026"
+        "value": "Provider capacity, cost and model controls \u2014 Carry cumulative Setup requirements into interactive Refinement\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13"
+        "value": "nothing running - quiet"
       },
       {
         "label": "Status",
-        "value": "slice: Provider capacity, cost and model controls \u00b7 0/7 done \u00b7 quiet"
+        "value": "slice: Provider capacity, cost and model controls \u00b7 0/9 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "none"
+        "value": "waiting on you: Review Setup mockup Refinement 2: keep its layout or refine before laptop planning."
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0005-setup-mockup-refinement-1: Setup mockup \u2014 Refinement 1, October 4, 2026"
+        "value": "0008-provider-handoff-and-review-pickup: Interrupted review handback recovered \u2014 October 4, 2026"
       },
       {
         "label": "ETA",
@@ -49,47 +49,47 @@
       },
       {
         "label": "To do",
-        "value": "Provider capacity, cost and model"
+        "value": "Provider capacity, cost and model controls"
       }
     ]
   },
-  "lead_line": "Next: Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart \u2014 The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
+  "lead_line": "Next: Provider capacity, cost and model controls; then Review Setup before laptop integration \u2014 The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct \u00b7 waiting on you: Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.",
   "now": [
-    "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13"
+    "nothing running - quiet"
   ],
   "running": {
-    "kind": "steward",
-    "label": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13",
+    "kind": "none",
+    "label": "nothing running - quiet",
     "skill": "",
-    "source": "engine",
+    "source": "",
     "age": ""
   },
   "slice": {
     "n": 3,
-    "total": 7,
+    "total": 9,
     "id": "gwl-provider-status",
     "name": "Provider capacity, cost and model controls",
     "part": "slice",
-    "summary": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback,\u2026",
+    "summary": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0005-setup-mockup-refinement-1: Setup mockup \u2014 Refinement 1, October 4, 2026",
+  "journal": "0008-provider-handoff-and-review-pickup: Interrupted review handback recovered \u2014 October 4, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
       "step_id": "gwl-provider-status",
-      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a"
+      "session_id": "01a108d8-a633-78b0-9433-92d175405fde"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0005-setup-mockup-refinement-1.md",
-      "entry_id": "0005-setup-mockup-refinement-1",
-      "at": "2026-10-04T20:13:23Z",
+      "path": "journal/0008-provider-handoff-and-review-pickup.md",
+      "entry_id": "0008-provider-handoff-and-review-pickup",
+      "at": "2026-10-04T21:42:30Z",
       "step_id": "gwl-provider-status",
-      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "session_id": "01a108d8-a633-78b0-9433-92d175405fde",
       "run_id": null
     },
     "eta": {
@@ -98,19 +98,19 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Provider capacity, cost and model",
-    "then Third: organize goals and initiatives on the Star Chart"
+    "Provider capacity, cost and model controls",
+    "then Review Setup before laptop integration"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u25b6 \u00b7 integrate \u00b7 research \u00b7 harden \u00b7 rigor",
+    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 research \u00b7 harden",
     "steps_done": 0,
-    "steps_total": 7
+    "steps_total": 9
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
+    "text": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
@@ -119,20 +119,22 @@
   "plan": {
     "step": "slice: Provider capacity, cost and model controls",
     "steps_done": 0,
-    "steps_total": 7,
-    "waiting_on_you": "",
+    "steps_total": 9,
+    "waiting_on_you": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.",
     "waiting_since": null,
-    "next": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-    "why": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
+    "next": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+    "why": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
     "attention": "quiet",
     "goal_reread": true
   },
   "map": [
     "research: Third: organize goals and initiatives on the Star Chart (proposed)",
     "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
-    "slice: Provider capacity, cost and model controls (active) \u00b7 no gate",
-    "rigor: Review Setup before building it (proposed) \u00b7 no gate",
+    "slice: Provider capacity, cost and model controls (active) \u00b7 gate",
+    "rigor: Review Setup before laptop integration (proposed) \u00b7 no gate",
+    "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
     "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
+    "integrate: Wire Cave controls and reopen Setup (proposed) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
   ],
@@ -212,9 +214,9 @@
           "id": "gwl-provider-status",
           "name": "Provider capacity, cost and model controls",
           "status": "active",
-          "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build.",
+          "done_when": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave left sidebar bottom exposes the selected provider/account and model/reasoning through the same provider surface, with right-side capacity retained. Preserve host pairing, account tests and allowances, accepted warnings retaining full strength, and Star Chart organization. Check actual interactions and pixels, then obtain human feedback before implementation planning or live laptop integration.",
           "if_then": "",
-          "waiting_on": "Setup mockup Refinement 1: keep full strength and warn at low allowance, or automatically reduce model strength?",
+          "waiting_on": "Setup mockup Refinement 2: keep the revised provider, gear and Cave sidebar layout for the laptop implementation plan, or refine it?",
           "due": null,
           "ref": null,
           "tier": null,
@@ -223,7 +225,7 @@
           "seat_order": null,
           "commissioned_as": null,
           "part": "slice",
-          "gate": "",
+          "gate": "python .ecgberht/verify-setup-refinement-2.py",
           "component_ids": [],
           "navigation": {
             "path": [
@@ -231,8 +233,8 @@
             ],
             "current": true,
             "featured_paths": [
-              "mockups/SETUP-refinement-1.html",
-              "SCOPE-v4.md"
+              "mockups/SETUP-refinement-2.html",
+              "SCOPE-v5.md"
             ]
           }
         }
@@ -242,13 +244,36 @@
       "tag": "rigor",
       "label": "Prove it",
       "done": 0,
-      "total": 1,
+      "total": 2,
       "steps": [
         {
           "id": "gwl-review",
-          "name": "Review Setup before building it",
+          "name": "Review Setup before laptop integration",
           "status": "proposed",
-          "done_when": "Settle load-bearing choices and review the user-facing Setup flow.",
+          "done_when": "Settle the provider mockup and review the Setup walkthrough before implementation planning and live laptop integration. The accepted warning default is only one policy decision; further mockup feedback remains open and a slice closes only on John's explicit instruction.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "rigor",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
+          }
+        },
+        {
+          "id": "gwl-laptop-provider-test",
+          "name": "Test providers in the running laptop Anchor",
+          "status": "proposed",
+          "done_when": "After the provider mockup is settled and implementation work is agreed, test the provider flow in the current Anchor client actually running on John's laptop. Check the selected mother ship, subscriptions and optional API connections, per-account tests and honestly reported allowance/cost, warnings preserving full strength and explicit model changes. Distinguish the actual laptop client from fresh-browser mockup checks; do not reset first-time setup or disrupt ongoing sessions.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -273,7 +298,7 @@
       "tag": "integrate",
       "label": "Join",
       "done": 0,
-      "total": 2,
+      "total": 3,
       "steps": [
         {
           "id": "gwl-access",
@@ -297,6 +322,29 @@
               "gwl-setup"
             ],
             "current": false
+          }
+        },
+        {
+          "id": "gwl-cave-settings",
+          "name": "Wire Cave controls and reopen Setup",
+          "status": "proposed",
+          "done_when": "After provider mockup settlement and laptop testing, wire the bottom of the Cave of Wonders left side window to the agreed mother-ship provider/model/reasoning settings. Retain the separately specified lower-right capacity display. After first-time Setup, show a gear at the far upper left and move the Anchor icon slightly right. The gear opens the same Setup page to modify existing settings and preserves completed host/provider/project setup. Verify in the running laptop client; credentials and tests stay on the mother ship.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "integrate",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ]
           }
         },
         {
@@ -358,5 +406,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 11
+  "deliverables_count": 13
 }
