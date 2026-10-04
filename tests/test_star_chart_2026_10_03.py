@@ -42,12 +42,11 @@ def _star(ctx):
 
 def test_the_campaign_page_is_the_star_chart_and_aladdin_keeps_his_name():
     html = cpg.render_campaign_html(_star(w2._ctx()))
-    assert "<title>The Star Chart</title>" in html and 'aria-label="The Star Chart"' in html
-    assert '<h2 class="modeh">The Star Chart</h2>' in html
+    assert "<title>Star Chart</title>" in html and 'aria-label="The Star Chart"' in html      # the tile reads "Star Chart" (2026-10-03)
+    assert '<h2 class="modeh">Star Chart</h2>' in html and 'class="back"' not in html, "no back link to the Cave (his word)"
     mh = html[html.index('class="mh-stew"'):]
-    assert 'src="/vendor/brand/campaign-aladdin-star-chart.jpg' in mh[:400] and "<b>The Star Chart</b><span>Aladdin &middot; goals and foresight</span>" in mh, "the masthead wears the mode (his accepted mockup)"
+    assert 'src="/vendor/brand/campaign-aladdin-star-chart.jpg' in mh[:400] and "<b>Star Chart</b><span>Aladdin &middot; goals and foresight</span>" in mh, "the masthead wears the mode (his accepted mockup)"
     assert 'placeholder="Ask Aladdin, discuss, or tell it what to do &mdash; it runs the Star Chart:' in html, "the steward keeps his name; the page is the Star Chart"
-    assert "&larr; Cave of Wonders</a>" in html, "the back link stays the Cave"
     assert 'id="brief"' not in html and "The brief" not in html, "his word: the brief is gone"
     assert html.index('id="lookAhead"') < html.index('id="dialogue"'), "the look-ahead takes its place at the top of the panel"
 

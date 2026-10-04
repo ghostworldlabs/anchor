@@ -518,3 +518,11 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .hdr h2.modeh{display:inline-flex;align-items:center;gap:8px}
 .hdr h2.modeh img{width:28px;height:28px;border-radius:6px;object-fit:cover}
 .pfold:empty{display:none}.pfold .gift{white-space:normal}
+
+/* the composer always keeps Send on screen (his report, 2026-10-03: a long dictation pushed Send below the page):
+   the draft grows to at most a quarter of the window, then scrolls; the look-ahead scrolls inside its own box; the
+   conversation gives up height before the composer does */
+.panel>.lookahead{flex:0 1 auto;min-height:0;max-height:30vh;overflow-y:auto}
+.panel>.exwrap.cview{min-height:110px}
+.panel .exwrap .cview-frame{min-height:70px}
+.panel>.composer textarea{max-height:25vh}

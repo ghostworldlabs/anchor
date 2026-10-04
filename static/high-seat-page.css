@@ -936,3 +936,10 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .nudgeslot:empty{display:none}
 .nudge.resume{border-left-color:var(--accent-t)}
 .nudge.resume .nk{color:var(--accent-t)}
+
+/* the composer always keeps Send on screen (2026-10-03): the draft grows to a quarter of the window, then scrolls;
+   the nudge slot scrolls inside itself; the conversation gives up height before the composer does */
+.panel>.composer textarea{max-height:20vh}
+.panel>.nudgeslot{max-height:25vh;overflow-y:auto;min-height:0}
+.panel>.exwrap.cview{min-height:110px}
+.panel .exwrap .cview-frame{min-height:70px}

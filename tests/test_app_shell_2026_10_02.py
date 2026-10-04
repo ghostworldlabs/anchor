@@ -29,6 +29,9 @@ PAGES = {
 <button id="pre" onclick="var w=window.open('about:blank','_blank');w.opener=null;w.location.replace('/project/p2');">resume</button>
 <button id="np" onclick="window.open('/dashboard?new=1&only=1','anchor-new-project','width=640,height=800')">new project</button>
 <div id="got"></div>
+<script>window.ANCHOR_BOOT={campaign_pid:"camp"};window.ANCHOR_TILES={seat_name:"Cave of Wonders",seat_icon:"/vendor/brand/aladdin-high-seat-cave.png",mode_name:"Star Chart",mode_icon:"/vendor/brand/campaign-aladdin-star-chart.jpg"};</script>
+<a id="star" href="/project/camp" target="_blank">Open the Star Chart</a>
+<a id="cavecp" href="/steward/v1?pid=camp&amp;dir=Cave%20of%20Wonders" target="_blank">open in the cockpit</a>
 <script>window.addEventListener('message',function(e){document.getElementById('got').textContent=e.data;});</script>
 </body></html>""",
     "/project/p1": """<!doctype html><html><head><title>MBA Teaching AI</title></head><body>""" + SHIM + """
@@ -41,6 +44,9 @@ PAGES = {
 <button id="tidy" onclick="var w=window.open('','tidy_status');w.document.open();w.document.write('<title>Tidy run</title><p id=n>0</p>');w.document.close();window.__tick=setInterval(function(){var n=w.document.getElementById('n');n.textContent=+n.textContent+1;},100);">tidy</button>
 <iframe id="v1" src="/steward/v1?pid=p1" style="width:300px;height:80px"></iframe>
 </body></html>""",
+    "/project/camp": "<!doctype html><html><head><title>Star Chart</title></head><body>" + SHIM
+                     + '<a id="starcp" href="/steward/v1?pid=camp&amp;dir=" target="_blank">open in the cockpit</a>'
+                     + '<a id="place" href="/project/camp?open=trusts" target="_blank">its place</a></body></html>',
     "/project/p2": "<!doctype html><html><head><title>Artificial Magi</title></head><body>" + SHIM + "<p>magi</p></body></html>",
     "/project/p3": "<!doctype html><html><head><title>DARPA proposal</title></head><body>" + SHIM + "<p>darpa</p></body></html>",
     "/steward/v1": "<!doctype html><html><head><title>v1</title></head><body>" + SHIM
@@ -484,3 +490,31 @@ def test_the_desktop_program_snapped_narrow_keeps_its_desktop_bar(base):
         assert pg.evaluate("getComputedStyle(document.getElementById('two')).display") != "none"
         assert pg.evaluate("getComputedStyle(document.querySelector('#bar .grab')).display") != "none"
         b.close()
+
+
+# ---------- his naming and one-tile rules (2026-10-03) ----------
+def test_the_star_chart_and_both_cockpits_are_named_for_what_they_show_and_open_once(page):
+    _cave(page).locator("#star").click()
+    page.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
+    _settle(page)
+    assert _tiles(page) == ["Cave of Wonders", "Star Chart"]
+    assert "campaign-aladdin-star-chart" in page.eval_on_selector_all("#strip .tile img", "els => els.map(e => e.src).join(' ')")
+    _focus_frame(page, "/project/camp").locator("#starcp").click()
+    page.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 3")
+    _settle(page)
+    assert _tiles(page) == ["Cave of Wonders", "Star Chart", "Star Chart — AI Cockpit"]
+    page.locator("#strip .tile.cave").click(); _settle(page)
+    assert _painted_frames(page) == ["/"], (_painted_frames(page), _tiles(page))
+    _cave(page).locator("#cavecp").click()
+    page.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 4")
+    _settle(page)
+    assert _tiles(page)[-1] == "Cave of Wonders — AI Cockpit"
+    # selected again while open: the open tile is shown, never a second one
+    page.locator("#strip .tile.cave").click(); _settle(page)
+    _cave(page).locator("#star").click(); _settle(page)
+    assert len(_tiles(page)) == 4 and _painted_frames(page) == ["/project/camp"]
+    _focus_frame(page, "/project/camp").locator("#place").click(); _settle(page)
+    assert len(_tiles(page)) == 4 and _painted_frames(page) == ["/project/camp"], "a goal's place is the same tile"
+    page.locator("#strip .tile.cave").click(); _settle(page)
+    _cave(page).locator("#cavecp").click(); _settle(page)
+    assert len(_tiles(page)) == 4 and _painted_frames(page) == ["/steward/v1"]
