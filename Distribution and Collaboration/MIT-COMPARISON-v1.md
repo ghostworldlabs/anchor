@@ -1,5 +1,7 @@
 # MIT and the no-sales requirement — comparison v1
 
+**Current direction, 4 October:** John accepted the custom candidate for drafting and review within Distribution scope v1, Refinement 1, then explicitly requested [Ghost World Lab License v1](GHOST-WORLD-LAB-LICENSE-v1.md) and Legal-Beagle review. That draft is now the current licensing product; this comparison remains independently reviewable. No final license is accepted, applied or published.
+
 MIT does not meet the rule John described. It allows people to use and modify software, sell copies and sell products incorporating the MIT-covered code. It requires retention of the copyright and permission notices, but does not require publication of modifications. [MIT license](https://opensource.org/license/mit)
 
 John's request is broad permission to use and modify Anchor, with no sale of Anchor or a product built on its covered code. Source: local turn `9644fd33-97d1-4223-b5f9-9d080890ba70`, 2026-10-04T18:51:43Z. Free internal business use is accepted. His later turn `bddb9954-a824-4209-9d17-92fc3a432a48`, 2026-10-04T19:13:54Z, expressly makes sharing modifications voluntary and asks which license best fits. That replaces the earlier mandatory share-back requirement. These answers refine the same scope; they do not select or apply a license.

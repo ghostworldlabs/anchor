@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Paid-hosting permission recorded; choosing the licensing candidate in Distribution scope v1, Refinement 1.",
+  "active_effort": "Drafting Ghost World Lab License v1 and obtaining the requested Legal-Beagle review.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "none",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -17,7 +17,7 @@
   "anti_starvation_age_days": 0,
   "grasscatch": [],
   "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
-  "why_next": "The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license",
+  "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -503,6 +503,36 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "next_recommended": "Review Ghost World Lab License v1 after Legal-Beagle checks the draft.",
+      "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Drafting Ghost World Lab License v1 and obtaining the requested Legal-Beagle review.",
+      "human_wait": "none",
+      "current_step_id": "gwl-license"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
+      "why_next": "John accepted custom terms and explicitly requested the named draft and legal review.",
+      "horizon_source_seq": 38,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
     }
   ],
   "receipts": [
@@ -665,8 +695,8 @@
       "summary": "Paid-hosting permission recorded"
     }
   ],
-  "horizon_source_seq": 36,
+  "horizon_source_seq": 38,
   "horizon_focus": "gwl-license",
-  "wait_ref": "decision:gwl-custom-license-candidate-v1",
+  "wait_ref": "none",
   "current_step_id": "gwl-license"
 }

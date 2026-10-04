@@ -2,7 +2,7 @@
 
 This cockpit owns portable releases, the public distribution home and license choice. Existing distribution/onboarding work is retained. The earlier July record reserved rights; today’s open-source direction is a new proposal whose exact license remains undecided.
 
-Distribution scope v1, Refinement 1 — policy answers recorded 4 October 2026: **ordinary internal business use is free, sharing modifications is voluntary, and third-party paid Anchor hosting requires permission**. John's separate no-sales requirement remains active. These are accepted policy boundaries; no final license is selected or applied.
+Distribution scope v1, Refinement 1 — policy answers recorded 4 October 2026: **ordinary internal business use is free, sharing modifications is voluntary, and third-party paid Anchor hosting requires permission**. John's separate no-sales requirement remains active. **The custom candidate is accepted for drafting and review:** [Ghost World Lab License v1](GHOST-WORLD-LAB-LICENSE-v1.md). The draft's final terms are not accepted or applied.
 
 ## Accepted licensing boundaries
 
@@ -104,7 +104,7 @@ John requested moving this discussion into this cockpit in Campaign turn `58cb00
 
 ## Later local clarification — voluntary sharing
 
-Original local turn `bddb9954-a824-4209-9d17-92fc3a432a48`, at `2026-10-04T19:13:54.336371+00:00`, says sharing modifications back is optional, not required, while sale of a modified Anchor version is prohibited. This supersedes the earlier potential mandatory share-back requirement in this same refinement. The existing comparison now checks Commons Clause, Elastic 2.0 and FSL as well as the earlier candidates. Tailored source-available terms are recommended because none of the checked candidates precisely supplies this combination; no final license is selected or drafted here.
+Original local turn `bddb9954-a824-4209-9d17-92fc3a432a48`, at `2026-10-04T19:13:54.336371+00:00`, says sharing modifications back is optional, not required, while sale of a modified Anchor version is prohibited. This supersedes the earlier potential mandatory share-back requirement in this same refinement. The existing comparison now checks Commons Clause, Elastic 2.0 and FSL as well as the earlier candidates. Tailored source-available terms were recommended because none of the checked candidates precisely supplies this combination. The subsequent candidate acceptance and explicit drafting request are recorded below; final terms remain for review.
 
 ## Accepted decision — paid hosted access
 
@@ -120,9 +120,15 @@ This authorizes: refine Distribution scope v1, Refinement 1 to reserve paid Anch
 Reversible: yes - undo: remove the hosting restriction from the draft scope.
 Should paid hosting require permission?
 
-## Next decision — licensing candidate
+## Accepted decision — custom licensing candidate
 
-Free internal business use, broad modification, voluntary contributions, restricted sales and permission for third-party paid hosting are now recorded together. John has not yet selected the proposed custom licensing mechanism or accepted final terms.
+John's local turn `2122dc15-8520-47c6-9b54-a13aa880f380`, at `2026-10-04T20:36:22.153388+00:00`, accepts the custom source-available license candidate. It answers saved question `61534f6918b49e4a58fa04e13993fefb40fc77cc8ef6ddc955dcdbc296ba338b`, scoped to **Distribution scope v1, Refinement 1**, from steward turn `chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:7`.
+
+The custom candidate is selected for drafting and review; final terms are not accepted or applied. The answered question and its waits are retired. Undo remains removing the candidate from the scope on John's instruction.
+
+John then explicitly requested the draft name **Ghost World Lab License** in turn `f95c8ec4-2b07-4607-a9d3-4068814c5bb3`, a **Legal-Beagle** review in turn `c34fd8f9-3d47-4825-a4f3-3e78bf68b2c9`, and a journal entry in turn `77589eef-ee23-48d3-9330-c852da1dae0b`. These authorize producing **Ghost World Lab License v1 — draft for review**, its legal analysis, and the work journal within this same scope refinement. They do not authorize publication, applying a repository license, changing the North Star, accepting any other artifact or closing a slice. The legal owner, governing law and dependency/contributor rights remain unverified prerequisites to publication.
+
+The original question is retained below as provenance, not a pending request.
 
 Recommendation: use custom source-available terms as the candidate because they can express the recorded policy in one reviewable draft. MIT plus Commons Clause is a ready-made alternative with the value-added derivative and service-boundary mismatches explained in the existing comparison. Deferring leaves the licensing mechanism open.
 

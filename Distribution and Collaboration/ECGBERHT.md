@@ -10,19 +10,19 @@ John's Campaign dictation, 2026-10-04, turn `3c476265-7142-441c-a934-a7a37d5a1e9
 
 ## Active effort
 
-Paid-hosting permission recorded; choosing the licensing candidate in Distribution scope v1, Refinement 1.
+Drafting Ghost World Lab License v1 and obtaining the requested Legal-Beagle review.
 
 ## Why next
 
-The accepted policy is concrete; custom source-available terms are recommended as a candidate, not selected or applied.
+Custom candidate accepted in scope Refinement 1; named draft and legal review explicitly requested.
 
 ## Human wait
 
-John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.
+None. John answered the candidate question and authorized the named draft and review.
 
 ## Why stakes
 
-Recorded policy and earlier licensing products remain independently reviewable; final terms and publication are undecided.
+Drafting is authorized; final terms, rights clearance and publication remain independently reviewable.
 
 ## Existing work
 
