@@ -290,6 +290,37 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "human_wait": "none",
+      "wait_ref": "none"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "Broad use and modification with restricted sales need a more precise license boundary.",
+      "horizon_source_seq": 26,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:gwl-internal-business-use-v1",
+      "human_wait": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1."
     }
   ],
   "receipts": [
@@ -384,9 +415,25 @@
       "path": "journal/0003-first-trial-discovery-2026-10-04.md",
       "entry_id": "0003-first-trial-discovery-2026-10-04",
       "summary": "First collaborator trial discovery — 2026-10-04"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-04",
+      "at": "2026-10-04T19:03:16Z",
+      "current_step_id": null,
+      "last_event_seq": 26,
+      "last_event_at": "2026-10-04T19:02:00.292Z",
+      "last_event_kind": "status_flip",
+      "last_event_step_id": "gwl-license",
+      "presentation_id": null,
+      "active_effort": "Connect-first order recorded; MIT comparison v1 and licensing guide v1 ready to read.",
+      "wait_ref": "none",
+      "human_wait": "none",
+      "_kind": "receipt"
     }
   ],
-  "horizon_source_seq": 24,
+  "horizon_source_seq": 26,
   "horizon_focus": "gwl-license",
   "wait_ref": "decision:gwl-internal-business-use-v1"
 }

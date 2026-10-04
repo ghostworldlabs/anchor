@@ -18,7 +18,7 @@ The trial order is settled; MIT permits the sales John wants to restrict.
 
 ## Human wait
 
-none
+John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.
 
 ## Why stakes
 
