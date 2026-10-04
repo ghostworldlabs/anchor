@@ -13,12 +13,13 @@ For MIT-covered code, a developer can take the source, add features, retain the 
 | Choice | Use and modify | Sell a version or a product incorporating the covered code | Sharing changes |
 | --- | --- | --- | --- |
 | MIT | Broad permission, including business use | Permitted, with required notices | No obligation to publish or submit modifications |
+| Apache 2.0 | Broad permission, including business use, with an express patent license | Permitted, with license/notice requirements and changed-file markings | No general obligation to disclose modifications as source |
 | GPLv3 | Permitted, including business use | Permitted, subject to GPL obligations | Covered distributions require corresponding source and GPL rights for recipients |
 | AGPLv3 | Permitted, including business use | Permitted, subject to AGPL obligations | Distributed covered work needs source; a modified network version must offer its corresponding source to remote users |
 | PolyForm Shield | Permitted for purposes within its competition rules | Restricts competing products, including free competitors; does not prohibit every noncompeting commercial product | No general obligation to publish or return modifications |
 | PolyForm Noncommercial | Permitted for its defined noncommercial purposes and listed organizations | Ordinary commercial use needs separate permission | No general obligation to publish or return modifications |
 
-Sources: [GPLv3](https://spdx.org/licenses/GPL-3.0-only.html), [AGPLv3](https://spdx.org/licenses/AGPL-3.0-only.html), [Shield's full terms](https://raw.githubusercontent.com/polyformproject/polyform-licenses/1.0.0/PolyForm-Shield-1.0.0.md), [Noncommercial](https://polyformproject.org/licenses/noncommercial/1.0.0), and the MIT sources above. GPL and AGPL source-sharing obligations do not require sending every private change back to John.
+Sources: [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0), [GPLv3](https://spdx.org/licenses/GPL-3.0-only.html), [AGPLv3](https://spdx.org/licenses/AGPL-3.0-only.html), [Shield's full terms](https://raw.githubusercontent.com/polyformproject/polyform-licenses/1.0.0/PolyForm-Shield-1.0.0.md), [Noncommercial](https://polyformproject.org/licenses/noncommercial/1.0.0), and the MIT sources above. GPL and AGPL source-sharing obligations do not require sending every private change back to John.
 
 ## Recommendation for the same scope
 
