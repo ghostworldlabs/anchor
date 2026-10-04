@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 13:43",
-  "status_id": "01791143000010803100",
+  "at": "2026-10-04 14:34",
+  "status_id": "01791146090596829700",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26",
+    "activity": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13",
     "latest_event": null,
     "next": [
-      "Provider capacity, cost and model controls"
+      "Provider capacity, cost and model"
     ],
-    "question": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Provider capacity, cost and model controls \u2014 Produce and refine a usable mockup of subscription/API setup,\u2026"
+        "value": "Provider capacity, cost and model controls \u2014 Refine the interactive Setup sequence and shared provider\u2026"
       },
       {
         "label": "Effort",
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26"
+        "value": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13"
       },
       {
         "label": "Status",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: Choose whether to keep the shared provider-panel layout in the Initial draft."
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0004-provider-mockup-initial: Provider setup mockup \u2014 Initial draft, 2026-10-04"
+        "value": "0005-setup-mockup-refinement-1: Setup mockup \u2014 Refinement 1, October 4, 2026"
       },
       {
         "label": "ETA",
@@ -49,17 +49,17 @@
       },
       {
         "label": "To do",
-        "value": "Provider capacity, cost and model controls"
+        "value": "Provider capacity, cost and model"
       }
     ]
   },
-  "lead_line": "Next: Provider capacity, cost and model controls; then Projects, folders and recommended organization \u2014 The requested prototype is ready; refine its layout before an implementation plan. \u00b7 waiting on you: Choose whether to keep the shared provider-panel layout in the Initial draft.",
+  "lead_line": "Next: Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart \u2014 The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
   "now": [
-    "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26"
+    "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13"
   ],
   "running": {
     "kind": "steward",
-    "label": "steward mid-turn since 13:43 (0 min) \u00b7 last status 13:26",
+    "label": "steward mid-turn since 14:34 (0 min) \u00b7 last status 14:13",
     "skill": "",
     "source": "engine",
     "age": ""
@@ -70,12 +70,12 @@
     "id": "gwl-provider-status",
     "name": "Provider capacity, cost and model controls",
     "part": "slice",
-    "summary": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices\u2026",
+    "summary": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback,\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0004-provider-mockup-initial: Provider setup mockup \u2014 Initial draft, 2026-10-04",
+  "journal": "0005-setup-mockup-refinement-1: Setup mockup \u2014 Refinement 1, October 4, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,9 +85,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0004-provider-mockup-initial.md",
-      "entry_id": "0004-provider-mockup-initial",
-      "at": "2026-10-04T19:23:57Z",
+      "path": "journal/0005-setup-mockup-refinement-1.md",
+      "entry_id": "0005-setup-mockup-refinement-1",
+      "at": "2026-10-04T20:13:23Z",
       "step_id": "gwl-provider-status",
       "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
       "run_id": null
@@ -98,8 +98,8 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Provider capacity, cost and model controls",
-    "then Projects, folders and recommended organization"
+    "Provider capacity, cost and model",
+    "then Third: organize goals and initiatives on the Star Chart"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
@@ -110,7 +110,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
+    "text": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
     "as_of": "2026-10-04",
     "newest_work": "2026-10-04",
     "behind_days": 0,
@@ -120,20 +120,20 @@
     "step": "slice: Provider capacity, cost and model controls",
     "steps_done": 0,
     "steps_total": 7,
-    "waiting_on_you": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+    "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-    "why": "The requested prototype is ready; refine its layout before an implementation plan.",
+    "next": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+    "why": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
     "attention": "quiet",
     "goal_reread": true
   },
   "map": [
-    "research: Projects, folders and recommended organization (proposed)",
-    "slice: One mother ship per person and connected client computers (proposed) \u00b7 no gate",
+    "research: Third: organize goals and initiatives on the Star Chart (proposed)",
+    "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
     "slice: Provider capacity, cost and model controls (active) \u00b7 no gate",
     "rigor: Review Setup before building it (proposed) \u00b7 no gate",
-    "integrate: Subscription sign-in and optional API keys (proposed) \u00b7 no gate",
-    "integrate: Email and calendars (proposed) \u00b7 no gate",
+    "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
+    "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
   ],
   "work_map": [
@@ -145,9 +145,9 @@
       "steps": [
         {
           "id": "gwl-mapping",
-          "name": "Projects, folders and recommended organization",
+          "name": "Third: organize goals and initiatives on the Star Chart",
           "status": "proposed",
-          "done_when": "Recommend project and goal mappings from folders nominated by the user, with C:/dev as John\u2019s preferred home.",
+          "done_when": "For a new mother ship, start in Star Chart with Aladdin as default steward; choose a dev-drive storage directory when available or another location, brainstorm major goals and their initiatives/deliverables, identify source material, and require at least one goal/initiative before previewing populated Star Chart and Cave. Existing-host clients reuse its organization.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -176,9 +176,9 @@
       "steps": [
         {
           "id": "gwl-host-client",
-          "name": "One mother ship per person and connected client computers",
+          "name": "First: choose or connect to the mother ship",
           "status": "proposed",
-          "done_when": "Detect each person's chosen mother ship on their own computer, install and register it when needed, and connect their other computers through Tailscale without accidental duplicate hosts.",
+          "done_when": "On first launch choose this computer as the personal mother ship or connect to an existing personal host through a guided Tailscale and secure pairing-token flow. Install Anchor and Foundry skills only on a new mother ship; client devices use that host.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -212,9 +212,9 @@
           "id": "gwl-provider-status",
           "name": "Provider capacity, cost and model controls",
           "status": "active",
-          "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization.",
+          "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build.",
           "if_then": "",
-          "waiting_on": "Keep the compact Cave tile opening one provider detail panel shared with Setup, in Provider mockup Initial draft?",
+          "waiting_on": "Setup mockup Refinement 1: keep full strength and warn at low allowance, or automatically reduce model strength?",
           "due": null,
           "ref": null,
           "tier": null,
@@ -231,8 +231,8 @@
             ],
             "current": true,
             "featured_paths": [
-              "mockups/PROVIDER-SETUP-initial.html",
-              "SCOPE-v3.md"
+              "mockups/SETUP-refinement-1.html",
+              "SCOPE-v4.md"
             ]
           }
         }
@@ -277,9 +277,9 @@
       "steps": [
         {
           "id": "gwl-access",
-          "name": "Subscription sign-in and optional API keys",
+          "name": "Second: connect subscriptions and optional API keys",
           "status": "proposed",
-          "done_when": "Set up normal subscription sign-in and optional user API keys on the personal mother ship, distinguishing subscription allowances from paid API usage; do this before email and calendar setup.",
+          "done_when": "After host connection, show a provider checklist allowing multiple separately named subscriptions per provider and optional API connections. Normal sign-in, credentials, tests and usage reports belong to the mother ship; show per-connection capacity, cost and honest unknowns.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -301,9 +301,9 @@
         },
         {
           "id": "gwl-accounts",
-          "name": "Email and calendars",
+          "name": "Optional: connect calendars and email",
           "status": "proposed",
-          "done_when": "Set up Outlook and Gmail accounts and calendars.",
+          "done_when": "After provider setup, expose a separate optional calendars/email button for Outlook and Gmail. Secure sign-in and integration run on the mother ship; this does not block independent personal-host or goal organization work.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -358,5 +358,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 9
+  "deliverables_count": 11
 }

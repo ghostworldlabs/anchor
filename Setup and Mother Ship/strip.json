@@ -7,7 +7,7 @@
   "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "Choose warning versus automatic model-strength reduction in Setup mockup Refinement 1.",
+  "human_wait": "",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-  "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
+  "why_next": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -346,6 +346,21 @@
         "gwl-provider-status",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
+      "horizon_source_seq": 44,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -376,6 +391,16 @@
       "path": "journal/0004-provider-mockup-initial.md",
       "entry_id": "0004-provider-mockup-initial",
       "summary": "Provider setup mockup — Initial draft, 2026-10-04"
+    },
+    {
+      "at": "2026-10-04T20:13:23Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0005-setup-mockup-refinement-1.md",
+      "entry_id": "0005-setup-mockup-refinement-1",
+      "summary": "Setup mockup — Refinement 1, October 4, 2026"
     }
   ],
   "horizon_source_seq": 44,
