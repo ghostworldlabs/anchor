@@ -67,7 +67,7 @@ def campaign_initiatives(steps, resolved=None):
                 kind = ref.split(":", 1)[0] if ref else "task"
                 state = r.get("state") or ("" if r.get("broken") else str(p.get("status") or ""))
                 parts.append({
-                    "id": p.get("id"), "kind": kind, "text": r.get("what") or p.get("name") or "",
+                    "id": p.get("id"), "kind": kind, "name": p.get("name") or "", "text": r.get("what") or p.get("name") or "",
                     "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
                     "pid": str(r.get("pid") or ""), "lead": str(r.get("lead") or ""), "dir": str(r.get("dir") or ""),
                     "href": r.get("href") or "", "status": str(p.get("status") or ""),
@@ -667,7 +667,8 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     with no record is a quiet card: the name, its blurb, the cockpit."""
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
-    name = esc(e.get("name"))
+    # A seated component has its own Campaign name; the project is context, not its title.
+    name = esc((step or {}).get("name") or e.get("name"))
     # W2c (2026-09-30): on a shelf the card is a seated initiative — it carries its step, drags, has its × and names
     # its goal; a cockpit within a project is its own card on its own effort
     cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
@@ -737,7 +738,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div></div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", cockpit_href, xbtn, goal_line,
+    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % esc(e.get("name"))) if step else (('<span class="t-eff">&middot; %s</span>' % rel) if rel else ""), cockpit_href, xbtn, goal_line,
          line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 

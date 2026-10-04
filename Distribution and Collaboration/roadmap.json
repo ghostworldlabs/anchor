@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04",
+  "as_of": "2026-10-04T16:17:54.226Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -294,6 +294,71 @@
       },
       "at": "2026-10-04",
       "seq": 17
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Compare standard licensing and IP options against John’s restricted commercial-version preference; settle internal-business use and sharing obligations before John selects terms.",
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ],
+          "current": true
+        }
+      },
+      "at": "2026-10-04T16:09:56.219Z",
+      "client_event_id": "gwl-refinement-52eadd74-2b48-4381-ae92-d255c5042d21-gwl-license",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T16:09:56.219Z",
+        "why": "John's feedback 52eadd74-2b48-4381-ae92-d255c5042d21 carried into Distribution scope v1 Refinement 1 and licensing/IP guide v1. Names use existing component records; original brainstorming belongs to its goal. No close or final license."
+      },
+      "seq": 18
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": "John: should internal business use be free? Recommendation: yes; Distribution scope v1, Refinement 1 only. Final license undecided."
+      },
+      "at": "2026-10-04T16:16:51.950Z",
+      "client_event_id": "gwl-internal-use-question-52eadd74-2b48-4381-ae92-d255c5042d21-gwl-license",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T16:16:51.950Z",
+        "why": "Guide v1 explains the distinct, still-unresolved internal-use boundary after John's restricted preference 52eadd74-2b48-4381-ae92-d255c5042d21. Not a repeat of open-or-restricted; no slice close."
+      },
+      "seq": 19
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "active",
+      "to": "waiting",
+      "at": "2026-10-04T16:16:51.950Z",
+      "client_event_id": "gwl-internal-use-wait-52eadd74-2b48-4381-ae92-d255c5042d21",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T16:16:51.950Z",
+        "why": "Guide v1 explains the distinct, still-unresolved internal-use boundary after John's restricted preference 52eadd74-2b48-4381-ae92-d255c5042d21. Not a repeat of open-or-restricted; no slice close."
+      },
+      "seq": 20
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1."
+      },
+      "at": "2026-10-04T16:17:54.226Z",
+      "client_event_id": "gwl-internal-use-question-concise-52eadd74-2b48-4381-ae92-d255c5042d21-gwl-license",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T16:17:54.226Z",
+        "why": "Guide v1 explains the distinct, still-unresolved internal-use boundary after John's restricted preference 52eadd74-2b48-4381-ae92-d255c5042d21. Not a repeat of open-or-restricted; no slice close."
+      },
+      "seq": 21
     }
   ],
   "roadmap_projection": [
@@ -353,9 +418,9 @@
     {
       "id": "gwl-license",
       "name": "License and intellectual property — restricted preference",
-      "status": "active",
-      "done_when": "Compare the requested modification-sharing and commercial-permission terms; John chooses the license direction.",
-      "waiting_on": null,
+      "status": "waiting",
+      "done_when": "Compare standard licensing and IP options against John’s restricted commercial-version preference; settle internal-business use and sharing obligations before John selects terms.",
+      "waiting_on": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.",
       "commissioned_as": null,
       "part": "research",
       "gate": null,

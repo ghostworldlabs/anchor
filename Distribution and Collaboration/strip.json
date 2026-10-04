@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Comparing licensing in Campaign and choosing the first collaborator trial here.",
+  "active_effort": "Licensing and IP guide v1; Distribution scope v1, Refinement 1.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "none",
+  "human_wait": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -17,7 +17,7 @@
   "anti_starvation_age_days": 0,
   "grasscatch": [],
   "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
-  "why_next": "Both connection and installation remain required; their trial order is unsettled.",
+  "why_next": "John wants clearer options before selecting final licensing terms.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -117,6 +117,78 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "phase": "planning",
+      "active_effort": "Licensing and IP guide v1; Distribution scope v1, Refinement 1.",
+      "next_recommended": "Review internal business use versus competing commercial products.",
+      "why_next": "John wants clearer options before selecting final licensing terms.",
+      "human_wait": "none",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "John wants clearer options before selecting final licensing terms.",
+      "horizon_source_seq": 18,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "John wants clearer options before selecting final licensing terms.",
+      "horizon_source_seq": 20,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "human_wait": "John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "License and intellectual property — restricted preference; then Install and use from a collaborator’s computer",
+      "why_next": "John wants clearer options before selecting final licensing terms.",
+      "horizon_source_seq": 21,
+      "horizon_focus": "gwl-license",
+      "horizon_steps": [
+        "gwl-license",
+        "gwl-release"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:gwl-internal-business-use-v1"
     }
   ],
   "receipts": [
@@ -201,8 +273,19 @@
       "path": "journal/0002-pickup-license-preference-2026-10-04.md",
       "entry_id": "0002-pickup-license-preference-2026-10-04",
       "summary": "Distribution and Collaboration pickup — 2026-10-04"
+    },
+    {
+      "at": "2026-10-04T16:07:46Z",
+      "source": "engine",
+      "step_id": null,
+      "session_id": "01a1079f-349a-72d0-b5ff-0fc0f4d122be",
+      "kind": "journal_update",
+      "path": "journal/0003-first-trial-discovery-2026-10-04.md",
+      "entry_id": "0003-first-trial-discovery-2026-10-04",
+      "summary": "First collaborator trial discovery — 2026-10-04"
     }
   ],
-  "horizon_source_seq": 17,
-  "horizon_focus": "gwl-license"
+  "horizon_source_seq": 21,
+  "horizon_focus": "gwl-license",
+  "wait_ref": "decision:gwl-internal-business-use-v1"
 }

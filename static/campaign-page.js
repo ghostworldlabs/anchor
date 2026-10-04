@@ -124,6 +124,25 @@
     try { var u = new URL(location.href); u.searchParams.set('open', id); history.replaceState(null, '', u.toString()); } catch (e) {}
     if (boardEl) boardEl.scrollTop = 0;   // the list of goals stays in view on top, shortened to names; the place opens right under it
     var th = $('.gthread', p); if (th) th.scrollTop = th.scrollHeight;
+    // The goal view reads the same originals, including long associated dictation.
+    // Static clients can do this before an older server's next safe activation.
+    if (th) fetch('/api/steward/history?pid=' + encodeURIComponent(PID) + '&goal=' + encodeURIComponent(id), { headers: headers(), cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('history unavailable'); return r.json(); })
+      .then(function (j) {
+        if (openedId !== id || th.querySelector('.live') || !Array.isArray(j.turns)) return;
+        var fragment = document.createDocumentFragment();
+        j.turns.slice(-12).forEach(function (turn) {
+          var you = turn.role === 'john', li = document.createElement('li'); li.className = 'exrow ' + (you ? 'you' : 'st');
+          var who = document.createElement('div'); who.className = 'exw ' + (you ? 'you' : 'st');
+          who.textContent = you ? ((window.ANCHOR_BOOT || {}).you || 'John') : ((window.ANCHOR_BOOT || {}).steward || 'Aladdin');
+          var stamp = document.createElement('span'); stamp.className = 't';
+          var date = new Date(turn.at); stamp.textContent = isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          who.appendChild(stamp); li.appendChild(who);
+          var text = document.createElement('div'); text.className = 'ext'; text.textContent = turn.text || ''; li.appendChild(text);
+          fragment.appendChild(li);
+        });
+        if (j.turns.length) { th.replaceChildren(fragment); th.scrollTop = th.scrollHeight; }
+      }).catch(function () {}); // Retain the rendered conversation if this read fails.
     fitComposer($('.gsay', p));
   }
   $$('button[data-open]').forEach(function (b) { b.addEventListener('click', function () { var id = b.getAttribute('data-open'); openPlace(openedId === id ? null : id); }); });

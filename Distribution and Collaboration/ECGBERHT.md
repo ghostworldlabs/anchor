@@ -14,10 +14,9 @@ Both onboarding paths remain required; choosing their trial order guides the fir
 
 ## Human wait
 
-- **Waiting on:** none
-- **Until / unblock:** none recorded in this new cockpit. Open choices are described in SCOPE-v1.md.
+John: free internal business use? Recommend yes; Distribution scope v1, Refinement 1.
 
 ## Why stakes
 
-Scope recorded; work awaits its own cockpit discovery and review.
+Licensing and IP guide v1 is ready for review; restricted is a provisional preference, not an applied license.
 

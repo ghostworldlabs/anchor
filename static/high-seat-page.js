@@ -76,6 +76,25 @@
     });
   }
   initiativeCockpitLinks(document);
+  // An older service can stay alive while its conversations finish. Read the
+  // component names from the same Campaign map until its next safe activation.
+  (function initiativeNames() {
+    var pid = (window.ANCHOR_BOOT || {}).campaign_pid;
+    if (!pid) return;
+    fetch('/api/steward/map?pid=' + encodeURIComponent(pid), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('map unavailable'); return r.json(); })
+      .then(function (map) {
+        var names = {}; (map.steps || []).forEach(function (s) { if (s.name) names[s.id] = s.name; });
+        $$('.tile[data-step][data-tile]').forEach(function (card) {
+          var name = names[card.getAttribute('data-step')], label = $('.t-nm', card);
+          if (!name || !label) return;
+          label.textContent = name; label.title = name;
+          card.setAttribute('data-name', name);
+          card.setAttribute('aria-label', name + ': hover for details, Enter opens the full cockpit');
+          var head = $('.t-peek-head span', card); if (head) head.textContent = name;
+        });
+      }).catch(function () {}); // Retain the server's last recorded labels on a failed read.
+  })();
   // Keep loaded-page names and links correct while an older service finishes its active turns.
   var seatBrand = $('.masthead .mh-stew b');
   if (seatBrand && seatBrand.textContent.trim().replace(/^The /, '') === 'Cave of Wonders') {

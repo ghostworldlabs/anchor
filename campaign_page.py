@@ -200,7 +200,7 @@ def _thread(i, ctx):
     if not turns:
         return '<li class="exfade">Nothing said about this goal yet.</li>'
     return "".join('<li class="exrow %s"><div class="exw %s">%s<span class="t">%s</span></div><div class="ext">%s</div></li>' % (
-        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"][:900])) for t in turns[-12:])
+        "you" if t["you"] else "st", "you" if t["you"] else "st", HIS_NAME if t["you"] else esc(ctx["steward"]["label"]), esc(t["at"]), esc(t["text"])) for t in turns[-12:])
 
 
 def _guide_block(i, ctx):

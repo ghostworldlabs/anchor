@@ -302,3 +302,46 @@ def append_turns(campaign_dir, turns, *, thread_id: str | None = None) -> int:
                 raise ConversationHistoryError("history_size_limit")
             _replace(target, payload)
             return len(additions)
+
+
+def associate_turns_with_goal(campaign_dir, turn_ids, goal, *, source_turn_id):
+    """Associate existing original turns with a goal view on John's explicit word.
+
+    No new speech is appended. The main conversation still reads every original
+    turn. Validate the entire batch before replacement; preserve text, identity,
+    order, timestamps and metadata. Repeating the association is a no-op.
+    """
+    if (not isinstance(goal, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", goal)
+            or not isinstance(source_turn_id, str) or not source_turn_id
+            or not isinstance(turn_ids, (list, tuple)) or not turn_ids
+            or any(not isinstance(t, str) or not t for t in turn_ids)):
+        raise ConversationHistoryError("invalid_goal_association")
+    with _THREAD_LOCK:
+        target, lock = _paths(campaign_dir, None, create=False)
+        with _process_lock(lock):
+            _check_path(target, directory=False)
+            document = _read(target)
+            by_id = {t.get("turn_id"): t for t in document["turns"]}
+            requested = list(dict.fromkeys(turn_ids))
+            if source_turn_id not in by_id or any(t not in by_id for t in requested):
+                raise ConversationHistoryError("goal_association_turn_missing")
+            if any(by_id[t].get("goal") not in (None, "", goal) for t in requested):
+                raise ConversationHistoryError("goal_association_conflict")
+            changed = 0
+            for identity in requested:
+                turn = by_id[identity]
+                if turn.get("goal") == goal:
+                    continue
+                turn["goal"] = goal
+                turn.setdefault("goal_associations", []).append({
+                    "goal": goal, "source_turn_id": source_turn_id,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "via": "John requested original brainstorming in the goal view",
+                })
+                changed += 1
+            if changed:
+                payload = (json.dumps(document, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode("utf-8")
+                if len(payload) > MAX_HISTORY_BYTES:
+                    raise ConversationHistoryError("history_size_limit")
+                _replace(target, payload)
+            return changed
