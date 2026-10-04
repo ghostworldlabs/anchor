@@ -41,3 +41,9 @@ Keep a backup outside the host computer?
 This is a proposal about backup location policy, not permission to configure or run backups. Its four-hour window starts with this new decision turn. Destination, frequency, retained versions and restore checks remain further design details; no backup system is claimed delivered. John’s collaboration clarification is new information rather than an overhead correction; session overhead remains 0.
 
 No slice closed, so no goal_flip is due. Unmanaged campaign: the conditional producer-handoff instruction does not apply. No pending lifecycle handoff was invented. Overhead this session remains 0; engine resume bookkeeping is not a new John correction.
+
+## Later priority decision — provider mockup first
+
+Before the handback, another original turn arrived: 9205de17-a7fb-4aad-8d81-cb063fc494f0 at 2026-10-04T18:59:35.195923Z. John prioritizes subscription sign-in, optional API keys and remaining capacity/cost before email/calendars, and explicitly requests a mockup to refine their display and interaction inside Anchor. This authorizes mockup production now; it is not merely a status request or a request to approve another plan. The unasked backup-location proposal above was withdrawn before final presentation and its roadmap wait cleared. It has no silence window or approval to apply.
+
+The same writer reordered provider access and status ahead of mapping/email, retained all other scope, and focused the provider mockup. Scope v3 records this priority; it is distinct from the provider mockup's Initial draft. Scope v2 remains the personal-host record. The native mockup author works under the no-shell rule; root owns checks and commits. No production provider call or account operation is authorized or attempted. This priority change is a substantive John decision, not overhead.

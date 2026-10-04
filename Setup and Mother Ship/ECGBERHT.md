@@ -10,11 +10,11 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Discovery: personal hosts settled in scope v2; collaboration between hosts parked; clarify backups next.
+Creating the initial provider sign-in, capacity, cost and model-control mockup; scope v3 records provider-first ordering.
 
 ## Why next
 
-Backup recovery is the next independent choice. Sharing between personal mother ships is future work.
+John wants the provider mockup refined before email/calendars. Personal hosts are settled; collaboration between hosts is parked.
 
 ## Human wait
 

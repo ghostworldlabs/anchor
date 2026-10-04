@@ -1,0 +1,11 @@
+# Provider setup mockup — Initial draft, 2026-10-04
+
+Authorization: original John turn 9205de17-a7fb-4aad-8d81-cb063fc494f0, read from the complete durable conversation before final handback. Build/refine how subscription sign-in, optional API keys, remaining tokens/capacity and cost display and interact inside Anchor, before email/calendars. Continue this work rather than stopping at the priority update. Preserve personal mother ships on owners' own computers and the caught future collaboration idea.
+
+The existing single writer reordered gwl-access before mapping and gwl-provider-status immediately after access, both before accounts; retained all seven steps and parts. Updated the two provider steps for subscription/API separation, cost and model controls; started the mockup step and withdrew the unsent backup decision. Scoped source receipts name John and the original turn. No slice was closed or goal rewritten. Scope v3 and its register row document the new priority; mockup Initial draft is a separate product version.
+
+Commissioned one native HTML author with the complete bounded source brief, no shell, no account/network operations and no edits outside the mockup file. This is a LITE in-session prototype, not Foreman, Crucible, a Shark swarm or a claim of configured independent-provider review. Attention is working while that author runs and refreshed only after observing it still active; root owns verification, journals and commits.
+
+Initial content brief covers the whole provider surface: shared Cave/Setup state, four providers, separate subscription/API controls, simulated sign-in, remaining allowance/capacity and unknown states, cost with its reporting period/source, chosen model/reasoning, and the later email/calendar step. All values are illustrative; no actual API keys, credentials, sign-in calls, provider usage discovery or production settings writes. Unknown usage is not a zero charge or usable green capacity. Existing requested compact Cave tile and model controls remain anchors. No element from John's requested provider scope was cut.
+
+Checks and handback will be appended after the actual mockup and its contained reader are driven. The campaign is unmanaged; no managed adoption or producer_handoff is invented. John reviews/refines the visible prototype before any implementation plan or build approval.

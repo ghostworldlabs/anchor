@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
+  "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Backups and restore; then Review Setup before building it",
-  "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+  "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+  "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -174,6 +174,34 @@
         "gwl-backup",
         "gwl-review"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
+      "next_recommended": "Review the provider mockup and refine its controls before implementation.",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "horizon_source_seq": 34,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -196,7 +224,7 @@
       "summary": "Mother ship ownership discovery — 2026-10-04"
     }
   ],
-  "horizon_source_seq": 26,
-  "horizon_focus": "gwl-backup",
-  "current_step_id": "gwl-backup"
+  "horizon_source_seq": 34,
+  "horizon_focus": "gwl-provider-status",
+  "current_step_id": "gwl-provider-status"
 }

@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T18:57:39.119Z",
+  "as_of": "2026-10-04",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -456,6 +456,121 @@
       },
       "seq": 26,
       "at": "2026-10-04T18:57:39.119Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-backup",
+      "client_event_id": "setup-backup-unasked-choice-withdrawn-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "fields": {
+        "waiting_on": null
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 27,
+      "at": "2026-10-04T19:04:09.194Z"
+    },
+    {
+      "kind": "reorder",
+      "step_id": "gwl-access",
+      "before": "gwl-mapping",
+      "client_event_id": "setup-provider-auth-first-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 28,
+      "at": "2026-10-04T19:04:09.200Z"
+    },
+    {
+      "kind": "reorder",
+      "step_id": "gwl-provider-status",
+      "after": "gwl-access",
+      "client_event_id": "setup-provider-display-before-accounts-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 29,
+      "at": "2026-10-04T19:04:09.203Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "client_event_id": "setup-subscription-plus-api-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "fields": {
+        "name": "Subscription sign-in and optional API keys",
+        "done_when": "Set up normal subscription sign-in and optional user API keys on the personal mother ship, distinguishing subscription allowances from paid API usage; do this before email and calendar setup."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 30,
+      "at": "2026-10-04T19:04:09.206Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "client_event_id": "setup-capacity-cost-mockup-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "fields": {
+        "name": "Provider capacity, cost and model controls",
+        "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 31,
+      "at": "2026-10-04T19:04:09.209Z"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-provider-status",
+      "to": "active",
+      "client_event_id": "setup-mockup-start-9205de17-a7fb-4aad-8d81-cb063fc494f0",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T18:59:35.195923Z",
+        "why": "Prioritize subscription sign-in, optional API keys, remaining tokens/capacity and cost before email/calendars; build and refine the display mockup. Source 9205de17-a7fb-4aad-8d81-cb063fc494f0"
+      },
+      "seq": 32,
+      "at": "2026-10-04T19:04:09.212Z",
+      "from": "proposed"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true
+        }
+      },
+      "seq": 33,
+      "at": "2026-10-04"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-backup",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": false
+        }
+      },
+      "seq": 34,
+      "at": "2026-10-04"
     }
   ],
   "roadmap_projection": [
@@ -486,6 +601,38 @@
       }
     },
     {
+      "id": "gwl-access",
+      "name": "Subscription sign-in and optional API keys",
+      "status": "proposed",
+      "done_when": "Set up normal subscription sign-in and optional user API keys on the personal mother ship, distinguishing subscription allowances from paid API usage; do this before email and calendar setup.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "integrate",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ],
+        "current": false
+      }
+    },
+    {
+      "id": "gwl-provider-status",
+      "name": "Provider capacity, cost and model controls",
+      "status": "active",
+      "done_when": "Produce and refine a usable mockup of subscription/API setup, honest remaining capacity and cost, actual model/reasoning and model choices inside Anchor, with email/calendars later; then implement only under subsequent authorization.",
+      "waiting_on": null,
+      "commissioned_as": null,
+      "part": "slice",
+      "gate": null,
+      "navigation": {
+        "path": [
+          "gwl-setup"
+        ],
+        "current": true
+      }
+    },
+    {
       "id": "gwl-mapping",
       "name": "Projects, folders and recommended organization",
       "status": "proposed",
@@ -498,22 +645,6 @@
         "path": [
           "gwl-setup"
         ]
-      }
-    },
-    {
-      "id": "gwl-access",
-      "name": "Token sharing and secure local authentication",
-      "status": "proposed",
-      "done_when": "Set up access tokens and normal provider authentication on the owner's personal mother ship; cross-host project collaboration remains future work.",
-      "waiting_on": null,
-      "commissioned_as": null,
-      "part": "integrate",
-      "gate": null,
-      "navigation": {
-        "path": [
-          "gwl-setup"
-        ],
-        "current": false
       }
     },
     {
@@ -532,26 +663,11 @@
       }
     },
     {
-      "id": "gwl-provider-status",
-      "name": "Provider health, capacity and chosen model",
-      "status": "proposed",
-      "done_when": "Show whether providers work, green/amber/red remaining service, actual model and reasoning level, and the selected model policy.",
-      "waiting_on": null,
-      "commissioned_as": null,
-      "part": "slice",
-      "gate": null,
-      "navigation": {
-        "path": [
-          "gwl-setup"
-        ]
-      }
-    },
-    {
       "id": "gwl-backup",
       "name": "Backups and restore",
       "status": "proposed",
       "done_when": "Set up backups from the chosen project mapping and main directory.",
-      "waiting_on": "Choose whether each personal mother ship keeps a backup on another device or remote storage, rather than only on the host.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "harden",
       "gate": null,
@@ -559,7 +675,7 @@
         "path": [
           "gwl-setup"
         ],
-        "current": true
+        "current": false
       }
     },
     {
