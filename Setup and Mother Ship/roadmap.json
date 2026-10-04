@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T20:10:58.999Z",
+  "as_of": "2026-10-04T20:39:03.386Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -750,6 +750,22 @@
       "client_event_id": "setup-r1-warning-review-ebd5e8b3",
       "seq": 44,
       "at": "2026-10-04T20:10:58.999Z"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, and a configurable warning threshold. John accepted warnings while retaining full model strength until the user explicitly changes it, for Setup mockup Refinement 1. Keep credentials/tests on the selected mother ship. The whole walkthrough remains open for feedback before an implementation plan or build."
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-04T20:34:48.217468Z",
+        "why": "Explicit scoped warning-policy acceptance, source turn d1766e5a-bd83-4350-b45d-ff4539a1237b, saved question 4977d2ed1477755eb8a43a53c4f778bf3b1c6d03fa3e8a53bff024b5a7b9c1c5. Record only for Setup mockup Refinement 1; no whole-prototype acceptance, slice close or production authorization."
+      },
+      "client_event_id": "setup-r1-warning-accepted-d1766e5a",
+      "seq": 45,
+      "at": "2026-10-04T20:39:03.386Z"
     }
   ],
   "roadmap_projection": [
@@ -799,8 +815,8 @@
       "id": "gwl-provider-status",
       "name": "Provider capacity, cost and model controls",
       "status": "active",
-      "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, warning threshold and full-strength versus tier-down model policy; keep credentials/tests on the selected mother ship. John reviews before an implementation plan or build.",
-      "waiting_on": "Setup mockup Refinement 1: keep full strength and warn at low allowance, or automatically reduce model strength?",
+      "done_when": "Refine the interactive Setup sequence and shared provider surface with multiple subscriptions per provider, test/report feedback, remaining allowance and API cost, and a configurable warning threshold. John accepted warnings while retaining full model strength until the user explicitly changes it, for Setup mockup Refinement 1. Keep credentials/tests on the selected mother ship. The whole walkthrough remains open for feedback before an implementation plan or build.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "slice",
       "gate": null,

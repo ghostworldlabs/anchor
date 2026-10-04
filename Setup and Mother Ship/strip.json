@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-04",
   "phase": "planning",
-  "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
+  "active_effort": "Setup mockup Refinement 1 is ready for continued feedback; the warning default is settled.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-  "why_next": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
+  "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -361,6 +361,35 @@
         "gwl-provider-status",
         "gwl-mapping"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 is ready for continued feedback; the warning default is settled.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "next_recommended": "Review the remaining Setup walkthrough before implementation planning.",
+      "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
+      "horizon_source_seq": 45,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
     }
   ],
   "receipts": [
@@ -403,8 +432,8 @@
       "summary": "Setup mockup — Refinement 1, October 4, 2026"
     }
   ],
-  "horizon_source_seq": 44,
+  "horizon_source_seq": 45,
   "horizon_focus": "gwl-provider-status",
   "current_step_id": "gwl-provider-status",
-  "wait_ref": "decision:setup-r1-warning-policy"
+  "wait_ref": "none"
 }

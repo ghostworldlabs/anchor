@@ -10,16 +10,15 @@ John’s Campaign dictation, 2026-10-04, turn 3c476265-7142-441c-a934-a7a37d5a1e
 
 ## Active effort
 
-Setup mockup Refinement 1 is ready for review: mother ship first, providers second, Star Chart organization third; scope v4 carries John's feedback.
+Setup mockup Refinement 1 remains open for feedback: mother ship first, providers second, Star Chart organization third. John accepted warnings retaining full model strength; scope v4 records that decision.
 
 ## Why next
 
-Review the actual walkthrough and choose its warning policy before implementation planning; all credentials, tests and usage run on the mother ship.
+Review the remaining walkthrough before implementation planning; the warning policy is settled. All credentials, tests and usage run on the mother ship.
 
 ## Human wait
 
-- **Waiting on:** in Setup mockup Refinement 1, warn at low allowance while retaining full strength, or reduce model strength automatically? Recommend warn and keep quality.
-- **Until / unblock:** the scoped policy answer; reversible recommendation proceeds four hours after the actual question is sent. Mockup feedback remains open; no slice closes without John's explicit instruction.
+No outstanding question about the warning policy: John explicitly accepted warnings retaining full strength on October 4, turn d1766e5a-bd83-4350-b45d-ff4539a1237b. The whole mockup remains open for feedback; no slice closes without John's explicit instruction.
 
 ## Why stakes
 
