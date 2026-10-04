@@ -207,6 +207,24 @@
       "text": "Okay, so if Anchor is free to use, people can modify, they can share back if they want--not required, but they cannot sell a modified version of Anchor--what license best fits that structure?",
       "turn_id": "bddb9954-a824-4209-9d17-92fc3a432a48",
       "at": "2026-10-04T19:13:54.336371+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll record free internal business use in Distribution scope v1, Refinement 1 and clear that question. Your restriction on selling Anchor-based products stays in place; this answer doesn’t select a final license.\nFree internal business use is already recorded in Distribution scope v1, Refinement 1. I also recovered your later clarification that sharing modifications is voluntary; I’ll carry that forward and check which license best fits the remaining no-sales rule.\nThe licenses we checked all miss part of your rule. Commons Clause can allow substantial paid derivatives and restrict some hosting or support; Shield also restricts free competitors. I recommend tailored source-available terms, and I’m updating the comparison and visible plan to reflect voluntary sharing.\nThe visible plan now records free internal use and voluntary sharing in the same refinement. The remaining boundary is paid hosted access: whether another provider may charge for an Anchor mother ship. The comparison is registered, and I’m checking the saved records before committing.\nFree internal business use is recorded in Distribution scope v1, Refinement 1; the plan also reflects your clarification that sharing modifications is voluntary. Your proposed paid mother ships leave one boundary open: other providers charging for hosted access.\n\nI recommend a custom source-available license: [Commons Clause](https://commonsclause.com/) permits some paid derivatives, while [Shield](https://polyformproject.org/licenses/shield/1.0.0) also restricts free competitors. For paid Anchor hosting, I recommend requiring permission to protect your proposed service.\n\nAllow hosting: wider provider choice, more competition; defer: leave that boundary open.\n\nThis authorizes: refine Distribution scope v1, Refinement 1 to reserve paid Anchor hosting for permission.\n\nReversible: yes - undo: remove that restriction from the draft scope.\n\nShould paid hosting require permission?",
+      "turn_id": "chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:5",
+      "at": "2026-10-04T19:25:18.175922+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll check the saved comparison against that exact rule: free use and modification, optional sharing, and no selling modified Anchor.\nI recommend a **custom source-available license** for your exact rule: free use, including internal business use; modification and free redistribution; optional contributions; and no selling Anchor, modified versions or products containing its covered code.\n\n**MIT plus [Commons Clause](https://commonsclause.com/)** is the closest resale-focused option we checked. But it can permit value-added paid products and restrict some hosting or support, so it does not precisely match your rule. [MIT alone](https://opensource.org/license/mit) expressly allows sales.\n\nThis direction is recorded in Distribution scope v1, Refinement 1. A sales ban makes it source-available rather than [standard open source](https://opensource.org/osd); the final wording should receive legal review before publication.",
+      "turn_id": "chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:6",
+      "at": "2026-10-04T19:29:11.656019+00:00"
+    },
+    {
+      "role": "john",
+      "text": "Accept recommendation: For paid Anchor hosting, I recommend requiring permission to protect your proposed service.",
+      "turn_id": "54353a3f-f66f-4138-8c33-b1acdb7957d8",
+      "at": "2026-10-04T19:47:51.189280+00:00"
     }
   ]
 }

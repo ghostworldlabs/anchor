@@ -10,19 +10,19 @@ John's Campaign dictation, 2026-10-04, turn `3c476265-7142-441c-a934-a7a37d5a1e9
 
 ## Active effort
 
-License comparison updated for voluntary sharing; paid-hosting permission boundary remains open.
+Paid-hosting permission recorded; choosing the licensing candidate in Distribution scope v1, Refinement 1.
 
 ## Why next
 
-Free internal use and optional contributions are settled; tailored source-available terms are recommended, not selected.
+The accepted policy is concrete; custom source-available terms are recommended as a candidate, not selected or applied.
 
 ## Human wait
 
-John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1.
+John: custom source-available candidate? Recommend yes; Distribution scope v1, Refinement 1.
 
 ## Why stakes
 
-Licensing and IP guide v1 is ready for review; restricted is a provisional preference, not an applied license.
+Recorded policy and earlier licensing products remain independently reviewable; final terms and publication are undecided.
 
 ## Existing work
 

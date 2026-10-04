@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T19:23:03.083Z",
+  "as_of": "2026-10-04T19:53:36.705Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -513,6 +513,65 @@
         "why": "Keep the visible next-action sentence readable; accepted free use and voluntary sharing remain in the same step criterion. Paid-hosting permission is still the pending question."
       },
       "seq": 32
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based software and permission for third-party paid hosted access. John chooses the candidate and final terms; rights/legal review precedes publication. Enterprise and model services remain proposals.",
+        "waiting_on": null
+      },
+      "at": "2026-10-04T19:53:36.705Z",
+      "client_event_id": "gwl-hosting-54353a3f-policy-and-clear",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T19:53:36.705Z",
+        "why": "John original local answer 54353a3f-f66f-4138-8c33-b1acdb7957d8 accepts paid Anchor hosting requiring permission, saved question bbe4240655e32bab3ec66d8821da73af2dc9a553116fa030daeef47478ea0406. Same Distribution scope v1, Refinement 1 only; no candidate, final license, service, price or close approved."
+      },
+      "seq": 33
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "waiting",
+      "to": "active",
+      "at": "2026-10-04T19:53:36.705Z",
+      "client_event_id": "gwl-hosting-54353a3f-answer-active",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-04T19:53:36.705Z",
+        "why": "John original local answer 54353a3f-f66f-4138-8c33-b1acdb7957d8 accepts paid Anchor hosting requiring permission, saved question bbe4240655e32bab3ec66d8821da73af2dc9a553116fa030daeef47478ea0406. Same Distribution scope v1, Refinement 1 only; no candidate, final license, service, price or close approved."
+      },
+      "seq": 34
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": "John: use custom source-available terms as the license candidate? Recommend yes; Distribution scope v1, Refinement 1."
+      },
+      "at": "2026-10-04T19:53:36.705Z",
+      "client_event_id": "gwl-custom-candidate-after-54353a3f-question",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:53:36.705Z",
+        "why": "The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license candidate for review; this licensing-mechanism decision remains pending and separate from final terms."
+      },
+      "seq": 35
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "active",
+      "to": "waiting",
+      "at": "2026-10-04T19:53:36.705Z",
+      "client_event_id": "gwl-custom-candidate-after-54353a3f-wait",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T19:53:36.705Z",
+        "why": "The accepted policy boundaries are now concrete in the existing scope and comparison. Aladdin recommends choosing a custom source-available license candidate for review; this licensing-mechanism decision remains pending and separate from final terms."
+      },
+      "seq": 36
     }
   ],
   "roadmap_projection": [
@@ -573,8 +632,8 @@
       "id": "gwl-license",
       "name": "Licensing and hosting",
       "status": "waiting",
-      "done_when": "Compare standard licenses against accepted free internal business use, broad modification, voluntary sharing and restricted sales of Anchor-based software; settle paid hosted access before John selects final public terms. Enterprise and model services remain proposals.",
-      "waiting_on": "John: should paid Anchor hosting require permission? Recommend yes; Distribution scope v1, Refinement 1.",
+      "done_when": "Compare candidate licenses against free internal business use, broad modification, voluntary sharing, restricted sales of Anchor-based software and permission for third-party paid hosted access. John chooses the candidate and final terms; rights/legal review precedes publication. Enterprise and model services remain proposals.",
+      "waiting_on": "John: use custom source-available terms as the license candidate? Recommend yes; Distribution scope v1, Refinement 1.",
       "commissioned_as": null,
       "part": "research",
       "gate": null,

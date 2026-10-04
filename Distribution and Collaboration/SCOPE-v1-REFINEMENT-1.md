@@ -2,7 +2,18 @@
 
 This cockpit owns portable releases, the public distribution home and license choice. Existing distribution/onboarding work is retained. The earlier July record reserved rights; today’s open-source direction is a new proposal whose exact license remains undecided.
 
-Distribution scope v1, Refinement 1 — policy answer recorded 4 October 2026: **ordinary internal business use is free**. John accepted this boundary, while reserving competing products for permission. His separate no-sales requirement remains active; sharing modifications back is voluntary by his later local clarification; no final license is selected or applied.
+Distribution scope v1, Refinement 1 — policy answers recorded 4 October 2026: **ordinary internal business use is free, sharing modifications is voluntary, and third-party paid Anchor hosting requires permission**. John's separate no-sales requirement remains active. These are accepted policy boundaries; no final license is selected or applied.
+
+## Accepted licensing boundaries
+
+| Activity | Recorded policy |
+| --- | --- |
+| Use Anchor for personal work or internally in a business | Free |
+| Modify Anchor | Allowed |
+| Contribute modifications back | Optional |
+| Sell Anchor, modified versions or products built from its covered code | Restricted by John's no-sales rule |
+| Charge third parties for hosted access to Anchor | Requires permission |
+| Ghost World Labs enterprise, managed-mother-ship or model services | Proposed; no price, offering or build approved |
 
 **Placement:** Active under Ghost World Labs. **Source:** John’s original Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98, 2026-10-04. **Owner:** Anchor / Distribution and Collaboration.
 
@@ -16,7 +27,7 @@ Distribution scope v1, Refinement 1 — policy answer recorded 4 October 2026: *
 
 2. Proposed identity: Ghost World Labs / ghostworldlabs on GitHub. Keep separate repositories for the Anchor engine and the current Foundry skills. Proposed website: ghostworldlabs.com or ghostworldlabs.org, with downloads and collaboration access. Identity/domain availability and ownership are unverified; this organization creates neither a public repository nor a purchase.
 
-3. John wants broad use and modification, including free internal business use, with voluntary sharing of changes back. His local clarification restricts third-party sale of Anchor or a product built on its covered code. The precise sales and hosting terms remain for refinement, not a selected license.
+3. John wants broad use and modification, including free internal business use, with voluntary sharing of changes back. His local clarification restricts third-party sale of Anchor or a product built on its covered code. Third-party paid hosted access to Anchor requires permission. Final wording implementing these boundaries remains for review, not a selected license.
 
 4. Historical initial candidate: AGPLv3 if true open source is the priority. Refinement 1 below supersedes that recommendation in light of John’s commercial-control preference. It permits commercial use, requires source when covered software is distributed and requires an offer of corresponding source to remote users of a modified network service. It does not require every private change to be sent upstream to John.
 
@@ -95,12 +106,26 @@ John requested moving this discussion into this cockpit in Campaign turn `58cb00
 
 Original local turn `bddb9954-a824-4209-9d17-92fc3a432a48`, at `2026-10-04T19:13:54.336371+00:00`, says sharing modifications back is optional, not required, while sale of a modified Anchor version is prohibited. This supersedes the earlier potential mandatory share-back requirement in this same refinement. The existing comparison now checks Commons Clause, Elastic 2.0 and FSL as well as the earlier candidates. Tailored source-available terms are recommended because none of the checked candidates precisely supplies this combination; no final license is selected or drafted here.
 
-## Next policy question — paid hosted access
+## Accepted decision — paid hosted access
 
-The proposed Ghost World Labs managed-mother-ship service raises a separate boundary: whether another provider may charge for hosted access to Anchor without distributing a software copy. John's software no-sales rule does not yet explicitly settle that service boundary.
+John's local turn `54353a3f-f66f-4138-8c33-b1acdb7957d8`, at `2026-10-04T19:47:51.189280+00:00`, accepts: “For paid Anchor hosting, I recommend requiring permission to protect your proposed service.” It answers saved question `bbe4240655e32bab3ec66d8821da73af2dc9a553116fa030daeef47478ea0406`, from steward turn `chatgpt:01a1079f-349a-72d0-b5ff-0fc0f4d122be:1:5`.
 
-Recommendation: require permission for third-party paid Anchor hosting, to protect the proposed managed service. Alternative: allow paid hosting to encourage a wider provider ecosystem; defer: leave the boundary open. This recommendation is pending; it is not an adopted restriction.
+This authorizes refining **Distribution scope v1, Refinement 1** to reserve third-party paid Anchor hosting for permission. It settles charging for hosted access separately from software-copy sales. It does not select a custom license or standard license, approve a fee or service, transfer copyright, authorize publication or close a slice. Undo remains removing the hosting restriction from the draft scope on John's instruction. The answered wait is retired.
+
+The original question is retained below as provenance, not a pending request.
+
+Recommendation: require permission for third-party paid Anchor hosting, to protect the proposed managed service. Alternative: allow paid hosting to encourage a wider provider ecosystem; defer: leave the boundary open.
 
 This authorizes: refine Distribution scope v1, Refinement 1 to reserve paid Anchor hosting for permission.
 Reversible: yes - undo: remove the hosting restriction from the draft scope.
 Should paid hosting require permission?
+
+## Next decision — licensing candidate
+
+Free internal business use, broad modification, voluntary contributions, restricted sales and permission for third-party paid hosting are now recorded together. John has not yet selected the proposed custom licensing mechanism or accepted final terms.
+
+Recommendation: use custom source-available terms as the candidate because they can express the recorded policy in one reviewable draft. MIT plus Commons Clause is a ready-made alternative with the value-added derivative and service-boundary mismatches explained in the existing comparison. Deferring leaves the licensing mechanism open.
+
+This authorizes: refine Distribution scope v1, Refinement 1 around a custom source-available license candidate for review.
+Reversible: yes - undo: remove the custom candidate from the scope.
+Custom?
