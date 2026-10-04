@@ -1,0 +1,66 @@
+{
+  "schema": "trio.seat.v1",
+  "ok": true,
+  "status": "success",
+  "label": "review:legal-beagle-license-v1-text-recovery",
+  "role": "review",
+  "verification": true,
+  "structured": false,
+  "requested": {
+    "driver": "grok-cli",
+    "family": "grok",
+    "model": "grok-4.7"
+  },
+  "served": {
+    "driver": "grok-cli",
+    "family": "grok",
+    "model": "grok-4.7-build",
+    "family_attested": true,
+    "model_attested": true
+  },
+  "attempts": [
+    {
+      "ordinal": 1,
+      "kind": "primary",
+      "requested": {
+        "driver": "grok-cli",
+        "family": "grok",
+        "model": "grok-4.7"
+      },
+      "ok": true,
+      "status": "success",
+      "served": {
+        "driver": "grok-cli",
+        "family": "grok",
+        "model": "grok-4.7-build",
+        "family_attested": true,
+        "model_attested": true
+      },
+      "transport_attempts": [
+        {
+          "ordinal": 1,
+          "kind": "initial",
+          "label": "review:legal-beagle-license-v1-text-recovery",
+          "ok": true,
+          "status": "accepted",
+          "provider_status": "success",
+          "served": {
+            "driver": "grok-cli",
+            "family": "grok",
+            "model": "grok-4.7-build",
+            "family_attested": true,
+            "model_attested": true
+          },
+          "error": null
+        }
+      ],
+      "error": null
+    }
+  ],
+  "failover": {
+    "allowed": false,
+    "used": false,
+    "blocked_reason": "verification_seat"
+  },
+  "error": null
+}

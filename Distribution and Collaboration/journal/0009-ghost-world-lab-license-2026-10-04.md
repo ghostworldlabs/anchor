@@ -12,4 +12,6 @@ Live delivery verification subsequently passed through the actual `pid` plus eff
 
 The independent reviewer returned a schema-nonconforming response at 21:01 UTC; the installed driver is making its single automatic strict retry. No review verdict is claimed from that first response. Scope and comparison wording now consistently distinguish the selected draft candidate from unapplied final terms.
 
+The structured attempt failed at 21:04 after that retry. Recovered the same independent review through the driver's documented text interface, with no skill/driver edits, family change or quality downgrade. The actual served model was attested as `grok-4.7-build`; its written findings landed at 21:11. They found staff compensation, confidentiality and generic-server-rental conflicts, a missing contribution redistribution grant, and inconsistent termination text. Those wording findings were applied to v1, Refinement 1 before a fresh independent correction check. Paid private delivery and stronger enforcement remain proposed choices, not inferred acceptance. The consolidated review is registered.
+
 Campaign is unmanaged at spine sequence 38; the conditional lifecycle producer handoff does not apply. Original conversation IDs, text and cumulative feedback are retained. Your overhead this session: 0.

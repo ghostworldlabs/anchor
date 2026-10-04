@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T21:02:50.587Z",
+  "as_of": "2026-10-04T21:17:34.568Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -617,6 +617,21 @@
         "why": "Named candidate drafted under John’s explicit authorization; Current work pin opened through normal authentication in the intended report reader. Independent review pending; no acceptance or close."
       },
       "seq": 39
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "done_when": "Ghost World Lab License v1, Refinement 1 incorporates received Legal-Beagle wording corrections; complete the independent correction check. John decides paid private deliveries and reviews final text separately. Owner, governing law and dependency/contributor rights remain publication prerequisites."
+      },
+      "at": "2026-10-04T21:17:34.568Z",
+      "client_event_id": "gwl-license-v1-refinement1-legal-findings-applied",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-04T21:17:34.568Z",
+        "why": "Received Grok-family Legal-Beagle review found internal-use conflicts; applied them to the same named draft before correction check. Final terms and unresolved private-delivery policy remain unaccepted. No slice close."
+      },
+      "seq": 40
     }
   ],
   "roadmap_projection": [
@@ -677,7 +692,7 @@
       "id": "gwl-license",
       "name": "Licensing and hosting",
       "status": "active",
-      "done_when": "Ghost World Lab License v1 draft is registered and opens in the live reader. Complete the requested Legal-Beagle review and resolve policy edges; John reviews final text separately. Owner, governing law and dependency/contributor rights must be established before publication.",
+      "done_when": "Ghost World Lab License v1, Refinement 1 incorporates received Legal-Beagle wording corrections; complete the independent correction check. John decides paid private deliveries and reviews final text separately. Owner, governing law and dependency/contributor rights remain publication prerequisites.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "research",

@@ -1,6 +1,6 @@
 # Ghost World Lab License
 
-Version 1 — draft for review, 4 October 2026
+Version 1, Refinement 1 — draft for review, 4 October 2026
 
 **Status: proposed instrument, not an applied license.** John authorized this named draft and Legal-Beagle review within Distribution scope v1, Refinement 1. He has not approved its final text or publication. The permissions below would operate only after an authorized rights holder adopts the completed instrument for identified software. Bracketed fields must be resolved before that happens.
 
@@ -8,9 +8,11 @@ This is a source-available license candidate. It permits free use and modificati
 
 ## Proposed license instrument
 
+Only sections 1 through 10 below are proposed operative terms. The surrounding status, explanation, examples, review notes and authorization references are commentary.
+
 ### 1. Identification and definitions
 
-**Licensor:** [FULL LEGAL NAME OF AUTHORIZED COPYRIGHT HOLDER OR LICENSING ENTITY].
+**Primary Licensor:** [FULL LEGAL NAME OF AUTHORIZED COPYRIGHT HOLDER OR LICENSING ENTITY]. “Licensor” means that authorized rights holder, or an authorized rights holder identified in the notice for a contribution expressly licensed under this instrument, in each case only for material that holder is authorized to license.
 
 **Software notice:** Copyright [YEAR OR YEARS] [COPYRIGHT HOLDER OR HOLDERS]. Licensed under the Ghost World Lab License, Version 1.
 
@@ -24,13 +26,17 @@ This is a source-available license candidate. It permits free use and modificati
 
 “Sale” means supplying a copy of Covered Software, a modification, a product containing Covered Software, or rights to use any of them in exchange for required payment, barter or other consideration. It includes licenses, rentals, subscriptions, paid bundles and transactions through an intermediary. Giving the covered component a separate price of zero does not exempt a paid bundle containing it. A voluntary donation is not a Sale when neither receipt of the software nor the permissions granted here depend on donating.
 
+Paying Internal Users for work on a copy that remains under Your control for Your own operations is not a Sale or Paid Hosted Access. This includes wages and contractor compensation for creating, maintaining or modifying that copy. It does not exempt supplying a paid product, a separately delivered paid modification, or Paid Hosted Access to customers or other third parties.
+
 “Hosted Access” means enabling another person to use the functionality of Covered Software running on a computer that You or Your provider operates, through an interface, API, intermediary or other service. “Paid Hosted Access” means Hosted Access for which payment, barter or other consideration is required, including access supplied as part of a paid bundle. Merely using Covered Software internally to produce a report, design or other output for a customer, without giving the customer access to its functionality, is not Hosted Access.
+
+Your Internal Users' access to a copy You operate for Your own operations is not Paid Hosted Access, including when You rent general-purpose computing infrastructure. A general-purpose computing provider does not supply Paid Hosted Access merely by renting infrastructure on which its customer installs and operates Covered Software; offering the functionality of Covered Software itself for payment remains reserved. A genuinely voluntary donation or sponsorship, unrelated to receipt or extent of access, does not make otherwise free Hosted Access paid.
 
 “Separate Permission” means express written authorization from a rights holder authorized to grant the requested rights, identifying the permitted activity and any applicable conditions. This license itself does not supply Separate Permission.
 
 ### 2. Free permissions
 
-Subject to sections 3 through 9, each Licensor grants You a worldwide, nonexclusive, royalty-free copyright license to use, run, reproduce, study, modify and prepare derivative works of Covered Software, and to distribute it without a Sale. These permissions include personal use, research and ordinary internal business use. You may operate original or modified versions for Internal Users without a license fee.
+Subject to sections 3 through 9, each Licensor grants You a worldwide, nonexclusive, royalty-free copyright license to use, run, reproduce, study, modify and prepare derivative works of Covered Software, and to distribute it without a Sale. These permissions include personal use, research and internal business use. You may operate original or modified versions for Internal Users without a license fee.
 
 You may provide free Hosted Access. You may distribute original or modified versions, in source or compiled form, without charging for the software or software-use rights, provided You comply with section 5. Recipients receive the permissions in this instrument directly from the relevant Licensor for that Licensor's Covered Software; You may not grant broader rights to that code than You hold.
 
@@ -48,19 +54,19 @@ Obtain Separate Permission before either activity. A separate agreement may auth
 
 You may charge for independently created software and outputs that contain no Covered Software. You may use Anchor internally in a business that sells such work. This instrument does not claim rights in Your data, reports, designs, prompts, model outputs or independently written programs merely because You used Anchor to create them; any Covered Software actually incorporated into an output remains subject to this license.
 
-You may charge for standalone training, consulting, installation assistance or support when payment purchases the service rather than a copy, software-use rights or Hosted Access, and the customer's receipt and continued use of Covered Software are not conditional on purchasing that service. Paid Hosted Access supplied by the service provider still requires Separate Permission. Delivering a paid custom modification is not automatically exempt as consulting: if the transaction supplies modified Covered Software for required consideration, section 3 applies.
+You may charge for standalone training, consulting, installation assistance or support when payment purchases the service rather than a copy, software-use rights or Hosted Access, and the customer's receipt and continued use of Covered Software are not conditional on purchasing that service. Paid Hosted Access supplied by the service provider still requires Separate Permission. Work performed by Internal Users on Your controlled copy has the exception in section 1. Outside that exception, delivering a paid custom modification is not automatically exempt as consulting: if the transaction supplies modified Covered Software for required consideration, section 3 applies.
 
 ### 5. Redistribution and modifications
 
 When distributing Covered Software, include this license, retain applicable copyright and attribution notices, and identify material modifications and their author or distributor in a reasonable accompanying notice. Do not represent a modified version as an official release or imply endorsement by the Licensor.
 
-Do not impose a fee or additional restriction on the permissions this license grants for the Licensor's Covered Software. You may attach terms for independently owned additions, but those terms cannot enlarge rights in the original covered code or permit a Sale or Paid Hosted Access prohibited here. You are not required to publish the source of Your modifications by this license.
+When redistributing Covered Software outside Your Internal Users, do not impose a fee or additional license restriction on the permissions this instrument grants for the Licensor's Covered Software. This condition does not require You to share private copies or modifications, or prevent internal confidentiality and security rules for Your controlled copies. You may attach terms for independently owned additions, including confidentiality terms, but those terms cannot enlarge rights in the original covered code or permit a Sale or Paid Hosted Access prohibited here. You are not required to publish the source of Your modifications by this license.
 
 Distribution of a combined product does not replace any separately applicable third-party license. Preserve its required notices and comply with it. This instrument cannot convert another party's code to these terms or satisfy an incompatible license merely by including a copy of this instrument.
 
 ### 6. Ownership, contributions and commercial permissions
 
-Each rights holder retains ownership of that holder's material. Modification, distribution or voluntary submission does not assign copyright to the Licensor. Submitting a contribution does not, by itself, grant the Licensor permission to sell that contributor's material under different terms. A contribution intended for inclusion in a commercial edition may require a separate contribution agreement or other adequate permission, agreed voluntarily by the contributor and the relevant rights holder.
+Each rights holder retains ownership of that holder's material. Modification, distribution or voluntary submission does not assign copyright to the Licensor. Submission alone does not authorize the Licensor to redistribute a contribution, free or paid. A contributor may expressly license material under identified accompanying terms or a separately agreed contribution agreement. Submitting a contribution does not, by itself, grant the Licensor permission to sell that contributor's material under different terms. A contribution intended for inclusion in a commercial edition may require a separate contribution agreement or other adequate permission, agreed voluntarily by the contributor and the relevant rights holder.
 
 The Licensor may offer separate licenses for material the Licensor owns or is authorized to license. This instrument does not establish that such authorization exists for third-party components or contributions, and does not announce a commercial offering or price.
 
@@ -76,9 +82,9 @@ To the extent permitted by applicable law, a Licensor is not liable under this l
 
 ### 9. Compliance and termination
 
-The permissions in section 2 are conditional on compliance with this instrument. A Sale or Paid Hosted Access outside Separate Permission is unauthorized when it occurs; no notice or cure period creates a temporary commercial permission.
+The permissions in section 2 are granted on the terms of this instrument. A Sale or Paid Hosted Access outside Separate Permission is unauthorized when it occurs; no notice or cure period creates a temporary commercial permission or retroactively authorizes that activity. Termination of otherwise permitted activities occurs through the notice-and-cure process below.
 
-If You materially breach another condition of this license, the relevant Licensor may give written notice identifying the breach. If You do not cure it within 30 days after receiving that notice, the permissions granted by that Licensor under this license terminate. A terminated permission can be restored by that Licensor's written confirmation after cure. Termination of Your permissions does not, by itself, terminate a complying recipient's direct permissions.
+If You materially breach this license, including through an unauthorized Sale or Paid Hosted Access, the relevant Licensor may give written notice identifying the breach. If You do not cure it within 30 days after receiving that notice, the permissions granted by that Licensor under this license terminate. A terminated permission can be restored by that Licensor's written confirmation after cure. Termination of Your permissions does not, by itself, terminate a complying recipient's direct permissions.
 
 No later change of license terms retracts these permissions for a version already received under this license while You remain compliant. A separate agreement governs any additional rights it expressly grants. Sections concerning ownership, reserved rights, disclaimer and liability remain relevant after termination to the extent applicable law permits.
 
@@ -95,12 +101,12 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 | 1 | Identify the actual owner and covered code. Renaming a paid fork or bundling Anchor for “free” does not remove the restriction. Connecting independent software does not automatically make it covered. |
 | 2 | Use Anchor at home or inside a business, change it privately, share a free fork, or offer free hosted access. You do not owe upstream contributions or publication of your modified source. |
 | 3 | Selling Anchor-based software or charging for hosted access needs separate written permission. Adding more features does not create a value-added exception. |
-| 4 | Sell work produced with Anchor when it contains no covered code and provides no hosted access to Anchor. Standalone services are allowed; paid delivery of a custom Anchor modification needs further policy review. |
+| 4 | Sell work produced with Anchor when it contains no covered code and provides no hosted access to Anchor. Staff and contractors can be paid to work on your controlled private copy. Separately delivering a paid custom modification still requires permission in this candidate; John has not settled that edge. |
 | 5 | Keep notices and the license with copies, label changes, and respect third-party terms. This is not a source-disclosure requirement. |
-| 6 | Contributors keep their rights. A commercial edition needs permission for any contributed or third-party material it includes. |
+| 6 | Contributors keep their rights. A free or paid edition needs permission to redistribute contributed material; a commercial edition also needs the applicable commercial rights. |
 | 7 | This draft grants no brand or explicit patent license. Patent coverage and naming rules need review before release. |
 | 8 | The draft disclaims promises and limits liability only as applicable law allows. |
-| 9 | Unauthorized sales and paid hosting receive no permission. Other material breaches have a notice-and-cure process; a compliant recipient does not automatically lose rights because its distributor breached. |
+| 9 | Unauthorized sales and paid hosting receive no permission, including during a cure period. Termination of otherwise free permissions uses notice and failure to cure; a compliant recipient does not automatically lose rights because its distributor breached. These enforcement terms remain proposed. |
 | 10 | The governing law and any dispute forum remain unresolved. This draft makes no claim about enforcement in a particular jurisdiction. |
 
 ## Policy examples to test in review
@@ -108,6 +114,8 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 | Scenario | Candidate treatment |
 | --- | --- |
 | A company changes Anchor for its own staff and keeps the patch private | Allowed without a license fee or share-back requirement |
+| A company pays staff or an in-house contractor to modify its controlled private copy | Allowed; wages and compensation for this internal work are not software sales |
+| A company rents generic computing infrastructure for its own Anchor installation | Allowed; the provider is not selling Anchor functionality merely by renting infrastructure |
 | A collaborator gives away a modified version with notices | Allowed, including a free competing fork |
 | A company sells a renamed Anchor fork with substantial new features | Requires Separate Permission |
 | A vendor includes Anchor in a paid software bundle and calls Anchor itself free | Requires Separate Permission |
@@ -116,7 +124,7 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 | A consultant uses Anchor privately to make a paid report without covered code | Allowed |
 | A developer sells an independently written plugin that includes no Anchor code | Allowed by this license; other rights may still apply |
 | A consultant charges for support while the customer controls its own free installation | Allowed if software/use/access is not conditional on buying the support |
-| Someone is paid to deliver a private Anchor modification | Requires Separate Permission as drafted; this edge is not yet settled by John |
+| Someone is paid to separately deliver a private Anchor modification outside the Internal Users exception | Requires Separate Permission as drafted; this edge is not yet settled by John |
 | Ghost World Labs incorporates someone else's patch into a paid edition | Needs adequate rights from that contributor; a voluntary patch is not an assignment |
 
 ## Review boundaries and unresolved facts
@@ -124,6 +132,8 @@ This license is governed by the law of [JURISDICTION TO BE CHOSEN AFTER CONFIRMI
 The core user policy is accepted. The definitions, notices, service exception, donation treatment, patent reservation, liability terms, cure process and governing-law mechanism are proposed supporting text, not individually approved policy decisions. They are included because a reviewable instrument needs clear scope and consequences; dropping them leaves users and reviewers to guess those boundaries.
 
 The named owner is unverified, covered files have not been inventoried, governing law has not been selected, and dependency/contributor permissions have not been cleared. No public repository license is changed by this draft. Any Legal-Beagle analysis is drafting support rather than a lawyer's opinion on enforceability; licensed counsel should review the completed instrument before publication.
+
+Refinement 1 implements Legal-Beagle's wording corrections for internal compensation, private confidentiality, rented infrastructure, contribution permission and consistent termination mechanics. The independent review of the original v1 is preserved in `legal-review-v1/INDEPENDENT-REVIEW.md`. Paid custom deliveries, recipient protection after an unauthorized sale, patents, naming and the full range of noncash consideration remain proposed edges for later acceptance. The original input is retained as `legal-review-v1/INPUT-LICENSE-v1.md`; no earlier review receipt is represented as covering these changed bytes.
 
 The live comparison and this draft should be read independently. Accepting the custom candidate did not accept the earlier licensing guide, comparison, scope artifact or this text as complete.
 

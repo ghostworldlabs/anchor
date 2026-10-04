@@ -126,6 +126,8 @@ John's local turn `2122dc15-8520-47c6-9b54-a13aa880f380`, at `2026-10-04T20:36:2
 
 The custom candidate is selected for drafting and review; final terms are not accepted or applied. The answered question and its waits are retired. Undo remains removing the candidate from the scope on John's instruction.
 
+The named license's **v1, Refinement 1** applies received Legal-Beagle wording corrections for free internal use, private modifications, generic computing rental and contribution/termination clarity. [Legal-Beagle review v1](LEGAL-BEAGLE-REVIEW-v1.md) records the findings and pending correction check. This does not create a new scope refinement, accept proposed supporting clauses, settle paid private deliveries or license public releases.
+
 John then explicitly requested the draft name **Ghost World Lab License** in turn `f95c8ec4-2b07-4607-a9d3-4068814c5bb3`, a **Legal-Beagle** review in turn `c34fd8f9-3d47-4825-a4f3-3e78bf68b2c9`, and a journal entry in turn `77589eef-ee23-48d3-9330-c852da1dae0b`. These authorize producing **Ghost World Lab License v1 — draft for review**, its legal analysis, and the work journal within this same scope refinement. They do not authorize publication, applying a repository license, changing the North Star, accepting any other artifact or closing a slice. The legal owner, governing law and dependency/contributor rights remain unverified prerequisites to publication.
 
 The original question is retained below as provenance, not a pending request.

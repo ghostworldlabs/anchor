@@ -44,7 +44,7 @@ with sync_playwright() as p:
         'no_horizontal_overflow': reader.evaluate('document.documentElement.scrollWidth <= innerWidth')}
     assert all(report[k] for k in ('instrument_present','companion_present','clauses_present','no_horizontal_overflow'))
     artifact = context.new_page()
-    exact = '/artifact/' + pid + '?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md'
+    exact = '/artifact/' + pid + '?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md&render=1'
     response = artifact.goto(origin+exact, wait_until='domcontentloaded', timeout=20000)
     report['conversation_link'] = exact
     report['conversation_target_status'] = response.status

@@ -6,8 +6,10 @@
   "companion_present": true,
   "clauses_present": true,
   "no_horizontal_overflow": true,
-  "conversation_link": "/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md",
+  "conversation_link": "/artifact/f69f6d66171f4dbd95c8c45db6846d97?path=Distribution%20and%20Collaboration%2FGHOST-WORLD-LAB-LICENSE-v1.md&render=1",
   "conversation_target_status": 200,
   "conversation_target_has_license": true,
-  "conversation_target_heading": []
+  "conversation_target_heading": [
+    "Ghost World Lab License"
+  ]
 }

@@ -1,0 +1,82 @@
+{
+  "schema": "trio.seat.v1",
+  "ok": false,
+  "status": "verification_fail_closed",
+  "label": "review:legal-beagle-ghost-world-lab-license-v1",
+  "role": "review",
+  "verification": true,
+  "structured": true,
+  "requested": {
+    "driver": "grok-cli",
+    "family": "grok",
+    "model": "grok-4.7"
+  },
+  "served": null,
+  "attempts": [
+    {
+      "ordinal": 1,
+      "kind": "primary",
+      "requested": {
+        "driver": "grok-cli",
+        "family": "grok",
+        "model": "grok-4.7"
+      },
+      "ok": false,
+      "status": "schema_exhausted",
+      "served": null,
+      "transport_attempts": [
+        {
+          "ordinal": 1,
+          "kind": "initial",
+          "label": "review:legal-beagle-ghost-world-lab-license-v1",
+          "ok": false,
+          "status": "schema_rejected",
+          "provider_status": "success",
+          "served": {
+            "driver": "grok-cli",
+            "family": "grok",
+            "model": "grok-4.7-build",
+            "family_attested": true,
+            "model_attested": true
+          },
+          "error": {
+            "code": "schema_nonconforming",
+            "message": "provider reply did not conform to the requested schema"
+          }
+        },
+        {
+          "ordinal": 2,
+          "kind": "schema_reprompt",
+          "label": "review:legal-beagle-ghost-world-lab-license-v1#retry",
+          "ok": false,
+          "status": "schema_rejected",
+          "provider_status": "success",
+          "served": {
+            "driver": "grok-cli",
+            "family": "grok",
+            "model": "grok-4.7-build",
+            "family_attested": true,
+            "model_attested": true
+          },
+          "error": {
+            "code": "schema_nonconforming",
+            "message": "provider reply did not conform to the requested schema"
+          }
+        }
+      ],
+      "error": {
+        "code": "schema_nonconforming",
+        "message": "provider reply remained schema-nonconforming after one reprompt (review:legal-beagle-ghost-world-lab-license-v1)"
+      }
+    }
+  ],
+  "failover": {
+    "allowed": false,
+    "used": false,
+    "blocked_reason": "verification_seat"
+  },
+  "error": {
+    "code": "schema_nonconforming",
+    "message": "provider reply remained schema-nonconforming after one reprompt (review:legal-beagle-ghost-world-lab-license-v1)"
+  }
+}
