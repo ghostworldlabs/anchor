@@ -6,6 +6,7 @@ the application's ordinary login/cookie flow, never privileged test headers.
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import http.cookiejar
+import builtins
 import json
 import os
 from pathlib import Path
@@ -292,6 +293,119 @@ def test_observed_ledger_rows_are_account_qualified(stack):
     assert setup.observed_tokens("a"*32)["tokens"] is None
 
 
+def test_account_usage_reads_each_ledger_once_and_reuses_unchanged_files(stack, monkeypatch, tmp_path):
+    service, _, data, _ = stack
+    account = add(service)
+    ledger = data / ".anchor" / "usage_ledger"
+    ledger.mkdir(parents=True)
+    count = 257
+    when = "2026-10-05T12:00:00+00:00"
+    def write(path, tokens):
+        path.write_text(json.dumps({"entries": {
+            "default": {"provider_connection_id": "chatgpt-default", "tokens": tokens, "recorded_at": when},
+            "named": {"provider_connection_id": account["id"], "tokens": 3, "recorded_at": when},
+            "zero": {"provider_connection_id": "claude-default", "tokens": 0},
+            "legacy": {"tokens": 999},
+            "invalid": {"provider_connection_id": account["id"], "tokens": True},
+            "malformed": None,
+        }}), encoding="utf-8")
+    for i in range(count):
+        suffix = ".JSON" if os.name == "nt" and i == count - 1 else ".json"
+        write(ledger / f"{i}{suffix}", 2)
+    original_open, reads = builtins.open, []
+    def tracked_open(path, *args, **kwargs):
+        if Path(path).parent == ledger:
+            reads.append(Path(path).name)
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", tracked_open)
+    first = service.snapshot()
+    assert len(reads) == count and len(set(reads)) == count
+    assert row(first, "chatgpt-default")["anchor_observed"]["tokens"] == count * 2
+    assert row(first, account["id"])["anchor_observed"]["tokens"] == count * 3
+    assert row(first, "claude-default")["anchor_observed"]["tokens"] == 0
+    assert row(first, "grok-default")["anchor_observed"]["state"] == "unknown"
+    assert service.snapshot() == first and len(reads) == count
+    # Match the ledger writer's atomic replacement, including a same-size update.
+    replacement = ledger / "replace.tmp"
+    write(replacement, 7)
+    os.replace(replacement, ledger / "0.json")
+    second = service.snapshot()
+    assert len(reads) == count + 1
+    assert row(second, "chatgpt-default")["anchor_observed"]["tokens"] == count * 2 + 5
+    write(ledger / "new.json", 11)
+    (ledger / "1.json").unlink()
+    third = service.snapshot()
+    assert len(reads) == count + 2
+    assert row(third, "chatgpt-default")["anchor_observed"]["tokens"] == count * 2 + 14
+    assert row(third, account["id"])["anchor_observed"]["tokens"] == count * 3
+    # Returned rows cannot mutate the cache, and another data root cannot borrow it.
+    row(third, account["id"])["anchor_observed"]["tokens"] = -1
+    assert setup.observed_tokens(account["id"])["tokens"] == count * 3
+    other = tmp_path / "other" / ".anchor" / "usage_ledger"
+    other.mkdir(parents=True)
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(other.parent.parent))
+    assert setup.observed_tokens(account["id"])["tokens"] is None
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    assert setup.observed_tokens(account["id"])["tokens"] == count * 3
+
+
+def test_account_usage_failed_read_retains_prior_totals_and_retries(stack, monkeypatch):
+    service, _, data, _ = stack
+    ledger = data / ".anchor" / "usage_ledger"
+    ledger.mkdir(parents=True)
+    path = ledger / "one.json"
+    doc = {"entries": {"one": {"provider_connection_id": "chatgpt-default", "tokens": 123,
+                              "recorded_at": "2026-10-05T12:00:00+00:00"}}}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    before = setup.observed_tokens("chatgpt-default")
+    path.write_text("invalid", encoding="utf-8")
+    failed = setup.observed_tokens("chatgpt-default")
+    assert failed == {**before, "state": "stale"}
+    original_scandir = os.scandir
+    def unavailable(root):
+        if str(root) == str(ledger):
+            raise PermissionError()
+        return original_scandir(root)
+    monkeypatch.setattr(os, "scandir", unavailable)
+    assert setup.observed_tokens("chatgpt-default") == failed
+    monkeypatch.setattr(os, "scandir", original_scandir)
+    doc["entries"]["one"]["tokens"] = 456
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert setup.observed_tokens("chatgpt-default") == {**before, "tokens": 456}
+
+
+def test_ledger_io_does_not_hold_native_observation_lock(stack, monkeypatch):
+    service, _, data, _ = stack
+    ledger = data / ".anchor" / "usage_ledger"
+    ledger.mkdir(parents=True)
+    (ledger / "one.json").write_text('{"entries":{}}', encoding="utf-8")
+    entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+    original_open = builtins.open
+    def slow_open(path, *args, **kwargs):
+        if Path(path).parent == ledger:
+            entered.set()
+            assert release.wait(5)
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", slow_open)
+    results = []
+    def read():
+        try:
+            results.append(service.snapshot())
+        finally:
+            completed.set()
+    worker = threading.Thread(target=read)
+    worker.start()
+    try:
+        assert entered.wait(2)
+        acquired = service.lock.acquire(timeout=1)
+        if acquired:
+            service.lock.release()
+        assert acquired, "Cached ledger I/O blocked native state publication"
+    finally:
+        release.set(); worker.join(5)
+    assert completed.is_set() and not worker.is_alive() and results[0]["ok"]
+
+
 def test_apply_is_explicit_and_does_not_change_global_policy_or_live_engine(stack, monkeypatch, tmp_path):
     service, backend, _, _=stack
     from steward_cockpit import steward_engine
@@ -394,6 +508,40 @@ def authenticated(origin):
     code,_=http_request(opener,origin,"/api/auth/login",{"token":AUTH})
     assert code == 200 and any(cookie.has_nonstandard_attr("HttpOnly") for cookie in cookies)
     return opener
+
+
+@pytest.mark.parametrize("failure", ["timeout", "unsupported"])
+def test_cached_http_state_is_responsive_during_native_refresh(server, monkeypatch, failure):
+    origin, (service, backend, _, _) = server
+    before = row(service.snapshot(True), "chatgpt-default")
+    entered, release = threading.Event(), threading.Event()
+    def busy(connection):
+        entered.set()
+        assert release.wait(5)
+        raise native.NativeError(failure)
+    monkeypatch.setattr(backend, "observe", busy)
+    connection = metadata.find_connection(settings.load_settings(), "chatgpt-default")
+    worker = threading.Thread(target=service.refresh, args=(connection,))
+    opener = authenticated(origin)
+    worker.start()
+    try:
+        assert entered.wait(2)
+        started = time.monotonic()
+        with opener.open(origin + "/api/provider-setup", timeout=2) as response:
+            assert response.status == 200
+            cached = row(json.load(response), "chatgpt-default")
+        assert time.monotonic() - started < 2
+        assert worker.is_alive(), "Read did not overlap the native refresh"
+        assert cached["auth"] == before["auth"]
+        assert cached["allowance"] == before["allowance"]
+        assert cached["catalog"] == before["catalog"]
+    finally:
+        release.set(); worker.join(5)
+    assert not worker.is_alive()
+    after = row(service.snapshot(), "chatgpt-default")
+    assert after["auth"] == failure
+    assert after["allowance"] == {**before["allowance"], "state": "stale",
+                                 "attempted_at": after["attempted_at"], "error": failure}
 
 
 @pytest.mark.parametrize("method,path",[("GET","/setup"),("GET","/api/provider-setup"),("GET","/api/provider-setup/login"),

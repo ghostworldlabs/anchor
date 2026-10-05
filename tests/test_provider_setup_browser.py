@@ -1,6 +1,7 @@
 """Normally authenticated, disposable browser/server proof of Setup and Cave."""
 from copy import deepcopy
 from pathlib import Path
+import json
 import re
 import threading
 
@@ -31,6 +32,65 @@ def cave_server(stack, monkeypatch):
     finally:
         server.shutdown();server.server_close();thread.join(3)
         assert not thread.is_alive()
+
+
+def test_setup_cached_page_loads_while_native_refresh_is_busy(cave_server, monkeypatch):
+    import anchor_settings
+    import provider_native
+    import provider_settings
+    origin, service, data = cave_server
+    ledger = data / ".anchor" / "usage_ledger"
+    ledger.mkdir(parents=True)
+    for i in range(257):
+        (ledger / f"{i}.json").write_text(json.dumps({"entries": {
+            "one": {"provider_connection_id": "claude-default", "tokens": 123},
+            "legacy": {"tokens": 999},
+        }}), encoding="utf-8")
+    entered, release = threading.Event(), threading.Event()
+    def busy(connection):
+        entered.set()
+        assert release.wait(15)
+        raise provider_native.NativeError("unsupported")
+    monkeypatch.setattr(service.native, "observe", busy)
+    account = provider_settings.find_connection(anchor_settings.load_settings(), "chatgpt-default")
+    worker = threading.Thread(target=service.refresh, args=(account,))
+    worker.start()
+    try:
+        assert entered.wait(2)
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                context = browser.new_context()
+                login = context.request.post(origin + "/api/auth/login", data={"token": AUTH})
+                assert login.ok and any(c.get("httpOnly") for c in context.cookies(origin))
+                page = context.new_page()
+                errors, blocked = [], []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                def guard(route):
+                    if route.request.method != "GET" or "/api/steward/events" in route.request.url:
+                        blocked.append(route.request.url)
+                        route.abort()
+                    else:
+                        route.continue_()
+                page.route("**/*", guard)
+                for _ in range(2):
+                    page.goto(origin + "/setup", wait_until="domcontentloaded")
+                    expect(page.locator("#host-runtime")).to_contain_text("existing setup retained", timeout=3000)
+                    expect(page.locator("#provider-detail")).to_contain_text("31,611 tokens")
+                    assert worker.is_alive(), "Page load did not overlap the native refresh"
+                # A failed ledger read retains the observed figure with an
+                # explicit stale label on the actual account detail surface.
+                (ledger / "0.json").write_text("invalid", encoding="utf-8")
+                page.reload(wait_until="domcontentloaded")
+                expect(page.locator("#provider-detail")).to_contain_text("31,611 tokens")
+                consumption = page.locator(".provider-facts div").filter(has=page.locator("dt", has_text="Anchor-observed consumption"))
+                expect(consumption).to_contain_text("stale")
+                assert not errors and not blocked
+            finally:
+                browser.close()
+    finally:
+        release.set(); worker.join(5)
+    assert not worker.is_alive()
 
 
 @pytest.mark.parametrize("viewport",[{"width":1440,"height":1050},{"width":390,"height":844}])

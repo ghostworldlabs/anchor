@@ -13,7 +13,7 @@
       ['Subscription allowance',api.capacityText(account)],['Allowance source / observed',account.allowance.source+' · '+(account.allowance.observed_at || 'Not reported')],
       ['Exact tokens remaining','Not reported'],['Provider account token activity',account.provider_usage.tokens===null ? 'Not reported · '+account.provider_usage.state : account.provider_usage.tokens.toLocaleString()+' lifetime tokens · '+account.provider_usage.state],
       ['Token activity source / observed',account.provider_usage.source+' · '+(account.provider_usage.observed_at || 'Not reported')],
-      ['Anchor-observed consumption',account.anchor_observed.tokens===null ? 'Not reported; legacy observations have no account attribution' : account.anchor_observed.tokens.toLocaleString()+' tokens · '+account.anchor_observed.period],
+      ['Anchor-observed consumption',account.anchor_observed.tokens===null ? 'Not reported; legacy observations have no account attribution' : account.anchor_observed.tokens.toLocaleString()+' tokens · '+account.anchor_observed.period+(account.anchor_observed.state==='stale'?' · stale':'')],
       ['Anchor source / observed',account.anchor_observed.source+' · '+(account.anchor_observed.observed_at || 'Not reported')],
       ['API spend','Not reported · '+account.api_spend.state],['Subscription price','Not reported · '+account.subscription_price.state]];
     rows.forEach(([label,value])=>{const cell=document.createElement('div');cell.append(text('dt',label),text('dd',value));facts.append(cell);});parent.append(facts);

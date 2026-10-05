@@ -81,6 +81,7 @@ class ProviderService:
         self.capabilities = {}
         self.catalogs = {}
         self.logins = {}
+        self.usage = AccountUsageReader()
 
     def _key(self, identity):
         return (str(paths.data_dir()), identity)
@@ -183,10 +184,14 @@ class ProviderService:
             selected = [metadata.find_connection(settings, identity)] if identity else connections
             with ThreadPoolExecutor(max_workers=2) as pool:
                 list(pool.map(self.refresh, selected))
+        # Ledger I/O must neither multiply by account count nor hold the lock
+        # used to publish native observations and sign-in progress.
+        usage = self.usage.read()
         out = []
+        capabilities = {family: self.capability(family) for family in {c["family"] for c in connections}}
         with self.lock:
             for connection in connections:
-                cap = self.capability(connection["family"])
+                cap = capabilities[connection["family"]]
                 obs = deepcopy(self.observations.get(self._key(connection["id"]), empty_observation()))
                 for metric in ("allowance", "provider_usage"):
                     observation = obs[metric]
@@ -216,7 +221,7 @@ class ProviderService:
                             "capacity": "exhausted" if exhausted else "near_limit" if low and remaining else "usable" if remaining else "unknown",
                             "warning": (("Low allowance. " if remaining else "Last report indicated low allowance; its status is now " + obs["allowance"]["state"] + ". ")
                                         + "Full model strength stays selected until you apply a change.") if low else None,
-                            "anchor_observed": observed_tokens(connection["id"]),
+                            "anchor_observed": usage_report(usage, connection["id"]),
                             "api_spend": {**unknown("Provider API billing report", "unsupported"), "amount": None, "currency": None},
                             "subscription_price": {**unknown("Provider subscription billing", "unsupported"), "amount": None}})
         return {"ok": True, "host": host_state(), "settings_revision": settings["settings_revision"],
@@ -352,26 +357,85 @@ def claude_allowance(identity, attempted_at):
     return out
 
 
+class AccountUsageReader:
+    """An in-memory read cache of the existing ledger, shared by all accounts.
+
+    Check every file on every read, but parse only new/replaced documents. Keep
+    only account-qualified sums and timestamps, never raw ledger/private data.
+    A separate lock serializes readers without blocking native refresh workers.
+    """
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.root = None
+        self.files = {}
+
+    @staticmethod
+    def _summarize(doc):
+        totals = {}
+        entries = doc.get("entries") or {}
+        if not isinstance(entries, dict):
+            raise ValueError("Invalid usage ledger")
+        for entry in entries.values():
+            if not isinstance(entry, dict):
+                continue
+            identity, tokens = entry.get("provider_connection_id"), entry.get("tokens")
+            if not isinstance(identity, str) or not identity or not native.finite(tokens):
+                continue
+            total, latest = totals.get(identity, (0, None))
+            when = entry.get("recorded_at")
+            if isinstance(when, str):
+                latest = max(latest or when, when)
+            totals[identity] = (total + tokens, latest)
+        return totals
+
+    def read(self):
+        import usage_capacity
+        root = usage_capacity.ledger_dir()
+        with self.lock:
+            if root != self.root:
+                self.root, self.files = root, {}
+            seen, stale = set(), set()
+            try:
+                with os.scandir(root) as files:
+                    for file in files:
+                        if not os.path.normcase(file.name).endswith(".json"):
+                            continue
+                        seen.add(file.name)
+                        prior = self.files.get(file.name)
+                        try:
+                            info = file.stat()
+                            signature = (info.st_mtime_ns, info.st_ctime_ns, info.st_size)
+                            if prior and prior[0] == signature:
+                                continue
+                            with open(file.path, encoding="utf-8") as stream:
+                                totals = self._summarize(json.load(stream))
+                            self.files[file.name] = (signature, totals)
+                        except (OSError, ValueError, TypeError, AttributeError):
+                            # Retry on the next read; a failed read cannot erase
+                            # a previously observed account's usage.
+                            stale.update(prior[1] if prior else ())
+                self.files = {name: value for name, value in self.files.items() if name in seen}
+            except OSError:
+                stale.update(identity for _, totals in self.files.values() for identity in totals)
+            totals = {}
+            for _, accounts in self.files.values():
+                for identity, (tokens, when) in accounts.items():
+                    total, latest = totals.get(identity, (0, None))
+                    totals[identity] = (total + tokens, max(latest or when, when) if when else latest)
+            return totals, stale
+
+
+def usage_report(usage, identity):
+    totals, stale = usage
+    total, latest = totals.get(identity, (None, None))
+    return {"state": "stale" if identity in stale else "observed" if total is not None else "unknown",
+            "tokens": total, "source": "Anchor account-qualified usage ledger",
+            "observed_at": latest, "period": "Recorded Anchor work only; other native work is outside this total"}
+
+
 def observed_tokens(identity):
     """Read only account-qualified entries from the existing usage ledger."""
-    import usage_capacity
-    from glob import glob
-    total, latest = None, None
-    for filename in glob(os.path.join(usage_capacity.ledger_dir(), "*.json")):
-        try:
-            with open(filename, encoding="utf-8") as stream:
-                doc = json.load(stream)
-            for entry in (doc.get("entries") or {}).values():
-                if entry.get("provider_connection_id") != identity or not native.finite(entry.get("tokens")):
-                    continue
-                total = (total or 0) + entry["tokens"]
-                when = entry.get("recorded_at")
-                if isinstance(when, str):
-                    latest = max(latest or when, when)
-        except (OSError, ValueError, TypeError, AttributeError):
-            continue
-    return {"state": "observed" if total is not None else "unknown", "tokens": total, "source": "Anchor account-qualified usage ledger",
-            "observed_at": latest, "period": "Recorded Anchor work only; other native work is outside this total"}
+    return usage_report(SERVICE.usage.read(), identity)
 
 
 def host_state():
