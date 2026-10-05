@@ -1,4 +1,4 @@
-"""Anchor as a program on PUTER: one WebView2 window around static/app.html (PLAN v2.2 section 3.3,
+"""Anchor as a Windows program: one WebView2 window around static/app.html (PLAN v2.2 section 3.3,
 Skill Foundry/planning/anchor-app-shell-2026-09-29).
 
 Not product code: it runs from its own venv (%LOCALAPPDATA%/anchor-shell/.venv, pywebview + pywin32) and is
@@ -16,8 +16,8 @@ not on the ship list. The service is unchanged; this only opens a window onto it
     which WebView2 (non-client region support) turns into a real caption - smooth moves, snap, double-click to
     maximize. Windows 11 rounds the corners; the window's outer edges resize it.
 
-  - (every-device D1, 2026-10-03) it finds Anchor itself (shell/connect.py): PUTER's own copy, else the address he
-    typed once; a plain page when that address does not answer; packaged for his other PCs as Anchor.zip
+  - (every-device D1, 2026-10-03) it finds Anchor itself (shell/connect.py): the local copy, else the owner's saved
+    mother ship address; a plain page when that address does not answer; packaged for other PCs as Anchor.zip
     (shell/build_exe.ps1), whose first run puts its own Start-menu shortcut in place.
 
 Usage:  pythonw shell/anchor_shell.py [--url ADDRESS] [--setup]      (or the packaged Anchor.exe, same flags)
@@ -224,7 +224,7 @@ class HostApi:
         if not address:
             return why
         if not connect.reachable(address):
-            return "No answer from %s. Is Tailscale on here, and is Anchor running there?" % address
+            return "No answer from your selected mother ship at %s. Is Tailscale on here, and is your mother ship awake with Anchor running there?" % address
         connect.save_address(DATA, address)
         self._open(address)
         return ""
@@ -234,7 +234,7 @@ class HostApi:
         if connect.reachable(self._address):
             self._open(self._address)
             return ""
-        return "Still no answer. Check Tailscale and PUTER, then Retry."
+        return "Still no answer from your selected mother ship. Check Tailscale here and that your mother ship is awake with Anchor running, then Retry."
 
     def change_address(self):
         import connect
@@ -269,7 +269,7 @@ class HostApi:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default="", help="Anchor's address (else PUTER's own, else the saved one)")
+    ap.add_argument("--url", default="", help="Anchor's address (else local Anchor, else the saved mother ship address)")
     ap.add_argument("--setup", action="store_true", help="ask for the address again")
     args = ap.parse_args(argv)
 
