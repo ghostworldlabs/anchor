@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-04 15:42",
-  "status_id": "01791150151444909600",
+  "at": "2026-10-05 13:45",
+  "status_id": "01791229517308549700",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - quiet",
+    "activity": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35",
     "latest_event": null,
     "next": [
       "Provider capacity, cost and model controls"
     ],
-    "question": "Keep or refine?",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Provider capacity, cost and model controls \u2014 Carry cumulative Setup requirements into interactive Refinement\u2026"
+        "value": "Provider capacity, cost and model controls \u2014 Build and integrate the accepted Refinement 2 provider surface:\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - quiet"
+        "value": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35"
       },
       {
         "label": "Status",
-        "value": "slice: Provider capacity, cost and model controls \u00b7 0/9 done \u00b7 quiet"
+        "value": "slice: Provider capacity, cost and model controls \u00b7 0/9 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: Review Setup mockup Refinement 2: keep its layout or refine before laptop planning."
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0008-provider-handoff-and-review-pickup: Interrupted review handback recovered \u2014 October 4, 2026"
+        "value": "0010-provider-dispatch-recovery: Provider dispatch recovery \u2014 October 5, 2026"
       },
       {
         "label": "ETA",
@@ -53,15 +53,15 @@
       }
     ]
   },
-  "lead_line": "Next: Provider capacity, cost and model controls; then Review Setup before laptop integration \u2014 The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct \u00b7 waiting on you: Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.",
+  "lead_line": "Next: Provider capacity, cost and model controls; then Review Setup before laptop integration \u2014 John accepted the layout and authorized real integration; no further approval blocks the build.",
   "now": [
-    "nothing running - quiet"
+    "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - quiet",
+    "kind": "steward",
+    "label": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
@@ -70,26 +70,26 @@
     "id": "gwl-provider-status",
     "name": "Provider capacity, cost and model controls",
     "part": "slice",
-    "summary": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave\u2026",
+    "summary": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login,\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0008-provider-handoff-and-review-pickup: Interrupted review handback recovered \u2014 October 4, 2026",
+  "journal": "0010-provider-dispatch-recovery: Provider dispatch recovery \u2014 October 5, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
       "step_id": "gwl-provider-status",
-      "session_id": "01a108d8-a633-78b0-9433-92d175405fde"
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0008-provider-handoff-and-review-pickup.md",
-      "entry_id": "0008-provider-handoff-and-review-pickup",
-      "at": "2026-10-04T21:42:30Z",
+      "path": "journal/0010-provider-dispatch-recovery.md",
+      "entry_id": "0010-provider-dispatch-recovery",
+      "at": "2026-10-05T19:23:02Z",
       "step_id": "gwl-provider-status",
-      "session_id": "01a108d8-a633-78b0-9433-92d175405fde",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
       "run_id": null
     },
     "eta": {
@@ -110,9 +110,9 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
-    "as_of": "2026-10-04",
-    "newest_work": "2026-10-04",
+    "text": "Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.",
+    "as_of": "2026-10-05",
+    "newest_work": "2026-10-05",
     "behind_days": 0,
     "stale": false
   },
@@ -120,11 +120,11 @@
     "step": "slice: Provider capacity, cost and model controls",
     "steps_done": 0,
     "steps_total": 9,
-    "waiting_on_you": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.",
+    "waiting_on_you": "",
     "waiting_since": null,
     "next": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-    "why": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
-    "attention": "quiet",
+    "why": "John accepted the layout and authorized real integration; no further approval blocks the build.",
+    "attention": "stale",
     "goal_reread": true
   },
   "map": [
@@ -214,9 +214,9 @@
           "id": "gwl-provider-status",
           "name": "Provider capacity, cost and model controls",
           "status": "active",
-          "done_when": "Carry cumulative Setup requirements into interactive Refinement 2: post-completion upper-left gear reopens existing Setup settings; Cave left sidebar bottom exposes the selected provider/account and model/reasoning through the same provider surface, with right-side capacity retained. Preserve host pairing, account tests and allowances, accepted warnings retaining full strength, and Star Chart organization. Check actual interactions and pixels, then obtain human feedback before implementation planning or live laptop integration.",
+          "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
           "if_then": "",
-          "waiting_on": "Setup mockup Refinement 2: keep the revised provider, gear and Cave sidebar layout for the laptop implementation plan, or refine it?",
+          "waiting_on": null,
           "due": null,
           "ref": null,
           "tier": null,
@@ -225,7 +225,7 @@
           "seat_order": null,
           "commissioned_as": null,
           "part": "slice",
-          "gate": "python .ecgberht/verify-setup-refinement-2.py",
+          "gate": "python -m pytest -q tests/test_provider_setup.py",
           "component_ids": [],
           "navigation": {
             "path": [
@@ -233,8 +233,9 @@
             ],
             "current": true,
             "featured_paths": [
-              "mockups/SETUP-refinement-2.html",
-              "SCOPE-v5.md"
+              "IMPLEMENTATION-PLAN-v1.md",
+              "SCOPE-v6.md",
+              "mockups/SETUP-refinement-2.html"
             ]
           }
         }
@@ -250,7 +251,7 @@
           "id": "gwl-review",
           "name": "Review Setup before laptop integration",
           "status": "proposed",
-          "done_when": "Settle the provider mockup and review the Setup walkthrough before implementation planning and live laptop integration. The accepted warning default is only one policy decision; further mockup feedback remains open and a slice closes only on John's explicit instruction.",
+          "done_when": "Refinement 2 starting layout is explicitly accepted in turn d7dd98a2-97a2-42f9-9273-c71b3e49cbf9. Review the working provider integration on the laptop after build and activation; preserve independent feedback and require explicit slice close.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -273,7 +274,7 @@
           "id": "gwl-laptop-provider-test",
           "name": "Test providers in the running laptop Anchor",
           "status": "proposed",
-          "done_when": "After the provider mockup is settled and implementation work is agreed, test the provider flow in the current Anchor client actually running on John's laptop. Check the selected mother ship, subscriptions and optional API connections, per-account tests and honestly reported allowance/cost, warnings preserving full strength and explicit model changes. Distinguish the actual laptop client from fresh-browser mockup checks; do not reset first-time setup or disrupt ongoing sessions.",
+          "done_when": "After the authorized integration lands and can be safely activated without interrupting sessions, test in John's existing laptop Anchor client: native sign-ins without open terminals, separate accounts, direct login, real or explicitly unsupported/stale allowance, Cave gear/settings and quality controls. Worktree browser checks do not establish delivery.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -304,7 +305,7 @@
           "id": "gwl-access",
           "name": "Second: connect subscriptions and optional API keys",
           "status": "proposed",
-          "done_when": "After host connection, show a provider checklist allowing multiple separately named subscriptions per provider and optional API connections. Normal sign-in, credentials, tests and usage reports belong to the mother ship; show per-connection capacity, cost and honest unknowns.",
+          "done_when": "Reuse existing host-side native sign-ins; provide normal native login from Setup without keeping terminals open. Preserve existing default accounts/sessions, isolate additional subscriptions where supported, and support explicit API connections without silent billing substitution.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -328,7 +329,7 @@
           "id": "gwl-cave-settings",
           "name": "Wire Cave controls and reopen Setup",
           "status": "proposed",
-          "done_when": "After provider mockup settlement and laptop testing, wire the bottom of the Cave of Wonders left side window to the agreed mother-ship provider/model/reasoning settings. Retain the separately specified lower-right capacity display. After first-time Setup, show a gear at the far upper left and move the Anchor icon slightly right. The gear opens the same Setup page to modify existing settings and preserves completed host/provider/project setup. Verify in the running laptop client; credentials and tests stay on the mother ship.",
+          "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -406,5 +407,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 13
+  "deliverables_count": 15
 }
