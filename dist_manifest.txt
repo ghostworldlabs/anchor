@@ -44,6 +44,13 @@ usage_ledger.py
 usage_capture.py
 narration.py
 anchor_settings.py
+provider_settings.py
+provider_native.py
+provider_secrets.py
+provider_setup.py
+usage_capacity.py
+high_seat_page.py
+codex_catalog.py
 model_policy.py
 anchor_notebooks.py
 notebook_artifacts.py

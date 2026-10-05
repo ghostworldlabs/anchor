@@ -988,6 +988,9 @@ def handle_get(cdir, verb, qs):
         rel = str(qs.get("path", ""))
         creal = os.path.realpath(str(cdir))
         real = os.path.realpath(str(Path(cdir) / rel))
+        from provider_native import private_account_path
+        if private_account_path(real):
+            return {"error": "private host credentials are not deliverables"}, 403
         if not (real == creal or real.startswith(creal + os.sep)) \
                 or not os.path.isfile(real):
             return {"error": "not an openable deliverable (outside this effort or missing)"}, 404

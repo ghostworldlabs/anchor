@@ -258,7 +258,7 @@ def _cache_identity(family, env):
     binary = {"chatgpt": "codex", "claude": "claude", "grok": "grok", "gemini": "agy"}.get(family, "")
     command = shutil.which(binary, path=env.get("PATH")) if binary else None
     provider_root = Path(env.get("CODEX_HOME") or profile / ".codex") if family == "chatgpt" else (
-        Path(env.get("GROK_HOME") or profile / ".grok") if family == "grok" else profile / ".claude")
+        Path(env.get("GROK_HOME") or profile / ".grok") if family == "grok" else Path(env.get("CLAUDE_CONFIG_DIR") or profile / ".claude"))
     paths = ([Path(command)] if command else []) + [provider_root / name for name in
              ("auth.json", "config.toml", "settings.json", ".credentials.json", "session.json", "models_cache.json")]
     stamps = []

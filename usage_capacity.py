@@ -115,7 +115,7 @@ def _last_event(text):
     return None
 
 
-def latest_limit_signal(now=None, directory=None, max_logs=80):
+def latest_limit_signal(now=None, directory=None, max_logs=80, connection_id=None):
     """The newest rate_limit_event a Claude run wrote into a job log inside the week, or None."""
     now = now or datetime.now(timezone.utc)
     d = directory or jobs_dir()
@@ -125,6 +125,16 @@ def latest_limit_signal(now=None, directory=None, max_logs=80):
     except Exception:
         logs = []
     for p in logs:
+        if connection_id is not None:
+            # Legacy events are unqualified: never borrow their meter for a
+            # selected subscription, including the apparent native default.
+            try:
+                with open(os.path.splitext(p)[0] + ".json", encoding="utf-8") as stream:
+                    record = json.load(stream)
+                if (record.get("provider_connection") or {}).get("id") != connection_id:
+                    continue
+            except (OSError, ValueError, AttributeError, TypeError):
+                continue
         try:
             info = _last_event(_tail(p))
         except Exception:

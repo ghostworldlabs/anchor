@@ -24,6 +24,7 @@ from pathlib import Path
 
 import paths as _paths
 from model_policy import DEFAULT_POLICY, validate_policy
+import provider_settings as _providers
 
 VALID_CLIS = frozenset({"claude", "gemini", "grok", "chatgpt"})
 VALID_FAMILIES = VALID_CLIS
@@ -167,6 +168,9 @@ def _normalize(raw) -> dict:
     out = dict(DEFAULTS)
     out["model_policy"] = dict(DEFAULT_POLICY)
     out["settings_revision"] = 0
+    out["provider_connections"] = _providers.default_connections()
+    from copy import deepcopy
+    out["provider_preferences"] = deepcopy(_providers.DEFAULT_PREFERENCES)
     out["updated_at"] = _now_iso()
     if not isinstance(raw, dict):
         return out
@@ -192,6 +196,10 @@ def _normalize(raw) -> dict:
             out["model_policy"] = validate_policy(raw["model_policy"])
         except ValueError:
             pass  # Display normalization only; read_settings_state rejects it for launch.
+    if "provider_connections" in raw:
+        out["provider_connections"] = _providers.validate_connections(raw["provider_connections"])
+    if "provider_preferences" in raw:
+        out["provider_preferences"] = _providers.validate_preferences(raw["provider_preferences"], out["provider_connections"])
     return out
 
 
@@ -335,6 +343,10 @@ def _save_settings_locked(**kwargs) -> dict:
         current["steward_type"] = val.strip()
     if "model_policy" in kwargs:
         current["model_policy"] = validate_policy(kwargs["model_policy"])
+    if "provider_connections" in kwargs:
+        current["provider_connections"] = _providers.validate_connections(kwargs["provider_connections"])
+    if "provider_preferences" in kwargs:
+        current["provider_preferences"] = _providers.validate_preferences(kwargs["provider_preferences"], current["provider_connections"])
     current["settings_revision"] += 1
     current["updated_at"] = _now_iso()
 

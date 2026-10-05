@@ -753,6 +753,10 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     settings_snapshot = None if command else _aset.get_launch_settings()
     backend = _require_backend((settings_snapshot or {}).get("coding_family", DEFAULT_BACKEND)
                                if backend is None else backend)
+    provider_connection = None
+    if not command:
+        import provider_setup as _provider_setup
+        provider_connection = _provider_setup.selected_for_launch(settings_snapshot, backend, surface="jobs", check_capacity=True)
     # codex-discipline-2026-09-15 Wave 1.6: no new job of any kind starts
     # behind the maintenance barrier (running ones drain to their own
     # boundary; control-plane commands included — Grok R1).
@@ -854,7 +858,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     runner_override = (backend != BACKEND_CHATGPT
                        and bool(os.environ.get(RUNNER_CMD_ENV, "").strip()))
     selection = (None if command or runner_override
-                 else _mp.resolve(backend, settings=settings_snapshot))
+                 else _provider_setup.resolve_quality(backend, settings_snapshot, provider_connection, surface="jobs"))
     job_id = job_id or uuid.uuid4().hex
     # Pin this job's storage dir for its lifetime (resolved now, once).
     pinned = jobs_dir()
@@ -882,6 +886,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     full_env = dict(os.environ) if command else _mp.policy_environment()
     if env and backend != BACKEND_CHATGPT:
         full_env.update(env)
+    if not command:
+        full_env = _mp.policy_environment(full_env)
+    if provider_connection and backend != BACKEND_CHATGPT:
+        import provider_native
+        _account_env = provider_native.account_env(provider_connection)
+        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANCHOR_PROVIDER_CONNECTION"):
+            if _key in _account_env:
+                full_env[_key] = _account_env[_key]
     # Propagate Anchor model-family prefs so foundry/trio seats (and any agent
     # reading CODING_FAMILY / REVIEW_FAMILY) honor the dashboard knobs.
     # Saved settings are authoritative and overwrite stale process/setx values.
@@ -1017,6 +1029,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "exit_code": None,
         "session_id": None,
         "backend": backend,
+        "provider_connection": provider_connection,
         "crypt_token": crypt_token,
         "model_policy": selection,
         "proc_create_time": proc_create_time,

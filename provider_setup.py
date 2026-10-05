@@ -1,0 +1,559 @@
+"""Shared Setup/Cave provider service and small normally authenticated routes."""
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from datetime import datetime, timezone
+import ipaddress
+import json
+import os
+from pathlib import Path
+import socket
+import threading
+import time
+import uuid
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.error import HTTPError, URLError
+
+import anchor_settings
+import model_policy
+import paths
+import provider_native as native
+import provider_secrets
+import provider_settings as metadata
+
+TTL = 300
+
+
+def stamp():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def unknown(source, state="unknown"):
+    return {"state": state, "source": source, "observed_at": None, "attempted_at": None}
+
+
+def empty_observation():
+    return {"auth": "unknown", "test": "not_tested", "auth_source": "Native CLI status", "observed_at": None,
+            "allowance": {**unknown("Native subscription interface"), "windows": []},
+            "provider_usage": {**unknown("Native account usage"), "tokens": None}}
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def validate_api(family, secret):
+    """GET the documented public model catalog. Never submit model work."""
+    if not isinstance(secret, str) or not 12 <= len(secret) <= 4096 or any(c.isspace() or ord(c) < 32 for c in secret):
+        raise ValueError("Enter a valid API key in the secure host form")
+    url = {"chatgpt": "https://api.openai.com/v1/models", "claude": "https://api.anthropic.com/v1/models",
+           "grok": "https://api.x.ai/v1/models", "gemini": "https://generativelanguage.googleapis.com/v1beta/models"}[family]
+    headers = {"Accept": "application/json"}
+    if family == "claude":
+        headers.update({"x-api-key": secret, "anthropic-version": "2023-06-01"})
+    elif family == "gemini":
+        headers["x-goog-api-key"] = secret
+    else:
+        headers["Authorization"] = "Bearer " + secret
+    try:
+        with build_opener(NoRedirect()).open(Request(url, headers=headers), timeout=10) as response:
+            raw = response.read(native.MAX_OUTPUT + 1)
+            if len(raw) > native.MAX_OUTPUT or response.status != 200:
+                raise ValueError("API validation failed")
+            data = json.loads(raw)
+            if not isinstance(data, dict) or not isinstance(data.get("data", data.get("models")), list):
+                raise ValueError("API validation returned an unsupported report")
+    except HTTPError as exc:
+        raise ValueError("API authentication failed" if exc.code in (401, 403) else "API validation is unavailable") from None
+    except (URLError, OSError, ValueError):
+        raise ValueError("API validation failed; no model work was submitted") from None
+
+
+class ProviderService:
+    def __init__(self, backend=None):
+        self.native = backend or native.NativeProviders()
+        self.lock = threading.RLock()
+        self.refresh_locks = {}
+        self.observations = {}
+        self.capabilities = {}
+        self.catalogs = {}
+        self.logins = {}
+
+    def _key(self, identity):
+        return (str(paths.data_dir()), identity)
+
+    def capability(self, family, refresh=False):
+        key = self._key(family)
+        with self.lock:
+            existing = self.capabilities.get(key)
+            if existing and (not refresh or time.time() - existing["at"] < TTL):
+                return deepcopy(existing["value"])
+        if not refresh:
+            return {"installed": bool(native.executable(family)), "state": "not_checked", "version": None,
+                    "isolated": False, "login": None, "observed_at": None, "source": "Installed native CLI help/schema",
+                    "limit": "Refresh host status to check installed capabilities."}
+        try:
+            out = self.native.capabilities(family)
+        except (native.NativeError, OSError, ValueError):
+            out = {"installed": bool(native.executable(family)), "state": "error", "version": None, "isolated": False, "login": None,
+                   "limit": "Installed capability check failed. Existing sign-in is retained."}
+        out.update(observed_at=stamp(), source="Installed native CLI help/schema")
+        with self.lock:
+            self.capabilities[key] = {"at": time.time(), "value": deepcopy(out)}
+        return out
+
+    def initialize(self, body):
+        # The installer establishes the running host first. This explicit step
+        # uses the existing settings writer only when neither store exists.
+        # Established settings (including a valid mirror) remain authoritative.
+        if set(body) != {"expected_revision"} or type(body["expected_revision"]) is not int:
+            raise ValueError("Invalid first setup action")
+        state = anchor_settings.read_settings_state()
+        if state["missing"]:
+            anchor_settings.save_settings(steward_type="aladdin", expected_revision=body["expected_revision"])
+        elif not state["valid"]:
+            raise anchor_settings.SettingsInvalid(state["error"])
+        return self.snapshot()
+
+    def refresh(self, connection):
+        key = self._key(connection["id"])
+        with self.lock:
+            gate = self.refresh_locks.setdefault(key, threading.Lock())
+        with gate:
+            cap = self.capability(connection["family"], True)
+            now = stamp()
+            old = deepcopy(self.observations.get(key, empty_observation()))
+            try:
+                if connection["mode"] == "api":
+                    secret = provider_secrets.get(connection["id"])
+                    if not secret:
+                        out = empty_observation()
+                        out.update(auth="signed_out", auth_source="Host OS credential vault")
+                    else:
+                        validate_api(connection["family"], secret)
+                        out = empty_observation()
+                        out.update(auth="api_key", test="passed", auth_source="Public API model catalog GET")
+                    out["allowance"]["state"] = "unsupported"
+                elif not cap["installed"]:
+                    raise native.NativeError("unavailable")
+                elif not connection["native_default"] and not cap["isolated"]:
+                    raise native.NativeError("unsupported")
+                else:
+                    out = self.native.observe(connection)
+                out["observed_at"] = now
+                for metric in ("allowance", "provider_usage"):
+                    prior = old[metric]
+                    retained = bool(prior.get("windows")) if metric == "allowance" else prior.get("tokens") is not None
+                    if out[metric]["state"] != "fresh" and retained and prior.get("observed_at"):
+                        out[metric] = {**prior, "state": "stale", "attempted_at": now, "error": out[metric]["state"]}
+                    else:
+                        out[metric].update(observed_at=now, attempted_at=now)
+                if connection["family"] == "claude" and connection["mode"] == "subscription":
+                    out["allowance"] = claude_allowance(connection["id"], now)
+            except (native.NativeError, ValueError, OSError) as exc:
+                state = exc.state if isinstance(exc, native.NativeError) else "error"
+                out = old
+                out.update(auth=state, test="failed", attempted_at=now,
+                           error="Host status is " + state + "; existing credentials are retained")
+                for metric in ("allowance", "provider_usage"):
+                    out[metric].update(state="stale" if old[metric].get("observed_at") else state,
+                                       attempted_at=now, error=state)
+            with self.lock:
+                self.observations[key] = deepcopy(out)
+            # Capability discovery reads native model catalogs and help only.
+            if out["auth"] == "signed_in" and connection["family"] in ("claude", "chatgpt", "grok"):
+                try:
+                    rows, _ = model_policy.discover(connection["family"], env=native.account_env(connection), runner=native.catalog_command)
+                    selection = model_policy.select_model(connection["family"], rows)
+                    public_rows = [{"model": r["model"], "efforts": r["efforts"]} for r in rows]
+                    public_selection = {"model": selection["model"], "effort": selection["effort"]}
+                    with self.lock:
+                        self.catalogs[key] = {"state": "fresh", "observed_at": now, "rows": public_rows, "selection": public_selection}
+                except (ValueError, RuntimeError, TypeError, AttributeError):
+                    with self.lock:
+                        self.catalogs[key] = {"state": "unavailable", "observed_at": now, "rows": []}
+
+    def snapshot(self, refresh=False, identity=None):
+        settings = anchor_settings.load_settings()
+        connections = settings["provider_connections"]
+        if refresh:
+            selected = [metadata.find_connection(settings, identity)] if identity else connections
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(self.refresh, selected))
+        out = []
+        with self.lock:
+            for connection in connections:
+                cap = self.capability(connection["family"])
+                obs = deepcopy(self.observations.get(self._key(connection["id"]), empty_observation()))
+                for metric in ("allowance", "provider_usage"):
+                    observation = obs[metric]
+                    when = observation.get("observed_at")
+                    if when and observation["state"] == "fresh" and time.time() - datetime.fromisoformat(when).timestamp() > TTL:
+                        observation["state"] = "stale"
+                    if metric == "allowance" and any(w.get("resets_at") is not None and w["resets_at"] <= time.time() for w in observation["windows"]):
+                        observation["state"] = "stale"
+                age = obs.get("observed_at")
+                obs["auth_stale"] = bool(age and time.time() - datetime.fromisoformat(age).timestamp() > TTL)
+                ready = (obs["auth"] == "signed_in" and not obs["auth_stale"] and connection["mode"] == "subscription"
+                         and connection["family"] in ("claude", "chatgpt")
+                         and (connection["native_default"] or cap["isolated"]))
+                catalog = deepcopy(self.catalogs.get(self._key(connection["id"]), {"state": "unknown", "rows": []}))
+                if catalog.get("observed_at") and time.time() - datetime.fromisoformat(catalog["observed_at"]).timestamp() > TTL:
+                    catalog["state"] = "stale"
+                reported = [w["remaining_percent"] for w in obs["allowance"]["windows"]]
+                remaining = reported if obs["allowance"]["state"] == "fresh" else []
+                low = bool(reported and min(reported) <= settings["provider_preferences"]["warning_threshold"])
+                exhausted = bool(remaining and min(remaining) <= 0)
+                out.append({**connection, **obs, "capability": cap, "catalog": catalog,
+                            "execution": {"ready": ready and not exhausted, "cockpit": ready and not exhausted,
+                                          "jobs": ready and (connection["family"] == "claude" or connection["native_default"]) and not exhausted,
+                                          "reason": "API connections have separate billing; subscription execution adapters do not support API mode." if connection["mode"] == "api" else
+                                          "Isolated ChatGPT accounts can start new cockpits; the one-shot adapter retains its fixed default home." if connection["family"] == "chatgpt" and not connection["native_default"] else
+                                          "Native authentication checked; allowance may still be unknown." if ready else "Execution is unready; refresh host authentication and capabilities."},
+                            "capacity": "exhausted" if exhausted else "near_limit" if low and remaining else "usable" if remaining else "unknown",
+                            "warning": (("Low allowance. " if remaining else "Last report indicated low allowance; its status is now " + obs["allowance"]["state"] + ". ")
+                                        + "Full model strength stays selected until you apply a change.") if low else None,
+                            "anchor_observed": observed_tokens(connection["id"]),
+                            "api_spend": {**unknown("Provider API billing report", "unsupported"), "amount": None, "currency": None},
+                            "subscription_price": {**unknown("Provider subscription billing", "unsupported"), "amount": None}})
+        return {"ok": True, "host": host_state(), "settings_revision": settings["settings_revision"],
+                "settings_error": settings.get("settings_error"), "preferences": deepcopy(settings["provider_preferences"]),
+                "default_family": settings["default_cli"], "connections": out, "api_storage_available": provider_secrets.available()}
+
+    def add(self, body):
+        settings = anchor_settings.get_launch_settings()
+        connection = metadata.new_connection(body.get("family"), body.get("name"), body.get("mode", "subscription"))
+        if connection["mode"] == "subscription":
+            cap = self.capability(connection["family"], True)
+            if not cap["isolated"]:
+                raise ValueError("This native provider has no verified isolated account home; existing login is preserved")
+        anchor_settings.save_settings(provider_connections=settings["provider_connections"] + [connection], expected_revision=body.get("expected_revision"))
+        return {"ok": True, "connection_id": connection["id"], "snapshot": self.snapshot()}
+
+    def rename(self, body):
+        settings = anchor_settings.get_launch_settings()
+        connections = deepcopy(settings["provider_connections"])
+        connection = metadata.find_connection(settings, body.get("connection_id"))
+        for item in connections:
+            if item["id"] == connection["id"]:
+                item["name"] = body.get("name")
+        anchor_settings.save_settings(provider_connections=connections, expected_revision=body.get("expected_revision"))
+        return self.snapshot()
+
+    def apply(self, body):
+        if type(body.get("expected_revision")) is not int:
+            raise ValueError("Load settings before applying changes")
+        settings = anchor_settings.get_launch_settings()
+        prefs = metadata.validate_preferences(body.get("preferences"), settings["provider_connections"])
+        snapshot = self.snapshot()
+        by_id = {c["id"]: c for c in snapshot["connections"]}
+        family = prefs["family"] or settings["default_cli"]
+        connection = metadata.selected_connection({**settings, "provider_preferences": prefs}, family)
+        if not by_id[connection["id"]]["execution"]["ready"]:
+            raise ValueError("Selected account is unready for execution; refresh its host status")
+        for candidate_family, quality in prefs["quality"].items():
+            selected = metadata.selected_connection({**settings, "provider_preferences": prefs}, candidate_family)
+            catalog = by_id[selected["id"]]["catalog"]
+            if quality != {"model": "latest_supported", "effort": "highest_supported"}:
+                rows = catalog.get("rows") or []
+                if catalog["state"] != "fresh":
+                    raise ValueError("Refresh native model capabilities before choosing an exact model or effort")
+                model = catalog.get("selection", {}).get("model") if quality["model"] == "latest_supported" else quality["model"]
+                row = next((r for r in rows if r["model"] == model), None)
+                if not row or quality["effort"] != "highest_supported" and quality["effort"] not in row["efforts"]:
+                    raise ValueError("Model or reasoning effort is not advertised by this account's native CLI")
+        # Store user choices in the existing settings transaction. Do not touch
+        # global family/model policy or any live engine, queue or campaign.
+        anchor_settings.save_settings(provider_preferences=prefs, expected_revision=body["expected_revision"])
+        return self.snapshot()
+
+    def start_login(self, identity):
+        connection = metadata.find_connection(anchor_settings.get_launch_settings(), identity)
+        if connection["native_default"] or connection["mode"] != "subscription":
+            raise ValueError("Add a named subscription for sign-in; the existing default is preserved")
+        cap = self.capability(connection["family"], True)
+        if not cap["login"] or not cap["isolated"]:
+            raise ValueError("Terminal-free isolated enrollment is unsupported by this installed native CLI")
+        # Never replace the source of a live/previously bound bridge. Retry a
+        # failed pending login, but renewal of a signed-in home needs a new home.
+        self.refresh(connection)
+        if self.observations[self._key(identity)]["auth"] == "signed_in":
+            raise ValueError("This account is already signed in; add a separate subscription to change identity")
+        with self.lock:
+            if any(v["key"] == self._key(identity) and v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()):
+                raise ValueError("Sign-in is already in progress for this account")
+            if sum(v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()) >= 2:
+                raise ValueError("Two host sign-ins are already in progress")
+            login_id, cancel = uuid.uuid4().hex, threading.Event()
+            self.logins[login_id] = {"id": login_id, "key": self._key(identity), "connection_id": identity,
+                                     "state": "starting", "message": "Starting native sign-in on the mother ship", "cancel": cancel,
+                                     "started_at": time.time(), "expires_at": time.time() + native.LOGIN_TIMEOUT}
+            # Remove only old completed ephemeral attempts.
+            for key, value in list(self.logins.items()):
+                if value["state"] not in ("starting", "awaiting_browser", "cancelling") and time.time() - value["started_at"] > 600:
+                    del self.logins[key]
+        def progress(value):
+            with self.lock:
+                if not cancel.is_set():
+                    self.logins[login_id].update(value)
+        def worker():
+            try:
+                self.native.login(connection, cancel, progress)
+                if cancel.is_set():
+                    raise native.NativeError("cancelled")
+                self.refresh(connection)
+                if self.observations[self._key(identity)]["auth"] != "signed_in":
+                    raise native.NativeError()
+                state, message = "completed", "Native sign-in completed; account status refreshed on the mother ship"
+            except (native.NativeError, ValueError, OSError):
+                state = "cancelled" if cancel.is_set() else "failed"
+                message = "Sign-in cancelled" if cancel.is_set() else "Native sign-in failed or timed out. Retry this account; existing default login is retained."
+            finally:
+                with self.lock:
+                    self.logins[login_id].pop("url", None)
+                    self.logins[login_id].pop("user_code", None)
+                    self.logins[login_id].update(state=state, message=message)
+        thread = threading.Thread(target=worker, name="provider-login-" + login_id, daemon=True)
+        with self.lock:
+            self.logins[login_id]["thread"] = thread
+        thread.start()
+        return self.login_status(login_id)
+
+    def login_status(self, identity, cancel=False):
+        with self.lock:
+            value = self.logins.get(identity)
+            if not value or value["key"][0] != str(paths.data_dir()):
+                raise ValueError("Unknown sign-in attempt")
+            if cancel and value["state"] in ("starting", "awaiting_browser"):
+                value["cancel"].set()
+                value["state"] = "cancelling"
+                value["message"] = "Cancelling owned native sign-in"
+            return {"ok": True, **{k: v for k, v in value.items() if k in ("id", "connection_id", "state", "message", "url", "user_code", "expires_at")}}
+
+
+def claude_allowance(identity, attempted_at):
+    import usage_capacity
+    signal = usage_capacity.latest_limit_signal(connection_id=identity)
+    out = {**unknown("Account-qualified Claude rate_limit_event", "unsupported"), "windows": [], "attempted_at": attempted_at}
+    if not signal:
+        return out
+    out["observed_at"] = signal["seen_at"]
+    out["state"] = "fresh" if time.time() - datetime.fromisoformat(signal["seen_at"]).timestamp() < TTL else "stale"
+    for key in ("five_hour", "seven_day"):
+        window = signal[key]
+        if native.finite(window.get("utilization"), 0, 1):
+            out["windows"].append({"label": key.replace("_", " "), "remaining_percent": 100 * (1 - window["utilization"]),
+                                   "resets_at": window.get("resets_at"), "window_minutes": 300 if key == "five_hour" else 10080})
+            if window.get("resets_at") and window["resets_at"] <= time.time():
+                out["state"] = "stale"
+    return out
+
+
+def observed_tokens(identity):
+    """Read only account-qualified entries from the existing usage ledger."""
+    import usage_capacity
+    from glob import glob
+    total, latest = None, None
+    for filename in glob(os.path.join(usage_capacity.ledger_dir(), "*.json")):
+        try:
+            with open(filename, encoding="utf-8") as stream:
+                doc = json.load(stream)
+            for entry in (doc.get("entries") or {}).values():
+                if entry.get("provider_connection_id") != identity or not native.finite(entry.get("tokens")):
+                    continue
+                total = (total or 0) + entry["tokens"]
+                when = entry.get("recorded_at")
+                if isinstance(when, str):
+                    latest = max(latest or when, when)
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+    return {"state": "observed" if total is not None else "unknown", "tokens": total, "source": "Anchor account-qualified usage ledger",
+            "observed_at": latest, "period": "Recorded Anchor work only; other native work is outside this total"}
+
+
+def host_state():
+    # Identity facts, not a claim about Tailscale installation/reachability.
+    root = paths.data_dir()
+    state = anchor_settings.read_settings_state()
+    return {"name": socket.gethostname(), "runtime": "mother_ship", "data_directory": str(root),
+            "configured": state["valid"], "first_setup": state["missing"],
+            "tailscale": "Not checked here; this connection uses Anchor's existing authentication and pairing",
+            "project_roots": project_roots(), "star_chart_url": star_chart_url(), "organization": "Use the existing Star Chart and Aladdin conversation; existing projects are retained"}
+
+
+def star_chart_url():
+    from urllib.parse import quote
+    try:
+        import rnd_registry
+        for entry in rnd_registry.list_projects():
+            if Path(entry.get("folder_path") or "").name.lower() == "campaign":
+                return "/project/" + quote(str(entry["id"]), safe="")
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
+        pass
+    return "/high-seat#camp"
+
+
+def project_roots():
+    try:
+        import rnd_registry
+        entries = rnd_registry.list_projects()
+        if isinstance(entries, dict):
+            entries = entries.get("projects", [])
+        return sorted({e["folder_path"] for e in entries if isinstance(e, dict) and isinstance(e.get("folder_path"), str)})
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+
+
+SERVICE = ProviderService()
+
+
+def require_capacity_choice(settings, connection):
+    # A cached observation can require a user's explicit route choice. This
+    # check performs no native/network refresh and never changes model strength.
+    with SERVICE.lock:
+        allowance = deepcopy(SERVICE.observations.get(SERVICE._key(connection["id"]), empty_observation())["allowance"])
+    observed = allowance.get("observed_at")
+    if (allowance["state"] != "fresh" or not observed
+            or time.time() - datetime.fromisoformat(observed).timestamp() > TTL
+            or any(w.get("resets_at") is not None and w["resets_at"] <= time.time() for w in allowance["windows"])):
+        return
+    remaining = [w["remaining_percent"] for w in allowance["windows"] if native.finite(w.get("remaining_percent"), 0, 100)]
+    if not remaining:
+        return
+    if min(remaining) <= 0:
+        raise ValueError("Selected subscription allowance is exhausted; refresh or apply another account in Setup. Full quality is retained.")
+    prefs = settings.get("provider_preferences", metadata.DEFAULT_PREFERENCES)
+    if min(remaining) <= prefs["warning_threshold"] and prefs["warning_policy"] == "manual":
+        raise ValueError("Your near-limit policy requires an explicit route choice in Setup before starting work. Full quality is retained.")
+
+
+def selected_for_launch(settings, family, surface="cockpit", check_capacity=False):
+    connection = metadata.selected_connection(settings, family)
+    if connection["mode"] != "subscription" or not connection["native_default"] and family not in ("claude", "chatgpt"):
+        raise ValueError("Selected connection has no subscription execution adapter")
+    if surface == "jobs" and family == "chatgpt" and not connection["native_default"]:
+        raise ValueError("The Codex one-shot adapter cannot execute an isolated account; choose its existing native default explicitly")
+    if check_capacity:
+        require_capacity_choice(settings, connection)
+    return connection
+
+
+def resolve_quality(family, settings, connection, *, surface="cockpit"):
+    choice = settings.get("provider_preferences", metadata.DEFAULT_PREFERENCES)["quality"].get(family)
+    if surface == "jobs" and family == "chatgpt" and choice and choice != {"model": "latest_supported", "effort": "highest_supported"}:
+        raise ValueError("The Codex one-shot adapter requires latest model and highest reasoning")
+    selected = (model_policy.resolve(family, settings=settings) if connection["native_default"]
+                else model_policy.resolve(family, settings=settings, env=native.account_env(connection)))
+    if not choice or choice == {"model": "latest_supported", "effort": "highest_supported"}:
+        return selected
+    rows, _ = model_policy.discover(family, env=native.account_env(connection))
+    model = selected["model"] if choice["model"] == "latest_supported" else choice["model"]
+    row = next((r for r in rows if r["model"] == model), None)
+    if not row:
+        raise ValueError("The explicitly selected model is no longer available")
+    effort = model_policy.highest_effort(row["efforts"]) if choice["effort"] == "highest_supported" else choice["effort"]
+    if effort not in row["efforts"]:
+        raise ValueError("The explicitly selected reasoning effort is unavailable")
+    return {**selected, "model": model, "effort": effort, "selection_evidence": "explicit_setup_choice"}
+
+
+def handle_page(handler, path, body):
+    if path == "/setup/install":
+        from html import escape
+        # The existing installer documentation is code, not user project data.
+        content = (Path(__file__).parent / "USER-ONBOARD.md").read_text(encoding="utf-8")
+        handler._send_html('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
+                           '<title>Anchor installation</title><a href="/setup">Return to Setup</a>'
+                           '<pre style="white-space:pre-wrap;max-width:80ch;margin:24px auto">' + escape(content) + '</pre>')
+        return
+    handler._send_html((Path(__file__).parent / "static" / "provider-setup.html").read_text(encoding="utf-8"))
+
+
+def handle_get(handler, path, body):
+    query = parse_qs(urlsplit(handler.path).query)
+    try:
+        if path == "/api/provider-setup/login":
+            out = SERVICE.login_status(query.get("id", [None])[0])
+        else:
+            out = SERVICE.snapshot(query.get("refresh", ["0"])[0] == "1", query.get("connection_id", [None])[0])
+            out["client_can_enter_api"] = local_request(handler)
+        if "connections" in out:
+            out["client_can_enter_api"] = local_request(handler)
+        if "snapshot" in out:
+            out["snapshot"]["client_can_enter_api"] = local_request(handler)
+        handler._send_json(out)
+    except (ValueError, OSError, RuntimeError):
+        handler._send_json({"ok": False, "error": "Host provider status is unavailable; existing setup is retained"}, 400)
+
+
+def local_request(handler):
+    try:
+        if any(handler.headers.get(h) for h in ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "Via")):
+            return False
+        host = urlsplit("http://" + handler.headers.get("Host", "")).hostname
+        origin = urlsplit(handler.headers.get("Origin", "")).hostname
+        return (ipaddress.ip_address(handler.client_address[0]).is_loopback
+                and host in ("localhost", "127.0.0.1", "::1")
+                and origin in (None, "localhost", "127.0.0.1", "::1"))
+    except ValueError:
+        return False
+
+
+def handle_post(handler, path, body):
+    if not handler._steward_same_origin():
+        handler._send_json({"ok": False, "error": "Cross-origin provider action refused"}, 403)
+        return
+    body = body or {}
+    try:
+        if not isinstance(body, dict):
+            raise ValueError("Invalid provider action")
+        if path.endswith("/initialize"):
+            out = SERVICE.initialize(body)
+        elif path.endswith("/accounts"):
+            allowed = {"family", "mode", "name", "expected_revision"}
+            if set(body) - allowed or type(body.get("expected_revision")) is not int:
+                raise ValueError("Only non-secret named account metadata is accepted")
+            out = SERVICE.add(body)
+        elif path.endswith("/rename"):
+            if set(body) - {"connection_id", "name", "expected_revision"} or type(body.get("expected_revision")) is not int:
+                raise ValueError("Invalid nickname action")
+            out = SERVICE.rename(body)
+        elif path.endswith("/apply"):
+            out = SERVICE.apply(body)
+        elif path.endswith("/login"):
+            out = SERVICE.start_login(body.get("connection_id"))
+        elif path.endswith("/cancel"):
+            out = SERVICE.login_status(body.get("id"), cancel=True)
+        elif path.endswith("/api-key"):
+            # Secret entry stays on the mother ship's local UI. A remote client
+            # can view API status, but may not transmit keys over plain HTTP.
+            if not local_request(handler):
+                handler._send_json({"ok": False, "error": "Enter API credentials in Setup on the mother ship itself"}, 403)
+                return
+            if not provider_secrets.available():
+                raise ValueError("Secure OS API credential storage is unavailable")
+            connection = metadata.find_connection(anchor_settings.get_launch_settings(), body.get("connection_id"))
+            if connection["mode"] != "api":
+                raise ValueError("API keys cannot replace subscription sign-ins")
+            secret = body.get("api_key")
+            validate_api(connection["family"], secret)
+            provider_secrets.put(connection["id"], secret)
+            SERVICE.refresh(connection)
+            out = SERVICE.snapshot()
+        else:
+            raise ValueError("Unknown provider action")
+        if "connections" in out:
+            out["client_can_enter_api"] = local_request(handler)
+        if "snapshot" in out:
+            out["snapshot"]["client_can_enter_api"] = local_request(handler)
+        handler._send_json(out)
+    except anchor_settings.SettingsInvalid:
+        handler._send_json({"ok": False, "error": "Settings changed or are invalid; reload before saving"}, 409)
+    except (ValueError, OSError, RuntimeError, TypeError, KeyError) as exc:
+        # ValueError messages originate here/metadata only. Never forward any
+        # provider, subprocess, vault or HTTP exception text.
+        message = str(exc) if type(exc) is ValueError else "Host provider action failed; existing setup is retained"
+        handler._send_json({"ok": False, "error": message}, 400)

@@ -730,6 +730,7 @@ def ingest_job_cost(engine_session_uuid, cost, job_id, record=None) -> int:
         cost_usd=_cost_number(cost.get("total_cost_usd")),
         project_id=project_id, folder_path=folder_path, effort_dir=where,
         cli=rec.get("backend") or None,
+        provider_connection_id=(rec.get("provider_connection") or {}).get("id"),
         model=receipt.get("model_served") or receipt.get("model") or None,
         duration_ms=_int(cost.get("duration_ms")),
         usage={"input_tokens": inp, "output_tokens": out,
@@ -868,7 +869,8 @@ def turn_key(engine_session_uuid, native_id) -> str:
 def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
                  cost_usd=None, project_id=None, folder_path=None, effort_dir=None,
                  cli=None, model=None, duration_ms=0, usage=None, recorded_at=None,
-                 index_key=None, parent_id=None, replace=False, attested=None) -> int:
+                 index_key=None, parent_id=None, replace=False, attested=None,
+                 provider_connection_id=None) -> int:
     """Write ONE attributed usage row: the ledger entry (write-once per key under
     the engine session's doc) and, for an indexed source with a project, the
     compact per-project index row the cockpit reads. A row with no engine
@@ -901,6 +903,8 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
         "parent_id": parent_id or None,
         "model_attested": None if attested is None else bool(attested),
     }
+    if provider_connection_id:
+        entry["provider_connection_id"] = provider_connection_id
     if isinstance(usage, dict):
         entry["usage"] = dict(usage)
     added = 0

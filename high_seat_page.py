@@ -385,6 +385,7 @@ def _rail(ctx):
     cap_rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or ())
     return (
         '<nav class="rail">'
+        '<div class="provider-rail-head"><button id="setup-gear" class="setup-gear" type="button" aria-label="Setup settings" title="Setup settings">&#9881;</button><span class="provider-rail-brand">%sAnchor</span></div>'
         '<div class="lockup">%s<div class="wordmark">Ghost World <span class="gwl-accent">Labs</span></div></div>'
         '<div class="gwl-badge">Powered by NextGen Nuclear %s</div>'
         '<div class="railseat">%s<h1>The %s</h1></div>'   # the Cave's picture alone (his word 2026-10-02); the anchor stays by the word Anchor
@@ -401,9 +402,16 @@ def _rail(ctx):
         '<li><button data-rail="email"><span class="n">Email</span><span class="c">not connected</span></button></li>'
         '<li><button data-rail="term"><span class="n">Terminal</span><span class="c" id="railTerm">%d</span></button></li>'
         '</ul>'
-        '<div class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div></div>'
+        '<div id="cave-provider-controls" class="provider-controls" aria-label="Provider and quality for new work">'
+        '<div><label for="cave-family">Provider</label><select id="cave-family" aria-label="Provider"></select></div>'
+        '<div><label for="cave-account">Account</label><select id="cave-account" aria-label="Account"></select></div>'
+        '<div><label for="cave-model">Model</label><select id="cave-model" aria-label="Model"></select></div>'
+        '<div><label for="cave-effort">Reasoning</label><select id="cave-effort" aria-label="Reasoning"></select></div>'
+        '<button id="cave-provider-apply" type="button">Apply to new work</button><button id="cave-provider-settings" type="button">Provider details / Setup</button>'
+        '<p id="cave-provider-message" class="provider-control-message" role="status"></p></div>'
+        '<details class="cap provider-history"><summary>Provider-wide Anchor observations</summary><div id="capList">%s</div></details>'
         '</nav>'
-    ) % (_brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
+    ) % (anchor_mark(ctx["build"]), _brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
          _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
          esc(st["high_seat_name"]), esc(mode_name(st)), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
          esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
@@ -1146,6 +1154,7 @@ def _panel(ctx):
         '<input id="loginTok" type="password" placeholder="paste the token here" autocomplete="off" spellcheck="false">'
         '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
         '%s'
+        '<button id="cave-provider-capacity" class="provider-capacity" type="button" aria-label="Provider capacity and details"><strong>Provider capacity</strong><span>Unknown · reading host settings</span></button>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a %s verb applies on the record"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Cave&rsquo;s steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
@@ -1235,4 +1244,5 @@ def render_high_seat_html(ctx) -> str:
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), _tile_names(ctx), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
-    return page
+    return page.replace('</head>', '<link rel="stylesheet" href="/static/provider-setup.css"></head>').replace('</body>',
+        '<script src="/static/provider-controls.js"></script></body>')

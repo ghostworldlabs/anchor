@@ -516,6 +516,8 @@ import rnd_terminal as _term
 import terminal_session as _termsess
 import session_registry as _sessreg
 import anchor_settings as _aset  # durable model/engine prefs (default_cli, families)
+from provider_setup import handle_page as handle_provider_setup_page, handle_get as handle_provider_setup_get, handle_post as handle_provider_setup_post
+from provider_native import private_account_path as _provider_private_path
 import handoff as _handoff
 import preview_server as _preview
 import project_bootstrap as _bootstrap
@@ -14616,6 +14618,9 @@ def handle_ecgberht_artifact(handler, path, body):
         return
     root = Path(folder).resolve()
     target = (root / rel).resolve()
+    if _provider_private_path(target):
+        handler._send_json({"ok": False, "error": "private_host_credentials"}, 403)
+        return
     try:
         target.relative_to(root)
     except ValueError:
@@ -14775,6 +14780,9 @@ def handle_ecgberht_chamber_artifact(handler, path, body):
     folder, err, status = _ecgberht_project_folder(pid)
     if err is not None:
         handler._send_json(err, status)
+        return
+    if _provider_private_path(Path(folder) / rel):
+        handler._send_json({"ok": False, "error": "private_host_credentials"}, 403)
         return
     artifact = {
         "kind": kind,
@@ -19688,6 +19696,9 @@ def handle_project_files(handler, path, body):
         return
 
     target_path = (project_root / p).resolve()
+    if _provider_private_path(target_path):
+        handler._send_json({"ok": False, "error": "private_host_credentials"}, 403)
+        return
     try:
         target_path.relative_to(project_root)
     except ValueError:
@@ -19816,6 +19827,9 @@ def handle_project_file_content(handler, path, body):
         return
 
     target_path = (project_root / p).resolve()
+    if _provider_private_path(target_path):
+        handler._send_json({"ok": False, "error": "private_host_credentials"}, 403)
+        return
     try:
         target_path.relative_to(project_root)
     except ValueError:
@@ -21749,6 +21763,9 @@ _MIGRATED_HANDLERS = {
     "handle_doctor_resolve_all": handle_doctor_resolve_all,
     "handle_doctor_probe": handle_doctor_probe,
     "handle_settings_get": handle_settings_get,
+    "handle_provider_setup_page": handle_provider_setup_page,
+    "handle_provider_setup_get": handle_provider_setup_get,
+    "handle_provider_setup_post": handle_provider_setup_post,
     "handle_settings_post": handle_settings_post,
     "handle_set_blurb": handle_set_blurb,
     "handle_link_task": handle_link_task,

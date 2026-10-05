@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Anchor · Setup</title>
+  <link rel="stylesheet" href="/static/provider-setup.css">
+</head>
+<body class="provider-setup">
+  <header class="setup-top"><span class="setup-brand">⚓ Anchor</span><span id="setup-host" class="muted"></span><button id="setup-return" type="button">Return to Cave</button></header>
+  <main>
+    <nav class="setup-steps" aria-label="Setup sections">
+      <button data-section="host" aria-current="step">1 · Mother ship</button>
+      <button data-section="providers">2 · Providers</button>
+      <button data-section="chart">3 · Star Chart</button>
+    </nav>
+    <p id="setup-message" role="status" aria-live="polite"></p>
+    <section id="setup-section-host">
+      <p class="eyebrow">One personal home for your work</p><h1>Your mother ship</h1>
+      <p>Anchor runs on the mother ship. Other computers and phones connect to its existing projects, provider accounts and Aladdin.</p>
+      <div class="setup-grid">
+        <article class="setup-card"><h2>This computer is my mother ship</h2><p id="host-runtime">Reading existing setup…</p><p>First installation uses Anchor’s existing installer: Anchor and Foundry skills, directories, then service startup. This page continues that setup after the service is reachable.</p><a href="/setup/install" target="_blank" rel="noopener">Installation instructions</a></article>
+        <article class="setup-card"><h2>Connect to my existing mother ship</h2><p>Join the same personal Tailscale network, confirm the host is online, and use Anchor’s existing secure pairing flow. The client uses the host’s providers and projects.</p><p id="host-network" class="muted"></p><p>Opening these settings keeps the established connection. No pairing token is created or replaced.</p></article>
+      </div>
+      <p class="setup-notice">Sign-in, account tests, API credentials and usage reads run on the mother ship, wherever you connect from.</p>
+      <button id="setup-initialize" class="primary" hidden>Save first setup with Aladdin</button>
+      <p id="initialize-message" role="status"></p>
+      <button data-section="providers" class="primary">Continue to providers →</button>
+    </section>
+    <section id="setup-section-providers" hidden>
+      <p class="eyebrow">Shared Setup and Cave settings</p><h1>Your AI providers on the mother ship</h1>
+      <p>Existing native sign-ins work without an open terminal. Each named subscription keeps its own account and allowance. API billing is a separate, optional mode.</p>
+      <p id="provider-host-note" class="setup-notice"></p>
+      <div class="setup-actions"><button id="provider-refresh">Refresh host sign-ins & reports</button><span id="refresh-message" role="status"></span></div>
+      <div id="provider-tabs" class="provider-tabs" role="group" aria-label="AI providers"></div>
+      <div class="setup-grid provider-grid">
+        <article class="setup-card"><h2>Named connections</h2><div id="provider-accounts"></div>
+          <form id="add-account-form">
+            <label for="new-account-name">New connection nickname</label><input id="new-account-name" maxlength="70" required autocomplete="off">
+            <label for="new-account-mode">Billing mode</label><select id="new-account-mode"><option value="subscription">Native subscription</option><option value="api">Optional API connection</option></select>
+            <button id="add-account" type="submit">+ Add named connection</button><p id="add-account-limit" class="muted small"></p>
+          </form>
+        </article>
+        <article id="provider-detail" class="setup-card" aria-live="polite"></article>
+      </div>
+      <article class="setup-card quality-card">
+        <h2>Provider · account · model · reasoning</h2><p>Apply chooses the source for newly started work. Existing conversations retain their account and native session.</p>
+        <div class="quality-grid">
+          <div><label for="setup-family">Provider</label><select id="setup-family"></select></div>
+          <div><label for="setup-account">Account</label><select id="setup-account"></select></div>
+          <div><label for="setup-model">Model</label><select id="setup-model"></select></div>
+          <div><label for="setup-effort">Reasoning</label><select id="setup-effort"></select></div>
+        </div>
+        <div class="quality-grid">
+          <div><label for="setup-threshold">Warn at remaining allowance</label><select id="setup-threshold"><option value="10">10%</option><option value="20">20%</option><option value="30">30%</option><option value="40">40%</option><option value="50">50%</option></select></div>
+          <div><label for="setup-warning">Near-limit response</label><select id="setup-warning"><option value="warn">Warn + keep full strength</option><option value="offer">Offer a quality change for me to apply</option><option value="manual">Ask me to choose another route</option></select></div>
+        </div>
+        <p class="setup-notice">Low allowance never lowers the model, reasoning effort or changes accounts automatically. Unknown allowance is not confirmed capacity.</p>
+        <button id="setup-apply" class="primary">Save / apply to new work</button><p id="apply-message" role="status"></p>
+      </article>
+      <div class="setup-actions"><button data-section="host">Mother ship details</button><button data-section="chart">Continue to Star Chart →</button></div>
+    </section>
+    <section id="setup-section-chart" hidden>
+      <p class="eyebrow">Star Chart · Aladdin</p><h1>Your goals and material</h1>
+      <p>Existing goals, initiatives and project folders are retained. On a new mother ship, begin with Aladdin in Star Chart: describe a major goal, its first initiative and deliverable, choose a storage directory, and nominate existing material or start fresh.</p>
+      <p>Use a dev drive when available, or choose another location. The existing Star Chart conversation and source/goal controls keep the original brainstorming readable and preview organization before any material is moved.</p>
+      <article class="setup-card"><h2>Existing project folders on the mother ship</h2><ul id="setup-project-roots"></ul><a id="setup-star-chart" href="/high-seat#camp">Open Star Chart</a></article>
+      <p class="setup-notice">Calendars & email are optional later work. Backups and collaboration between separate mother ships retain their later scope.</p>
+      <button id="chart-return">Return to Cave</button>
+    </section>
+  </main>
+  <script src="/static/provider-controls.js"></script>
+  <script src="/static/provider-setup.js"></script>
+</body>
+</html>

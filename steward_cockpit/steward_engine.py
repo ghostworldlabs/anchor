@@ -735,6 +735,17 @@ class Engine:
         self.cli = stored_entry.get("cli") or prefs["default_cli"]
         self.model_selection = stored_entry.get("model_policy")
         self.policy_override = stored_entry.get("policy_override")
+        # A native conversation retains its original account, including across
+        # Setup edits and process restarts. New conversations use the explicit
+        # Setup choice; changing settings never takes an existing bridge away.
+        import provider_setup as _provider_setup
+        self.provider_connection = stored_entry.get("provider_connection")
+        if self.provider_connection is None:
+            _family = self.cli if stored_entry.get("session_id") else prefs.get("provider_preferences", {}).get("family") or self.cli
+            self.provider_connection = (_provider_setup.metadata.find_connection(prefs, _family + "-default")
+                                        if stored_entry.get("session_id") else _provider_setup.selected_for_launch(prefs, _family))
+        self.provider_quality = (stored_entry.get("provider_quality") if stored_entry.get("session_id") else
+                                 prefs.get("provider_preferences", {}).get("quality", {}).get(self.provider_connection["family"]))
         # codex-discipline-2026-09-15 Wave 1.1 as corrected by John: the
         # dashboard selection drives every steward. What stays: a transient
         # catalog failure keeps the running family and its last selection
@@ -1060,12 +1071,24 @@ class Engine:
                     records.append(record)
             if not any(r.get("family") == family and r.get("session_id") == session_id for r in records):
                 records.append({"family": family, "session_id": session_id,
-                                "model_policy": entry.get("model_policy"), "preserved_at": time.time()})
+                                "model_policy": entry.get("model_policy"),
+                                "provider_connection": entry.get("provider_connection"),
+                                "provider_quality": entry.get("provider_quality"), "preserved_at": time.time()})
             return _update_state(self.skey(), {"provider_sessions": records}) is True
 
     def _desired_policy(self):
         import anchor_settings
         settings = anchor_settings.get_launch_settings()
+        if not self.session_id and not self.alive() and not _read_state_entry(self.skey()).get("session_id"):
+            # Opening a pane can instantiate an idle engine before Setup is
+            # applied. Bind its source at the first actual launch, not that read.
+            import provider_setup as _provider_setup
+            family = settings.get("provider_preferences", {}).get("family") or settings["default_cli"]
+            connection = _provider_setup.selected_for_launch(settings, family)
+            if connection != self.provider_connection:
+                self.model_selection = None
+            self.provider_connection = connection
+            self.provider_quality = settings.get("provider_preferences", {}).get("quality", {}).get(family)
         override = self.policy_override or {}
         # The dashboard selection drives every steward (John, 2026-09-15):
         # a newly selected model reviews the history and takes over on the
@@ -1074,7 +1097,11 @@ class Engine:
             target = override["family"]
         else:
             self.policy_override = None
-            target = settings["default_cli"]
+            # Setup choices apply to newly started work, not conversations
+            # already bound to a native account. Global dashboard routing
+            # remains its separate existing preference.
+            target = (self.provider_connection["family"] if settings.get("provider_preferences", {}).get("family")
+                      else settings["default_cli"])
         return settings, target
 
     def _note_stale_catalog(self, reason):
@@ -1109,6 +1136,9 @@ class Engine:
         import model_policy
         if self.busy:
             return self.cli, self.model_selection
+        if (self.provider_quality and target == self.provider_connection["family"]
+                and self.model_selection and self.provider_quality != {"model": "latest_supported", "effort": "highest_supported"}):
+            return self.cli, self.model_selection
         if not (target == self.cli and self.model_selection):
             return self._select_available_policy(settings, target)
         if self._unavailable_family == self.cli:
@@ -1116,7 +1146,8 @@ class Engine:
             self._unavailable_family = None  # one walk per finding
             return self._select_available_policy(settings, target, excluded=(failed,))
         try:
-            cached = model_policy.cached_selection(self.cli, settings=settings)
+            kwargs = self._account_policy_kwargs(self.cli)
+            cached = model_policy.cached_selection(self.cli, settings=settings, **kwargs)
             if cached is not None:
                 stale = cached.pop("stale", False)
                 if stale:
@@ -1143,10 +1174,11 @@ class Engine:
         if thread is not None and thread.is_alive():
             return
         family = self.cli
+        kwargs = self._account_policy_kwargs(family)
 
         def _run():
             try:
-                model_policy.resolve(family, settings=settings, force=True)
+                model_policy.resolve(family, settings=settings, force=True, **kwargs)
             except model_policy.PolicyUnavailable as exc:
                 if exc.code in ("cli_missing", "auth_required"):
                     # real capacity loss (Grok R1 F5): the next send walks the
@@ -1158,6 +1190,12 @@ class Engine:
         thread = threading.Thread(target=_run, name="steward-catalog-refresh", daemon=True)
         self._catalog_refresh_thread = thread
         thread.start()
+
+    def _account_policy_kwargs(self, family):
+        if self.provider_connection["family"] == family and not self.provider_connection["native_default"]:
+            import provider_native
+            return {"env": provider_native.account_env(self.provider_connection)}
+        return {}
 
     def _journal_routing(self, **event):
         entry = _read_state_entry(self.skey())
@@ -1171,6 +1209,8 @@ class Engine:
         """Bounded prelaunch selection, exclusively among dashboard families."""
         import model_policy
         ladder = list(dict.fromkeys([target] + [settings[k] for k in ("coding_family", "review_family", "default_cli")]))
+        if settings.get("provider_preferences", {}).get("family"):
+            ladder = [target]  # An explicit account choice never borrows another subscription.
         failed = []
         for family in ladder:
             if family in excluded:
@@ -1180,7 +1220,13 @@ class Engine:
                     raise RuntimeError("native cockpit capability contract is not verified")
                 if family == "grok" and not (HERE / "grok_turn_bridge.py").is_file():
                     raise RuntimeError("native Grok cockpit adapter is unavailable")
-                selection = model_policy.resolve(family, settings=settings)
+                if self.provider_connection["family"] == family and (not self.provider_connection["native_default"] or self.provider_quality):
+                    import provider_setup as _provider_setup
+                    bound_settings = {**settings, "provider_preferences": {**settings["provider_preferences"],
+                                     "quality": {family: self.provider_quality} if self.provider_quality else {}}}
+                    selection = _provider_setup.resolve_quality(family, bound_settings, self.provider_connection)
+                else:
+                    selection = model_policy.resolve(family, settings=settings)
             except (ValueError, RuntimeError) as exc:
                 failed.append(family)
                 self._journal_routing(action="unavailable", family=family,
@@ -1289,6 +1335,23 @@ class Engine:
                 elif not seed and entry.get("last_text"):
                     seed = "Provider changed. Read the campaign record before continuing. Prior session summary:\n" + entry["last_text"]
             self.cli, self.model_selection = target, selection
+            import provider_setup as _provider_setup
+            if self.provider_connection["family"] != target:
+                self.provider_connection = _provider_setup.selected_for_launch(settings, target)
+                self.provider_quality = settings.get("provider_preferences", {}).get("quality", {}).get(target)
+            try:
+                _provider_setup.require_capacity_choice(settings, self.provider_connection)
+            except ValueError as exc:
+                self._emit({"t": "sys", "text": str(exc)})
+                return False, str(exc)
+            if not entry.get("session_id") and (not self.provider_connection["native_default"] or settings.get("provider_preferences", {}).get("quality")):
+                try:
+                    bound_settings = {**settings, "provider_preferences": {**settings["provider_preferences"],
+                                     "quality": {target: self.provider_quality} if self.provider_quality else {}}}
+                    self.model_selection = selection = _provider_setup.resolve_quality(target, bound_settings, self.provider_connection)
+                except (ValueError, RuntimeError) as exc:
+                    self._emit({"t": "sys", "text": "Selected provider source is unavailable: " + str(exc)})
+                    return False, "selected provider source unavailable"
         held = list(entry.get("pending_queue") or [])
         if held and not self.queue:
             self.queue = held
@@ -1360,6 +1423,8 @@ class Engine:
             return False, str(e)
         self.proc = proc
         _update_state(self.skey(), {"cli": self.cli, "model_policy": self.model_selection,
+                                   "provider_connection": self.provider_connection,
+                                   "provider_quality": self.provider_quality,
                                    "policy_override": self.policy_override,
                                    "session_id": stored})
 
@@ -2588,7 +2653,7 @@ class Engine:
                 cost_usd=accounting.get("cost"), project_id=project_id,
                 folder_path=folder_path, effort_dir=self.dir, cli=self.cli,
                 model=served, duration_ms=int((accounting.get("duration") or 0) * 1000),
-                usage=usage)
+                usage=usage, provider_connection_id=self.provider_connection["id"])
         except Exception:
             pass
         self._ledger_children()
@@ -2598,6 +2663,11 @@ class Engine:
         children inherit (project, this effort dir, where to drop receipts)."""
         import model_policy
         env = model_policy.policy_environment()
+        import provider_native
+        _account_env = provider_native.account_env(self.provider_connection)
+        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANCHOR_PROVIDER_CONNECTION"):
+            if _key in _account_env:
+                env[_key] = _account_env[_key]
         # A1 (delegated-work PROPOSAL v0.3; Grok code R1 F1-F3, R2 N1-N2): every git ANY agent session runs - steward,
         # code job or workbench terminal - goes through gitguard, which refuses tree-rewriting verbs outside a code
         # job's own worktree BEFORE git runs: a real git.exe (found for `git` and `git.exe` alike), a `git` script and

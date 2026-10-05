@@ -389,6 +389,11 @@ def resolve_project_artifact(folder_path, rel_path: str):
     except ValueError:
         return None
 
+    # A registered project may itself be inside the host's private account
+    # store. A folder-relative hidden-file check alone cannot protect it.
+    from provider_native import private_account_path
+    if private_account_path(target):
+        return None
     # Reject .git / .anchor at the top of the resolved relative path.
     parts = rel_inside.parts
     if parts and parts[0] in _ARTIFACT_FORBIDDEN_TOP:

@@ -286,6 +286,7 @@ def build_argv(
     result.extend(launch_args({"family": "chatgpt", "model": model, "effort": effort}))
     # Both exec and exec resume accept -c; resume does not accept --sandbox.
     result.extend([
+        "-c", 'forced_login_method="chatgpt"',
         "-c", 'approval_policy="never"',
         "-c", f'sandbox_mode="{PERMISSIONS[permission_mode]}"',
     ])

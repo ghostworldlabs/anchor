@@ -410,6 +410,17 @@ ROUTES = [
     # ── Model/engine prefs (durable settings.json) ────────────────────────
     _r("GET",  "/api/settings", AUTH_TOKEN, handler="handle_settings_get",  migrated=True),
     _r("POST", "/api/settings", AUTH_TOKEN, handler="handle_settings_post", migrated=True),
+    _r("GET", "/setup", AUTH_TOKEN, handler="handle_provider_setup_page", migrated=True),
+    _r("GET", "/setup/install", AUTH_TOKEN, handler="handle_provider_setup_page", migrated=True),
+    _r("GET", "/api/provider-setup", AUTH_TOKEN, handler="handle_provider_setup_get", migrated=True),
+    _r("GET", "/api/provider-setup/login", AUTH_TOKEN, handler="handle_provider_setup_get", migrated=True),
+    _r("POST", "/api/provider-setup/accounts", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/initialize", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/rename", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/apply", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/login", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/cancel", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/api-key", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
 
     # ── doctor V3 W3 — the /doctor page + background diagnostics ──────────
     # The page itself is an open bootstrap (same posture as "/" — browser
