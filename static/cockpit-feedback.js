@@ -17,7 +17,9 @@
         || (!/\b(?:not|no longer)\b/i.test(label) && /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(label));
     });
   }
-  function color(light, ready) { return light === 'red' || light === 'green' ? light : ready ? 'orange' : 'gray'; }
+  // W4 (his word 2026-10-05: "why is AI Club green and still has a pulsing outline?"): something waiting on him wins over
+  // working - the dot is orange exactly when the edge pulses; red (a problem) still leads
+  function color(light, ready) { return light === 'red' ? 'red' : ready ? 'orange' : light === 'green' ? 'green' : 'gray'; }
   function get(url, headers) {
     var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 12000);
     return fetch(url, { cache: 'no-store', signal: controller.signal, headers: headers || {} })
@@ -29,7 +31,7 @@
     if (target.general) q += '&general=1&term=' + encodeURIComponent(target.term || '1');
     return get('/api/steward/state' + q, headers).then(function (st) {
       if (!st || !/^(green|orange|red|quiet|gray)$/.test(st.light) || typeof st.busy !== 'boolean') throw new Error('incomplete feedback');
-      var question = !!st.open_question || !!((st.pending_questions || []).length);
+      var question = !!st.open_question || !!((st.pending_questions || []).length) || st.light === 'orange';   // W4 (2026-10-05): one rule - the light is orange exactly when something waits on him
       if (early) early(st, question);
       var stamp = String(st.stamp || ''), cached = old && old.identity === key && old.stamp === stamp && Date.now() < old.until;
       var record = cached ? Promise.resolve(old) : target.general ? Promise.resolve({identity:key,stamp:stamp,until:Date.now()+15000,review:false})

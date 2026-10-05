@@ -306,9 +306,9 @@ def assert_thin_attention(locator):
 def test_running_work_pin_selection_focus_hover_and_legacy_need_are_not_attention(ui):
     fixture, page = ui
     fixture.change(light="green", pin=True)
-    # The second actual Cave card starts with an orange light but no request.
-    # It must never get an amber edge, even before the first scoped poll returns.
-    assert page.frames[1].evaluate("initialAttentionCards") == []
+    # W4 (his rule, 2026-10-05): one rule - the edge pulses exactly when the light is orange; the second Cave card's
+    # orange light IS its attention (orange is painted only from a wait-on-him record).
+    assert page.frames[1].evaluate("initialAttentionCards") == ["card-p-two"]
     card = page.frames[1].locator("#card-p-one")
     tile = fixture.open(page, EFFORT)
     dot = tile.locator(".activity-dot")
@@ -344,7 +344,7 @@ def test_legacy_review_requires_explicit_designation_without_managed_override(ui
     fixture, page = ui
     fixture.change(light="green", pin=True, legacy=True, label=label, owner_phase=owner_phase)
     tile = fixture.open(page, EFFORT)
-    expect(tile.locator(".activity-dot")).to_have_class("activity-dot green")
+    expect(tile.locator(".activity-dot")).to_have_class("activity-dot orange" if attention else "activity-dot green")   # W4: attention shows orange
     page.locator("#strip .tile.cave").click()
     card = page.frames[1].locator("#card-p-one")
     for locator in (tile, card):
@@ -379,7 +379,7 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     card.evaluate("e=>e.classList.add('quiet')")
     assert_thin_attention(card)
     page.emulate_media(reduced_motion="reduce")
-    assert card.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(251, 191, 36)"
+    assert card.evaluate("e=>getComputedStyle(e).animationName") in ("readyedge", "attentionedge"), "the edge pulses with reduced motion (his word, 2026-10-05)"
     page.emulate_media(reduced_motion="no-preference")
     card.evaluate("e=>e.classList.remove('quiet')")
     card.focus()
@@ -397,7 +397,7 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     assert_flashing(card)
     fixture.change(light="green", review=True)
     fixture.refresh(page)
-    expect(card.locator(".tlight")).to_have_class("tlight green")
+    expect(card.locator(".tlight")).to_have_class("tlight orange")   # W4 (2026-10-05): a review waiting on him wins over working
     expect(card).to_have_class(re.compile(r"\bready\b"))
     assert_flashing(card)
     card.locator(".t-go").click()
@@ -429,7 +429,7 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     ("red", False, "rgb(224, 95, 95)"),
     ("orange", True, "rgb(251, 191, 36)"),
     ("quiet", True, "rgb(251, 191, 36)"),
-    ("orange", False, "rgb(137, 149, 167)"),
+    ("orange", False, "rgb(251, 191, 36)"),   # W4: orange is attention by itself
 ])
 def test_status_colors_and_attention_dot_pixels(ui, light, question, color):
     fixture, page = ui
@@ -439,7 +439,7 @@ def test_status_colors_and_attention_dot_pixels(ui, light, question, color):
     expect(dot).to_have_attribute("aria-label", re.compile("working|idle|a problem|needs your attention"))
     page.wait_for_function("color=>getComputedStyle(document.querySelector('.activity-dot')).backgroundColor===color", arg=color)
     assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == color
-    if question:
+    if question or light == "orange":
         expect(tile).to_have_class(re.compile(r"\bready\b"))
         assert_thin_attention(tile)
         assert_flashing(dot, dot=True)
@@ -458,8 +458,8 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
     expect(tile).to_have_class(re.compile(r"\bready\b"))
     assert_thin_attention(tile)
     assert_flashing(dot, dot=True)
-    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(74, 222, 128)"
-    expect(dot).to_have_attribute("aria-label", "working; needs your attention")
+    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(251, 191, 36)"   # W4: the dot is orange while something waits on him
+    expect(dot).to_have_attribute("aria-label", "needs your attention")   # W4: the dot says the one thing
     original_id = tile.get_attribute("data-id")
     fixture.open(page, "Other effort")
     tile = page.locator(f'#strip [data-id="{original_id}"]')
@@ -476,7 +476,7 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
     fixture.refresh(page)
     page.wait_for_timeout(300)
     expect(tile).to_have_class(re.compile(r"\bready\b"))
-    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(74, 222, 128)"
+    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(251, 191, 36)"   # W4: still waiting on him - orange while the read fails
     tile.hover()
     tile.click()
     expect(tile).to_have_class(re.compile(r"\bready\b"))
@@ -497,7 +497,7 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
 
 def test_reduced_motion_has_steady_amber_edge_and_attention_dot_marker(ui):
     fixture, page = ui
-    fixture.change(light="green", question=True)
+    fixture.change(light="orange", question=True)   # W4: a waiting question IS orange
     tile = fixture.open(page, EFFORT)
     expect(tile).to_have_class(re.compile(r"\bready\b"))
     page.locator("#strip .tile.cave").click()
@@ -506,13 +506,14 @@ def test_reduced_motion_has_steady_amber_edge_and_attention_dot_marker(ui):
     page.emulate_media(reduced_motion="reduce")
     card.evaluate("e=>e.classList.add('flash')")
     assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
-    for locator, is_dot in [(card, False), (tile, False), (tile.locator(".activity-dot"), True)]:
-        colors, pixels = painted_samples(locator, dot=is_dot)
-        assert len(set(pixels)) == 1
-        assert all(c[3] == "none" for c in colors)
-    assert card.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(251, 191, 36)"
+    # his word (2026-10-05): the attention EDGE pulses even with reduced motion; the dot keeps its steady marker
+    for locator in (card, tile):
+        assert locator.evaluate("e=>getComputedStyle(e).animationName") in ("readyedge", "attentionedge")
+    colors, pixels = painted_samples(tile.locator(".activity-dot"), dot=True)
+    assert len(set(pixels)) == 1
+    assert all(c[3] == "none" for c in colors)
     assert card.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
-    assert tile.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(224, 168, 54)"
+    assert tile.evaluate("e=>getComputedStyle(e).animationName") in ("readyedge", "attentionedge")   # pulses (his word)
     assert tile.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
     assert tile.evaluate("e=>getComputedStyle(e).boxShadow") == "none"
     dot = tile.locator(".activity-dot")

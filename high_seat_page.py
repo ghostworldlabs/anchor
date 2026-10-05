@@ -681,13 +681,12 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     # its goal; a cockpit within a project is its own card on its own effort
     cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
     attr = (' data-step="%s" data-name="%s" draggable="true"' % (esc(step["id"]), name)) if step else ""
-    # The scoped reader owns unresolved questions/reviews, independently of activity.
-    # Seed only an explicit wait in this card's record, never its colour alone or a
-    # wait promoted from another effort. Looking does not resolve the request.
+    # W4 of the two-lane plan (2026-10-05, his rule): the light is orange exactly when something waits on him (the
+    # engine's one rule), and the edge pulses exactly when the light is orange. Looking does not resolve the request.
     lt = light if isinstance(light, dict) else {}
     lclass = lt.get("light") if lt.get("light") in LIGHT_WORDS else "gray"
     dot = '<span class="tlight %s" title="%s"></span>' % (lclass, esc((LIGHT_WORDS[lclass] + ((": " + lt["why"]) if lt.get("why") else ""))[:200]))
-    if lclass == "orange" and f.get("needs_you") and not f.get("needs_you_effort"):
+    if lclass == "orange":   # W4 (2026-10-05, his rule): the edge pulses exactly when the light is orange
         import hashlib as _hl
         attr += ' data-ready="%s"' % _hl.sha1((str(lt.get("why") or "") + "|" + str(f.get("needs_you") or "")).encode("utf-8")).hexdigest()[:10]
     xbtn = ('<button class="t-x" data-home="%s" title="back to its goal">&times;</button>' % esc(step["id"])) if step else ""

@@ -873,12 +873,26 @@ class Engine:
                                self.woke_at) > max(2 * TICK_SECONDS, 1200))
         if self.broken or stuck or att.get("producer_recovery_required"):
             return "red"
-        if (self.alive() and (self.busy or self.queue)) or att.get("state") == "working":
-            return "green"
+        # W4 of the two-lane plan (2026-10-05, his rule): ORANGE when something waits on him - even while work runs (a
+        # plan ready for his review sat behind a green light on the Knowledge Map); GREEN only when work is observed
+        # running - a turn, a held message, a running code job (the steward's own "working" note alone no longer
+        # paints green: read_map already ages a stale note out); gray otherwise.
         if att.get("managed_refinement"):
-            return "orange" if self._question_contexts(att) else "quiet"
-        if self.open_question or att.get("state") in ("needs_you", "blocked"):
+            waits = bool(self._question_contexts(att))
+        else:
+            waits = bool(self.open_question) or att.get("state") in ("needs_you", "blocked")
+        if waits:
             return "orange"
+        if self.alive() and (self.busy or self.queue):
+            return "green"
+        try:
+            from steward_cockpit.steward_campaign import running_code_jobs
+            if running_code_jobs(self.dir):
+                return "green"
+        except Exception:
+            pass
+        if att.get("state") == "working":
+            return "green"      # a fresh note (read_map keeps it only while its heartbeat is fresh)
         return "quiet"
 
     def _question_contexts(self, attention):
