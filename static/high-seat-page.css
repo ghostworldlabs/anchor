@@ -266,9 +266,6 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tlight.orange{background:#fbbf24;box-shadow:0 0 6px rgba(251,191,36,.6)}
 .tlight.red{background:#e05f5f;box-shadow:0 0 7px #e05f5f}
 .tlight.gray{background:#8995a7;box-shadow:none}
-.tile.ready{border-color:var(--amber);animation:readyedge 2.4s ease-in-out infinite}
-@keyframes readyedge{0%,100%{border-color:rgba(226,169,63,.3);box-shadow:none}50%{border-color:var(--amber);box-shadow:none}}
-@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:var(--amber);box-shadow:none}}
 .cbrief{margin-top:6px;padding:8px 10px;border:1px solid var(--amber-edge);border-radius:8px;background:linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--surface);font-size:12.5px;line-height:1.45}
 .cbrief .k,.cmat .k{display:inline-block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:6px}
 .cb-wait{color:var(--text-dim)}.cb-wait.on{color:var(--amber-t);font-weight:650}
@@ -401,6 +398,11 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 @keyframes flash{0%{box-shadow:0 0 0 2px var(--accent)}70%{box-shadow:0 0 0 2px rgba(108,156,252,.35)}100%{box-shadow:0 0 0 0 transparent}}
 .tile.outline{box-shadow:0 0 0 2px var(--amber-edge)}
 .tile.open{cursor:default;border-color:#3d4352}
+/* Attention owns the existing one-pixel edge, also during a navigation highlight.
+   A held bright/dim beat is visible at card size without adding a halo. */
+.tile.ready{border-color:#fbbf24;box-shadow:none;animation:readyedge 1.2s steps(1,end) infinite}
+@keyframes readyedge{0%,100%{border-color:#fbbf24;box-shadow:none}50%{border-color:#78521e;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:#fbbf24;box-shadow:none}}
 /* the compact card (John, 2026-09-27): the name with the effort as a suffix and the cockpit link beside it, ONE line
    clamped to two, the acts on one line; the description, the next step behind a wait and the effort line open with it */
 .t-top{display:flex;align-items:baseline;gap:8px}

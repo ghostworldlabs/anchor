@@ -237,7 +237,7 @@ def test_close_returns_focus_and_drag_reorders_but_never_past_the_cave(page):
     assert page.locator("#strip .tile.focus").count() == 1
 
 
-# ---------- the phone (S3): the strip is a title bar; swipe on it; x closes; the Cave never closes ----------
+# ---------- the phone: wrapped rows; swipe still navigates; x closes; the Cave never closes ----------
 @pytest.fixture()
 def phone(base):
     with sync_api.sync_playwright() as p:
@@ -253,7 +253,8 @@ def phone(base):
 
 def _painted_tiles(pg):
     return pg.evaluate("""() => [...document.querySelectorAll('#strip .tile')]
-        .filter(t => getComputedStyle(t).display !== 'none' && t.getBoundingClientRect().width > 0)
+        .filter(t => getComputedStyle(t).display !== 'none' && getComputedStyle(t).visibility !== 'hidden'
+                  && t.getBoundingClientRect().width > 0)
         .map(t => t.querySelector('.name').textContent + ' | ' + t.querySelector('.pos').textContent.trim()
                   + ' | x=' + !!t.querySelector('.x'))""")
 
@@ -269,25 +270,29 @@ def _swipe(pg, dx):
     pg.wait_for_timeout(300)
 
 
-def test_phone_title_bar_shows_only_the_focus_with_its_place_and_swipe_moves_along_the_tiles(phone):
+def test_phone_title_bar_wraps_with_an_arrow_and_swipe_still_moves_along_the_tiles(phone):
     assert _painted_tiles(phone) == ["Cave of Wonders |  | x=false"]
     _cave(phone).locator("#ck1").click()
     phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 2")
-    phone.locator("#strip .tile.cave").evaluate("e => e.click()")      # hidden on the phone; back to the Cave
+    phone.locator("#strip .tile.cave").click()
     _cave(phone).locator("#pre").click()
     phone.wait_for_function("() => document.querySelectorAll('#strip .tile').length === 3")
     _settle(phone)
-    assert _painted_tiles(phone) == ["Artificial Magi | ‹ 3 of 3 › | x=true"]
+    assert _painted_tiles(phone) == ["Cave of Wonders | ‹ 1 of 3 › | x=false"]
+    assert phone.locator("#rows").is_visible()
+    assert phone.locator("#strip .tile.focus .name").text_content() == "Artificial Magi"
     _swipe(phone, 160)                                                  # right: the previous one
-    assert _painted_tiles(phone) == ["MBA Teaching AI | ‹ 2 of 3 › | x=true"]
+    assert phone.locator("#strip .tile.focus .name").text_content() == "MBA Teaching AI"
     _swipe(phone, 160)
-    assert _painted_tiles(phone) == ["Cave of Wonders | ‹ 1 of 3 › | x=false"]
+    assert phone.locator("#strip .tile.focus .name").text_content() == "Cave of Wonders"
     _swipe(phone, 160)                                                  # nothing before the Cave
-    assert _painted_tiles(phone) == ["Cave of Wonders | ‹ 1 of 3 › | x=false"]
+    assert phone.locator("#strip .tile.focus .name").text_content() == "Cave of Wonders"
     _swipe(phone, -160)                                                 # left: the next one
-    assert _painted_tiles(phone) == ["MBA Teaching AI | ‹ 2 of 3 › | x=true"]
+    assert phone.locator("#strip .tile.focus .name").text_content() == "MBA Teaching AI"
     _settle(phone)
     assert _painted_frames(phone) == ["/project/p1"]
+    phone.locator("#rows").click()
+    assert len(_painted_tiles(phone)) == 3
     phone.locator("#strip .tile.focus .x").click()
     _settle(phone, 300)
     assert len(phone.evaluate("[...document.querySelectorAll('#strip .tile')].map(t => t.dataset.id)")) == 2
