@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Setup mockup Refinement 2 is ready for review: the gear reopens existing settings and the Cave left sidebar exposes provider/model controls. Actual prototype interactions and desktop/phone views are checked. Warnings retain full strength; scope v5 and earlier versions remain preserved.
+Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.
 
 ## Why next
 
-Review the concrete provider/gear/Cave layout before preparing the laptop implementation plan. The authorized mockup refinement is now produced and checked; live laptop integration follows its human review.
+Build on existing mother-ship sign-ins and verify the working settings on the laptop.
 
 ## Human wait
 
-Review Setup mockup Refinement 2: keep its layout or refine before laptop planning.
+
 
 ## Why stakes
 

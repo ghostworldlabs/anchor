@@ -1,8 +1,8 @@
 {
-  "state": "quiet",
-  "reason": "Saved Setup mockup checks reconciled; Refinement 2 is ready for review",
-  "updated_at": "2026-10-04T21:40:11Z",
-  "state_since": "2026-10-04T21:40:11Z",
+  "state": "working",
+  "reason": "Dispatching the authorized provider integration build",
+  "updated_at": "2026-10-05T19:22:56.336121+00:00",
+  "state_since": "2026-10-05T19:22:56.336131+00:00",
   "provenance": [
     {
       "by": "engine",
