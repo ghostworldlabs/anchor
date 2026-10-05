@@ -289,6 +289,10 @@ def _finish(cdir, job_id, job, result):
 
 
 def land(repo, branch, files):
+    # FROZEN 2026-10-04 19:1x (incident): a failed `git merge` in a live, shared working tree rolls back other
+    # sessions' uncommitted work (it reverted settings.json, rnd_registry.json, anchor_gui.py, job_runner.py ...).
+    # Until landing is rebuilt to never touch the live tree's index or other files, a job's work waits on its branch.
+    return False, "not landed (landing is paused after an incident): the work waits on branch %s" % branch
     """Merge the job's branch into the repository's checked-out branch, only when none of its files is dirty there
     and no merge is already in progress; a failed merge is aborted only when this call started it."""
     _, gitdir, _ = _git(repo, "rev-parse", "--git-dir")

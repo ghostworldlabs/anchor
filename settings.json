@@ -2,11 +2,11 @@
   "default_cli": "chatgpt",
   "coding_family": "chatgpt",
   "review_family": "grok",
-  "steward_type": "jarvis",
+  "steward_type": "aladdin",
   "model_policy": {
     "mode": "latest_supported",
     "effort": "highest_supported"
   },
-  "settings_revision": 10,
-  "updated_at": "2026-09-15T15:22:34+00:00"
+  "settings_revision": 24,
+  "updated_at": "2026-10-05T01:04:51+00:00"
 }

@@ -346,5 +346,53 @@
     "remote_url": "",
     "auto_push": false,
     "group": "AI Infastructure"
+  },
+  {
+    "id": "df56858063ac4025982d0c36038509d2",
+    "name": "Campaign",
+    "folder_path": "C:\\dev\\Campaign",
+    "priority": "1",
+    "state": "active",
+    "notes": "restored 2026-10-04 after the 18:59 git rollback incident",
+    "blurb": "",
+    "remote_url": "",
+    "auto_push": "False",
+    "group": ""
+  },
+  {
+    "id": "92238e33239c42b587a3496692022460",
+    "name": "AI Club",
+    "folder_path": "C:\\dev\\AI Club",
+    "priority": "1",
+    "state": "active",
+    "notes": "restored 2026-10-04 after the 18:59 git rollback incident",
+    "blurb": "",
+    "remote_url": "",
+    "auto_push": "False",
+    "group": "Teaching"
+  },
+  {
+    "id": "bfb4eaa9b8d646dfb4b00a70aaf6d547",
+    "name": "Heterogeneity Empirical Demand Machine Learning",
+    "folder_path": "C:\\dev\\Heterogeneity Empirical Demand Machine Learning",
+    "priority": "1",
+    "state": "active",
+    "notes": "restored 2026-10-04 after the 18:59 git rollback incident",
+    "blurb": "",
+    "remote_url": "",
+    "auto_push": "False",
+    "group": "Research"
+  },
+  {
+    "id": "7b2a96aede814df4af45065760189b35",
+    "name": "Hierarchical Normalizing Flows",
+    "folder_path": "C:\\dev\\Hierarchical Normalizing Flows",
+    "priority": "1",
+    "state": "active",
+    "notes": "restored 2026-10-04 after the 18:59 git rollback incident",
+    "blurb": "",
+    "remote_url": "",
+    "auto_push": "False",
+    "group": "Research"
   }
 ]
