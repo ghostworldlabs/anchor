@@ -150,14 +150,14 @@ def catalog():
     if steward_row:
         rows.remove(steward_row)
         for role, label, art, purpose in (
-            ('project', 'AI cockpit / ' + profile['seal_name'], profile['seal'],
+            ('project', profile['seal_name'], profile['seal'],
              'Keep one effort’s dialogue, decisions and delivery coherent.'),
             ('portfolio', profile['high_seat_name'], profile['high_seat'],
              'Seat and coordinate initiatives across projects.'),
             ('starchart', profile['campaign_name'], profile['campaign_icon'],
              'Explore goals and foresight, then hand approved work to the portfolio steward.')):
             rows.append({**steward_row, 'id': 'steward-' + role,
-                         'name': profile['label'] + ' — ' + label, 'role': role,
+                         'name': profile['label'] + '-' + label, 'role': role,
                          'purpose': purpose, 'icon': '/brand/foundry-edge-ecgberhtportfolio.png'
                          if role == 'portfolio' and profile['key'] == 'ecgberht' else '/vendor/brand/' + art, 'iconPath': None})
     rows.sort(key=lambda r: r['name'].casefold())

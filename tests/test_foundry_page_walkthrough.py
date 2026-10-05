@@ -93,7 +93,7 @@ def test_disk_discovery_and_three_persona_roles(rig):
     assert names == sorted(names, key=str.casefold)
     assert not {'hidden', 'templates'} & {r['id'] for r in catalog['skills']}
     roles = [r for r in catalog['skills'] if r['role']]
-    assert [r['name'] for r in roles] == ['Aladdin — AI cockpit / Lamp', 'Aladdin — Cave of Wonders', 'Aladdin — Star Chart']
+    assert [r['name'] for r in roles] == ['Aladdin-Cave of Wonders', 'Aladdin-Lamp', 'Aladdin-Star Chart']
     assert len({r['source'] for r in roles}) == 1
     assert len({r['icon'] for r in roles}) == 3
     assert catalog['walkthroughOrder'] == ['researchprime', 'gandalf', 'steward-project', 'steward-portfolio', 'steward-starchart']
