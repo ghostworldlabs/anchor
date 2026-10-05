@@ -4,7 +4,7 @@ The approved functionality and layout from implementation plan v1 and scope v6 r
 
 ## What the evidence establishes today
 
-The original build landed and its required 55 tests passed. The author reports focused regressions, disposable browser checks and native account reads. No independent adversarial code-review receipt has been established. A normally authenticated real-service page rendered once, then a repeat timed out before refreshing native status. The current code job owns that diagnosis and remains independent of approval of this refinement. Existing laptop verification is open.
+The original build landed and its required 55 tests passed. No independent adversarial code-review receipt has been established. A normally authenticated real-service retry timed out before refreshing native status. The follow-up repair has now landed, with 60 required tests and three browser tests passing. Its author traced repeated full-ledger scans under the provider lock and reports isolated rendering in 1.21 seconds cold and 0.10 seconds warm with over 15,000 real ledger files and simulated native contention. That repair remains unactivated: the unchanged live service took 17.1 seconds on its latest author check, and the existing laptop is unverified. Review must include both landed changes.
 
 These tests provide useful evidence for cases they exercised. They do not prove robustness of untested failure paths, working enrollment, unsupported providers or an actual existing client.
 
@@ -13,6 +13,10 @@ These tests provide useful evidence for cases they exercised. They do not prove 
 Use Foreman's heavy build tier for the bounded review/fix/re-review work after the current repair finishes. Its deeper review is justified by credentials, separate account identities and a live failure in this area. The current selected families are ChatGPT for execution and Grok for independent review; re-resolve valid host preferences at launch, request latest supported models and highest supported effort, and record actual service. Two fresh, read-only reviewers must return substantive independent findings. Missing, same-family or failed reviewers cannot be described as cross-family assurance.
 
 Crucible remains the option for reforging an unsettled design. The approved product design need not be reopened merely to examine the implementation. This proposal is a bounded Foreman contract, not a claim that Foreman has run. Its contract must be confirmed before launching it, and all long execution remains in a code job's isolated worktree. The steward updates authoritative campaign records only after repository ownership releases. Preserve shared staging and active conversations.
+
+Frozen inputs are scope v6, this cumulative plan v2 and a new assurance execution log inside the assigned worktree. Run at most two waves, four fix iterations per wave and 120 minutes, then return the actual evidence or explicit halt. The native code-job runner owns landing; any Foreman commits stay inside that job's assigned worktree. The terminal gate is:
+
+test-command: python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py
 
 Needed because this software handles provider credentials and routes work between accounts; dropping independent review leaves the implementation judged only by its author. Needed because the real-service retry failed; dropping fault and concurrency tests leaves that class of failure unproved. Nothing requested is cut; calendars/email, backups and collaboration retain their existing later positions. Backups are separate from software hardening.
 

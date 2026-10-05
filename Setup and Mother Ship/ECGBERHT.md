@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Provider build landed; diagnose cached live-state loading before laptop verification.
+Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.
 
 ## Why next
 
-The real provider page loaded once, but a repeat timed out before native refresh.
+Passing author tests do not establish independent assurance.
 
 ## Human wait
 
-
+Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.
 
 ## Why stakes
 

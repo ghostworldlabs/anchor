@@ -3,11 +3,11 @@
   "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-05",
-  "phase": "build",
-  "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
+  "phase": "review",
+  "active_effort": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Repair the verified live-state delay, then test the existing laptop client.",
-  "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+  "next_recommended": "Confirm the bounded Foreman heavy assurance contract in plan v2.",
+  "why_next": "Passing author tests do not establish independent assurance.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -618,6 +618,50 @@
       "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
       "human_wait": "",
       "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": 63,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": 71,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-software-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "phase": "review",
+      "wait_ref": "decision:provider-assurance-v2",
+      "next_recommended": "Confirm the bounded Foreman heavy assurance contract in plan v2.",
+      "why_next": "Passing author tests do not establish independent assurance.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
+      "human_wait": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review."
     }
   ],
   "receipts": [
@@ -750,10 +794,20 @@
       "kind": "journal_update",
       "entry_id": "engine-20261005T195156-turn_error",
       "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s)."
+    },
+    {
+      "at": "2026-10-05T23:28:09Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "path": "journal/0011-provider-landed-and-plan-pickup.md",
+      "entry_id": "0011-provider-landed-and-plan-pickup",
+      "summary": "Provider integration landing and plan pickup - October 5, 2026"
     }
   ],
   "horizon_source_seq": null,
   "horizon_focus": null,
   "current_step_id": "gwl-provider-status",
-  "wait_ref": "none"
+  "wait_ref": "decision:provider-assurance-v2"
 }
