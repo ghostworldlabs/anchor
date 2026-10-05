@@ -639,6 +639,23 @@ def _cli_cmd(cli="claude"):
     return [exe]
 
 
+STEWARD_CONVERSATION_EFFORT = (os.environ.get("ANCHOR_STEWARD_EFFORT") or "high").strip().lower()
+
+
+def _cap_effort(selection, cap):
+    """The selection with its effort no higher than ``cap`` (2026-10-05); unchanged when there is no cap, the cap is not a
+    known level, or the selection is already at or below it."""
+    import model_policy
+    if not isinstance(selection, dict) or not cap or cap not in model_policy.EFFORT_ORDER:
+        return selection
+    eff = selection.get("effort")
+    if eff not in model_policy.EFFORT_ORDER or model_policy.EFFORT_ORDER.index(eff) <= model_policy.EFFORT_ORDER.index(cap):
+        return selection
+    capped = dict(selection)
+    capped["effort"], capped["effort_cap"] = cap, eff
+    return capped
+
+
 def _is_cave_dir(folder):
     """Is this the Cave of Wonders' own conversation (an effort of the Campaign, 2026-10-02)?"""
     try:
@@ -1077,6 +1094,14 @@ class Engine:
             self._emit({"t": "sys", "text": "MODEL ROUTING (not journaled): " + message})
 
     def _current_selection(self, settings, target):
+        """The selection below, with the steward's conversation effort capped (his word, 2026-10-05: "it should be really
+        responsive"; his yes to high, not maximum, for conversation turns - commissioned work keeps maximum: code jobs and
+        skill runs launch with their own policy). The cap is ANCHOR_STEWARD_EFFORT (default "high"); a workbench
+        terminal keeps the family's highest. Lowering it is a model refresh that keeps the native session."""
+        family, selection = self._current_selection_uncapped(settings, target)
+        return family, _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT)
+
+    def _current_selection_uncapped(self, settings, target):
         """Resolve the model for the dashboard-selected family. When that is the
         family already running, a transient catalog failure keeps the last
         selection (journaled) instead of walking the family ladder; only a
@@ -1176,6 +1201,7 @@ class Engine:
         import model_policy
         try:
             target, selection = self._select_available_policy(settings, target)
+            selection = _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT)
         except (ValueError, RuntimeError) as exc:
             self._emit({"t": "sys", "text": "Pending provider switch could not start: " + str(exc)})
             return False
@@ -2871,6 +2897,7 @@ class Engine:
                             excluded = set((self.policy_override or {}).get("failed_families") or [])
                             excluded.add(self.cli)
                             target, selection = self._select_available_policy(settings, self.cli, excluded=excluded)
+                            selection = _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT)
                             if ev.get("replay_safe") is True and not self._turn_had_tools:
                                 seed = self._last_submitted
                             else:

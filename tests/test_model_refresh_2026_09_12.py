@@ -5,6 +5,16 @@ import pytest
 import model_policy
 from steward_cockpit import steward_engine as se
 
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _no_conversation_effort_cap(monkeypatch):
+    # these test the refresh mechanics with a high -> ultra change; the conversation cap (2026-10-05) is its own test
+    from steward_cockpit import steward_engine as _se
+    monkeypatch.setattr(_se, "STEWARD_CONVERSATION_EFFORT", None)
+
 POLICY = {'mode': 'latest_supported', 'effort': 'highest_supported'}
 NATIVE_ID = '12345678-1234-4234-8234-123456789012'
 
