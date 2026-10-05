@@ -1728,6 +1728,8 @@ class Engine:
         text = (text or "").strip()
         if not text:
             return {"ok": False, "error": "empty"}
+        if human:   # W1 of the two-lane plan (2026-10-05): the queue wait is measured from his message's arrival
+            self._human_arrivals = (getattr(self, "_human_arrivals", None) or [])[-20:] + [time.time()]
         goal = str(goal or "").strip() or None      # W2 v2: said inside a goal's place — recorded with the tag, sent with the scope
         goal_name = ""
         if goal:
@@ -2098,6 +2100,9 @@ class Engine:
             self.turn_started = time.time()
             self.turn_text = ""
             self._turn_origin = "control" if is_control else "human"
+            arrivals = getattr(self, "_human_arrivals", None) or []
+            self._timing = {"arrived": (arrivals.pop(0) if (arrivals and not is_control) else None),
+                            "started": self.turn_started, "first_word": None, "tools": 0}
             if not is_control:
                 # Wave 1.2: durable until the broker's first native event acks
                 # it; reconciled on the next wake if the process dies first.
@@ -2770,6 +2775,9 @@ class Engine:
                 delta = inner.get("delta", {})
                 if delta.get("type") == "text_delta":
                     self.last_output = time.time()
+                    _tm = getattr(self, "_timing", None)
+                    if _tm is not None and _tm.get("first_word") is None:
+                        _tm["first_word"] = self.last_output
                     self.turn_text += delta.get("text", "")
                     self._emit({"t": "delta", "text": delta.get("text", ""),
                                 "tick": self.in_tick})
@@ -2801,6 +2809,8 @@ class Engine:
                         if new:
                             self.files.extend(new)
                             _update_state(self.skey(), {"files": self.files[-40:]})
+                    if getattr(self, "_timing", None) is not None:
+                        self._timing["tools"] = self._timing.get("tools", 0) + 1
                     self._emit({"t": "tool",
                                 "name": block.get("name", "?"),
                                 "detail": _tool_detail(block),
@@ -2945,6 +2955,7 @@ class Engine:
                     "epoch": self.epoch,
                 })
                 self.busy = False
+                self._record_timing(duration, was_tick)
                 self._emit({"t": "turn_end",
                             "cost_usd": round(cost, 4) if cost is not None else None,
                             "cost_status": "reported" if cost is not None else "unavailable",
@@ -3134,6 +3145,28 @@ class Engine:
             return campaign.read_map(self.dir).get("attention", {})
         except Exception:
             return {"state": "unknown", "reason": "Work status unavailable"}
+
+    def _record_timing(self, duration, was_tick):
+        """W1 of the two-lane plan (2026-10-05): one line per turn in <effort>/.ecgberht/turn-timing.jsonl - how long his
+        message waited, how long to the first word, the whole turn, the tools. Never raises; the measurement never costs
+        a turn."""
+        tm = getattr(self, "_timing", None) or {}
+        self._timing = None
+        try:
+            started = float(tm.get("started") or 0)
+            if not started:
+                return
+            row = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "origin": "tick" if was_tick else getattr(self, "_turn_origin", ""),
+                   "cli": self.cli, "effort": (self.model_selection or {}).get("effort"),
+                   "queued_s": round(started - tm["arrived"], 1) if tm.get("arrived") else None,
+                   "first_word_s": round(tm["first_word"] - started, 1) if tm.get("first_word") else None,
+                   "turn_s": round(float(duration or 0), 1), "tools": int(tm.get("tools") or 0)}
+            p = Path(self.dir) / ".ecgberht" / "turn-timing.jsonl"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception:
+            pass
 
     def _working_bg(self):
         """True when the campaign flag says commissioned/background work is
