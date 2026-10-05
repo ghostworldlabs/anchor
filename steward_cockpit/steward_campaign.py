@@ -1387,6 +1387,35 @@ def project_line(m):
             "steps_total": m.get("steps_total", 0)}
 
 
+def running_code_jobs(campaign_dir):
+    """The code jobs this steward commissioned that are still running, observed from its own job record (2026-10-05, his
+    word: the status updates "don't seem to be congruent with what's actually happening" - a job ran for an hour while
+    the status showed the steward's old note). [{id, title, minutes}] newest first; [] when none or unreadable."""
+    try:
+        raw = json.loads((Path(campaign_dir) / ".ecgberht" / "code-jobs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    rows = raw if isinstance(raw, list) else (raw.get("jobs") or list(raw.values()) if isinstance(raw, dict) else [])
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or str(r.get("status")) not in ("running", "landing", "queued"):
+            continue
+        title = ""
+        for line in str(r.get("brief") or "").splitlines():
+            line = line.strip().lstrip("#").strip()
+            if line:
+                title = line[len("Work order:"):].strip() if line.lower().startswith("work order:") else line
+                break
+        minutes = None
+        try:
+            minutes = int(max(0.0, time.time() - time.mktime(time.strptime(str(r.get("started"))[:19], "%Y-%m-%d %H:%M:%S"))) // 60)
+        except (ValueError, OverflowError):
+            pass
+        out.append({"id": str(r.get("id") or ""), "title": title[:120] or "a code job", "minutes": minutes,
+                    "status": str(r.get("status"))})
+    return list(reversed(out))
+
+
 def compose_status(campaign_dir: str, engine_state=None):
     """The deterministic TWO-PART 10-minute status (handoff 2026-08-25 #2b;
     reworked 2026-09-04 on John's word).
@@ -1418,17 +1447,27 @@ def compose_status(campaign_dir: str, engine_state=None):
     local_evidence = _local_status_evidence(campaign_dir, m, st, active)
     now_lines = []
     running = None
+    jobs = running_code_jobs(campaign_dir)
+    # 2026-10-05: a running code job is OBSERVED work - it leads, ahead of the steward's own note
+    for j in jobs[:2]:
+        now_lines.append("code job %s — %s%s" % (j["status"], j["title"], (" (%d min)" % j["minutes"]) if j["minutes"] is not None else ""))
+    if jobs:
+        running = {"kind": "code_job", "label": now_lines[0], "skill": "coder", "source": ".ecgberht/code-jobs.json",
+                   "age": ("%d min" % jobs[0]["minutes"]) if jobs[0]["minutes"] is not None else ""}
     # THE LOOK-THROUGH: the commissioned skill is what is happening;
     # "steward working" is the whole story only when nothing else runs.
     if look and not look["final"]:
         running = {"kind": "skill", "label": look["label"], "skill": look["skill"],
                    "source": look["source"], "age": look["age"]}
         now_lines.append(look["label"])
-    elif m["attention"]["state"] == "working":
+    elif m["attention"]["state"] == "working" and not jobs:
         run = (m["attention"]["reason"] or "").strip() \
             or "commissioned work in flight"
         if active and active.get("commissioned_as"):
             run += " \u00b7 as " + str(active["commissioned_as"])
+        if not st.get("busy"):
+            # the flag is the steward's own note: with no turn, no skill and no job running, say so (2026-10-05)
+            run = "the steward's note says working (" + run + ") \u2014 but nothing is running now"
         running = {"kind": "commissioned", "label": run,
                    "skill": str((active or {}).get("commissioned_as") or ""),
                    "source": ".ecgberht/attention.json", "age": ""}

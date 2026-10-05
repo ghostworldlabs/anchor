@@ -3071,7 +3071,13 @@ class Engine:
         idle while a commissioned run (Gandalf, Foreman) works; the old
         busy-only cadence showed NOTHING for exactly the long work John
         wants to watch (handoff 2026-08-25 #2a)."""
-        return self._attention().get("state") == "working"
+        if self._attention().get("state") == "working":
+            return True
+        try:   # 2026-10-05: a running code job is background work the cadence must narrate
+            from steward_cockpit.steward_campaign import running_code_jobs
+            return bool(running_code_jobs(self.dir))
+        except Exception:
+            return False
 
     def _status_update(self, emit=True):
         """The 10-minute status OF RECORD — deterministic, two-part,
