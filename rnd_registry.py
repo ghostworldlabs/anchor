@@ -132,6 +132,7 @@ def _save_registry(reg: dict) -> None:
     with _paths.WRITE_LOCK:
         _paths.data_dir().mkdir(parents=True, exist_ok=True)
         items = [reg[k] for k in reg]
+        _paths.backup_rotate(registry_path())      # A4: untracked runtime state keeps its own backups
         _paths.atomic_write_text(
             registry_path(),
             json.dumps(items, indent=2, ensure_ascii=False),

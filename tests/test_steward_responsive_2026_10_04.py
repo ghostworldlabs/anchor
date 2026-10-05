@@ -166,7 +166,7 @@ def test_one_writer_and_a_dirty_repository_is_not_overwritten(tmp_path, monkeypa
     (repo / "a.txt").write_text("his own edit\n", encoding="utf-8")       # uncommitted work in the repository
     out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", engine_factory=lambda wt: FakeCoder(wt))
     job = _wait(str(cdir), out["job"])
-    assert job["landed"] is False and "uncommitted edits to the same files" in job["land_note"]
+    assert job["landed"] is False and "has uncommitted edits in" in job["land_note"]
     assert (repo / "a.txt").read_text(encoding="utf-8") == "his own edit\n", "his work is untouched"
 
 

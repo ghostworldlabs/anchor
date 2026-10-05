@@ -277,7 +277,7 @@ def _finish(cdir, job_id, job, result):
     elif check_ok is False:
         land_note = "not landed: the check failed; the work waits on branch %s" % job["branch"]
     else:
-        landed, land_note = land(repo, job["branch"], files)
+        landed, land_note = land(job, files)
     done = _transition(cdir, job_id, ("finishing",), status="failed" if (err or commit_err) else "done",
                        finished=time.strftime("%Y-%m-%d %H:%M:%S"), summary=summary, error=err or commit_err,
                        check_ok=check_ok, check_output=check_out, files=files, landed=landed, land_note=land_note)
@@ -288,26 +288,43 @@ def _finish(cdir, job_id, job, result):
     _report(cdir, done)
 
 
-def land(repo, branch, files):
-    # FROZEN 2026-10-04 19:1x (incident): a failed `git merge` in a live, shared working tree rolls back other
-    # sessions' uncommitted work (it reverted settings.json, rnd_registry.json, anchor_gui.py, job_runner.py ...).
-    # Until landing is rebuilt to never touch the live tree's index or other files, a job's work waits on its branch.
-    return False, "not landed (landing is paused after an incident): the work waits on branch %s" % branch
-    """Merge the job's branch into the repository's checked-out branch, only when none of its files is dirty there
-    and no merge is already in progress; a failed merge is aborted only when this call started it."""
-    _, gitdir, _ = _git(repo, "rev-parse", "--git-dir")
-    merge_head = Path(repo, gitdir, "MERGE_HEAD") if gitdir and not os.path.isabs(gitdir) else Path(gitdir or ".", "MERGE_HEAD")
-    if merge_head.exists():
-        return False, "not landed: %s has a merge in progress; the work waits on branch %s" % (repo, branch)
-    code, dirty, _ = _git(repo, "status", "--porcelain", "--", *files) if files else (0, "", "")
-    if dirty:
-        return False, "not landed: %s has uncommitted edits to the same files; the work waits on branch %s" % (repo, branch)
-    code, out, err = _git(repo, "merge", "--no-ff", "--no-edit", branch, timeout=300)
+def land(job, files):
+    """A2 (PROPOSAL v0.3): bring the job's branch up to the repository's current HEAD inside the job's OWN worktree
+    (never in the shared tree), re-run its check there, then land only its own files with git_safety.land, which
+    refuses any file someone else has changed or staged and commits by path. Returns (landed, note)."""
+    import git_safety as _gs
+    repo, wt = job["repo"], job["worktree"]
+    with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
+        if not held:
+            return False, "not landed: the repository's commit lock is busy; the work waits on branch %s" % job["branch"]
+        return _land_under_lock(job, _gs)
+
+
+def _land_under_lock(job, _gs):
+    repo, wt = job["repo"], job["worktree"]
+    code, head, err = _git(repo, "rev-parse", "HEAD")
     if code != 0:
-        if merge_head.exists():
-            _git(repo, "merge", "--abort")
-        return False, "not landed: the merge did not apply cleanly (%s); the work waits on branch %s" % ((err or out)[:200], branch)
-    return True, "landed on %s" % repo
+        return False, "not landed: could not read %s HEAD (%s)" % (repo, err[:120])
+    code, out, err = _git(wt, "merge", "--no-edit", head, timeout=600)       # the job's own worktree: safe
+    if code != 0:
+        _git(wt, "merge", "--abort")
+        return False, "not landed: the work conflicts with newer changes in %s; it waits on branch %s" % (repo, job["branch"])
+    if job.get("check"):
+        try:
+            r = subprocess.run(job["check"], cwd=wt, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S)
+            if r.returncode != 0:
+                return False, "not landed: the check failed after bringing in newer changes; the work waits on branch %s" % job["branch"]
+        except Exception as e:
+            return False, "not landed: the check could not run after integration (%s)" % e
+    code, src, _ = _git(wt, "rev-parse", "HEAD")
+    code2, names, _ = _git(wt, "diff", "--name-only", head, src)
+    if code != 0 or code2 != 0:
+        return False, "not landed: could not read the integrated change"
+    land_files = [n for n in names.splitlines() if n.strip()]
+    if not land_files:
+        return False, "nothing changed beyond what %s already has" % repo
+    return _gs.land_locked(repo, src, land_files, "Code job %s for the steward\n\n%s" % (job["id"], job["brief"][:600]),
+                           who="code job " + job["id"], expect_head=head)
 
 
 def _cleanup(job, keep_branch=True):

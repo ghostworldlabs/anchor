@@ -38,7 +38,8 @@ RUNTIME_DIRS = ("logs", "rnd_jobs", "health_reports", "gandalf", "_devtest")
 
 #: Root-level runtime FILE globs (no slash — they match repo-root files only).
 RUNTIME_FILE_GLOBS = (
-    "rnd_registry.json",
+    "rnd_registry.json", "settings.json", "steward-cockpit-state.json",      # A4, 2026-10-05: untracked runtime state
+    "rnd_registry.json.bak-*", "settings.json.bak-*", "steward-cockpit-state.json.bak-*",
     "dashboard.html", "dashboard_live.html", "dashboard_api.html",
     "foreman-checkpoint.json",
     "pytest_stdout.txt", "pytest_*.txt", "*.pytest.log",

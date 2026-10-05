@@ -151,3 +151,12 @@ steward_cockpit/__pycache__/
 planning/**/pytest-*/
 planning/**/test-tmp-*/
 test_tmp*/
+
+# A4 (delegated-work PROPOSAL v0.3, 2026-10-05): runtime state is never tracked; it keeps its own .bak-N backups
+/settings.json
+/rnd_registry.json
+/steward-cockpit-state.json
+*.json.bak-[0-9]*
+/rnd_registry.json.bak-*
+/settings.json.bak-*
+/steward-cockpit-state.json.bak-*

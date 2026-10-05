@@ -998,14 +998,20 @@ def commit_campaign_state(folder, label: str = "campaign state") -> dict:
         if not present:
             out.update(ok=True, reason="no-campaign-state")
             return out
-        _git("add", "--", *present)
-        staged = _git("diff", "--cached", "--name-only")
-        if not (staged.stdout or "").strip():
-            out.update(ok=True, reason="nothing-new")
-            return out
-        done = _git("-c", "user.email=ecgberht@anchor.local",
-                    "-c", "user.name=Ecgberht Steward",
-                    "commit", "-m", f"ecgberht: {label}")
+        import git_safety as _gs
+        with _gs.repo_lock(_gs.toplevel(folder) or folder, wait_s=60, who="campaign state " + folder) as held:
+            if not held:
+                out.update(ok=False, reason="lock-busy")      # a land holds the lock; nothing committed (Grok code R1 F8)
+                return out
+            _git("add", "--", *present)
+            staged = _git("diff", "--cached", "--name-only", "--", *present)
+            if not (staged.stdout or "").strip():
+                out.update(ok=True, reason="nothing-new")
+                return out
+            # only these paths: never the whole index, which may hold another session's staging (Grok R2 G1)
+            done = _git("-c", "user.email=ecgberht@anchor.local",
+                        "-c", "user.name=Ecgberht Steward",
+                        "commit", "-m", f"ecgberht: {label}", "--", *present)
         out.update(ok=done.returncode == 0, committed=done.returncode == 0,
                    reason="ok" if done.returncode == 0
                    else (done.stderr or done.stdout or "commit-failed")[:200])

@@ -554,6 +554,11 @@ def _save_state(state):
     tmp = None
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        try:      # A4: untracked runtime state keeps its own backups (at most one per ten minutes; this file is busy)
+            import paths as _paths_bk
+            _paths_bk.backup_rotate(STATE_FILE, min_interval_s=600)
+        except Exception:
+            pass
         tmp = STATE_FILE.with_name(
             STATE_FILE.name + ".%s.%s.tmp" %
             (os.getpid(), threading.get_ident()))
@@ -2567,6 +2572,36 @@ class Engine:
         children inherit (project, this effort dir, where to drop receipts)."""
         import model_policy
         env = model_policy.policy_environment()
+        # A1 (delegated-work PROPOSAL v0.3; Grok code R1 F1-F3, R2 N1-N2): every git ANY agent session runs - steward,
+        # code job or workbench terminal - goes through gitguard, which refuses tree-rewriting verbs outside a code
+        # job's own worktree BEFORE git runs: a real git.exe (found for `git` and `git.exe` alike), a `git` script and
+        # BASH_ENV for Git Bash; the plain git.cmd directory only if the launcher could not be built.
+        try:
+            import shutil, sys as _sys
+            from steward_cockpit import code_jobs as _cj
+            tools_guard = str(Path(__file__).resolve().parent.parent / "tools" / "gitguard")
+            try:
+                import importlib.util as _ilu
+                _spec = _ilu.spec_from_file_location("anchor_gitguard_install", os.path.join(tools_guard, "install.py"))
+                _ggi = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_ggi)
+                bin_dir, bash_env = _ggi.ensure()
+            except Exception:
+                bin_dir, bash_env = "", ""
+            guard = bin_dir or tools_guard
+            path_now = env.get("PATH") or os.environ.get("PATH", "")
+            skip = {os.path.normcase(p.rstrip("\\/")) for p in (bin_dir, tools_guard) if p}
+            real = env.get("GITGUARD_REAL_GIT") or shutil.which("git", path=os.pathsep.join(
+                p for p in path_now.split(os.pathsep) if os.path.normcase(p.rstrip("\\/")) not in skip))
+            if real and os.path.isdir(guard):
+                env["GITGUARD_REAL_GIT"] = real
+                env["GITGUARD_PYTHON"] = _sys.executable
+                env["GITGUARD_ALLOW_UNDER"] = str(_cj.jobs_base())
+                env["PATH"] = guard + os.pathsep + path_now
+                if bash_env:
+                    env["BASH_ENV"] = bash_env
+        except Exception:
+            pass
         try:
             import usage_capture as _uc
             project_id, folder_path = self._attribution_ids()
@@ -3215,18 +3250,44 @@ class Engine:
                 self._commit_if_dirty("steward cadence checkpoint")
 
     def _commit_if_dirty(self, message):
-        """The campaign's own paths only; other staging untouched; announced only on git's word."""
+        """The campaign's own paths only; other staging untouched; announced only on git's word. Takes the
+        repository's one commit lock (git_safety, Grok R2 G1) so it never lands inside a code job's land."""
+        try:
+            import git_safety as _gs
+            _lock = _gs.repo_lock(_gs.toplevel(self.dir) or self.dir, wait_s=30, who="steward commit " + str(self.dir))
+        except Exception:
+            return None      # never commit without the lock (Grok code R1 F7)
+        with _lock as held:
+            if not held:
+                return None      # a land holds the lock: the next cadence tick commits
+            return self._commit_if_dirty_locked(message)
+
+    def _checkpoint_paths(self):
+        """What a steward checkpoint may commit: its own subtree when the cockpit is a folder inside a repository; only
+        the steward's bookkeeping when the cockpit folder IS the repository root (e.g. the Anchor project's cockpit at
+        C:\\dev\\Anchor), so a checkpoint never sweeps other sessions' files (Grok code R1 F8)."""
+        try:
+            import git_safety as _gs
+            root = _gs.toplevel(self.dir)
+        except Exception:
+            root = ""
+        if root and root != os.path.normcase(str(Path(self.dir).resolve())):
+            return ["."]
+        keep = ["ECGBERHT.md", "roadmap.json", "strip.json", "DELIVERABLES.md", "journal", ".ecgberht"]
+        return [k for k in keep if (Path(self.dir) / k).exists()] or ["ECGBERHT.md"]
+
+    def _commit_if_dirty_locked(self, message):
         if self.fake:
             return
         try:
             dirty = subprocess.run(
-                ["git", "status", "--porcelain", "--", "."], cwd=self.dir,
+                ["git", "status", "--porcelain", "--", *self._checkpoint_paths()], cwd=self.dir,
                 capture_output=True, text=True, timeout=15)
             if dirty.returncode != 0 or not dirty.stdout.strip():
                 return
-            add = subprocess.run(["git", "add", "-A", "--", "."], cwd=self.dir,
+            add = subprocess.run(["git", "add", "-A", "--", *self._checkpoint_paths()], cwd=self.dir,
                                  capture_output=True, text=True, timeout=30)
-            commit = (subprocess.run(["git", "commit", "-m", message, "--", "."], cwd=self.dir,
+            commit = (subprocess.run(["git", "commit", "-m", message, "--", *self._checkpoint_paths()], cwd=self.dir,
                                      capture_output=True, text=True, timeout=30)
                       if add.returncode == 0 else add)
             if commit.returncode == 0:

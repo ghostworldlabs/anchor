@@ -285,6 +285,7 @@ def _atomic_write_json(path: Path, obj: dict) -> None:
     """Atomic JSON write (tmp + os.replace). Caller holds WRITE_LOCK."""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
+    _paths.backup_rotate(path)          # A4: untracked runtime state keeps its own backups
     _paths.atomic_write_text(path, text)
 
 

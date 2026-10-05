@@ -22,6 +22,7 @@ mutating requests (under ``ThreadingHTTPServer``) cannot lose an update.
 """
 
 import os
+import time
 import threading
 from pathlib import Path
 
@@ -282,6 +283,30 @@ def _replace_with_retry(tmp, target) -> None:
             if attempt == _ATOMIC_REPLACE_RETRIES - 1:
                 raise
             _time.sleep(_ATOMIC_REPLACE_BACKOFF_S)
+
+
+_BACKUP_LAST = {}
+
+
+def backup_rotate(path, keep=5, min_interval_s=0):
+    """A4 (delegated-work PROPOSAL v0.3, the 2026-10-04 incident): before a runtime file (settings, the registry, the
+    steward state) is rewritten, keep its current bytes as ``<name>.bak-1`` .. ``.bak-<keep>`` (newest first). With
+    ``min_interval_s`` a busy writer keeps at most one backup per interval. Never raises; the write goes ahead."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            return
+        now = time.time()
+        if min_interval_s and now - _BACKUP_LAST.get(str(p), 0) < min_interval_s:
+            return
+        for n in range(keep - 1, 0, -1):
+            older = p.with_name("%s.bak-%d" % (p.name, n))
+            if older.exists():
+                os.replace(str(older), str(p.with_name("%s.bak-%d" % (p.name, n + 1))))
+        p.with_name(p.name + ".bak-1").write_bytes(p.read_bytes())
+        _BACKUP_LAST[str(p)] = now
+    except Exception:
+        pass
 
 
 def atomic_write_text(path, text, encoding="utf-8"):
