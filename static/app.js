@@ -20,6 +20,7 @@
   var DROP_AFTER_MS = 15000;
 
   var strip = document.getElementById("strip");
+  var rowButton = document.getElementById("rows"), rowsExpanded = false, rowTick = null;
   var stage = document.getElementById("stage");
   var heads = [document.getElementById("head0"), document.getElementById("head1")];
   var tiles = [];                  // {id, kind: "cave"|"page"|"doc", url, title, name, opener, frame}
@@ -348,8 +349,10 @@
   function closeTile(id) {
     var t = byId(id);
     if (!t || t.kind === "cave") return;                       // the Cave never closes
+    var hadFocus = t.el && t.el.contains(document.activeElement);
     var i = tiles.indexOf(t), k = shownIn(id);
     if (t.frame) t.frame.remove();
+    if (t.el) t.el.remove();
     tiles.splice(i, 1);
     var d = pendingDrop.indexOf(id);
     if (d >= 0) pendingDrop.splice(d, 1);
@@ -367,6 +370,10 @@
       if (s && !s.frame) s.frame = newFrame(s.url || CAVE_URL);
     }
     layout(); render();
+    if (hadFocus) {
+      var neighbor = tiles[Math.min(i, tiles.length - 1)].el;
+      if (neighbor.inert) rowButton.focus(); else neighbor.focus();
+    }
   }
 
   function layout() {
@@ -389,52 +396,99 @@
   }
 
   // ---------- the strip of tiles ----------
+  // Measure the real wrapped boxes. Hidden rows keep their layout but are inert, so
+  // neither keyboard navigation nor scrollIntoView can expose a clipped row.
+  function measureRows() {
+    rowTick = null;
+    var items = Array.from(strip.children);
+    if (!items.length) return;
+    var arrowFocused = document.activeElement === rowButton;
+    var first = items[0].getBoundingClientRect(), bottom = first.bottom;
+    var overflow = items.some(function (el) { return el.getBoundingClientRect().top > first.top + 1; });
+    if (!overflow) rowsExpanded = false;
+    rowButton.hidden = !overflow;
+    rowButton.setAttribute("aria-expanded", String(rowsExpanded));
+    rowButton.title = rowsExpanded ? "Show first row of open tiles" : "Show all open tiles";
+    rowButton.setAttribute("aria-label", rowButton.title);
+    strip.classList.toggle("expanded", rowsExpanded);
+    items.forEach(function (el) {
+      var r = el.getBoundingClientRect(), hide = !rowsExpanded && r.top > first.top + 1;
+      bottom = Math.max(bottom, r.bottom);
+      if (hide && el.contains(document.activeElement)) rowButton.focus();
+      el.classList.toggle("overflow-row", hide);
+      el.inert = hide;
+      el.tabIndex = hide ? -1 : 0;
+      el.setAttribute("aria-hidden", String(hide));
+    });
+    strip.style.setProperty("--strip-height", (rowsExpanded ? bottom - first.top : first.height) + "px");
+    if (!rowsExpanded) strip.scrollTop = 0;
+    if (!overflow && arrowFocused) {
+      var selected = byId(panes[two ? active : 0]);
+      (selected ? selected.el : items[0]).focus();
+    }
+  }
+  function queueRows() { if (rowTick === null) rowTick = requestAnimationFrame(measureRows); }
+  rowButton.addEventListener("click", function () { rowsExpanded = !rowsExpanded; measureRows(); });
+  strip.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && rowsExpanded) { ev.preventDefault(); rowsExpanded = false; measureRows(); rowButton.focus(); }
+  });
+  window.addEventListener("resize", queueRows);
+  new ResizeObserver(queueRows).observe(strip);
+
   function render() {
-    strip.textContent = "";
     var focusId = panes[two ? active : 0];
-    tiles.forEach(function (t) {
-      var el = document.createElement("div");
-      var k = shownIn(t.id);
-      el.className = "tile" + (t.kind === "cave" ? " cave" : "") + (t.kind === "doc" ? " doc" : "") +
-                     (k >= 0 ? " shown" : "") + (t.id === focusId ? " focus" : "");
-      el.tabIndex = 0;
-      el.setAttribute("role", "button");
-      el.dataset.id = t.id;
-      var who = identity(t);
-      if (who && who.icon) {
-        var img = document.createElement("img"); img.src = who.icon; img.alt = "";
-        if (who.mode) {                                        // the mode's art is framed: shown cropped to its centre
-          var icon = document.createElement("span"); icon.className = "tile-icon star-chart";
-          icon.appendChild(img); el.appendChild(icon);
-        } else el.appendChild(img);
+    var focused = document.activeElement;
+    tiles.forEach(function (t, index) {
+      // Status, selection and row changes retain the tile's nodes and animation.
+      if (!t.el) {
+        var el = document.createElement("div");
+        el.className = "tile" + (t.kind === "cave" ? " cave" : "");
+        el.tabIndex = 0;
+        el.setAttribute("role", "button");
+        el.dataset.id = t.id;
+        var name = document.createElement("span"); name.className = "name"; el.appendChild(name);
+        var pos = document.createElement("span"); pos.className = "pos"; el.appendChild(pos);
+        if (t.kind !== "cave") {
+          var x = document.createElement("button"); x.className = "x"; x.type = "button"; x.title = "Close"; x.textContent = "×";
+          x.addEventListener("click", function (ev) { ev.stopPropagation(); closeTile(t.id); });
+          el.appendChild(x);
+          el.addEventListener("pointerdown", startDrag);
+        }
+        el.addEventListener("click", function () { if (!dragMoved && !swiped) show(t.id, two ? active : 0); });
+        el.addEventListener("keydown", function (ev) {
+          if (ev.target === el && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); show(t.id, two ? active : 0); }
+        });
+        t.el = el;
       }
-      var name = document.createElement("span"); name.className = "name";
-      name.textContent = displayTitle(t);
-      el.title = name.textContent;
-      el.appendChild(name);
-      if (cockpitTarget(t)) {
-        var dot = document.createElement("span"); dot.className = "activity-dot gray"; dot.setAttribute("role", "img");
-        el.appendChild(dot);
+      var tile = t.el, pane = shownIn(t.id), side = tile.querySelector(".side"), whoNow = identity(t);
+      tile.classList.toggle("shown", pane >= 0);
+      tile.classList.toggle("focus", t.id === focusId);
+      tile.classList.toggle("doc", t.kind === "doc");
+      tile.querySelector(".name").textContent = displayTitle(t);
+      tile.title = displayTitle(t);
+      var oldIcon = tile.querySelector(".tile-icon, :scope > img");
+      if (whoNow && whoNow.icon && (!oldIcon || (oldIcon.querySelector("img") || oldIcon).getAttribute("src") !== whoNow.icon)) {
+        if (oldIcon) oldIcon.remove();
+        var newIcon = document.createElement("img"); newIcon.src = whoNow.icon; newIcon.alt = "";
+        if (whoNow.mode) { var wrap = document.createElement("span"); wrap.className = "tile-icon star-chart"; wrap.appendChild(newIcon); newIcon = wrap; }
+        tile.insertBefore(newIcon, tile.firstChild);
+      } else if (!whoNow && oldIcon) oldIcon.remove();
+      if (cockpitTarget(t) && !tile.querySelector(".activity-dot")) {
+        var newDot = document.createElement("span"); newDot.className = "activity-dot gray"; newDot.setAttribute("role", "img");
+        tile.insertBefore(newDot, tile.querySelector(".pos"));
+      } else if (!cockpitTarget(t) && tile.querySelector(".activity-dot")) {
+        tile.querySelector(".activity-dot").remove(); tile.classList.remove("ready");
       }
-      if (two && k >= 0) {
-        var side = document.createElement("span"); side.className = "side" + (k ? " r" : "");
-        side.textContent = k ? "R" : "L";
-        el.appendChild(side);
-      }
-      var pos = document.createElement("span"); pos.className = "pos";
-      pos.textContent = tiles.length > 1 ? "‹ " + (tiles.indexOf(t) + 1) + " of " + tiles.length + " ›" : "";
-      el.appendChild(pos);
-      if (t.kind !== "cave") {
-        var x = document.createElement("button"); x.className = "x"; x.type = "button"; x.title = "Close"; x.textContent = "×";
-        x.addEventListener("click", function (ev) { ev.stopPropagation(); closeTile(t.id); });
-        el.appendChild(x);
-      }
-      el.addEventListener("click", function () { if (!dragMoved && !swiped) show(t.id, two ? active : 0); });
-      el.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); show(t.id, two ? active : 0); } });
-      if (t.kind !== "cave") el.addEventListener("pointerdown", startDrag);
-      strip.appendChild(el);
+      if (two && pane >= 0) {
+        if (!side) { side = document.createElement("span"); tile.insertBefore(side, tile.querySelector(".pos")); }
+        side.className = "side" + (pane ? " r" : ""); side.textContent = pane ? "R" : "L";
+      } else if (side) side.remove();
+      tile.querySelector(".pos").textContent = tiles.length > 1 ? "‹ " + (index + 1) + " of " + tiles.length + " ›" : "";
+      if (strip.children[index] !== tile) strip.insertBefore(tile, strip.children[index] || null);
       paintFeedback(t);
     });
+    if (focused && focused.isConnected && focused.closest("#strip") && document.activeElement !== focused) focused.focus();
+    measureRows();
   }
 
   // the phone (760 px fold): a swipe on the title bar steps the active pane through the tiles, in order
@@ -442,7 +496,7 @@
   (function () {
     var x0 = null, y0 = 0;
     strip.addEventListener("pointerdown", function (ev) { if (narrow.matches) { x0 = ev.clientX; y0 = ev.clientY; } });
-    strip.addEventListener("pointerup", function (ev) {
+    document.addEventListener("pointerup", function (ev) {
       if (x0 === null) return;
       var dx = ev.clientX - x0, dy = ev.clientY - y0;
       x0 = null;
@@ -453,7 +507,7 @@
       show(tiles[j].id, k);
       setTimeout(function () { swiped = false; }, 0);
     });
-    strip.addEventListener("pointercancel", function () { x0 = null; });
+    document.addEventListener("pointercancel", function () { x0 = null; });
   })();
 
   // drag a tile to reorder (pointer events, a finger works too); the Cave stays first; not on the phone
@@ -461,10 +515,10 @@
   function startDrag(ev) {
     if (narrow.matches) return;
     if (ev.button !== 0 || (ev.target && ev.target.classList && ev.target.classList.contains("x"))) return;
-    var el = ev.currentTarget, id = el.dataset.id, x0 = ev.clientX;
+    var el = ev.currentTarget, id = el.dataset.id, x0 = ev.clientX, y0 = ev.clientY;
     dragMoved = false;
     function move(e) {
-      if (!dragMoved && Math.abs(e.clientX - x0) < 6) return;
+      if (!dragMoved && Math.max(Math.abs(e.clientX - x0), Math.abs(e.clientY - y0)) < 6) return;
       dragMoved = true;
       el.classList.add("dragging");
       var over = document.elementFromPoint(e.clientX, e.clientY);
@@ -551,6 +605,7 @@
     var h = host();
     if (!h || !h.window_control) return;
     document.body.classList.add("hosted");
+    queueRows();
     document.querySelectorAll("#winctl [data-act]").forEach(function (b) {
       b.addEventListener("click", function () { h.window_control(b.dataset.act); });
     });
@@ -568,13 +623,14 @@
     return {pid:r.q.get("pid"),dir:r.q.get("dir") || "",general:r.q.get("general")==="1",term:r.q.get("term") || ""};
   }
   function paintFeedback(t) {
-    var el = Array.from(strip.children).find(function (c) { return c.dataset.id === t.id; });
+    var el = t.el;
     if (!el) return;
     var dot = el.querySelector(".activity-dot"); if (!dot) return;
     var target = cockpitTarget(t), key = target && window.AnchorCockpitFeedback.identity(target);
     if (t.feedbackKey !== key) { t.feedbackKey = key; t.feedback = null; t.feedbackRecord = null; }
     var f = t.feedback, light = f ? window.AnchorCockpitFeedback.color(f.light, f.ready) : "gray";
     var word = !f ? "reading activity" : light === "green" ? "working" : light === "orange" ? "needs your attention" : light === "red" ? "a problem" : "idle";
+    if (f && f.ready && light !== "orange") word += "; needs your attention";
     dot.className = "activity-dot " + light; dot.title = word; dot.setAttribute("aria-label", word);
     el.classList.toggle("ready", !!(f && f.ready));
     el.title = displayTitle(t) + "; " + word + (f && f.reason ? "; " + f.reason : "");
