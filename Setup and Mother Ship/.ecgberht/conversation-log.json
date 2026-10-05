@@ -169,6 +169,12 @@
       "text": "Internal handoff from Aladdin, Lamp steward for Skill Foundry. John has explicitly corrected turn 8b5e46a9-0cbb-407e-b78c-288326064a98: the three skill labels are exactly Aladdin-Cave of Wonders; Aladdin-Lamp; Aladdin-Star Chart. They must follow the selected Jarvis/Aladdin/Ecgberht persona. Please carry this bounded correction through Anchor's owning coder or immediately after its safe handoff: in foundry_page.py remove the extra AI cockpit / prefix and join profile label and role name with a hyphen; update the existing test expectation in tests/test_foundry_page_walkthrough.py. Preserve role IDs, icons, settings and walkthrough order. Gate: python -m pytest -q tests/test_foundry_page_walkthrough.py. Commit only these paths; no live restart without a safe boundary, no new plan, report or slice close. No new approval is needed. Please report the landed commit and activation limit back to the Foundry effort. The correction and link omission are recorded in C:/Users/john/.claude/journal/2026-10-05-foundry-persona-names-and-plan-links.md and the global rule is now in C:/Users/john/.claude/AGENTS.md. Please journal the implementation once the owner boundary allows it. Do not make overlapping shared-tree edits.",
       "turn_id": "3d6c1b9e-31ce-410d-9f69-0d31ff9c9873",
       "at": "2026-10-05T19:29:42.663211+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll carry the exact hyphenated persona labels through Anchor’s next safe handoff, with the walkthrough check and a commit limited to those two files.\nQueued the exact labels: Aladdin-Cave of Wonders, Aladdin-Lamp and Aladdin-Star Chart, preserving selected-persona behavior.\n\nThe two-file correction will run after the current writer boundaries clear, pass the specified walkthrough check, and return its landed commit and activation limit directly to the Foundry effort. Activation remains deferred to a safe boundary.",
+      "turn_id": "chatgpt:01a10d74-4813-73f1-986b-23bf6a50c383:3:15",
+      "at": "2026-10-05T19:51:56.607130+00:00"
     }
   ]
 }

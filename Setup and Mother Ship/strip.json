@@ -696,6 +696,15 @@
    "path": "journal/0010-provider-dispatch-recovery.md",
    "entry_id": "0010-provider-dispatch-recovery",
    "summary": "Provider dispatch recovery — October 5, 2026"
+  },
+  {
+   "at": "2026-10-05T19:51:56Z",
+   "source": "engine",
+   "step_id": "gwl-provider-status",
+   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+   "kind": "journal_update",
+   "entry_id": "engine-20261005T195156-turn_error",
+   "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s)."
   }
  ],
  "horizon_source_seq": 62,

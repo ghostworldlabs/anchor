@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-05 13:45",
-  "status_id": "01791229517308549700",
+  "at": "2026-10-05 13:51",
+  "status_id": "01791229917522825000",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35",
+    "activity": "nothing running - attention stale - live owner unconfirmed",
     "latest_event": null,
     "next": [
       "Provider capacity, cost and model controls"
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35"
+        "value": "nothing running - attention stale - live owner unconfirmed"
       },
       {
         "label": "Status",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0010-provider-dispatch-recovery: Provider dispatch recovery \u2014 October 5, 2026"
+        "value": "engine-20261005T195156-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s\u2026"
       },
       {
         "label": "ETA",
@@ -55,13 +55,13 @@
   },
   "lead_line": "Next: Provider capacity, cost and model controls; then Review Setup before laptop integration \u2014 John accepted the layout and authorized real integration; no further approval blocks the build.",
   "now": [
-    "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35"
+    "nothing running - attention stale - live owner unconfirmed"
   ],
   "running": {
-    "kind": "steward",
-    "label": "steward mid-turn since 13:29 (15 min) \u00b7 last status 13:35",
+    "kind": "none",
+    "label": "nothing running - attention stale - live owner unconfirmed",
     "skill": "",
-    "source": "engine",
+    "source": "",
     "age": ""
   },
   "slice": {
@@ -75,7 +75,7 @@
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0010-provider-dispatch-recovery: Provider dispatch recovery \u2014 October 5, 2026",
+  "journal": "engine-20261005T195156-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s).",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,9 +85,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0010-provider-dispatch-recovery.md",
-      "entry_id": "0010-provider-dispatch-recovery",
-      "at": "2026-10-05T19:23:02Z",
+      "path": null,
+      "entry_id": "engine-20261005T195156-turn_error",
+      "at": "2026-10-05T19:51:56Z",
       "step_id": "gwl-provider-status",
       "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
       "run_id": null
