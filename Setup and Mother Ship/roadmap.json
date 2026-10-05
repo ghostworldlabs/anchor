@@ -1061,6 +1061,22 @@
       "client_event_id": "setup-build-d7dd98a2-97a2-42f9-9273-c71b3e49cbf9-gwl-laptop-provider-test",
       "seq": 62,
       "at": "2026-10-05"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "name": "Provider integration: verify live Setup and laptop",
+        "waiting_on": null
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-05T23:22:07.703527+00:00",
+        "why": "Provider job 20261005-132257-5a89b9 landed commit 64df9a6 with 55 required tests passed. John turn 5fb39524-863d-4a8e-8715-10f7b7e70deb accepts the existing plan, without expanding scope or closing a slice. Live authenticated /setup returns 200; laptop UI and account status still require verification."
+      },
+      "client_event_id": "setup-provider-landed-20261005-5a89b9",
+      "seq": 63,
+      "at": "2026-10-05"
     }
   ],
   "roadmap_projection": [
@@ -1108,7 +1124,7 @@
     },
     {
       "id": "gwl-provider-status",
-      "name": "Provider capacity, cost and model controls",
+      "name": "Provider integration: verify live Setup and laptop",
       "status": "active",
       "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
       "waiting_on": null,

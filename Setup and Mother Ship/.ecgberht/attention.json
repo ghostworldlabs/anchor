@@ -1,8 +1,8 @@
 {
-  "state": "working",
-  "reason": "Dispatching the authorized provider integration build",
-  "updated_at": "2026-10-05T19:22:56.336121+00:00",
-  "state_since": "2026-10-05T19:22:56.336131+00:00",
+  "state": "quiet",
+  "reason": "Provider build landed; verifying the running Setup page",
+  "updated_at": "2026-10-05T23:22:07.703527+00:00",
+  "state_since": "2026-10-05T23:22:07.703527+00:00",
   "provenance": [
     {
       "by": "engine",

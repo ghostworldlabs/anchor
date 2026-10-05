@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.
+Provider build landed; live Setup and existing laptop verification remain.
 
 ## Why next
 
-Build on existing mother-ship sign-ins and verify the working settings on the laptop.
+Use the authorized landed build and verify real account reports before human review.
 
 ## Human wait
 
@@ -19,3 +19,4 @@ Build on existing mother-ship sign-ins and verify the working settings on the la
 ## Why stakes
 
 The mockup makes provider sign-in, allowance, API cost and model controls tangible before an implementation plan; email and calendars follow later.
+
