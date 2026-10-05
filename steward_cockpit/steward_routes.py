@@ -179,6 +179,23 @@ def get_engine(cdir, general=False, tid=None, create=True):
         return ENGINES[key]
 
 
+def rename_stewards(label):
+    """The persona changed (2026-10-05, his word: the persona is not what the steward knows - switching it must never
+    look like forgetting): every live steward takes the new name for its next wake and its page labels. Storage never
+    depended on it (state, logs and engines are keyed by folder); only this cached name lagged."""
+    label = str(label or "").strip()
+    if not label:
+        return 0
+    CONFIG["steward"] = label
+    n = 0
+    with ENGINES_LOCK:
+        for eng in ENGINES.values():
+            if getattr(eng, "steward", None) != label:
+                eng.steward = label
+                n += 1
+    return n
+
+
 # ---------- static + document ----------
 def serve_static(name):
     name = Path(name).name

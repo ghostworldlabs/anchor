@@ -12641,6 +12641,12 @@ def handle_settings_post(handler, path, body):
     except ValueError as exc:
         handler._send_json({"ok": False, "error": str(exc)}, 400)
         return
+    if "steward_type" in kwargs:      # 2026-10-05: the live stewards take the new persona's name too
+        try:
+            from steward_cockpit import steward_routes as _sr
+            _sr.rename_stewards(_steward_ui().get("label"))
+        except Exception as _e:
+            print("  [%s] persona rename of live stewards failed: %r" % (datetime.now().strftime("%H:%M:%S"), _e))
     handler._send_json({
         "ok": True,
         **settings,
