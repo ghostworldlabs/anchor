@@ -8,6 +8,9 @@
       if (it.managed) return it.phase === 'awaiting_review';
       var owner = ((map && map.steps) || []).find(function (s) { return s.id === it.owner_step_id; });
       if (!owner || owner.status === 'done' || owner.status === 'parked' || (owner.refinement || {}).phase === 'done') return false;
+      // Managed products have their own current revisions above. Old register labels
+      // on that owner cannot turn an ordinary work copy into a new review request.
+      if ((owner.refinement || {}).phase) return false;
       var nav = owner.navigation || {}, label = String(nav.label || '');
       if (nav.current === false || nav.role === 'support') return false;
       return /^FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ''))
@@ -26,7 +29,7 @@
     if (target.general) q += '&general=1&term=' + encodeURIComponent(target.term || '1');
     return get('/api/steward/state' + q, headers).then(function (st) {
       if (!st || !/^(green|orange|red|quiet|gray)$/.test(st.light) || typeof st.busy !== 'boolean') throw new Error('incomplete feedback');
-      var question = !!st.open_question || !!((st.pending_questions || []).length) || st.light === 'orange';
+      var question = !!st.open_question || !!((st.pending_questions || []).length);
       if (early) early(st, question);
       var stamp = String(st.stamp || ''), cached = old && old.identity === key && old.stamp === stamp && Date.now() < old.until;
       var record = cached ? Promise.resolve(old) : target.general ? Promise.resolve({identity:key,stamp:stamp,until:Date.now()+15000,review:false})

@@ -29,7 +29,7 @@ def cave_html():
         {"has_record": True, "effort": directory, "next": "Keep the original words"},
         "", goal={"name": "Original goal"},
         step={"id": sid, "kind": "effort", "name": name},
-        light={"light": "gray"},
+        light={"light": "gray" if sid == "one" else "orange"},
     ) for sid, directory, name in [("one", EFFORT, "Distinct initiative"),
                                  ("two", "Other effort", "Other initiative")])
     return """<!doctype html><html><head><title>Cave of Wonders</title>
@@ -75,11 +75,13 @@ class ReadOnlyUI:
         context.on("page", lambda page: page.on("pageerror", lambda error: self.errors.append(str(error))))
 
     def change(self, directory=EFFORT, *, light="quiet", question=False,
-               review=False, pin=False, accepted=False, fail=None, general=False, term=""):
+               review=False, pin=False, accepted=False, fail=None, general=False, term="",
+               legacy=False, label="", owner_phase=None):
         self.stamp += 1
         self.values[("p", directory, general, term)] = dict(
             light=light, question=question, review=review, pin=pin,
-            accepted=accepted, fail=fail, stamp=str(self.stamp))
+            accepted=accepted, fail=fail, stamp=str(self.stamp),
+            legacy=legacy, label=label, owner_phase=owner_phase)
 
     def route(self, route):
         request = route.request
@@ -119,9 +121,11 @@ class ReadOnlyUI:
                 data = {"light": value["light"], "busy": value["light"] == "green",
                         "open_question": value["question"], "stamp": value["stamp"]}
             elif path.endswith("/map"):
-                data = {"stamp": value["stamp"], "steps": [{"id": "owner", "status": "active"}]}
+                data = {"stamp": value["stamp"], "steps": [{"id": "owner", "status": "active",
+                        "navigation": {"current": True, "label": value.get("label", "")},
+                        "refinement": {"phase": value.get("owner_phase")}}]}
             elif path.endswith("/deliverables"):
-                data = {"items": [{"is_current": True, "managed": True, "owner_step_id": "owner",
+                data = {"items": [{"is_current": True, "managed": not value.get("legacy"), "owner_step_id": "owner",
                                    "phase": "awaiting_review" if value["review"] else "working",
                                    "accepted": value["accepted"], "what": "Original product"}]
                         if value["review"] or value["pin"] else []}
@@ -154,7 +158,10 @@ def ui():
         context.add_init_script("""if(window===window.top){
 window.hostActions=[];window.pywebview={api:{zoom(){},window_control(act){hostActions.push(act)}}};}
 const originalInterval=window.setInterval;
-window.setInterval=(fn,ms,...args)=>originalInterval(fn,ms===5000?200:ms,...args);""")
+window.setInterval=(fn,ms,...args)=>originalInterval(fn,ms===5000?200:ms,...args);
+document.addEventListener('DOMContentLoaded',()=>{
+ window.initialAttentionCards=[...document.querySelectorAll('.tile.ready')].map(e=>e.id);
+},{once:true});""")
         fixture = ReadOnlyUI(context)
         page = context.new_page()
         page.goto(ORIGIN + "/static/app.html")
@@ -289,6 +296,66 @@ def assert_flashing(locator, *, dot=False):
     return colors
 
 
+def assert_thin_attention(locator):
+    assert locator.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
+    assert locator.evaluate("e=>getComputedStyle(e).boxShadow") == "none"
+    assert locator.evaluate("e=>getComputedStyle(e).animationDuration") == "2.8s"
+    assert_flashing(locator)
+
+
+def test_running_work_pin_selection_focus_hover_and_legacy_need_are_not_attention(ui):
+    fixture, page = ui
+    fixture.change(light="green", pin=True)
+    # The second actual Cave card starts with an orange light but no request.
+    # It must never get an amber edge, even before the first scoped poll returns.
+    assert page.frames[1].evaluate("initialAttentionCards") == []
+    card = page.frames[1].locator("#card-p-one")
+    tile = fixture.open(page, EFFORT)
+    dot = tile.locator(".activity-dot")
+    expect(dot).to_have_attribute("aria-label", "working")
+    expect(tile).to_have_class(re.compile(r"\bfocus\b"))
+    tile.focus()
+    tile.hover()
+    colors, pixels = painted_samples(tile)
+    assert len(set(pixels)) == 1
+    assert all(c[0] == "rgb(111, 162, 255)" and c[3:] == ["none", "none"] for c in colors)
+    assert tile.evaluate("e=>getComputedStyle(e).outlineColor") == "rgb(111, 162, 255)"
+    page.locator("#strip .tile.cave").click()
+    # Legacy work/fact classes must not bypass the exact cockpit's ready state.
+    card.evaluate("e=>e.classList.add('need')")
+    card.hover()
+    expect(card.locator(".t-peek")).to_be_visible()
+    card.click()
+    expect(card).to_have_attribute("aria-expanded", "true")
+    expect(card).not_to_have_class(re.compile(r"\bready\b"))
+    colors, pixels = painted_samples(card)
+    assert len(set(pixels)) == 1
+    assert all(c[0] == "rgb(61, 67, 82)" and c[3:] == ["none", "none"] for c in colors)
+
+
+@pytest.mark.parametrize("label,owner_phase,attention", [
+    ("Current working draft", None, False),
+    ("Draft ready for your review", None, True),
+    ("Draft no longer ready for your review", None, False),
+    ("Draft ready for your review", "revising", False),
+    ("Draft ready for your review", "done", False),
+])
+def test_legacy_review_requires_explicit_designation_without_managed_override(ui, label, owner_phase, attention):
+    fixture, page = ui
+    fixture.change(light="green", pin=True, legacy=True, label=label, owner_phase=owner_phase)
+    tile = fixture.open(page, EFFORT)
+    expect(tile.locator(".activity-dot")).to_have_class("activity-dot green")
+    page.locator("#strip .tile.cave").click()
+    card = page.frames[1].locator("#card-p-one")
+    for locator in (tile, card):
+        if attention:
+            expect(locator).to_have_class(re.compile(r"\bready\b"))
+            assert_thin_attention(locator)
+        else:
+            expect(locator).not_to_have_class(re.compile(r"\bready\b"))
+            assert locator.evaluate("e=>getComputedStyle(e).animationName") == "none"
+
+
 def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     fixture, page = ui
     cave = page.frames[1]
@@ -300,11 +367,21 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     assert card.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
     # Reproduce the real cascade collision, then check actual painted attention.
     card.evaluate("e=>e.classList.add('flash')")
-    assert_flashing(card)
+    assert_thin_attention(card)
+    assert card.evaluate("e=>getComputedStyle(e).outlineStyle") == "none"
     assert card.evaluate("e=>getComputedStyle(e).boxShadow") == "none"
     card.evaluate("e=>e.classList.remove('flash')")
     card.hover()
     expect(card.locator(".t-peek")).to_be_visible()
+    assert_thin_attention(card)
+    # A quiet card has a later border rule; it must also pulse and remain amber
+    # with reduced motion, then yield back to the original compact layout.
+    card.evaluate("e=>e.classList.add('quiet')")
+    assert_thin_attention(card)
+    page.emulate_media(reduced_motion="reduce")
+    assert card.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(251, 191, 36)"
+    page.emulate_media(reduced_motion="no-preference")
+    card.evaluate("e=>e.classList.remove('quiet')")
     card.focus()
     page.keyboard.press("Escape")
     expect(card).to_be_focused()
@@ -342,6 +419,7 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     colors, pixels = painted_samples(card)
     assert len(set(pixels)) == 1
     assert all(c[3] == "none" for c in colors)
+    assert all(c[0] != "rgb(251, 191, 36)" and c[4] == "none" for c in colors)
     assert any(path == "/api/steward/events" for path, _ in fixture.reads)
 
 
@@ -350,6 +428,8 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     ("quiet", False, "rgb(137, 149, 167)"),
     ("red", False, "rgb(224, 95, 95)"),
     ("orange", True, "rgb(251, 191, 36)"),
+    ("quiet", True, "rgb(251, 191, 36)"),
+    ("orange", False, "rgb(137, 149, 167)"),
 ])
 def test_status_colors_and_attention_dot_pixels(ui, light, question, color):
     fixture, page = ui
@@ -360,8 +440,11 @@ def test_status_colors_and_attention_dot_pixels(ui, light, question, color):
     page.wait_for_function("color=>getComputedStyle(document.querySelector('.activity-dot')).backgroundColor===color", arg=color)
     assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == color
     if question:
+        expect(tile).to_have_class(re.compile(r"\bready\b"))
+        assert_thin_attention(tile)
         assert_flashing(dot, dot=True)
     else:
+        expect(tile).not_to_have_class(re.compile(r"\bready\b"))
         colors, pixels = painted_samples(dot, dot=True)
         assert len(set(pixels)) == 1
         assert all(c[3] == "none" for c in colors)
@@ -373,6 +456,7 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
     tile = fixture.open(page, EFFORT)
     dot = tile.locator(".activity-dot")
     expect(tile).to_have_class(re.compile(r"\bready\b"))
+    assert_thin_attention(tile)
     assert_flashing(dot, dot=True)
     assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(74, 222, 128)"
     expect(dot).to_have_attribute("aria-label", "working; needs your attention")
@@ -396,10 +480,14 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
     tile.hover()
     tile.click()
     expect(tile).to_have_class(re.compile(r"\bready\b"))
+    assert_thin_attention(tile)
     fixture.change(light="green", review=True, accepted=True)
     fixture.refresh(page)
     expect(tile).not_to_have_class(re.compile(r"\bready\b"))
     assert dot.evaluate("e=>getComputedStyle(e).animationName") == "none"
+    colors, pixels = painted_samples(tile)
+    assert len(set(pixels)) == 1
+    assert all(c[0] == "rgb(111, 162, 255)" and c[3:] == ["none", "none"] for c in colors)
     fixture.change("", light="green", question=True, general=True, term="7")
     session = fixture.open(page, "", general="1", term="7")
     expect(session).to_have_class(re.compile(r"\bready\b"))
@@ -417,17 +505,22 @@ def test_reduced_motion_has_steady_amber_edge_and_attention_dot_marker(ui):
     expect(card).to_have_class(re.compile(r"\bready\b"))
     page.emulate_media(reduced_motion="reduce")
     card.evaluate("e=>e.classList.add('flash')")
-    for locator, is_dot in [(card, False), (tile.locator(".activity-dot"), True)]:
+    assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    for locator, is_dot in [(card, False), (tile, False), (tile.locator(".activity-dot"), True)]:
         colors, pixels = painted_samples(locator, dot=is_dot)
         assert len(set(pixels)) == 1
         assert all(c[3] == "none" for c in colors)
     assert card.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(251, 191, 36)"
     assert card.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
+    assert tile.evaluate("e=>getComputedStyle(e).borderTopColor") == "rgb(224, 168, 54)"
+    assert tile.evaluate("e=>getComputedStyle(e).borderTopWidth") == "1px"
+    assert tile.evaluate("e=>getComputedStyle(e).boxShadow") == "none"
     dot = tile.locator(".activity-dot")
     assert dot.evaluate("e=>getComputedStyle(e).outlineColor") == "rgb(224, 168, 54)"
     assert dot.evaluate("e=>getComputedStyle(e).outlineWidth") == "1px"
     page.emulate_media(reduced_motion="no-preference")
     assert_flashing(card)
+    assert_thin_attention(tile)
     assert_flashing(dot, dot=True)
 
 

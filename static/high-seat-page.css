@@ -391,18 +391,18 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:7px 9px 8px;
   min-width:0;cursor:pointer}
 .tile:hover{border-color:#3d4352}
-.tile.need{border-color:var(--amber-edge);background:linear-gradient(180deg,var(--amber-wash),transparent 46%),var(--surface)}
+.tile.desk.need{border-color:var(--amber-edge);background:linear-gradient(180deg,var(--amber-wash),transparent 46%),var(--surface)}
 .tile.parked{background:#161922;border-color:#252a36}
 .tile.parked .t-name{color:#b9bdc6}
-.tile.flash{animation:flash 2.2s ease-out}
+.tile.flash:not(.ready){animation:flash 2.2s ease-out}
 @keyframes flash{0%{box-shadow:0 0 0 2px var(--accent)}70%{box-shadow:0 0 0 2px rgba(108,156,252,.35)}100%{box-shadow:0 0 0 0 transparent}}
-.tile.outline{box-shadow:0 0 0 2px var(--amber-edge)}
+.tile.outline:not(.ready){border-color:var(--accent)}
 .tile.open{cursor:default;border-color:#3d4352}
 /* Attention owns the existing one-pixel edge, also during a navigation highlight.
-   A held bright/dim beat is visible at card size without adding a halo. */
-.tile.ready{border-color:#fbbf24;box-shadow:none;animation:readyedge 1.2s steps(1,end) infinite}
+   A gentle bright/dim beat is visible at card size without adding a halo. */
+.tile.ready,.tile.quiet.ready{border-color:#fbbf24;box-shadow:none;animation:readyedge 2.8s ease-in-out infinite}
 @keyframes readyedge{0%,100%{border-color:#fbbf24;box-shadow:none}50%{border-color:#78521e;box-shadow:none}}
-@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:#fbbf24;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tile.ready,.tile.quiet.ready{animation:none;border-color:#fbbf24;box-shadow:none}}
 /* the compact card (John, 2026-09-27): the name with the effort as a suffix and the cockpit link beside it, ONE line
    clamped to two, the acts on one line; the description, the next step behind a wait and the effort line open with it */
 .t-top{display:flex;align-items:baseline;gap:8px}
@@ -741,7 +741,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .balloon .bl-foot{margin-top:8px;font-size:11px;display:flex;gap:12px;align-items:center}
 .balloon .bl-foot a{color:var(--accent-t)}
 .balloon .bl-close{margin-left:auto;color:var(--text-dim2);cursor:pointer}
-.tile.flash{outline:2px solid var(--accent);outline-offset:2px}
+.tile.flash:not(.ready){outline:2px solid var(--accent);outline-offset:2px}
 
 
 /* W4: a long capacity state on its own line under the name and the bars */

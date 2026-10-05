@@ -46,21 +46,22 @@ body.hosted { border: 1px solid #2f3a4d; box-sizing: border-box; }
 .tile-icon.star-chart img { width: 30px; height: 30px; max-width: none; transform: translate(-6px, -6px); }
 .tile.doc { border-style: dashed; }
 .tile.shown { color: var(--text); border-color: #4a5a75; }
-.tile.focus { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(224, 168, 54, .18); }
+.tile.focus { border-color: var(--blue); }
 .tile .side { font: 700 9.5px var(--sans); color: var(--amber); border: 1px solid rgba(224,168,54,.5); border-radius: 4px; padding: 0 4px; }
 .tile .activity-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#8995a7}
 .tile .activity-dot.green{background:#4ade80;box-shadow:0 0 6px #4ade80}
 .tile .activity-dot.orange{background:#fbbf24;box-shadow:0 0 5px rgba(251,191,36,.6)}
 .tile .activity-dot.red{background:#e05f5f}
-.tile.ready{border-color:var(--amber);box-shadow:none}
+.tile.ready{border-color:var(--amber);box-shadow:none;animation:attentionedge 2.8s ease-in-out infinite}
+@keyframes attentionedge{0%,100%{border-color:var(--amber)}50%{border-color:#78521e}}
 /* Attention flashes independently of the activity colour, including green work. */
 .tile.ready .activity-dot{animation:attentiondot 1.2s steps(1,end) infinite}
 @keyframes attentiondot{0%,100%{opacity:1}50%{opacity:.2}}
-@media(prefers-reduced-motion:reduce){.tile.ready .activity-dot{animation:none;opacity:1;outline:1px solid var(--amber);outline-offset:2px;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:var(--amber)}.tile.ready .activity-dot{animation:none;opacity:1;outline:1px solid var(--amber);outline-offset:2px;box-shadow:none}}
 .tile .side.r { color: var(--blue); border-color: rgba(111,162,255,.5); }
 .tile .pos { display: none; }
 .tile.dragging { opacity: .6; outline: 1px dashed var(--faint); }
-.tile:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.tile:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 
 #bar .panes { display: flex; flex: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 8px 6px 0 0; }
 #bar .panes button { background: none; border: 0; color: var(--faint); width: 32px; height: 26px; cursor: pointer; display: grid; place-items: center; }
