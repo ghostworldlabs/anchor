@@ -337,6 +337,24 @@ def _cleanup(job, keep_branch=True):
         pass
 
 
+def live_note(job):
+    """Landed is not live (his word, 2026-10-05: a tile repair 'landed with all 20 checks passing' and nothing on his
+    screen changed - the running Anchor still had the old code and his page the old stylesheet). For a job landed in the
+    repository the Anchor service runs from, the one sentence the steward must carry: it waits for a restart."""
+    if not job.get("landed"):
+        return ""
+    try:
+        here = Path(__file__).resolve().parents[1]
+        if Path(str(job.get("repo") or "")).resolve() != here:
+            return ""
+    except Exception:
+        return ""
+    return ("NOT LIVE YET: this landed in Anchor's repository, but John's screen runs the build that was started before "
+            "it - the change shows only after Anchor restarts (an Anchor restart is John's word, or his standing "
+            "'restart when idle'). Tell him it is landed and waits for a restart; never call it installed, live or done "
+            "on his screen until the running build carries it.")
+
+
 def _report(cdir, job):
     """Wake the steward that commissioned the job with its result (a control turn, not his words)."""
     lines = ["(code job %s finished - not John) Status: %s." % (job["id"], job["status"])]
@@ -347,6 +365,9 @@ def _report(cdir, job):
     if job.get("check"):
         lines.append("Check `%s`: %s." % (job["check"], "passed" if job.get("check_ok") else "FAILED") + ((" Output tail: " + job["check_output"][-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
+    live = live_note(job)
+    if live:
+        lines.append(live)
     lines.append("The coder's summary: " + (job.get("summary") or "(none)"))
     lines.append("Tell John the result in two or three plain sentences; ask him only what is genuinely his to decide.")
     try:
