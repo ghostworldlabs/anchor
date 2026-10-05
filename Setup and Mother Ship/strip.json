@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-05",
   "phase": "build",
-  "active_effort": "Provider build landed; live Setup and existing laptop verification remain.",
+  "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Verify live Setup and the existing laptop client.",
-  "why_next": "The code job passed; real delivery still needs checking.",
+  "next_recommended": "Repair the verified live-state delay, then test the existing laptop client.",
+  "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -586,6 +586,36 @@
       "horizon_source_seq": null,
       "horizon_focus": null,
       "active_effort": "Provider build landed; live Setup and existing laptop verification remain.",
+      "human_wait": "",
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
+      "why_next": "The code job passed; real delivery still needs checking.",
+      "horizon_source_seq": 63,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "phase": "build",
+      "next_recommended": "Repair the verified live-state delay, then test the existing laptop client.",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
       "human_wait": "",
       "current_step_id": "gwl-provider-status"
     }

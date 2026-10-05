@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Provider build landed; live Setup and existing laptop verification remain.
+Provider build landed; diagnose cached live-state loading before laptop verification.
 
 ## Why next
 
-Use the authorized landed build and verify real account reports before human review.
+The real provider page loaded once, but a repeat timed out before native refresh.
 
 ## Human wait
 
