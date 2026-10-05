@@ -402,7 +402,9 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
    A gentle bright/dim beat is visible at card size without adding a halo. */
 .tile.ready,.tile.quiet.ready{border-color:#fbbf24;box-shadow:none;animation:readyedge 2.8s ease-in-out infinite}
 @keyframes readyedge{0%,100%{border-color:#fbbf24;box-shadow:none}50%{border-color:#78521e;box-shadow:none}}
-@media(prefers-reduced-motion:reduce){.tile.ready,.tile.quiet.ready{animation:none;border-color:#fbbf24;box-shadow:none}}
+/* his word 2026-10-05: the attention edge PULSES even with Windows animations off (his RDP session reports reduced motion) - a slow
+   border fade, nothing moves; every other motion still honours the setting */
+@media(prefers-reduced-motion:reduce){.tile.ready,.tile.quiet.ready{animation:readyedge 2.8s ease-in-out infinite;border-color:#fbbf24;box-shadow:none}}
 /* the compact card (John, 2026-09-27): the name with the effort as a suffix and the cockpit link beside it, ONE line
    clamped to two, the acts on one line; the description, the next step behind a wait and the effort line open with it */
 .t-top{display:flex;align-items:baseline;gap:8px}

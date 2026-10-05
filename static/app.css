@@ -57,7 +57,7 @@ body.hosted { border: 1px solid #2f3a4d; box-sizing: border-box; }
 /* Attention flashes independently of the activity colour, including green work. */
 .tile.ready .activity-dot{animation:attentiondot 1.2s steps(1,end) infinite}
 @keyframes attentiondot{0%,100%{opacity:1}50%{opacity:.2}}
-@media(prefers-reduced-motion:reduce){.tile.ready{animation:none;border-color:var(--amber)}.tile.ready .activity-dot{animation:none;opacity:1;outline:1px solid var(--amber);outline-offset:2px;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tile.ready{animation:attentionedge 2.8s ease-in-out infinite;border-color:var(--amber)}.tile.ready .activity-dot{animation:none;opacity:1;outline:1px solid var(--amber);outline-offset:2px;box-shadow:none}}
 .tile .side.r { color: var(--blue); border-color: rgba(111,162,255,.5); }
 .tile .pos { display: none; }
 .tile.dragging { opacity: .6; outline: 1px dashed var(--faint); }
