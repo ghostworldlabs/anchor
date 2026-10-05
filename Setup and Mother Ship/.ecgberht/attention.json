@@ -1,7 +1,7 @@
 {
-  "state": "working",
-  "reason": "Diagnosing the live provider-state loading delay",
-  "updated_at": "2026-10-05T23:27:23.565744+00:00",
+  "state": "quiet",
+  "reason": "Provider repair owner released; proposed assurance refinement is ready for inspection",
+  "updated_at": "2026-10-05T23:42:07.223646+00:00",
   "state_since": "2026-10-05T23:22:07.703527+00:00",
   "provenance": [
     {

@@ -1,0 +1,9 @@
+# Independent software assurance proposal - October 5, 2026
+
+Source: John turn56d231a8 asks why no Crucible/Foreman and whether adversarial review/hardening establish robustness. The direct job was selected for a bounded approved build and executable test gate. Its55 passing author tests and browser checks are not independent review. Plan v1 omitted the dedicated expert review and software hardening; its harden-tagged backups do not satisfy that obligation. This is a steward planning gap.
+
+Prepared proposed implementation plan v2 and PDF outside the owned repository, preserving the full v1 baseline and scope v6. On safe release, the existing writer added proposed rigor/harden steps with executable pytest gates and kept the same human explore/refine and existing laptop proof. The proposal is registered; v1 remains approved, v2 is not accepted, Foreman is not commissioned, no slice closes and no goal_flip is due.
+
+Read canonical Foreman SKILL.md at C:/Users/john/.claude/skills/foreman/SKILL.md completely. Its contract requires confirmation before building. Recommend heavy build tier because of credentials, separate accounts and an observed live failure. Host settings revision24 selects ChatGPT execution and Grok review; refresh at launch and verify actual participation. Two fresh completed read-only reviews, reproducible serious findings, failure-path gates, fix/re-review and real client proof are required; missing checks remain explicit.
+
+The current repair job continues independently. No engine restart or account/key changes were performed. The new global assurance rule is in C:/Users/john/.claude/AGENTS.md. Current session overhead:2 (original why-not-running correction plus this assurance-gap correction); decisions are excluded. Actual PDF viewer/review delivery and Foreman contract confirmation remain pending inspection after publication.
