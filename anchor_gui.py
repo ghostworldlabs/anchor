@@ -529,6 +529,7 @@ import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest projec
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
 import foundry_api as _fapi  # foundry GUI fold-in — the React app's real-data API layer (port of server.mjs)
+import foundry_page as _fpage  # read-only skill walkthrough / Library discovery
 import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
@@ -22880,6 +22881,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # gone; the doctor gate regression-tests its absence.
                 _lock, _ck = self._locked_page()        # the Doctor (locked 2026-10-03)
                 self._send_html(_lock or render_doctor_page_html(), cookie=None if _lock else _ck)
+            elif _path_only == "/api/foundry/page":
+                self._send_json(_fpage.catalog())
+            elif _path_only == "/api/foundry/skill":
+                q = parse_qs(urlparse(self.path).query)
+                detail = _fpage.skill_detail((q.get("skill") or [""])[0])
+                self._send_json(detail or {"error": "unknown skill"}, 200 if detail else 404)
+            elif _path_only == "/foundry/source":
+                q = parse_qs(urlparse(self.path).query)
+                page = _fpage.source_page((q.get("skill") or [""])[0],
+                                         (q.get("path") or [""])[0],
+                                         (q.get("anchor") or [""])[0])
+                if page is None:
+                    self._send_json({"error": "source not declared for this skill"}, 404)
+                else:
+                    self._send_html(page)
+            elif _path_only == "/foundry/icon":
+                q = parse_qs(urlparse(self.path).query)
+                icon = _fpage.icon_file((q.get("skill") or [""])[0])
+                if icon is None:
+                    self._send_json({"error": "icon not found"}, 404)
+                else:
+                    import mimetypes
+                    self._send_bytes(icon.read_bytes(), mimetypes.guess_type(str(icon))[0] or "image/png",
+                                     cache="no-cache")
             elif _path_only == "/foundry" or _path_only == "/foundry/":
                 # Foundry GUI (folded-in React app): serve the built SPA
                 # (foundry-gui/dist/index.html). Its absolute /assets, /brand

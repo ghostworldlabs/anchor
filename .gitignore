@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 venv/
 .env
+/.npm-cache/
 
 # Logs and Reports
 logs/*.md

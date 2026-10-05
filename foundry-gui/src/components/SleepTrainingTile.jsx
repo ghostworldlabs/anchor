@@ -196,7 +196,7 @@ export default function SleepTrainingTile({ selectedSkill, summary, metrics }) {
             </svg>
           </div>
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 group-hover:text-white font-display">5. Sleep &amp; Training</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 group-hover:text-white font-display">Sleep console</h3>
             <p className="text-[10px] text-slate-500 font-mono mt-0.5">Journal sessions &rarr; gated improvements</p>
           </div>
         </div>

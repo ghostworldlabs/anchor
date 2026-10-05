@@ -388,9 +388,9 @@ def anti_theater_check(source_text=None, module=None) -> list:
 # ── The page render (what the Anchor button serves) ──────────────────────────
 
 _PAGE_CSS = """
-  :root { --bg:#0e1116; --panel:#161b24; --line:#252d3b; --text:#dbe2ee;
-          --dim:#8a94a6; --accent:#6c9cfc; --ok:#22c55e; --warn:#f59e0b;
-          --bad:#ef4444; }
+  :root { --bg:#0f1117; --panel:#1a1d27; --line:#2e3340; --text:#e2e4e9;
+          --dim:#8b8f9a; --accent:#6c9cfc; --ok:#4cc38a; --warn:#e0a84a;
+          --bad:#e06c6c; }
   * { box-sizing:border-box; }
   body { background:var(--bg); color:var(--text); margin:0;
          font:14px/1.5 'Segoe UI',system-ui,sans-serif; }
