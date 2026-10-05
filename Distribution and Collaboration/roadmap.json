@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-04T22:41:49.639Z",
+  "as_of": "2026-10-05T00:49:38.487Z",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -692,6 +692,78 @@
         "why": "Original turn ee1d9c6c-201e-4dc5-adfd-facb4db2d028 accepts contractor programming time and rejects sales or recurring software-use fees for modified Anchor. Refine the same license draft; final terms, publication and slice close remain unapproved."
       },
       "seq": 44
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-license",
+      "fields": {
+        "waiting_on": null,
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ],
+          "current": false
+        }
+      },
+      "client_event_id": "distribution-f0c9ecc4-license-review-deferred",
+      "at": "2026-10-05T00:49:38.487Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-05T00:49:38.487Z",
+        "why": "Original turn f0c9ecc4-681b-43c2-8b6d-a0911349bcc7 defers reading license Refinement 2 and asks to carry on. Recovered Setup ownership decisions apply: one personal mother ship; cross-person sharing remains parked. Independent reversible client preparation only; no license acceptance, publishing, Setup mockup integration or slice close."
+      },
+      "seq": 45
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-license",
+      "from": "active",
+      "to": "parked",
+      "client_event_id": "distribution-f0c9ecc4-license-parked-unaccepted",
+      "at": "2026-10-05T00:49:38.487Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-05T00:49:38.487Z",
+        "why": "Original turn f0c9ecc4-681b-43c2-8b6d-a0911349bcc7 defers reading license Refinement 2 and asks to carry on. Recovered Setup ownership decisions apply: one personal mother ship; cross-person sharing remains parked. Independent reversible client preparation only; no license acceptance, publishing, Setup mockup integration or slice close."
+      },
+      "seq": 46
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-release",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "First verify a recipient’s additional device connects to their own existing mother ship through the shared Setup path; then independently verify new-host installation. Begin with a portable Windows connection-client correction and focused checks. Preserve Windows/Linux/macOS verification, same-owner secure access, independent acceptance and the parked cross-person sharing boundary. Live Setup integration follows its mockup review; final licensing review independently precedes publication.",
+        "gate": "python -m pytest -q tests/test_app_shell_connect_2026_10_03.py tests/test_app_shell_host_2026_10_02.py",
+        "navigation": {
+          "path": [
+            "gwl-distribution"
+          ],
+          "current": true
+        }
+      },
+      "client_event_id": "distribution-f0c9ecc4-connect-preparation-scope",
+      "at": "2026-10-05T00:49:38.487Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-05T00:49:38.487Z",
+        "why": "Original turn f0c9ecc4-681b-43c2-8b6d-a0911349bcc7 defers reading license Refinement 2 and asks to carry on. Recovered Setup ownership decisions apply: one personal mother ship; cross-person sharing remains parked. Independent reversible client preparation only; no license acceptance, publishing, Setup mockup integration or slice close."
+      },
+      "seq": 47
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-release",
+      "from": "proposed",
+      "to": "active",
+      "client_event_id": "distribution-f0c9ecc4-connect-preparation-active",
+      "at": "2026-10-05T00:49:38.487Z",
+      "receipt": {
+        "who": "John, recorded by Aladdin",
+        "when": "2026-10-05T00:49:38.487Z",
+        "why": "Original turn f0c9ecc4-681b-43c2-8b6d-a0911349bcc7 defers reading license Refinement 2 and asks to carry on. Recovered Setup ownership decisions apply: one personal mother ship; cross-person sharing remains parked. Independent reversible client preparation only; no license acceptance, publishing, Setup mockup integration or slice close."
+      },
+      "seq": 48
     }
   ],
   "roadmap_projection": [
@@ -751,7 +823,7 @@
     {
       "id": "gwl-license",
       "name": "Licensing and hosting",
-      "status": "active",
+      "status": "parked",
       "done_when": "Review Ghost World Lab License v1, Refinement 2: contractor programming labor permitted; one-time software sales and recurring fees for modified versions remain reserved. Preserve paid-hosting permission, voluntary sharing and free internal use. Final text, owner, law and dependency/contributor rights remain for review.",
       "waiting_on": null,
       "commissioned_as": null,
@@ -761,22 +833,23 @@
         "path": [
           "gwl-distribution"
         ],
-        "current": true
+        "current": false
       }
     },
     {
       "id": "gwl-release",
       "name": "Install and use from a collaborator’s computer",
-      "status": "proposed",
-      "done_when": "First verify a collaborator connects to the existing mother ship; then independently verify installation. Cover the supported platforms through the shared Setup flow.",
+      "status": "active",
+      "done_when": "First verify a recipient’s additional device connects to their own existing mother ship through the shared Setup path; then independently verify new-host installation. Begin with a portable Windows connection-client correction and focused checks. Preserve Windows/Linux/macOS verification, same-owner secure access, independent acceptance and the parked cross-person sharing boundary. Live Setup integration follows its mockup review; final licensing review independently precedes publication.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "harden",
-      "gate": null,
+      "gate": "python -m pytest -q tests/test_app_shell_connect_2026_10_03.py tests/test_app_shell_host_2026_10_02.py",
       "navigation": {
         "path": [
           "gwl-distribution"
-        ]
+        ],
+        "current": true
       }
     },
     {

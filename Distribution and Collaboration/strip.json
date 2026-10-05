@@ -2,9 +2,9 @@
   "schema": "ecgberht-strip-v0",
   "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
   "face_path": "ECGBERHT.md",
-  "as_of": "2026-10-04",
+  "as_of": "2026-10-05",
   "phase": "planning",
-  "active_effort": "Ghost World Lab License v1, Refinement 2 and its focused payment review are ready.",
+  "active_effort": "Preparing portable Windows connection client v1; license Refinement 2 reading is deferred.",
   "effort_status": "PENDING",
   "tool_depth_cell": "LITE",
   "human_wait": "none",
@@ -16,8 +16,8 @@
   },
   "anti_starvation_age_days": 0,
   "grasscatch": [],
-  "next_recommended": "Licensing and hosting; then Install and use from a collaborator’s computer",
-  "why_next": "Contractor labor is permitted; software sales and recurring version fees remain reserved.",
+  "next_recommended": "Check portable connection client v1; then prepare a real same-owner device trial.",
+  "why_next": "Connection preparation is independent of deferred licensing and the shared Setup layout review.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -672,6 +672,20 @@
         "gwl-license",
         "gwl-release"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "next_recommended": "Check portable connection client v1; then prepare a real same-owner device trial.",
+      "why_next": "Connection preparation is independent of deferred licensing and the shared Setup layout review.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Preparing portable Windows connection client v1; license Refinement 2 reading is deferred.",
+      "human_wait": "none",
+      "current_step_id": "gwl-release"
     }
   ],
   "receipts": [
@@ -842,10 +856,26 @@
       "path": "journal/0009-ghost-world-lab-license-2026-10-04.md",
       "entry_id": "0009-ghost-world-lab-license-2026-10-04",
       "summary": "Ghost World Lab License v1 — 4 October 2026"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-05",
+      "at": "2026-10-05T00:32:05Z",
+      "current_step_id": "gwl-license",
+      "last_event_seq": 44,
+      "last_event_at": "2026-10-04T22:41:49.639Z",
+      "last_event_kind": "status_flip",
+      "last_event_step_id": "gwl-license",
+      "presentation_id": null,
+      "active_effort": "Ghost World Lab License v1, Refinement 2 and its focused payment review are ready.",
+      "wait_ref": "none",
+      "human_wait": "none",
+      "_kind": "receipt"
     }
   ],
-  "horizon_source_seq": 44,
-  "horizon_focus": "gwl-license",
+  "horizon_source_seq": null,
+  "horizon_focus": null,
   "wait_ref": "none",
-  "current_step_id": "gwl-license"
+  "current_step_id": "gwl-release"
 }

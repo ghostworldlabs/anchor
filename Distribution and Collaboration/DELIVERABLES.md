@@ -2,8 +2,10 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| START HERE — ecgberht Ghost World Lab License v1, Refinement 2 — contractor programming time allowed; software sales and recurring version fees restricted; Legal-Beagle payment check completed | `GHOST-WORLD-LAB-LICENSE-v1.md` | 2026-10-04 | gwl-license |
-| FOR REVIEW — Legal-Beagle Ghost World Lab License v1, Refinement 2 payment review — completed; contractor labor permitted, software/version fees reserved | `LEGAL-BEAGLE-REVIEW-v1-REFINEMENT-2.md` | 2026-10-04 | gwl-license |
+| START HERE — ecgberht Connection readiness v1 — current code audit and Windows client preparation brief; build result pending | `CONNECTION-READINESS-v1.md` | 2026-10-04 | gwl-release |
+| ecgberht Connect-first client preparation journal — recovered authorization and code-job record | `journal/0010-connect-client-preparation-2026-10-04.md` | 2026-10-04 | gwl-release |
+| DEFERRED REVIEW — ecgberht Ghost World Lab License v1, Refinement 2 — contractor programming time allowed; software sales and recurring version fees restricted; Legal-Beagle payment check completed | `GHOST-WORLD-LAB-LICENSE-v1.md` | 2026-10-04 | gwl-license |
+| DEFERRED REVIEW — Legal-Beagle Ghost World Lab License v1, Refinement 2 payment review — completed; contractor labor permitted, software/version fees reserved | `LEGAL-BEAGLE-REVIEW-v1-REFINEMENT-2.md` | 2026-10-04 | gwl-license |
 | Earlier Legal-Beagle Ghost World Lab License v1, Refinement 1 review — completed; does not cover later changed text | `LEGAL-BEAGLE-REVIEW-v1.md` | 2026-10-04 | gwl-license |
 | Earlier ecgberht Ghost World Lab License v1, Refinement 1 — preserved before the contractor-payment decision | `versions/GHOST-WORLD-LAB-LICENSE-v1-REFINEMENT-1.md` | 2026-10-04 | gwl-license |
 | FOR REVIEW — ecgberht MIT comparison v1 — custom candidate accepted for drafting, not final terms | `MIT-COMPARISON-v1.md` | 2026-10-04 | gwl-license |
