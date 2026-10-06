@@ -145,6 +145,99 @@ def _repo_root(path):
     return Path(out).resolve() if code == 0 and out else None
 
 
+# ── Foreman as the code worker (his word, 2026-10-05: "no generic coder - Foundry skills") ─────────────────────────
+# A code job whose check is a real test run is built by FOREMAN (execute -> adversarial review -> fix -> re-review,
+# gated by the check) in the same worktree, landed by the same safe path. Foreman needs a real test runner (per-test
+# results, a changed file reached by a test - it refuses a vacuous green), so a job without one stays a coder job and
+# says so plainly.
+FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
+                        (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
+FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(4 * 3600)))
+FOREMAN_ON = os.environ.get("ANCHOR_CODE_JOB_FOREMAN", "0") == "1"   # off until a live run is proven (2026-10-05: the first halted without editing)
+_TEST_GATE = re.compile(r"\b(pytest|node\s+--test|npm\s+(?:run\s+)?test)\b")
+_FOREMAN_PROCS = {}
+
+
+def is_test_gate(check):
+    """True when the check is a real test run Foreman can gate on."""
+    return bool(_TEST_GATE.search(str(check or "")))
+
+
+def foreman_docs(job):
+    """The three documents Foreman reads, from the job's brief and check (one wave; the gate is the check)."""
+    title = next((ln.strip().lstrip("#").strip() for ln in job["brief"].splitlines() if ln.strip()), "the change")[:120]
+    brief = "\n".join(ln.lstrip("#").strip() if ln.lstrip().startswith("#") else ln for ln in job["brief"].splitlines())
+    check = re.sub(r"(?<=\s)-q(?=\s|$)", "", job["check"]).strip()      # Foreman refuses pytest -q (it needs per-test lines)
+    job = dict(job, brief=brief, check=check)
+    description = "# Code job %s - description\n\n%s\n" % (job["id"], job["brief"])
+    plan = ("# Code job %s - Implementation Plan\n\n**North Star:** %s\n\ntest-command: `%s`\n\n"
+            "## Wave 1 - %s\n\n%s\n\nDone when: `%s` passes and the change is reached by a test.\n") % (
+        job["id"], title, job["check"], title, job["brief"], job["check"])
+    return description, plan, "# Code job %s - execution log\n" % job["id"]
+
+
+def _start_foreman(cdir, job, wt):
+    """Write the docs (git-ignored), launch Foreman headless in the worktree, and finish the job when it ends."""
+    d = Path(wt) / ".foreman-job"
+    d.mkdir(parents=True, exist_ok=True)
+    desc, plan, log = foreman_docs(job)
+    (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
+    (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
+    (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
+    (Path(wt) / "foreman.config.json").write_text(json.dumps({"docs": {
+        "description": ".foreman-job/DESCRIPTION.md", "plan": ".foreman-job/IMPLEMENTATION-PLAN.md",
+        "execution_log": ".foreman-job/EXECUTION-LOG.md"}}), encoding="utf-8")
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)      # subscription billing, as go.ps1 does
+    env["CRUCIBLE_AGENT_LIVE"] = "1"
+    out = open(d / "foreman-run.log", "w", encoding="utf-8")
+    proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--reviewers", "2", "--cap", "3"], cwd=str(wt),
+                            stdout=out, stderr=subprocess.STDOUT, env=env,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+    _FOREMAN_PROCS[job["id"]] = proc
+
+    def wait():
+        try:
+            rc = proc.wait(timeout=FOREMAN_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            rc = None
+        finally:
+            out.close()
+            _FOREMAN_PROCS.pop(job["id"], None)
+        finish(cdir, job["id"], foreman_result((d / "foreman-run.log").read_text(encoding="utf-8", errors="replace"), rc))
+    threading.Thread(target=wait, name="foreman-job-" + job["id"], daemon=True).start()
+
+
+def foreman_result(text, rc):
+    """Foreman's run, as the job's result: DONE -> its summary; HALT / BUDGET-STOP / no run record -> an error."""
+    m = re.search(r"RUN_JSON_START\s*(\{.*?\})\s*RUN_JSON_END", text or "", re.S)
+    run = {}
+    if m:
+        try:
+            run = json.loads(m.group(1))
+        except ValueError:
+            run = {}
+    status = str(run.get("status") or "")
+    waves = run.get("waveResults") or []
+    summary = "Foreman %s: %s" % (status or "ended without a run record", "; ".join(
+        "wave %s %s" % (w.get("wave") or w.get("n") or "?", w.get("status") or w.get("verdict") or "") for w in waves if isinstance(w, dict))[:600])
+    if status == "DONE":
+        return {"text": summary, "error": ""}
+    why = str(run.get("haltReason") or ("exit %s" % rc if rc is not None else "timed out"))
+    return {"text": summary, "error": "Foreman %s: %s" % (status or "did not finish", why[:400])}
+
+
+def _kill_tree(proc):
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=30)
+        else:
+            proc.kill()
+    except Exception:
+        pass
+
+
 def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine)."""
@@ -178,6 +271,16 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
     terms.parent.mkdir(parents=True, exist_ok=True)
     terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
     _exclude_local(wt)
+    if FOREMAN_ON and is_test_gate(job["check"]) and FOREMAN_RUN_LIVE.is_file():
+        try:
+            _transition(cdir, job_id, LIVE, worker="foreman")
+            _start_foreman(cdir, job, wt)
+            return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "foreman"}
+        except Exception as e:
+            j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error="Foreman could not start: %s" % e)
+            _cleanup(j or job, keep_branch=False)
+            return {"ok": False, "error": "Foreman could not start: %s" % e, "job": job_id}
+    _transition(cdir, job_id, LIVE, worker="coder" + ("" if FOREMAN_ON else " (Foreman not yet switched on)") if not is_test_gate(job["check"]) or not FOREMAN_ON else "coder")
     try:
         eng = engine_factory(str(wt)) if engine_factory else None
         if eng is None:
@@ -203,7 +306,8 @@ def _exclude_local(wt):
             f = ex / "info" / "exclude"
             f.parent.mkdir(parents=True, exist_ok=True)
             cur = f.read_text(encoding="utf-8") if f.exists() else ""
-            add = [x for x in ("/.anchor/", "/.ecgberht/") if x not in cur]
+            add = [x for x in ("/.anchor/", "/.ecgberht/", "/.foreman-job/", "/foreman.config.json", "/.foreman/",
+                               "/_foreman-status.log", "/foreman-checkpoint.json") if x not in cur]
             if add:
                 f.write_text(cur.rstrip("\n") + ("\n" if cur else "") + "\n".join(add) + "\n", encoding="utf-8")
     except Exception:
@@ -429,6 +533,9 @@ def stop(cdir, job_id=None, engine_lookup=None):
             eng.stop()
     except Exception:
         pass
+    proc = _FOREMAN_PROCS.pop(job["id"], None)     # a Foreman job: its process tree goes too (2026-10-05)
+    if proc is not None:
+        _kill_tree(proc)
     try:
         _git(job["worktree"], "add", "-A")
         _git(job["worktree"], "commit", "-q", "-m", "Code job %s stopped by John (unfinished)" % job["id"])

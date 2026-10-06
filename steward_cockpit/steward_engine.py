@@ -145,8 +145,8 @@ SMALL_DUTY = (
     "do not touch .ecgberht/attention.json. Anything LARGER (many files, a feature, an unknown cause, hours of work) "
     "is handed to a code job and you stay free to talk: write a short brief and run "
     "`python C:/dev/Anchor/tools/steward_code_job.py start --repo <the repo that owns the files> --brief-file <brief.md> "
-    "[--check \"<a command that fails when the work is wrong>\"]`, then tell John in one line what the coder is doing. "
-    "The code job runs on the best model at full effort in its own worktree, lands its work when clean, and wakes you "
+    "[--check \"<a command that fails when the work is wrong>\"]`, then tell John in one line what is building it. "
+    "It is a coder (not yet a Foundry skill), runs in its own worktree, lands its work when clean, and wakes you "
     "with the result; report it in two or three sentences. While a code job runs on a repository, do not write there "
     "yourself. When John says stop, run `python C:/dev/Anchor/tools/steward_code_job.py stop`. A swarm only when he "
     "asks for one. The engine ends any small-mode turn that passes 15 tool calls. "
@@ -156,7 +156,7 @@ SMALL_DUTY = (
 EFFORT_DUTY = (
     "THIS IS AN EFFORT: the plan discipline below applies in full. Keep the dialogue responsive: hand any long "
     "build work to a code job (`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file "
-    "<brief.md> [--check \"<cmd>\"]`, best model, full effort, its own worktree) and tell John in one line; do "
+    "<brief.md> [--check \"<cmd>\"]`, its own worktree) and tell John in one line; do "
     "not write in a repository while a code job owns it. "
 )
 
