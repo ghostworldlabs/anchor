@@ -56,6 +56,9 @@ STEWARDS = {
         # (John, 2026-10-03: Aladdin the Star Chart, Jarvis the Chart Room, Ecgberht the Beacon).
         "campaign_name": "Beacon",
         "campaign_icon": "campaign-ecgberht-beacon.jpg",
+        # The Desk (John 2026-10-06): the working desk on the page, its pen on the tab.
+        "desk_scene": "desk-scene-ecgberht.jpg",
+        "desk_icon": "desk-tab-ecgberht.jpg",
     },
     "aladdin": {
         "label": "Aladdin",
@@ -67,6 +70,8 @@ STEWARDS = {
         "projects_hint": "each kept under the Lamp&rsquo;s watch",
         "campaign_name": "Star Chart",
         "campaign_icon": "campaign-aladdin-star-chart.jpg",
+        "desk_scene": "desk-scene-aladdin.jpg",
+        "desk_icon": "desk-tab-aladdin.jpg",
     },
     "jarvis": {
         "label": "Jarvis",
@@ -83,6 +88,8 @@ STEWARDS = {
         "projects_hint": "each served on the Server",
         "campaign_name": "Chart Room",
         "campaign_icon": "campaign-jarvis-chart-room.jpg",
+        "desk_scene": "desk-scene-jarvis.jpg",
+        "desk_icon": "desk-tab-jarvis.jpg",
     },
 }
 VALID_STEWARDS = frozenset(STEWARDS)

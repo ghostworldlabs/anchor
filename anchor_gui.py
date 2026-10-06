@@ -5977,6 +5977,8 @@ _STEWARD_UI_FALLBACK = {
     "projects_hint": "each under Ecgberht&rsquo;s seal",
     "campaign_name": "Beacon",
     "campaign_icon": "campaign-ecgberht-beacon.jpg",
+    "desk_scene": "desk-scene-ecgberht.jpg",
+    "desk_icon": "desk-tab-ecgberht.jpg",
 }
 
 

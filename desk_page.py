@@ -14,8 +14,13 @@ STATE_LIGHT = {"waits": "orange", "working": "green", "quiet": "gray"}
 
 
 def desk_icon(st):
-    """The Desk's picture for this persona: its own Desk icon once chosen, else the persona's High Seat."""
+    """The Desk's TAB picture for this persona - its pen (his pick, 2026-10-06: "single objects for the tab (pens)")."""
     return (st or {}).get("desk_icon") or (st or {}).get("high_seat") or ""
+
+
+def desk_scene(st):
+    """The Desk PAGE's picture for this persona - its working desk ("scenes for the page")."""
+    return (st or {}).get("desk_scene") or desk_icon(st)
 
 
 def _cockpit_href(pid, d):
@@ -99,5 +104,5 @@ def render_desk_html(ctx) -> str:
         '<div class="desk-grid">%s%s</div>'
         '<div class="foot"><span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span></div>'
         '</div><script src="/static/desk-page.js?v=%s"></script></body></html>'
-    ) % (_hsp._masthead({"build": b, "steward": st}), _hsp._brand_img(b, desk_icon(st), "desk-icon"), line,
+    ) % (_hsp._masthead({"build": b, "steward": st}), _hsp._brand_img(b, desk_scene(st), "desk-scene"), line,
          _small(ctx), _cockpits(ctx), esc(b))
