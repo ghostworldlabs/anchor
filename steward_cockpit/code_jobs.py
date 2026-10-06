@@ -278,9 +278,14 @@ def _finish(cdir, job_id, job, result):
         land_note = "not landed: the check failed; the work waits on branch %s" % job["branch"]
     else:
         landed, land_note = land(job, files)
+    landed_commit = ""
+    if landed:
+        c, out, _ = _git(repo, "rev-parse", "HEAD")
+        landed_commit = out.strip() if c == 0 else ""
     done = _transition(cdir, job_id, ("finishing",), status="failed" if (err or commit_err) else "done",
                        finished=time.strftime("%Y-%m-%d %H:%M:%S"), summary=summary, error=err or commit_err,
-                       check_ok=check_ok, check_output=check_out, files=files, landed=landed, land_note=land_note)
+                       check_ok=check_ok, check_output=check_out, files=files, landed=landed, land_note=land_note,
+                       landed_commit=landed_commit)
     if done is None:
         return
     if not commit_err:
@@ -337,10 +342,9 @@ def _cleanup(job, keep_branch=True):
         pass
 
 
-def live_note(job):
-    """Landed is not live (his word, 2026-10-05: a tile repair 'landed with all 20 checks passing' and nothing on his
-    screen changed - the running Anchor still had the old code and his page the old stylesheet). For a job landed in the
-    repository the Anchor service runs from, the one sentence the steward must carry: it waits for a restart."""
+def live_state(job):
+    """'live' | 'waits for a restart' | '' (not an Anchor landing, or unknown) - OBSERVED (two-lane step 6, 2026-10-05):
+    the running build (ANCHOR_RUNNING_HEAD, set by the server at start) contains the commit the job landed."""
     if not job.get("landed"):
         return ""
     try:
@@ -348,6 +352,19 @@ def live_note(job):
         if Path(str(job.get("repo") or "")).resolve() != here:
             return ""
     except Exception:
+        return ""
+    running, landed = os.environ.get("ANCHOR_RUNNING_HEAD", ""), str(job.get("landed_commit") or "")
+    if not running or not landed:
+        return "waits for a restart"
+    c, _, _ = _git(str(here), "merge-base", "--is-ancestor", landed, running)
+    return "live" if c == 0 else "waits for a restart"
+
+
+def live_note(job):
+    """Landed is not live (his word, 2026-10-05: a tile repair 'landed with all 20 checks passing' and nothing on his
+    screen changed - the running Anchor still had the old code and his page the old stylesheet). For a job landed in the
+    repository the Anchor service runs from, the one sentence the steward must carry: it waits for a restart."""
+    if live_state(job) != "waits for a restart":
         return ""
     return ("NOT LIVE YET: this landed in Anchor's repository, but John's screen runs the build that was started before "
             "it - the change shows only after Anchor restarts (an Anchor restart is John's word, or his standing "
@@ -374,6 +391,14 @@ def _report(cdir, job):
         from steward_cockpit import steward_routes as _sr
         eng = _sr.get_engine(str(cdir))
         if eng is not None:
+            try:   # two-lane step 5 (2026-10-05): he sees the result at once, in the engine's own words
+                state = live_state(job)
+                eng._emit({"t": "sys", "text": "code job %s %s%s%s" % (
+                    job["id"], "finished" if job.get("status") == "done" else "failed",
+                    (" \u2014 landed" + ((", " + state) if state else "")) if job.get("landed") else "",
+                    (" \u2014 " + job.get("land_note")) if (job.get("land_note") and not job.get("landed")) else "")})
+            except Exception:
+                pass
             if not eng.alive():
                 eng.wake(fresh=False)
             eng.say("\n".join(lines), human=False)

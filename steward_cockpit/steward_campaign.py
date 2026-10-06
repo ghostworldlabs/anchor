@@ -1416,6 +1416,28 @@ def running_code_jobs(campaign_dir):
     return list(reversed(out))
 
 
+def landed_not_live(campaign_dir):
+    """Titles of this steward's code jobs landed in Anchor today whose commit the running build does not carry yet
+    (two-lane step 6, 2026-10-05). [] when none or unreadable."""
+    try:
+        raw = json.loads((Path(campaign_dir) / ".ecgberht" / "code-jobs.json").read_text(encoding="utf-8"))
+        from steward_cockpit import code_jobs as _cj
+    except Exception:
+        return []
+    rows = raw if isinstance(raw, list) else (raw.get("jobs") or list(raw.values()) if isinstance(raw, dict) else [])
+    today = time.strftime("%Y-%m-%d")
+    out = []
+    for r in rows:
+        if isinstance(r, dict) and r.get("landed") and str(r.get("finished") or "").startswith(today):
+            try:
+                if _cj.live_state(r) == "waits for a restart":
+                    t = next((ln.strip().lstrip("#").strip() for ln in str(r.get("brief") or "").splitlines() if ln.strip()), "")
+                    out.append((t[len("Work order:"):].strip() if t.lower().startswith("work order:") else t)[:100] or r.get("id"))
+            except Exception:
+                continue
+    return out
+
+
 def compose_status(campaign_dir: str, engine_state=None):
     """The deterministic TWO-PART 10-minute status (handoff 2026-08-25 #2b;
     reworked 2026-09-04 on John's word).
@@ -1448,9 +1470,12 @@ def compose_status(campaign_dir: str, engine_state=None):
     now_lines = []
     running = None
     jobs = running_code_jobs(campaign_dir)
+    waiting_restart = landed_not_live(campaign_dir)
     # 2026-10-05: a running code job is OBSERVED work - it leads, ahead of the steward's own note
     for j in jobs[:2]:
         now_lines.append("code job %s — %s%s" % (j["status"], j["title"], (" (%d min)" % j["minutes"]) if j["minutes"] is not None else ""))
+    for w in waiting_restart[:2]:
+        now_lines.append("landed, waits for a restart \u2014 %s" % w)
     if jobs:
         running = {"kind": "code_job", "label": now_lines[0], "skill": "coder", "source": ".ecgberht/code-jobs.json",
                    "age": ("%d min" % jobs[0]["minutes"]) if jobs[0]["minutes"] is not None else ""}

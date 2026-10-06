@@ -186,6 +186,7 @@ def _compute_build_id():
 
 
 BUILD_ID = _compute_build_id()
+os.environ["ANCHOR_RUNNING_HEAD"] = BUILD_ID.split("+")[0]   # two-lane step 6: what 'live' is checked against
 
 
 # Self-healing cache-bust client JS. Kept as a plain (non-f) string so it can
