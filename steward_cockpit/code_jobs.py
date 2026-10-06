@@ -154,7 +154,7 @@ def _repo_root(path):
 FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
                         (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
 FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(4 * 3600)))
-FOREMAN_ON = os.environ.get("ANCHOR_CODE_JOB_FOREMAN", "0") == "1"   # off until a live run is proven (2026-10-05: the first halted without editing)
+FOREMAN_ON = os.environ.get("ANCHOR_CODE_JOB_FOREMAN", "1") == "1"   # ON: proven live 2026-10-05 19:58 (Claude writes, Grok reviews, landed)
 _TEST_GATE = re.compile(r"\b(pytest|node\s+--test|npm\s+(?:run\s+)?test)\b")
 _FOREMAN_PROCS = {}
 
@@ -317,7 +317,8 @@ def _exclude_local(wt):
             f.parent.mkdir(parents=True, exist_ok=True)
             cur = f.read_text(encoding="utf-8") if f.exists() else ""
             add = [x for x in ("/.anchor/", "/.ecgberht/", "/.foreman-job/", "/foreman.config.json", "/.foreman/",
-                               "/_foreman-status.log", "/foreman-checkpoint.json") if x not in cur]
+                               "/_foreman-status.log", "/foreman-checkpoint.json", "__pycache__/", ".pytest_cache/",
+                               "*.pyc") if x not in cur]
             if add:
                 f.write_text(cur.rstrip("\n") + ("\n" if cur else "") + "\n".join(add) + "\n", encoding="utf-8")
     except Exception:
