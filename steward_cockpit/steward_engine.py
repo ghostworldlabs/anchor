@@ -179,6 +179,7 @@ def _is_machine_text(text):
 
 
 STEP_CAP = int(os.environ.get("STEWARD_SMALL_STEP_CAP", "15"))
+RECEIPT_AFTER_S = float(os.environ.get("STEWARD_RECEIPT_AFTER_S", "20"))   # two-lane step 1: words he sees within the minute
 _EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full process|treat (?:this|it) as an effort)\b", re.I)
 _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
 
@@ -2117,6 +2118,10 @@ class Engine:
             arrivals = getattr(self, "_human_arrivals", None) or []
             self._timing = {"arrived": (arrivals.pop(0) if (arrivals and not is_control) else None),
                             "started": self.turn_started, "first_word": None, "tools": 0}
+            if not is_control and not self.general:
+                _t = threading.Timer(RECEIPT_AFTER_S, self._early_receipt, args=(self.turn_started,))
+                _t.daemon = True
+                _t.start()
             if not is_control:
                 # Wave 1.2: durable until the broker's first native event acks
                 # it; reconciled on the next wake if the process dies first.
@@ -2262,11 +2267,16 @@ class Engine:
                 reason = "one writer: a code job is working on that repository"
                 note = ("(interface - not John) Your last turn was ended: it wrote %s while a code job owns that "
                         "repository. Do not write there until the job reports; tell John in one line." % hit[0])
-        if not reason and getattr(self, "_turn_origin", "human") == "human" and self._turn_tools > STEP_CAP and not self.effort_on():
-            reason = "past %d tool calls: larger than a small change" % STEP_CAP
-            note = ("(interface - not John) Your last turn was ended after %d tool calls: this is larger than a small "
-                    "change. Hand it to a code job now (tools/steward_code_job.py start, with a short brief and a check), "
-                    "then tell John in one line what the coder is doing." % self._turn_tools)
+        # two-lane step 1 (2026-10-05, Grok + Opus): the cap binds in effort mode too - the slowest stewards were the
+        # ones mid-effort, where it was off; the hand-off names the worker that fits the work, never a generic coder
+        if not reason and getattr(self, "_turn_origin", "human") == "human" and self._turn_tools > STEP_CAP:
+            reason = "past %d tool calls: larger than a conversation turn" % STEP_CAP
+            note = ("(interface - not John) Your last turn was ended after %d tool calls: that is work, not a conversation "
+                    "turn. Commission it now and come back to John: a code change -> a code job (tools/steward_code_job.py "
+                    "start, a short brief and a check); research -> researchPrime; a plan -> Crucible; a review -> Gandalf; "
+                    "a build with a failing gate -> Foreman. Then tell John in one line what you sent off and to whom. Do "
+                    "not finish the work inline." % self._turn_tools)
+            self._stopped_mid_turn = True
         if not reason:
             return False
         with self._lock:
@@ -2970,6 +2980,8 @@ class Engine:
                 })
                 self.busy = False
                 self._record_timing(duration, was_tick)
+                if not err_text:
+                    self._stopped_mid_turn = False   # a turn that ended on its own: the tree is whole again
                 self._emit({"t": "turn_end",
                             "cost_usd": round(cost, 4) if cost is not None else None,
                             "cost_status": "reported" if cost is not None else "unavailable",
@@ -3159,6 +3171,19 @@ class Engine:
             return campaign.read_map(self.dir).get("attention", {})
         except Exception:
             return {"state": "unknown", "reason": "Work status unavailable"}
+
+    def _early_receipt(self, started):
+        """Two-lane step 1 (2026-10-05, Opus: 'words within a minute' needs words he can see before the model's own,
+        which ChatGPT only sends at the end of a turn): 20 s into a turn on his message with nothing said yet, the
+        engine says what the steward is on. Once per turn; never on a turn that has spoken or ended."""
+        try:
+            tm = getattr(self, "_timing", None) or {}
+            if not self.busy or self.turn_started != started or tm.get("first_word") or (self.turn_text or "").strip():
+                return
+            self._emit({"t": "sys", "text": "%s is on it \u2014 %s (%d s so far)" % (
+                self.steward or "The steward", self._turn_activity(), int(time.time() - started)), "receipt": True})
+        except Exception:
+            pass
 
     def _record_timing(self, duration, was_tick):
         """W1 of the two-lane plan (2026-10-05): one line per turn in <effort>/.ecgberht/turn-timing.jsonl - how long his
@@ -3407,6 +3432,8 @@ class Engine:
             _lock = _gs.repo_lock(_gs.toplevel(self.dir) or self.dir, wait_s=30, who="steward commit " + str(self.dir))
         except Exception:
             return None      # never commit without the lock (Grok code R1 F7)
+        if getattr(self, "_stopped_mid_turn", False):
+            return None      # Opus 2026-10-05: a turn stopped mid-work may have left a half-written file - no checkpoint until a turn ends cleanly
         with _lock as held:
             if not held:
                 return None      # a land holds the lock: the next cadence tick commits

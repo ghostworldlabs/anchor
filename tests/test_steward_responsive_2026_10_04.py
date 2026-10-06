@@ -59,16 +59,20 @@ def test_the_step_cap_ends_a_small_turn_and_hands_it_off(eng, monkeypatch):
     monkeypatch.setattr(eng, "_wake_locked", lambda fresh, seed: calls.append("wake") or (True, "awake"))
     monkeypatch.setattr(eng, "_persist_queue", lambda: True)
     assert eng._guard_turn({"name": "exec_command", "input": {}}) is True
-    assert "larger than a small change" in calls[0] and calls[1] == "wake"
+    assert "larger than a conversation turn" in calls[0] and calls[1] == "wake"   # two-lane step 1 wording (2026-10-05)
     assert eng.queue[0].startswith("(interface - not John) Your last turn was ended after") and "steward_code_job.py start" in eng.queue[0]
 
 
-def test_the_step_cap_spares_an_effort(eng, monkeypatch, tmp_path):
+def test_the_step_cap_binds_an_effort_too(eng, monkeypatch, tmp_path):
+    # two-lane step 1 (2026-10-05, Grok + Opus): the cap was off in effort mode - the slowest stewards were mid-effort
     eng.fake = False
     eng.busy = True
     eng._turn_tools = steward_engine.STEP_CAP + 5
     steward_engine._update_state(eng.skey(), {"effort_mode": True})
-    assert eng._guard_turn({"name": "exec_command", "input": {}}) is False
+    calls = []
+    monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda reason: calls.append(reason) or {"ok": True})
+    monkeypatch.setattr(eng, "_wake_locked", lambda **k: calls.append("wake") or (True, ""))
+    assert eng._guard_turn({"name": "exec_command", "input": {}}) is True and eng._stopped_mid_turn is True
 
 
 # ---------- R1: the receipt ----------
