@@ -23,7 +23,7 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Confirm the bounded Foreman heavy assurance contract in plan v2.",
+  "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
   "why_next": "Passing author tests do not establish independent assurance.",
   "uncertainty_flags": [],
   "instruments": [
@@ -662,6 +662,21 @@
       "horizon_focus": null,
       "active_effort": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
       "human_wait": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
+      "why_next": "Passing author tests do not establish independent assurance.",
+      "horizon_source_seq": 71,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-software-review"
+      ]
     }
   ],
   "receipts": [
@@ -806,8 +821,8 @@
       "summary": "Provider integration landing and plan pickup - October 5, 2026"
     }
   ],
-  "horizon_source_seq": null,
-  "horizon_focus": null,
+  "horizon_source_seq": 71,
+  "horizon_focus": "gwl-provider-status",
   "current_step_id": "gwl-provider-status",
   "wait_ref": "decision:provider-assurance-v2"
 }

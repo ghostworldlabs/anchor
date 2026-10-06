@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-05 13:51",
-  "status_id": "01791229917522825000",
+  "at": "2026-10-05 17:59",
+  "status_id": "01791244771390270100",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - attention stale - live owner unconfirmed",
+    "activity": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued",
     "latest_event": null,
     "next": [
-      "Provider capacity, cost and model controls"
+      "Provider integration: verify live Setup and laptop"
     ],
-    "question": "",
+    "question": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
     "facts": [
       {
         "label": "Summary",
-        "value": "Provider capacity, cost and model controls \u2014 Build and integrate the accepted Refinement 2 provider surface:\u2026"
+        "value": "Provider integration: verify live Setup and laptop \u2014 Build and integrate the accepted Refinement 2 provider\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - attention stale - live owner unconfirmed"
+        "value": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued"
       },
       {
         "label": "Status",
-        "value": "slice: Provider capacity, cost and model controls \u00b7 0/9 done \u00b7 stale"
+        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "none"
+        "value": "waiting on you: Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and\u2026"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "engine-20261005T195156-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s\u2026"
+        "value": "0011-provider-landed-and-plan-pickup: Provider integration landing and plan pickup - October 5, 2026"
       },
       {
         "label": "ETA",
@@ -49,33 +49,33 @@
       },
       {
         "label": "To do",
-        "value": "Provider capacity, cost and model controls"
+        "value": "Provider integration: verify live Setup and laptop"
       }
     ]
   },
-  "lead_line": "Next: Provider capacity, cost and model controls; then Review Setup before laptop integration \u2014 John accepted the layout and authorized real integration; no further approval blocks the build.",
+  "lead_line": "Next: Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration \u2014 Passing author tests do not establish independent assurance. \u00b7 waiting on you: Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
   "now": [
-    "nothing running - attention stale - live owner unconfirmed"
+    "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - attention stale - live owner unconfirmed",
+    "kind": "steward",
+    "label": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
     "n": 3,
-    "total": 9,
+    "total": 11,
     "id": "gwl-provider-status",
-    "name": "Provider capacity, cost and model controls",
+    "name": "Provider integration: verify live Setup and laptop",
     "part": "slice",
     "summary": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login,\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "engine-20261005T195156-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s).",
+  "journal": "0011-provider-landed-and-plan-pickup: Provider integration landing and plan pickup - October 5, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,9 +85,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": null,
-      "entry_id": "engine-20261005T195156-turn_error",
-      "at": "2026-10-05T19:51:56Z",
+      "path": "journal/0011-provider-landed-and-plan-pickup.md",
+      "entry_id": "0011-provider-landed-and-plan-pickup",
+      "at": "2026-10-05T23:28:09Z",
       "step_id": "gwl-provider-status",
       "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
       "run_id": null
@@ -98,44 +98,46 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Provider capacity, cost and model controls",
-    "then Review Setup before laptop integration"
+    "Provider integration: verify live Setup and laptop",
+    "then Independent adversarial review of provider integration"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 research \u00b7 harden",
+    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
     "steps_done": 0,
-    "steps_total": 9
+    "steps_total": 11
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.",
+    "text": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
     "as_of": "2026-10-05",
     "newest_work": "2026-10-05",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "slice: Provider capacity, cost and model controls",
+    "step": "slice: Provider integration: verify live Setup and laptop",
     "steps_done": 0,
-    "steps_total": 9,
-    "waiting_on_you": "",
+    "steps_total": 11,
+    "waiting_on_you": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
     "waiting_since": null,
-    "next": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-    "why": "John accepted the layout and authorized real integration; no further approval blocks the build.",
-    "attention": "stale",
+    "next": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
+    "why": "Passing author tests do not establish independent assurance.",
+    "attention": "quiet",
     "goal_reread": true
   },
   "map": [
     "research: Third: organize goals and initiatives on the Star Chart (proposed)",
     "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
-    "slice: Provider capacity, cost and model controls (active) \u00b7 gate",
-    "rigor: Review Setup before laptop integration (proposed) \u00b7 no gate",
+    "slice: Provider integration: verify live Setup and laptop (active) \u00b7 gate",
+    "slice: Try and refine the working provider surface (proposed) \u00b7 no gate",
+    "rigor: Independent adversarial review of provider integration (proposed) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
     "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
     "integrate: Wire Cave controls and reopen Setup (proposed) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
+    "harden: Harden provider failures, concurrency and credential boundaries (proposed) \u00b7 gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
   ],
   "work_map": [
@@ -174,7 +176,7 @@
       "tag": "slice",
       "label": "The product",
       "done": 0,
-      "total": 2,
+      "total": 3,
       "steps": [
         {
           "id": "gwl-host-client",
@@ -212,7 +214,7 @@
         },
         {
           "id": "gwl-provider-status",
-          "name": "Provider capacity, cost and model controls",
+          "name": "Provider integration: verify live Setup and laptop",
           "status": "active",
           "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
           "if_then": "",
@@ -233,9 +235,33 @@
             ],
             "current": true,
             "featured_paths": [
+              "IMPLEMENTATION-PLAN-v2.pdf",
               "IMPLEMENTATION-PLAN-v1.md",
               "SCOPE-v6.md",
               "mockups/SETUP-refinement-2.html"
+            ]
+          }
+        },
+        {
+          "id": "gwl-review",
+          "name": "Try and refine the working provider surface",
+          "status": "proposed",
+          "done_when": "Refinement 2 starting layout is explicitly accepted in turn d7dd98a2-97a2-42f9-9273-c71b3e49cbf9. Review the working provider integration on the laptop after build and activation; preserve independent feedback and require explicit slice close.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "slice",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
             ]
           }
         }
@@ -248,10 +274,10 @@
       "total": 2,
       "steps": [
         {
-          "id": "gwl-review",
-          "name": "Review Setup before laptop integration",
+          "id": "gwl-software-review",
+          "name": "Independent adversarial review of provider integration",
           "status": "proposed",
-          "done_when": "Refinement 2 starting layout is explicitly accepted in turn d7dd98a2-97a2-42f9-9273-c71b3e49cbf9. Review the working provider integration on the laptop after build and activation; preserve independent feedback and require explicit slice close.",
+          "done_when": "Two substantive independent reviewer responses examine the complete integration and repair; findings have reproductions and disposition, required failure tests pass, and missing or same-family review is not represented as cross-family assurance. Foreman contract confirmation is still required.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -262,11 +288,14 @@
           "seat_order": null,
           "commissioned_as": null,
           "part": "rigor",
-          "gate": "",
+          "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py",
           "component_ids": [],
           "navigation": {
             "path": [
               "gwl-setup"
+            ],
+            "featured_paths": [
+              "IMPLEMENTATION-PLAN-v2.pdf"
             ]
           }
         },
@@ -377,8 +406,34 @@
       "tag": "harden",
       "label": "Finish",
       "done": 0,
-      "total": 1,
+      "total": 2,
       "steps": [
+        {
+          "id": "gwl-provider-harden",
+          "name": "Harden provider failures, concurrency and credential boundaries",
+          "status": "proposed",
+          "done_when": "In-scope findings are fixed and independently re-reviewed; realistic tests verify responsive cached reads, cancellation, corrupt settings, secret protection, account separation and retained sessions/quality. Serious findings and missing required reviewer participation keep the product unready. Actual laptop proof and human acceptance remain separate.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "harden",
+          "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ],
+            "featured_paths": [
+              "IMPLEMENTATION-PLAN-v2.pdf"
+            ]
+          }
+        },
         {
           "id": "gwl-backup",
           "name": "Backups and restore",
@@ -407,5 +462,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 15
+  "deliverables_count": 17
 }
