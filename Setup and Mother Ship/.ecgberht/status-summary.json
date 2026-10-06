@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-05 19:53",
-  "status_id": "01791251606191729900",
+  "at": "2026-10-06 06:06",
+  "status_id": "01791288419306123500",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now",
+    "activity": "nothing running - attention stale - live owner unconfirmed",
     "latest_event": null,
     "next": [
       "Independent adversarial review of provider integration"
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in\u2026"
+        "value": "nothing running - attention stale - live owner unconfirmed"
       },
       {
         "label": "Status",
-        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 working"
+        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -55,15 +55,13 @@
   },
   "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
   "now": [
-    "landed, waits for a restart \u2014 Anchor provider integration \u2014 approved Setup mockup Refinement 2",
-    "landed, waits for a restart \u2014 Continue the already authorized provider integration from commit 64df9a6 and plan v1 for Anchor / Se",
-    "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now"
+    "nothing running - attention stale - live owner unconfirmed"
   ],
   "running": {
-    "kind": "commissioned",
-    "label": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now",
+    "kind": "none",
+    "label": "nothing running - attention stale - live owner unconfirmed",
     "skill": "",
-    "source": ".ecgberht/attention.json",
+    "source": "",
     "age": ""
   },
   "slice": {
@@ -127,7 +125,7 @@
     "waiting_since": null,
     "next": "Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop",
     "why": "John approved plan v2 and said carry on after the restart (2026-10-06).",
-    "attention": "working",
+    "attention": "stale",
     "goal_reread": true
   },
   "map": [
