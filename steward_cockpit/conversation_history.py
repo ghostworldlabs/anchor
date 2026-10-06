@@ -21,6 +21,7 @@ import threading
 
 
 MAX_HISTORY_BYTES = 64 * 1024 * 1024
+STEWARD_ROLE_ALIASES = frozenset({"ecgberht", "aladdin", "jarvis", "assistant", "agent"})
 _THREAD_LOCK = threading.RLock()
 _THREAD_ID = re.compile(r"[0-9]{1,6}\Z")
 
@@ -114,6 +115,10 @@ def _read(target: Path) -> dict:
         raise ConversationHistoryError("history_document_invalid")
     seen = set()
     for turn in document["turns"]:
+        # A steward that wrote its own line by hand named itself (AI Club 2026-10-02: role "ecgberht" made the
+        # whole history unreadable for days). Its own names read as the steward; anything else stays invalid.
+        if isinstance(turn, dict) and str(turn.get("role") or "").strip().lower() in STEWARD_ROLE_ALIASES:
+            turn["role"] = "steward"
         if (
             not isinstance(turn, dict)
             or turn.get("role") not in ("john", "steward")
