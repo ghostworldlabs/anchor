@@ -17,7 +17,7 @@ import hashlib, json, logging, os, re, socket, sys, threading, time, traceback, 
 from datetime import datetime, date
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, quote as url_quote, urlparse
+from urllib.parse import parse_qs, quote as url_quote, unquote, urlencode, urlparse
 import html as html_lib
 
 # ── Paths ──────────────────────────────────────────────────────────────
@@ -23201,9 +23201,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 #   target=(folder/rel).resolve(); target.relative_to(folder)
                 # Rejects absolute rel, ../.. escape, .git/.anchor, symlink
                 # escape -> 400/404, ZERO bytes read.
-                pid = urlparse(self.path).path[len("/artifact/"):].strip("/")
+                artifact_path = urlparse(self.path).path[len("/artifact/"):]
+                pid, separator, file_path = artifact_path.partition("/")
+                if not file_path:
+                    separator = ""  # retain legacy /artifact/<pid>/?path= links
                 q = parse_qs(urlparse(self.path).query)
-                rel = q.get("path", [None])[0]
+                rel = unquote(file_path) if separator else q.get("path", [None])[0]
                 if not pid or not rel:
                     self.send_response(400)
                     self.end_headers()
@@ -23234,7 +23237,21 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     want_view = (q.get("view", [""])[0] or "").strip() in ("1", "true")
                     want_download = (q.get("download", [""])[0] or "").strip() in ("1", "true")
                     ext = Path(rel).suffix.lower()
-                    if want_render and "markdown" in (ctype or ""):
+                    if not separator and ext in (".html", ".htm") and not want_download:
+                        # A query URL has no document directory. Preserve it in
+                        # the existing contained artifact route so CSS, scripts,
+                        # images, source links and nested pages resolve normally.
+                        # The resolver above still rejects outside/private files.
+                        location = "/artifact/" + url_quote(pid, safe="") + "/" + url_quote(rel.replace("\\", "/"), safe="/")
+                        extra = {k: v for k, v in q.items() if k != "path"}
+                        if extra:
+                            location += "?" + urlencode(extra, doseq=True)
+                        self.send_response(302)
+                        self.send_header("Location", location)
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    elif want_render and "markdown" in (ctype or ""):
                         try:
                             md_text = data.decode("utf-8", "replace")
                             title = Path(rel).name or "Report"

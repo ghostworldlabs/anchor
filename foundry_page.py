@@ -13,7 +13,7 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import anchor_settings
 import foundry_api as api
@@ -36,6 +36,17 @@ DISPLAY_NAMES = {'researchprime': 'researchPrime', 'gandalf': 'Gandalf', 'crucib
                  'financialanalyst': 'Financial-Analyst', 'jumper': 'Jumper', 'legalbeagle': 'Legal-Beagle',
                  'literaturereview': 'Literature-Review', 'ramanujan': 'Ramanujan',
                  'tidyidy': 'Tidy-Idy', 'zombiehunter': 'Zombie-Hunter', 'superjump': 'Superjump'}
+
+# Content names are Foundry-owned; role identity and livery remain Anchor-owned.
+ROLE_CONTENT = {'steward-project': 'steward-lamp',
+                'steward-portfolio': 'steward-cave',
+                'steward-starchart': 'steward-star-chart'}
+# These are exact public implementation files, not additional serving roots.
+ANCHOR_PROVENANCE = ('foundry_page.py', 'anchor_settings.py', 'model_policy.py',
+                     'steward_cockpit/steward_engine.py',
+                     'steward_cockpit/steward_routes.py',
+                     'steward_cockpit/conversation_history.py',
+                     'steward_cockpit/code_jobs.py')
 
 
 def _key(value):
@@ -176,7 +187,8 @@ def _load_artifact(skill, names):
     role = skill.get('role')
     searches = [(content_root() / skill['id'], names), (directory, names)]
     if role:
-        searches = [(content_root() / skill['id'], names),
+        searches = [(content_root() / ROLE_CONTENT[skill['id']], names),
+                    (content_root() / skill['id'], names),
                     (directory, tuple(name.replace('.json', '.' + role + '.json') for name in names)),
                     (directory / 'knowledge' / role, names)]
     for base, file_names in searches:
@@ -199,6 +211,8 @@ def _path(raw, directory, artifact_dir=None):
         return None
     raw = raw.replace('\\', '/')
     path = Path(raw)
+    if '..' in path.parts:
+        return None
     candidates = [path] if path.is_absolute() else [directory / path]
     if not path.is_absolute():
         if artifact_dir:
@@ -214,14 +228,59 @@ def source_url(skill, path, anchor=''):
     return '/foundry/source?' + urlencode({'skill': skill, 'path': str(path), 'anchor': anchor or ''})
 
 
-def _anchor_link(anchor, skill, artifact_dir, resources):
+def _trusted_origin(raw, skill):
+    """A role may cite these exact originals; no user-home/root expansion."""
+    if skill['id'] not in ROLE_CONTENT or not isinstance(raw, str):
+        return None
+    candidate = Path(raw.replace('\\', '/'))
+    if not candidate.is_absolute() or '..' in candidate.parts:
+        return None
+    approved = [(root / rel, root) for root in
+                (CODE_ROOT, Path(api.FOUNDRY_ROOT).parent / 'Anchor')
+                for rel in ANCHOR_PROVENANCE]
+    global_dir = Path.home() / '.claude'
+    approved.append((global_dir / 'AGENTS.md', global_dir))
+    for exact, root in approved:
+        if (candidate == exact and _inside(candidate, root) and candidate.is_file()
+                and candidate.resolve() == root.resolve() / exact.relative_to(root)):
+            return candidate.resolve()
+    return None
+
+
+def _declared_source(source, skill, base):
+    """Resolve only this inventory entry, with frozen examples hash-bound."""
+    provenance = {k: source.get(k) for k in
+                  ('origin', 'freshness', 'captured_at', 'captured_from', 'applicability', 'sha256')}
+    if source.get('freshness') == 'frozen-example':
+        snapshot = source.get('snapshot')
+        digest = source.get('sha256')
+        if (not isinstance(snapshot, str) or not re.fullmatch(r'[a-f0-9]{64}', str(digest or ''))
+                or not all(source.get(k) for k in ('captured_at', 'captured_from', 'applicability'))):
+            return None, provenance, 'Historical source lacks its capture identity or qualification'
+        raw = Path(snapshot.replace('\\', '/'))
+        target = base / raw
+        if (raw.is_absolute() or '..' in raw.parts or any(p.startswith('.') for p in raw.parts)
+                or not _inside(target, base / 'sources') or not _allowed(target)
+                or not target.is_file() or target.suffix.lower() not in TEXT_TYPES):
+            return None, provenance, 'Historical snapshot missing or outside its bundle sources'
+        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            return None, provenance, 'Historical snapshot hash mismatch'
+        return target.resolve(), provenance, None
+    if source.get('freshness') not in (None, 'current-source'):
+        return None, provenance, 'Unsupported source freshness'
+    target = (_path(source.get('origin'), Path(skill['source']), base)
+              or _trusted_origin(source.get('origin'), skill))
+    return target, provenance, None if target else 'Missing or outside the declared source inventory'
+
+
+def _anchor_link(anchor, skill, artifact_dir, resources, *, declared_path=None, provenance=None):
     if isinstance(anchor, str):
         anchor = {'path': anchor}
     if not isinstance(anchor, dict):
         return None
     if anchor.get('type') in ('no-code', 'no-instruction'):
         return {'label': anchor.get('type'), 'note': anchor.get('reason') or 'Not implemented on this path.'}
-    path = _path(anchor.get('path') or anchor.get('file'), Path(skill['source']), artifact_dir)
+    path = declared_path or _path(anchor.get('path') or anchor.get('file'), Path(skill['source']), artifact_dir)
     if not path:
         return {'label': 'Source unavailable', 'problem': 'Missing or outside the declared source roots'}
     at = str(anchor.get('symbol') or anchor.get('heading') or anchor.get('anchor') or anchor.get('line') or '')
@@ -235,6 +294,8 @@ def _anchor_link(anchor, skill, artifact_dir, resources):
     if expected and hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         problem = 'Source changed since this map was checked'
     resource = _resource(skill, path, 'tools', path.name, anchor=at)
+    if provenance:
+        resource['provenance'] = provenance
     if not any(r['id'] == resource['id'] for r in resources):
         resources.append(resource)
     return {'label': path.name + (' · ' + at if at else ''), 'href': resource['href'],
@@ -245,6 +306,27 @@ def _resource(skill, path, category, title, anchor='', resource_id=None):
     return {'id': resource_id or hashlib.sha256((str(path) + '#' + anchor).encode()).hexdigest()[:16],
             'title': title, 'category': category, 'path': str(path), 'anchor': anchor,
             'href': source_url(skill['id'], path, anchor), 'frequency': 'Use not recorded'}
+
+
+def _review_project_id():
+    """Use only the existing, unambiguous project registration; never create one."""
+    import rnd_registry
+    rows = [r for r in rnd_registry.list_projects(with_effective_state=False)
+            if r.get('folder_path') and Path(r['folder_path']).resolve() == Path(api.FOUNDRY_ROOT).resolve()]
+    return rows[0]['id'] if len(rows) == 1 else None
+
+
+def _library_target(raw, base, project_id):
+    if not project_id or not isinstance(raw, str):
+        return None
+    rel = Path(raw.replace('\\', '/'))
+    target = base / rel
+    if (rel.is_absolute() or '..' in rel.parts or any(p.startswith('.') for p in rel.parts)
+            or not _inside(target, base / 'resources') or not _inside(target, Path(api.FOUNDRY_ROOT))
+            or not target.is_file() or target.suffix.lower() != '.html'):
+        return None
+    relative = target.resolve().relative_to(Path(api.FOUNDRY_ROOT).resolve()).as_posix()
+    return '/artifact/' + quote(str(project_id), safe='') + '/' + quote(relative, safe='/')
 
 
 def _frequency(record, skill, artifact_dir):
@@ -273,9 +355,8 @@ def _frequency(record, skill, artifact_dir):
 def _combined_display(skill, resources):
     """Foundry-owned foundry-skill-display/v1 handoff; canonical sources stay live.
 
-    Snapshot HTML targets are never served as executable mockup pages. Anchors
-    resolve the declared original file, check its frozen hash, and open in the
-    same contained reader as ordinary Library resources.
+    Anchors use the controlled reader. Historical examples use only their exact
+    immutable snapshots; current sources retain visible freshness checks.
     """
     data, path, error = _load_artifact(skill, ('maps.json',))
     if data is None:
@@ -290,17 +371,20 @@ def _combined_display(skill, resources):
             return None, [field + '.' + child + ' must be an array in maps.json']
     issues, links = [], {}
     sources = {s.get('id'): s for s in data.get('sources', []) if isinstance(s, dict)}
+    declared = {sid: _declared_source(source, skill, path.parent) for sid, source in sources.items()}
     for anchor in data.get('anchors', []):
         if not isinstance(anchor, dict):
             issues.append('Invalid source anchor')
             continue
         source = sources.get(anchor.get('source_id'), {})
+        target, provenance, source_error = declared.get(anchor.get('source_id'),
+                                                       (None, {}, 'Undeclared source'))
         spec = {'path': source.get('origin'), 'line': anchor.get('start'), 'sha256': source.get('sha256')}
-        link = _anchor_link(spec, skill, path.parent, resources)
+        link = (_anchor_link(spec, skill, path.parent, resources, declared_path=target, provenance=provenance)
+                if target else {'label': 'Source unavailable', 'problem': source_error})
         if link and link.get('href'):
-            target = _path(source.get('origin'), Path(skill['source']), path.parent)
             start, end = anchor.get('start'), anchor.get('end')
-            if isinstance(start, int) and isinstance(end, int) and 1 <= start <= end:
+            if isinstance(start, int) and isinstance(end, int) and 1 <= start <= end <= len(_text(target).splitlines()):
                 excerpt = '\n'.join(_text(target).splitlines()[start - 1:end])
                 if anchor.get('sha256') and hashlib.sha256(excerpt.encode()).hexdigest() != anchor['sha256']:
                     link['problem'] = 'Source changed: anchored excerpt differs'
@@ -309,9 +393,10 @@ def _combined_display(skill, resources):
         if not link:
             link = {'label': 'Source unavailable', 'problem': 'Missing original source'}
         if link.get('problem'):
-            issues.append(link['problem'])
+            issues.append(link['problem'] + ' · ' + str(anchor.get('source_id')) + ' / ' + str(anchor.get('id')))
         links[anchor.get('id')] = link
     categories = {'Reusable material': 'material', 'References': 'references', 'Other skills': 'skills', 'Tools': 'tools'}
+    project_id = _review_project_id() if any(r.get('target') for r in data['resources'] if isinstance(r, dict)) else None
     for row in data.get('resources', []):
         if not isinstance(row, dict):
             issues.append('Invalid Library resource')
@@ -324,6 +409,8 @@ def _combined_display(skill, resources):
         resources.append({**backing, 'id': row.get('id'), 'title': row.get('title'),
                           'category': categories.get(row.get('category'), 'material'),
                           'description': row.get('summary', ''), 'problem': link.get('problem'),
+                          'href': _library_target(row.get('target'), path.parent, project_id) or backing['href'],
+                          'sourceHref': backing['href'],
                           'frequency': _frequency(row, skill, path.parent), 'library': True})
     flow = data.get('process') if isinstance(data.get('process'), dict) else {}
     steps = []
@@ -349,7 +436,10 @@ def _combined_display(skill, resources):
                                       'sourceLink': links.get(e.get('anchor_id'))}
                                      for e in flow.get('edges', []) if isinstance(e, dict)],
             'exits': flow.get('terminals', []),
-            'disagreements': disagreements, 'nodes': nodes, 'issues': issues}, issues
+            'disagreements': disagreements, 'nodes': nodes, 'issues': issues,
+            'observedExamples': [{**e, 'sourceLinks': [links[a] for a in e.get('anchors', []) if a in links]}
+                                 for e in data.get('observed_examples', []) if isinstance(e, dict)],
+            'usageAudit': data.get('usage_audit')}, issues
 
 
 def skill_detail(skill_id):
@@ -542,17 +632,42 @@ def source_page(skill_id, requested, anchor=''):
     if not detail:
         return None
     try:
-        requested_path = Path(requested).resolve()
+        raw = Path(requested.replace('\\', '/'))
+        if '..' in raw.parts:
+            return None
+        requested_path = raw.resolve()
     except (OSError, ValueError):
         return None
-    targets = {Path(r['path']).resolve() for r in detail['resources'] if r.get('path')}
-    if requested_path not in targets or not _allowed(requested_path):
+    targets = [r for r in detail['resources'] if r.get('path') and Path(r['path']).resolve() == requested_path]
+    if not targets or not (_path(requested, Path(detail['skill']['source']))
+                           or _trusted_origin(requested, detail['skill'])):
         return None
-    text = _text(requested_path)
+    provenance = next((r['provenance'] for r in targets if r.get('provenance')), {})
+    try:
+        payload = requested_path.read_bytes()
+        text = payload.decode('utf-8-sig')
+    except (OSError, UnicodeError):
+        return None
+    if (provenance.get('freshness') == 'frozen-example' and
+            hashlib.sha256(payload).hexdigest() != provenance.get('sha256')):
+        return None
     lines = text.splitlines()
     hit = (int(anchor) if str(anchor).isdigit() else
            next((i for i, line in enumerate(lines, 1) if anchor and anchor in line), 0))
     esc = html.escape
+    provenance_html = ''
+    if provenance.get('freshness'):
+        provenance_html = ('<aside class="source-provenance" data-source-freshness="%s">'
+                           '<strong>%s</strong><p>Captured: %s</p><p class="path">Captured from: %s</p>'
+                           '<p>%s</p><p class="path">Capture SHA-256: %s</p></aside>') % tuple(esc(str(v or '')) for v in (
+                               provenance['freshness'],
+                               'Frozen historical example — not current state' if provenance['freshness'] == 'frozen-example'
+                               else 'Current source — on-disk bytes do not prove live activation',
+                               provenance.get('captured_at'), provenance.get('captured_from') or provenance.get('origin'),
+                               provenance.get('applicability'), provenance.get('sha256')))
+        if (provenance.get('freshness') == 'current-source' and provenance.get('sha256') and
+                hashlib.sha256(payload).hexdigest() != provenance['sha256']):
+            provenance_html += '<p>Source changed since capture; the current file is shown below.</p>'
     rendered = '\n'.join('<span id="L%d" class="%s"><a href="#L%d">%d</a> %s</span>' %
                          (i, 'hit' if i == hit else '', i, i, esc(line))
                          for i, line in enumerate(lines, 1))
@@ -560,9 +675,9 @@ def source_page(skill_id, requested, anchor=''):
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — Foundry source</title>
 <style>body{margin:0;background:#0f1117;color:#e2e4e9;font:15px/1.5 system-ui}header{padding:18px;border-bottom:1px solid #2e3340}a{color:#9ec0ff}pre{padding:18px;overflow:auto}pre span{display:block;min-height:1.5em}pre a{display:inline-block;width:4em;color:#8b8f9a}.hit{background:#3a2e17;outline:1px solid #e0a84a}h1{font-size:20px;margin:8px 0}.path{overflow-wrap:anywhere;color:#8b8f9a}</style>
 <header><a href="/foundry?skill=%s">← %s</a><h1>%s</h1><div class="path">%s</div><p>Read-only source%s</p></header>
-<pre>%s</pre>%s</html>''' % (esc(requested_path.name), esc(skill_id), esc(detail['skill']['name']),
+%s<pre>%s</pre>%s</html>''' % (esc(requested_path.name), esc(skill_id), esc(detail['skill']['name']),
                            esc(requested_path.name), esc(str(requested_path)),
-                           ' · anchor not found' if anchor and not hit else '', rendered,
+                           ' · anchor not found' if anchor and not hit else '', provenance_html, rendered,
                            '<script>document.getElementById("L%d")?.scrollIntoView({block:"center"})</script>' % hit if hit else '')
 
 

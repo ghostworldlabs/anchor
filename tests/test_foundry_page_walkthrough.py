@@ -5,10 +5,12 @@ cockpit event reads, sleep POSTs or production session activation.
 """
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 import pytest
 import foundry_page as page
@@ -48,7 +50,8 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv('TMP', str(tmp_path))
     monkeypatch.setenv('ANCHOR_PROACTIVE_SUMMARY', '0')
     monkeypatch.delenv('ANCHOR_TOKEN', raising=False)
-    return dict(root=tmp_path, content=content, instruction=instruction, program=program, skills=skills)
+    return dict(root=tmp_path, content=content, instruction=instruction, program=program, skills=skills,
+                profile=original_profile)
 
 
 def legacy(rig):
@@ -267,3 +270,227 @@ def test_built_desktop_and_phone_navigation_and_source_clicks(rig, server):
                 context.close()
         finally:
             browser.close()
+
+
+def role_bundle(rig, role='steward-project'):
+    _, doc = combined(rig)
+    doc['skill_id'] = role
+    base = rig['content'] / page.ROLE_CONTENT[role]
+    write(base / 'maps.json', doc)
+    return base, doc
+
+
+@pytest.mark.parametrize('persona', ['aladdin', 'jarvis', 'ecgberht'])
+@pytest.mark.parametrize('role', list(page.ROLE_CONTENT))
+def test_trusted_role_directories_keep_identity_and_selected_persona(rig, monkeypatch, persona, role):
+    resolver = rig['profile']
+    monkeypatch.setattr(page.anchor_settings, 'steward_profile', lambda: resolver({'steward_type': persona}))
+    base, doc = role_bundle(rig, role)
+    detail = page.skill_detail(role)
+    assert detail['skill']['id'] == role
+    profile = resolver({'steward_type': persona})
+    field = {'steward-project': 'seal_name', 'steward-portfolio': 'high_seat_name', 'steward-starchart': 'campaign_name'}[role]
+    assert detail['skill']['name'] == profile['label'] + '-' + profile[field]
+    assert detail['librarySource'] == str(base / 'maps.json')
+    assert detail['processMap']['status'] == 'source-anchored draft'
+    assert detail['knowledgeMap']['nodes'][0]['href'] == detail['libraryResources'][0]['href']
+    for other in page.ROLE_CONTENT.keys() - {role}:
+        assert page.skill_detail(other)['processMap']['status'] == 'unfinished'
+    doc['skill_id'] = next(r for r in page.ROLE_CONTENT if r != role)
+    write(base / 'maps.json', doc)
+    assert 'different-skill' in ' '.join(page.skill_detail(role)['libraryIssues'])
+
+
+def provenance_bundle(rig, source):
+    base, doc = role_bundle(rig)
+    doc['sources'] = [dict(id='instructions', **source), doc['sources'][1]]
+    doc['anchors'][0].update(start=1, end=1, sha256=hashlib.sha256(b'Captured example').hexdigest())
+    write(base / 'maps.json', doc)
+    return base, doc
+
+
+def test_exact_engine_and_global_inventory_does_not_broaden_roots(rig, monkeypatch):
+    engine = write(rig['root'] / 'Anchor/steward_cockpit/steward_engine.py', 'Captured example\n')
+    global_rules = write(rig['root'] / 'home/.claude/AGENTS.md', 'Captured example\n')
+    monkeypatch.setattr(Path, 'home', lambda: rig['root'] / 'home')
+    for origin in (engine, global_rules):
+        base, doc = provenance_bundle(rig, dict(origin=str(origin), freshness='current-source',
+            sha256=hashlib.sha256(origin.read_bytes()).hexdigest(), captured_at='2026-10-05T23:40:00+00:00',
+            captured_from=str(origin), applicability='On-disk code is not activation proof.'))
+        detail = page.skill_detail('steward-project')
+        assert not detail['libraryIssues']
+        markup = page.source_page('steward-project', str(origin), '1')
+        assert 'On-disk code is not activation proof.' in markup
+        assert page.source_page('steward-portfolio', str(origin)) is None
+        assert not page._allowed(origin)
+        origin.write_text('Later source\n', encoding='utf-8')
+        assert 'Source changed' in ' '.join(page.skill_detail('steward-project')['libraryIssues'])
+        assert 'Source changed since capture' in page.source_page('steward-project', str(origin))
+    for outside in (rig['root'] / 'Anchor/private.py', rig['root'] / 'home/.claude/private.md',
+                    rig['root'] / 'home/notes.md'):
+        write(outside, 'Captured example\n')
+        provenance_bundle(rig, dict(origin=str(outside)))
+        assert page.source_page('steward-project', str(outside)) is None
+        assert page.skill_detail('steward-project')['libraryIssues']
+
+
+def test_historical_reader_uses_only_qualified_immutable_snapshot(rig):
+    base = rig['content'] / 'steward-lamp'
+    snapshot = write(base / 'sources/example.md', 'Captured example\n')
+    original = write(rig['root'] / 'home/private.md', 'Changed live state\n')
+    source = dict(origin=str(original), snapshot='sources/example.md', freshness='frozen-example',
+                  sha256=hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+                  captured_at='2026-10-05T23:34:00+00:00', captured_from=str(original),
+                  applicability='Historical record; not current campaign state.')
+    base, doc = provenance_bundle(rig, source)
+    markup = page.source_page('steward-project', str(snapshot), '1')
+    assert 'Captured example' in markup and 'Historical record; not current campaign state.' in markup
+    assert '2026-10-05T23:34:00+00:00' in markup and source['sha256'] in markup
+    assert 'Changed live state' not in markup
+    assert page.source_page('steward-project', str(original)) is None
+    original.write_text('A newer decision\n', encoding='utf-8')
+    assert not page.skill_detail('steward-project')['libraryIssues']
+    snapshot.write_text('Corrupted snapshot\n', encoding='utf-8')
+    assert 'snapshot hash mismatch' in ' '.join(page.skill_detail('steward-project')['libraryIssues'])
+    assert page.source_page('steward-project', str(snapshot)) is None
+
+
+@pytest.mark.parametrize('snapshot', ['../outside.md', '/outside.md', 'sources/../../outside.md', '.ecgberht/history.json'])
+def test_snapshot_and_request_traversal_fail_closed(rig, snapshot):
+    outside = write(rig['root'] / 'outside.md', 'Captured example\n')
+    provenance_bundle(rig, dict(origin=str(outside), snapshot=snapshot, freshness='frozen-example',
+        sha256=hashlib.sha256(outside.read_bytes()).hexdigest(), captured_at='2026-10-05',
+        captured_from=str(outside), applicability='Historical.'))
+    assert page.source_page('steward-project', str(outside)) is None
+    assert page.skill_detail('steward-project')['libraryIssues']
+    combined(rig)
+    assert page.source_page('researchprime', str(rig['program'].parent / '../bin/run.mjs')) is None
+
+
+def test_declared_symlink_to_outside_is_rejected(rig):
+    outside = write(rig['root'] / 'outside.md', 'Captured example\n')
+    base = rig['content'] / 'steward-lamp'
+    link = base / 'sources/example.md'
+    link.parent.mkdir(parents=True)
+    try:
+        os.symlink(outside, link)
+    except OSError:
+        pytest.skip('symlink creation unavailable')
+    provenance_bundle(rig, dict(origin=str(outside), snapshot='sources/example.md', freshness='frozen-example',
+        sha256=hashlib.sha256(outside.read_bytes()).hexdigest(), captured_at='2026-10-05',
+        captured_from=str(outside), applicability='Historical.'))
+    assert page.source_page('steward-project', str(link)) is None
+    assert page.skill_detail('steward-project')['libraryIssues']
+
+
+@pytest.fixture
+def opening(rig, monkeypatch):
+    import anchor_gui
+    pid = 'fixture-foundry'
+    monkeypatch.setattr(anchor_gui._rnd, 'get_project', lambda p: {'id': pid, 'folder_path': str(rig['content'].parent)} if p == pid else None)
+    monkeypatch.setattr(page, '_review_project_id', lambda: pid)
+    base, doc = role_bundle(rig)
+    write(base / 'index.html', '''<!doctype html><html><head><link rel="stylesheet" href="../shared/maps.css">
+<script defer src="display.js"></script></head><body><img src="assets/lamp.svg"><div id="panel"></div></body></html>''')
+    write(base / 'display.js', "document.querySelector('#panel').innerHTML='<h1>Lamp Library</h1><a href=\"resources/plan.html\">Open resource</a>';")
+    write(rig['content'] / 'shared/maps.css', 'body{background:rgb(20, 30, 40);color:white}')
+    write(base / 'assets/lamp.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="gold"/></svg>')
+    write(base / 'resources/plan.html', '<!doctype html><link rel="stylesheet" href="../../shared/maps.css"><h1>Reusable research plan</h1><a href="../sources/example.md">Exact captured source</a>')
+    write(base / 'sources/example.md', 'An exact captured source.\n')
+    doc['resources'][0]['target'] = 'resources/plan.html'
+    write(base / 'maps.json', doc)
+    rel = base.relative_to(rig['content'].parent).as_posix() + '/index.html'
+    return '/artifact/' + pid + '?path=' + quote(rel, safe=''), base
+
+
+def test_real_artifact_opening_redirect_assets_and_containment(rig, server, opening):
+    route, base = opening
+    with urlopen(server + route) as response:
+        assert '/steward-lamp/index.html' in response.url
+        assert 'sandbox' in response.headers['Content-Security-Policy']
+        assert 'allow-same-origin' not in response.headers['Content-Security-Policy']
+    with urlopen(server + route.replace('fixture-foundry?', 'fixture-foundry/?') + '&persona=jarvis') as response:
+        assert response.url.endswith('/index.html?persona=jarvis')
+    from steward_cockpit.steward_campaign import classify_route
+    # This is the owner-applied Where-cell correction: keep the existing
+    # query grammar, which now redirects to the contained document directory.
+    assert classify_route(route) == route
+    assert classify_route(route + '#handoff') == route + '#handoff'
+    prefix = '/artifact/fixture-foundry/' + quote(base.relative_to(rig['content'].parent).as_posix(), safe='/')
+    for relative, ctype in [('display.js', 'application/javascript'), ('../shared/maps.css', 'text/css'), ('assets/lamp.svg', 'image/svg+xml')]:
+        # Browser URL resolution removes ordinary relative segments before GET.
+        from urllib.parse import urljoin
+        with urlopen(urljoin(server + prefix + '/index.html', relative)) as response:
+            assert response.headers['Content-Type'].startswith(ctype)
+    detail = page.skill_detail('steward-project')
+    assert detail['libraryResources'][0]['href'].endswith('/resources/plan.html')
+    assert detail['libraryResources'][0]['sourceHref'].startswith('/foundry/source?')
+    write(rig['content'].parent / '.git/config', 'SECRET')
+    for path in ('../../outside.md', '.git/config', str(rig['root'] / 'outside.md')):
+        with pytest.raises(HTTPError) as err:
+            urlopen(server + '/artifact/fixture-foundry?path=' + quote(path, safe=''))
+        assert err.value.code in (400, 404)
+    with pytest.raises(HTTPError) as err:
+        urlopen(server + '/artifact/fixture-foundry/.git/config')
+    assert err.value.code == 404
+
+
+def test_authenticated_desktop_phone_library_loads_relative_assets(rig, server, opening, monkeypatch):
+    playwright = pytest.importorskip('playwright.sync_api')
+    monkeypatch.setenv('ANCHOR_TOKEN', 'foundry-test-cookie')
+    route, _ = opening
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            for width, height in [(1440, 1000), (390, 844)]:
+                context = browser.new_context(viewport={'width': width, 'height': height})
+                tab = context.new_page()
+                # Use the normal local-page login, while guarding all Doctor
+                # follow-up reads so no other effort can soft-wake.
+                tab.route('**/*', lambda r: r.continue_() if r.request.is_navigation_request() and '/doctor' in r.request.url else r.abort())
+                tab.goto(server + '/doctor')
+                assert any(c['name'] == 'anchor_auth' and c['httpOnly'] for c in context.cookies())
+                tab.unroute('**/*')
+                errors, failed, writes = [], [], []
+                tab.on('pageerror', lambda e: errors.append(str(e)))
+                tab.on('requestfailed', lambda r: failed.append(r.url))
+                tab.on('response', lambda r: failed.append(r.url) if r.status >= 400 else None)
+                tab.on('request', lambda r: writes.append(r.url) if r.method != 'GET' else None)
+                tab.goto(server + route)
+                tab.get_by_role('heading', name='Lamp Library').wait_for()
+                assert tab.locator('img').evaluate('(el) => el.complete && el.naturalWidth > 0')
+                assert tab.locator('body').evaluate('(el) => getComputedStyle(el).backgroundColor') == 'rgb(20, 30, 40)'
+                tab.get_by_role('link', name='Open resource', exact=True).click()
+                tab.get_by_role('heading', name='Reusable research plan').wait_for()
+                tab.get_by_role('link', name='Exact captured source').click()
+                assert 'An exact captured source.' in tab.locator('body').inner_text()
+                assert not errors and not failed and not writes
+                context.close()
+        finally:
+            browser.close()
+
+
+def test_windows_journal_does_not_break_real_foundry_loading(rig, server, monkeypatch):
+    journal = rig['skills'] / 'gandalf/journal/0001-legacy.md'
+    journal.parent.mkdir(parents=True)
+    journal.write_bytes('# Review — a historical entry\nRetained “quoted” context.'.encode('cp1252'))
+    monkeypatch.setattr(page.api, '_load_manifest', lambda: [
+        {'name': 'Gandalf', 'ref': 'gandalf', 'source': str(rig['skills'] / 'gandalf')}])
+    events = page.api._journal_events(str(journal.parent.parent))
+    assert events[0]['event'] == 'Review — a historical entry'
+    assert events[0]['sourceEncoding'] == 'windows-1252'
+    assert '“quoted”' in events[0]['details']
+    for route in ('/api/skills', '/api/metrics'):
+        with urlopen(server + route) as response:
+            assert response.status == 200
+            assert json.load(response)
+    assert journal.read_bytes() == '# Review — a historical entry\nRetained “quoted” context.'.encode('cp1252')
+
+
+def test_exact_inventory_and_resource_target_rejections(rig, opening):
+    _, base = opening
+    unknown = write(base / 'sources/undeclared.md', 'PRIVATE')
+    assert page.source_page('steward-project', str(unknown)) is None
+    assert page.source_page('steward-project', str(write(rig['root'] / 'Anchor/model_policy.py', 'PRIVATE'))) is None
+    for target in ('../sources/undeclared.md', 'resources/../../outside.html', str(unknown), '.anchor/private.html'):
+        assert page._library_target(target, base, 'fixture-foundry') is None

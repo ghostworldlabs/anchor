@@ -112,9 +112,9 @@ export default function App() {
               <button className="btn" onClick={() => { const el = document.getElementById('files'); el.open = true; el.scrollIntoView({ block: 'start' }); }}>Program files</button>
             </div>
           </div></div>
-          <p className="qualification">{skillId === 'researchprime' ?
-            (detail.knowledgeMap.nodes.length && detail.processMap.steps.length ? 'First walkthrough · Library and maps awaiting human review.' : 'First walkthrough · Foundry’s Library and maps are not available here yet.') :
-            'Walkthrough unfinished · scheduled after researchPrime.'}
+          <p className="qualification">{detail.knowledgeMap.nodes.length && detail.processMap.steps.length ?
+            `${detail.processMap.qualification} · Library and maps awaiting independent human review.` :
+            'Walkthrough unfinished · Foundry’s Library and maps are not available here yet.'}
             {!selected.inFoundryMap && ' Not in the Foundry map.'}</p>
           <Tile title="North Star" preview={selected.northStar ? 'Read the declared purpose' : 'No North Star file yet'}>
             {selected.northStar ? <Markdown source={selected.northStar} /> : <p>No North Star is declared. The purpose above comes from the existing skill instructions or human guide.</p>}

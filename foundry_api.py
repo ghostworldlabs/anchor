@@ -57,7 +57,7 @@ def _node_cmd() -> str:
 def _read_text_safe(file_path) -> str:
     try:
         return Path(file_path).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
         return None
 
 
@@ -250,7 +250,17 @@ def _journal_events(skill_dir):
         st = _stat_safe(file_path)
         if not st:
             continue
-        text = _read_text_safe(file_path) or ""
+        text = _read_text_safe(file_path)
+        encoding = "utf-8"
+        if text is None:
+            # Older Windows journal entries predate the UTF-8 convention.
+            # Qualify this display decoding; never rewrite source bytes or
+            # apply a legacy decoder to JSON/configuration authority.
+            try:
+                text = Path(file_path).read_text(encoding="cp1252")
+                encoding = "windows-1252"
+            except (OSError, UnicodeError):
+                text, encoding = "", "unreadable"
         heading = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
         if heading:
             title = heading.group(1).strip()
@@ -266,6 +276,7 @@ def _journal_events(skill_dir):
             "timestamp": st.st_mtime * 1000.0,
             "status": "success",
             "details": details,
+            "sourceEncoding": encoding,
         })
     events.sort(key=lambda e: e["timestamp"], reverse=True)
     return events

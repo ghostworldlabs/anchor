@@ -17,6 +17,7 @@ export function Library({ resources }) {
       {matches.filter(r => r.category === id || (id === 'material' && !groups.some(g => g[0] === r.category))).map((r, i) =>
         <div className="library-resource" key={`${r.id}-${i}`} data-resource-id={r.id}>
           <a href={r.href} target="_blank" rel="noreferrer">{r.title}</a><small>{r.frequency || 'Use not recorded'}</small>
+          {r.sourceHref && r.sourceHref !== r.href && <a href={r.sourceHref} target="_blank" rel="noreferrer">Read exact source</a>}
           {r.description && <p>{r.description}</p>}{r.problem && <p className="source-problem">{r.problem}</p>}
         </div>)}
       {!matches.some(r => r.category === id) && <p className="muted">No declared resources in this category yet.</p>}
@@ -45,6 +46,9 @@ export function ProcessMap({ map, resources, nodes = [], onExploreNode }) {
         {step.swarm && <p className="seat">Swarm: {step.swarm.enabled === false ? 'No new swarm on this step.' : words(step.swarm)}</p>}
         {step.differs && <p className="source-problem">Code / instruction disagreement: {words(step.differs)}</p>}
         <div className="step-sources"><SourceLink link={step.codeLink} label="Code" /><SourceLink link={step.instructionLink} label="Instructions" /></div>
+        {step.anchorLinks?.filter(link => link !== step.codeLink && link !== step.instructionLink &&
+          link.href !== step.codeLink?.href && link.href !== step.instructionLink?.href).map((link, j) =>
+          <SourceLink key={j} link={link} label="Source" />)}
         {step.resource_ids?.length > 0 && <div className="step-library">Library: {step.resource_ids.map(id => {
           const r = resources.find(r => r.id === id);
           return r ? <a key={id} href={r.href} target="_blank" rel="noreferrer">{r.title}</a> : <span key={id}>Missing {id}</span>;
@@ -61,6 +65,12 @@ export function ProcessMap({ map, resources, nodes = [], onExploreNode }) {
     {map.disagreements?.length > 0 && <section className="disagreements"><h3>Code / instruction disagreements</h3>
       {map.disagreements.map((d, i) => <details key={i}><summary>{d.title || words(d)}</summary><p>{d.fact || d.description || words(d)}</p>
         {(d.sourceLinks || []).map((link, j) => <SourceLink key={j} link={link} label="Evidence" />)}</details>)}
+    </section>}
+    {map.observedExamples?.length > 0 && <section className="observed-examples"><h3>Use and improvement</h3>
+      <p>Recorded examples retain their capture dates and scope. They do not establish current deployment, resource access frequency or human acceptance.</p>
+      {map.observedExamples.map((example, i) => <details key={i}><summary>{example.id}</summary><p>{example.summary}</p>
+        {(example.sourceLinks || []).map((link, j) => <SourceLink key={j} link={link} label="Evidence" />)}</details>)}
+      {map.usageAudit && <p>{map.usageAudit.scope} · {map.usageAudit.qualification}</p>}
     </section>}
   </div>;
 }
