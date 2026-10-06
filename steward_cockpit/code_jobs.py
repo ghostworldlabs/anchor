@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -190,6 +191,7 @@ def _start_foreman(cdir, job, wt):
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)      # subscription billing, as go.ps1 does
     env["CRUCIBLE_AGENT_LIVE"] = "1"
+    # Who writes and who reviews = the dashboard seats (Coder / Reviewer); Foreman stamps them over any env.
     out = open(d / "foreman-run.log", "w", encoding="utf-8")
     proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--reviewers", "2", "--cap", "3"], cwd=str(wt),
                             stdout=out, stderr=subprocess.STDOUT, env=env,
@@ -205,6 +207,14 @@ def _start_foreman(cdir, job, wt):
         finally:
             out.close()
             _FOREMAN_PROCS.pop(job["id"], None)
+            try:   # Foreman's own records outlive the worktree, so a HALT can be read (2026-10-05)
+                keep = Path(cdir) / ".ecgberht" / "foreman" / job["id"]
+                keep.mkdir(parents=True, exist_ok=True)
+                for f in list((Path(wt) / ".foreman").glob("*.json")) + [d / "foreman-run.log"]:
+                    if f.is_file():
+                        shutil.copy2(f, keep / f.name)
+            except Exception:
+                pass
         finish(cdir, job["id"], foreman_result((d / "foreman-run.log").read_text(encoding="utf-8", errors="replace"), rc))
     threading.Thread(target=wait, name="foreman-job-" + job["id"], daemon=True).start()
 
