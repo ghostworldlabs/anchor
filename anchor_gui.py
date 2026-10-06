@@ -7933,7 +7933,13 @@ def _high_seat_context():
             resume_from = (", ".join(_on[:3]) + (" and %d more" % (len(_on) - 3) if len(_on) > 3 else ""))[:240]
         except Exception:
             resume_from = ""
+    try:   # the Desk (2026-10-06): its one line on the Cave - read only when it exists; the Cave never creates it
+        _desk_e, desk = _desk_state(create=False)
+        desk_pid = (_desk_e or {}).get("id") or ""
+    except Exception:
+        desk, desk_pid = None, ""
     return {
+        "desk": desk, "desk_pid": desk_pid,
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
         "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
@@ -8200,6 +8206,106 @@ def handle_high_seat_campaign(handler, path, body):
         handler._send_json({"ok": False, "receipt": "only the Campaign takes these acts"}, 404); return
     from steward_cockpit.campaign_acts import act as _act
     out = _act(entry.get("folder_path"), b)
+    handler._send_json(out, 200 if out.get("ok") else 400)
+
+
+# ── the Desk (John 2026-10-06, his mockup notes): admin work with no project - one Anchor project whose efforts are
+# AI Cockpits: "Small items" (one small-item cockpit for every small item) and one cockpit per substantial effort,
+# each seatable On deck / Active in the Cave like any cockpit. desk.py holds the file logic; desk_page.py the page.
+def _desk_entry(create=False):
+    """The Desk's registry entry (its folder = desk.desk_dir()); created on the first visit to /desk when asked."""
+    import desk as _desk
+    root = _desk.desk_dir()
+    try:
+        for e in _rnd.list_projects(include_archived=False, include_future=False, include_retired=False):
+            if e.get("folder_path") and Path(e["folder_path"]).resolve() == root.resolve():
+                return e
+    except Exception:
+        return None
+    if not create:
+        return None
+    try:
+        res = (select_existing_project(_desk.DESK_NAME, str(root)) if root.exists()
+               else create_new_folder_project(_desk.DESK_NAME, str(root.parent)))
+        entry = res.get("entry") or res
+        _desk.ensure_small_items(root)
+        return entry if isinstance(entry, dict) and entry.get("id") else None
+    except Exception:
+        return None
+
+
+def _desk_seats(pid):
+    """{effort dir: {seat, step}} for the Desk's cockpits seated on the Campaign (ref effort:<pid>/<dir>)."""
+    out = {}
+    try:
+        camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
+        from steward_cockpit.steward_campaign import read_map as _read_map
+        prefix = "effort:%s/" % pid
+        for st in _read_map(str(camp_dir)).get("steps") or []:
+            ref = str(st.get("ref") or "")
+            if ref.startswith(prefix) and st.get("status") not in ("done",) and st.get("seat") in ("active", "deck"):
+                out[ref[len(prefix):]] = {"seat": st["seat"], "step": st.get("id")}
+    except Exception:
+        pass
+    return out
+
+
+def _desk_state(create=False):
+    """(entry, summary) - the Desk as both pages show it; (None, None) when it does not exist and create is False."""
+    import desk as _desk
+    entry = _desk_entry(create=create)
+    if entry is None:
+        return None, None
+    _desk.ensure_small_items()
+    seats = _desk_seats(entry["id"])
+    summ = _desk.summary(lambda f: _light_words(f, {}, False, True),
+                         seat_of=lambda d: (seats.get(d) or {}).get("seat", ""))
+    for c in summ["cockpits"]:
+        c["step"] = (seats.get(c["dir"]) or {}).get("step") or ""
+    return entry, summ
+
+
+def render_desk_page(logged_in=False) -> str:
+    """GET /desk - the Desk page; an honest error page, never a blank."""
+    try:
+        import desk_page as _dp
+        entry, summ = _desk_state(create=True)
+        if entry is None:
+            raise RuntimeError("the Desk project could not be created at %s" % __import__("desk").desk_dir())
+        camp = None
+        try:
+            camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
+            camp = next((e for e in _rnd.list_projects() if e.get("folder_path") and Path(e["folder_path"]).resolve() == camp_dir), None)
+        except Exception:
+            pass
+        ctx = {"build": BUILD_ID, "steward": _steward_ui(), "logged_in": bool(logged_in),
+               "auth_required": bool(_paths.expected_token()), "entry": entry, "desk": summ,
+               "campaign_pid": (camp or {}).get("id") or ""}
+        return _dp.render_desk_html(ctx)
+    except Exception as e:
+        return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
+                "<h1>The Desk could not render</h1><p>%s</p><p><a href=\"/\" style=\"color:#8ab4f8\">the Cave</a></p></body></html>"
+                % html_lib.escape("%s: %s" % (type(e).__name__, e)))
+
+
+def handle_desk(handler, path, body):
+    """POST /api/desk {act, ...} - the Desk page's acts: add / done / undone / promote an item, start a cockpit.
+    Seating a cockpit is the Campaign's own act (seat_new / withdraw on /api/high-seat/campaign)."""
+    import desk as _desk
+    b = body or {}
+    if _desk_entry(create=False) is None:
+        handler._send_json({"ok": False, "error": "the Desk does not exist yet - open /desk"}, 404); return
+    a = str(b.get("act") or "")
+    if a == "add":
+        out = _desk.add_item(b.get("text"))
+    elif a in ("done", "undone"):
+        out = _desk.set_done(str(b.get("item") or ""), done=(a == "done"))
+    elif a == "promote":
+        out = _desk.promote(str(b.get("item") or ""))
+    elif a == "new_cockpit":
+        out = _desk.new_cockpit(b.get("name"))
+    else:
+        out = {"ok": False, "error": "no such act"}
     handler._send_json(out, 200 if out.get("ok") else 400)
 
 
@@ -21724,6 +21830,7 @@ _MIGRATED_HANDLERS = {
     "handle_high_seat_campaign": handle_high_seat_campaign,
     "handle_high_seat_repair": handle_high_seat_repair,
     "handle_cave_terminal": handle_cave_terminal,
+    "handle_desk": handle_desk,
     "handle_debug_threads": handle_debug_threads,
     "handle_high_seat_projects": handle_high_seat_projects,
     "handle_cave_terminals": handle_cave_terminals,
@@ -22891,6 +22998,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     projects, tasks, inbox = gather_all()
                     html = generate_html(projects, tasks, inbox)
                     self._send_html(html, cookie=_ck)
+            elif _path_only == "/desk":
+                # the Desk (2026-10-06): admin cockpits - small items in one, substantial efforts in their own
+                _ck = self._local_login_cookie()
+                self._send_html(render_desk_page(logged_in=bool(_ck) or self._term_token_ok()), cookie=_ck)
             elif _path_only == "/high-seat":
                 # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
                 _ck = self._local_login_cookie()

@@ -751,17 +751,47 @@ def _card(e, f, cls, goal=None, step=None, light=None):
 
 
 
+def desk_counts(desk):
+    """(waits, small items open, cockpits) for the Desk tile and the rail; zeros when the Desk is not set up."""
+    if not desk:
+        return 0, 0, 0
+    return int(desk.get("waits") or 0), len((desk.get("small") or {}).get("items") or ()), len(desk.get("cockpits") or ())
+
+
 def _desk_line(ctx):
+    """The Desk on the Cave (his word, 2026-10-06): ONE line - the Goals tile's own pattern - that expands in the page
+    to a row per cockpit (Small items first) and opens the Desk page with a click. Small items share one small-item
+    cockpit; only substantial efforts have their own, and those can be seated On deck / Active like any cockpit."""
+    desk = ctx.get("desk")
+    pid = ctx.get("desk_pid") or ""
+    # the old task list stays reachable from here (moved with the Desk, never dropped)
+    tasks = '<button class="dchip" id="chipTasks" data-desk="tasks">Tasks &middot; <span id="taskTotal">%d</span></button>' % int(ctx.get("tasks_open") or 0)
+    if not desk or not pid:
+        return ('<section class="camp desk" id="deskline"><div class="camp-h" id="deskHead"><span class="k">Desk</span>'
+                '<span class="d">&middot; admin, no project &mdash; not set up yet; opening it sets it up</span><span class="sp"></span>' + tasks +
+                '<a class="camp-open" href="/desk" target="_blank" rel="noopener">Open the Desk</a></div></section>')
+    waits, n_small, n_cock = desk_counts(desk)
+    lights = [((desk.get("small") or {}).get("light") or "gray")] + [c.get("light") or "gray" for c in desk.get("cockpits") or ()]
+    head_light = next((l for l in ("red", "orange", "green") if l in lights), "gray")
+    line = "&middot; %s &middot; Small items %d &middot; %d cockpit%s" % (
+        ("<b>%d wait%s on you</b>" % (waits, "" if waits == 1 else "s")) if waits else "nothing waits on you",
+        n_small, n_cock, "" if n_cock == 1 else "s")
+
+    def row(name, d, lt, why, seat=""):
+        lclass = lt if lt in LIGHT_WORDS else "gray"
+        return ('<a class="drow%s" href="/steward/v1?pid=%s&amp;dir=%s" target="_blank" rel="noopener">'
+                '<span class="tlight %s" title="%s"></span><span class="drow-n">%s</span><span class="drow-w">%s</span>%s</a>') % (
+            " waits" if lclass == "orange" else "", esc(pid), esc(_quote(d)), lclass, esc(LIGHT_WORDS[lclass]), esc(name),
+            esc(why or LIGHT_WORDS[lclass]), ('<span class="drow-s">%s</span>' % esc(SEAT_NAMES.get(seat, ""))) if seat else "")
+    sm = desk.get("small") or {}
+    rows = [row("Small items · %d" % n_small, "Small items", sm.get("light"), sm.get("why"))]
+    rows += [row(c["name"], c["dir"], c.get("light"), c.get("why"), c.get("seat") or "") for c in desk.get("cockpits") or ()]
     return (
-        '<section class="deskline" id="deskline"><div class="dl-row"><span class="dl-k">Desk</span><span class="dl-d">&middot; admin, no project</span>'
-        '<button class="dchip" id="chipTasks" data-desk="tasks">Tasks &middot; <span id="taskTotal">%d</span></button>'
-        '<span class="dl-sp"></span>%s</div>'
-        '<div class="dl-body" id="deskBody"><p class="ptile-note">%s</p></div></section>'
-    ) % (int(ctx.get("tasks_open") or 0),
-         ('<a class="dl-open" href="/project/%s?view=desk" target="_blank" rel="noopener" title="the Desk view of the Campaign record">Open the Desk cockpit &rarr;</a>' % esc((ctx.get("campaign") or {}).get("pid")))
-         if ctx.get("campaign") else '<span class="dl-open muted" title="The Desk reads the Campaign record, which is not stood up yet">Open the Desk cockpit &mdash; after the Campaign exists</span>',
-         "The Desk reads the Campaign record&rsquo;s tasks; this old task list stays on the old dashboard until your word." if ctx.get("campaign")
-         else "The task list still lives on the old dashboard until the Campaign exists.")
+        '<section class="camp desk%s" id="deskline"><div class="camp-h" id="deskHead"><span class="tlight %s"></span><span class="k">Desk</span>'
+        '<span class="d">%s</span><span class="sp"></span>' + tasks + '<span class="tog" id="deskTog">Expand</span>'
+        '<a class="camp-open" href="/desk" target="_blank" rel="noopener">Open the Desk</a></div>'
+        '<div class="camp-body"><div class="drows">%s</div></div></section>'
+    ) % (" ready" if head_light == "orange" else "", head_light, line, "".join(rows))
 
 
 def _ruler(ctx):

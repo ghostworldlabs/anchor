@@ -38,6 +38,7 @@
     {"method": "GET", "pattern": "/api/rnd/tail", "justification": "W8/W9 — cursor-stable incremental job-log read; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
     {"method": "GET", "pattern": "/api/rnd/jobs", "justification": "W8/W9 — read-only job listing; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
     {"method": "GET", "pattern": "/api/rnd/previews", "justification": "Read-only SAFE projection of ephemeral deliverable previews (no absolute paths); unchanged from pre-rearch behavior."},
+    {"method": "GET", "pattern": "/desk", "justification": "the Desk page bootstrap (2026-10-06); mirrors '/' - it shows nothing until he is logged in (its locked view), and every act it makes is token-gated (/api/desk, /api/high-seat/campaign)."},
     {"method": "GET", "pattern": "/doctor", "justification": "Anchor Doctor page bootstrap (doctor V3 W3); mirrors '/' — browser navigation must load before any token is presented. All its data/mutating calls (/api/doctor/*, /doctor/report, terminal transports) are token-gated."},
     {"method": "GET", "pattern": "/foundry", "justification": "Skill Foundry v2 GUI page bootstrap; mirrors /project/ — the page loads open, all its mutative actions (/api/foundry/*) are token-gated. Scheduled to move open -> token (cookie-nav) under the same warn-then-enforce soak as /project/."},
     {"method": "GET", "pattern": "/foundry/", "justification": "Trailing-slash variant of the folded-in Foundry React SPA entry; same posture as /foundry."},

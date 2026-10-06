@@ -361,6 +361,9 @@ ROUTES = [
     _r("POST", "/api/high-seat/repair", AUTH_TOKEN,
        handler="handle_high_seat_repair", migrated=True),
     # the Cave's plain terminals (2026-10-02, his word): the Workbench retired, a terminal in its place
+    # the Desk's acts (2026-10-06): small items and new admin cockpits
+    _r("POST", "/api/desk", AUTH_TOKEN,
+       handler="handle_desk", migrated=True),
     _r("POST", "/api/cave/terminal", AUTH_TOKEN,
        handler="handle_cave_terminal", migrated=True),
     _r("GET", "/api/cave/terminals", AUTH_TOKEN,
@@ -428,6 +431,9 @@ ROUTES = [
     # data call it makes is token-gated below). Served by the legacy do_GET
     # arm (a whole-page render, like "/dashboard").
     _r("GET", "/doctor", AUTH_OPEN),
+    # the Desk page (2026-10-06): an open bootstrap like the Cave - it shows nothing until he is logged in (the
+    # page's own locked view), and every act it makes is token-gated (/api/desk, /api/high-seat/campaign)
+    _r("GET", "/desk", AUTH_OPEN),
     # Real stat cards / reports-list refresh data (read, per-install health
     # data → default-deny token; ?token= / Authorization / cookie accepted).
     _r("GET", "/api/doctor/status", AUTH_TOKEN,

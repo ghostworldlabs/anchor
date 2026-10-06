@@ -210,6 +210,10 @@
   function setCamp(open) { if (!camp) return; camp.classList.toggle('open', open); if (campTog) campTog.textContent = open ? 'Collapse' : 'Expand'; }
   if (campTog) campTog.addEventListener('click', function (e) { e.stopPropagation(); setCamp(!camp.classList.contains('open')); });
   if (campHead) campHead.addEventListener('click', function (e) { if (e.target.closest('a')) return; setCamp(!camp.classList.contains('open')); });
+  // the Desk's one line (2026-10-06): the same pattern - the head toggles the rows in the page, the link opens the Desk
+  var desk = $('#deskline'), deskTog = $('#deskTog'), deskHead = $('#deskHead');
+  function setDesk(open) { if (!desk || !deskTog) return; desk.classList.toggle('open', open); deskTog.textContent = open ? 'Collapse' : 'Expand'; }
+  if (deskHead && deskTog) deskHead.addEventListener('click', function (e) { if (e.target.closest('a, button')) return; setDesk(!desk.classList.contains('open')); });
   $$('.grow .gh').forEach(function (h) { h.addEventListener('click', function (e) { if (e.target.closest('a, button')) return; h.parentNode.classList.toggle('open'); }); });
   var CAMPAIGN = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.campaign_pid) || '';
   var acting = false;
