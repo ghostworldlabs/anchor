@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.
+Foreman heavy under implementation plan v2 is approved; work is paused for the restart.
 
 ## Why next
 
-Passing author tests do not establish independent assurance.
+Resume the approved independent review and hardening after the restart is confirmed complete.
 
 ## Human wait
 
-Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.
+
 
 ## Why stakes
 

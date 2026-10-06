@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-05",
+  "as_of": "2026-10-06",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -1239,6 +1239,98 @@
       "client_event_id": "setup-assurance-v2-proposal-link-56d231a8-8117-447d-9d37-51eb60220b5a",
       "seq": 71,
       "at": "2026-10-05"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-provider-status",
+      "to": "parked",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause."
+      },
+      "client_event_id": "setup-v2-restart-park-gwl-provider-status-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 72,
+      "at": "2026-10-06",
+      "from": "active"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "waiting_on": null
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause.",
+        "source_turn_id": "087893eb-4c35-4177-96cf-c782d5c3a44f"
+      },
+      "client_event_id": "setup-v2-approved-restart-pause-gwl-provider-status-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 73,
+      "at": "2026-10-06"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-software-review",
+      "to": "parked",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause."
+      },
+      "client_event_id": "setup-v2-restart-park-gwl-software-review-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 74,
+      "at": "2026-10-06",
+      "from": "proposed"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-software-review",
+      "fields": {
+        "waiting_on": null,
+        "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py"
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause.",
+        "source_turn_id": "087893eb-4c35-4177-96cf-c782d5c3a44f"
+      },
+      "client_event_id": "setup-v2-approved-restart-pause-gwl-software-review-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 75,
+      "at": "2026-10-06"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-provider-harden",
+      "to": "parked",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause."
+      },
+      "client_event_id": "setup-v2-restart-park-gwl-provider-harden-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 76,
+      "at": "2026-10-06",
+      "from": "proposed"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-harden",
+      "fields": {
+        "waiting_on": null,
+        "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py"
+      },
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-06T00:42:54.830066+00:00",
+        "why": "John explicitly approves Foreman heavy under implementation plan v2, then pauses until the restart is complete. Approval does not close a slice or authorize work during the pause.",
+        "source_turn_id": "087893eb-4c35-4177-96cf-c782d5c3a44f"
+      },
+      "client_event_id": "setup-v2-approved-restart-pause-gwl-provider-harden-087893eb-4c35-4177-96cf-c782d5c3a44f",
+      "seq": 77,
+      "at": "2026-10-06"
     }
   ],
   "roadmap_projection": [
@@ -1287,7 +1379,7 @@
     {
       "id": "gwl-provider-status",
       "name": "Provider integration: verify live Setup and laptop",
-      "status": "active",
+      "status": "parked",
       "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
       "waiting_on": null,
       "commissioned_as": null,
@@ -1309,12 +1401,12 @@
     {
       "id": "gwl-software-review",
       "name": "Independent adversarial review of provider integration",
-      "status": "proposed",
+      "status": "parked",
       "done_when": "Two substantive independent reviewer responses examine the complete integration and repair; findings have reproductions and disposition, required failure tests pass, and missing or same-family review is not represented as cross-family assurance. Foreman contract confirmation is still required.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "rigor",
-      "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py",
+      "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py",
       "navigation": {
         "path": [
           "gwl-setup"
@@ -1327,12 +1419,12 @@
     {
       "id": "gwl-provider-harden",
       "name": "Harden provider failures, concurrency and credential boundaries",
-      "status": "proposed",
+      "status": "parked",
       "done_when": "In-scope findings are fixed and independently re-reviewed; realistic tests verify responsive cached reads, cancellation, corrupt settings, secret protection, account separation and retained sessions/quality. Serious findings and missing required reviewer participation keep the product unready. Actual laptop proof and human acceptance remain separate.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "harden",
-      "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
+      "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
       "navigation": {
         "path": [
           "gwl-setup"

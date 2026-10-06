@@ -2,8 +2,8 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| START HERE - ecgberht proposed provider implementation plan v2 PDF - independent review and hardening; v1 remains approved | `IMPLEMENTATION-PLAN-v2.pdf` | 2026-10-05 | 3 |
-| ecgberht proposed provider implementation plan v2 source - cumulative v1 baseline and bounded Foreman heavy contract | `IMPLEMENTATION-PLAN-v2.md` | 2026-10-05 | 3 |
+| START HERE - ecgberht approved provider implementation plan v2 PDF - independent review and hardening; execution paused for restart | `IMPLEMENTATION-PLAN-v2.pdf` | 2026-10-05 | gwl-provider-status |
+| ecgberht approved provider implementation plan v2 source - cumulative v1 baseline and bounded Foreman heavy contract | `IMPLEMENTATION-PLAN-v2.md` | 2026-10-05 | gwl-provider-status |
 | Approved baseline — ecgberht Provider integration implementation plan v1 — authorized build from accepted Refinement 2 | `IMPLEMENTATION-PLAN-v1.md` | 2026-10-04 | gwl-provider-status |
 | Current ecgberht Setup scope v6 — accepted layout, existing host sign-ins, direct login and real account usage | `SCOPE-v6.md` | 2026-10-04 | gwl-provider-status |
 | Accepted starting layout — ecgberht Setup mockup — Refinement 2; gear reopens existing settings, Cave sidebar model controls | `mockups/SETUP-refinement-2.html` | 2026-10-04 | gwl-provider-status |
