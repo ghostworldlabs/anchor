@@ -1,13 +1,1 @@
-{
-  "state": "quiet",
-  "reason": "Approved Foreman assurance is paused for the restart",
-  "updated_at": "2026-10-06T00:45:48.717855+00:00",
-  "state_since": "2026-10-05T23:22:07.703527+00:00",
-  "provenance": [
-    {
-      "by": "engine",
-      "at": "2026-10-04T15:06:43",
-      "state": "needs_you"
-    }
-  ]
-}
+{"state": "working", "reason": "Foreman heavy assurance of the provider integration is running as code job 20261005-192207-b89bab in its own worktree (independent review, then hardening).", "updated_at": "2026-10-06T01:23:00+00:00"}

@@ -1,15 +1,15 @@
 {
-  "at": "2026-10-05 17:59",
-  "status_id": "01791244771390270100",
+  "at": "2026-10-05 19:47",
+  "status_id": "01791251274986339400",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued",
+    "activity": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
     "latest_event": null,
     "next": [
-      "Provider integration: verify live Setup and laptop"
+      "Independent adversarial review of provider integration"
     ],
-    "question": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued"
+        "value": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2,\u2026"
       },
       {
         "label": "Status",
-        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 quiet"
+        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and\u2026"
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0011-provider-landed-and-plan-pickup: Provider integration landing and plan pickup - October 5, 2026"
+        "value": "0013-foreman-approved-restart-pause: Foreman approved; pause for restart - October 5, 2026"
       },
       {
         "label": "ETA",
@@ -49,20 +49,22 @@
       },
       {
         "label": "To do",
-        "value": "Provider integration: verify live Setup and laptop"
+        "value": "Independent adversarial review of provider integration"
       }
     ]
   },
-  "lead_line": "Next: Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration \u2014 Passing author tests do not establish independent assurance. \u00b7 waiting on you: Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
+  "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
   "now": [
-    "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued"
+    "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
+    "landed, waits for a restart \u2014 Anchor provider integration \u2014 approved Setup mockup Refinement 2",
+    "landed, waits for a restart \u2014 Continue the already authorized provider integration from commit 64df9a6 and plan v1 for Anchor / Se"
   ],
   "running": {
-    "kind": "steward",
-    "label": "steward mid-turn since 17:33 (25 min) \u00b7 last status 17:49 \u00b7 1 queued",
-    "skill": "",
-    "source": "engine",
-    "age": ""
+    "kind": "code_job",
+    "label": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
+    "skill": "coder",
+    "source": ".ecgberht/code-jobs.json",
+    "age": "25 min"
   },
   "slice": {
     "n": 3,
@@ -75,19 +77,19 @@
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0011-provider-landed-and-plan-pickup: Provider integration landing and plan pickup - October 5, 2026",
+  "journal": "0013-foreman-approved-restart-pause: Foreman approved; pause for restart - October 5, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
       "step_id": "gwl-provider-status",
-      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383"
+      "session_id": "b2058b94-93ad-4d36-9715-317e12cca179"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0011-provider-landed-and-plan-pickup.md",
-      "entry_id": "0011-provider-landed-and-plan-pickup",
-      "at": "2026-10-05T23:28:09Z",
+      "path": "journal/0013-foreman-approved-restart-pause.md",
+      "entry_id": "0013-foreman-approved-restart-pause",
+      "at": "2026-10-06T00:48:40Z",
       "step_id": "gwl-provider-status",
       "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
       "run_id": null
@@ -98,19 +100,20 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Provider integration: verify live Setup and laptop",
-    "then Independent adversarial review of provider integration"
+    "Independent adversarial review of provider integration",
+    "then harden failure paths",
+    "then verify on the laptop"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
+    "parts": "slice \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
     "steps_done": 0,
     "steps_total": 11
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
+    "text": "Foreman heavy assurance under implementation plan v2 is running as code job 20261005-192207-b89bab; restart done, loading repair live.",
     "as_of": "2026-10-05",
     "newest_work": "2026-10-05",
     "behind_days": 0,
@@ -120,24 +123,24 @@
     "step": "slice: Provider integration: verify live Setup and laptop",
     "steps_done": 0,
     "steps_total": 11,
-    "waiting_on_you": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review.",
+    "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
-    "why": "Passing author tests do not establish independent assurance.",
-    "attention": "quiet",
+    "next": "Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop",
+    "why": "John approved plan v2 and said carry on after the restart (2026-10-06).",
+    "attention": "stale",
     "goal_reread": true
   },
   "map": [
     "research: Third: organize goals and initiatives on the Star Chart (proposed)",
     "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
-    "slice: Provider integration: verify live Setup and laptop (active) \u00b7 gate",
+    "slice: Provider integration: verify live Setup and laptop (parked) \u00b7 gate",
     "slice: Try and refine the working provider surface (proposed) \u00b7 no gate",
-    "rigor: Independent adversarial review of provider integration (proposed) \u00b7 gate",
+    "rigor: Independent adversarial review of provider integration (parked) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
     "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
     "integrate: Wire Cave controls and reopen Setup (proposed) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
-    "harden: Harden provider failures, concurrency and credential boundaries (proposed) \u00b7 gate",
+    "harden: Harden provider failures, concurrency and credential boundaries (parked) \u00b7 gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
   ],
   "work_map": [
@@ -215,7 +218,7 @@
         {
           "id": "gwl-provider-status",
           "name": "Provider integration: verify live Setup and laptop",
-          "status": "active",
+          "status": "parked",
           "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
           "if_then": "",
           "waiting_on": null,
@@ -276,7 +279,7 @@
         {
           "id": "gwl-software-review",
           "name": "Independent adversarial review of provider integration",
-          "status": "proposed",
+          "status": "parked",
           "done_when": "Two substantive independent reviewer responses examine the complete integration and repair; findings have reproductions and disposition, required failure tests pass, and missing or same-family review is not represented as cross-family assurance. Foreman contract confirmation is still required.",
           "if_then": "",
           "waiting_on": null,
@@ -288,7 +291,7 @@
           "seat_order": null,
           "commissioned_as": null,
           "part": "rigor",
-          "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py",
+          "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py",
           "component_ids": [],
           "navigation": {
             "path": [
@@ -411,7 +414,7 @@
         {
           "id": "gwl-provider-harden",
           "name": "Harden provider failures, concurrency and credential boundaries",
-          "status": "proposed",
+          "status": "parked",
           "done_when": "In-scope findings are fixed and independently re-reviewed; realistic tests verify responsive cached reads, cancellation, corrupt settings, secret protection, account separation and retained sessions/quality. Serious findings and missing required reviewer participation keep the product unready. Actual laptop proof and human acceptance remain separate.",
           "if_then": "",
           "waiting_on": null,
@@ -423,7 +426,7 @@
           "seat_order": null,
           "commissioned_as": null,
           "part": "harden",
-          "gate": "python -m pytest -q tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
+          "gate": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
           "component_ids": [],
           "navigation": {
             "path": [

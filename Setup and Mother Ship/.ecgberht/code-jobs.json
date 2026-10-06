@@ -71,5 +71,34 @@
   ],
   "landed": true,
   "land_note": "landed on c:\\dev\\anchor (4 files; snapshot refs/anchor-snapshots/20261005-173757-9af76e)"
+ },
+ "20261005-192207-b89bab": {
+  "id": "20261005-192207-b89bab",
+  "repo": "C:\\dev\\Anchor",
+  "branch": "steward-job-20261005-192207-b89bab",
+  "worktree": "C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261005-192207-b89bab",
+  "base": "f77710c34a9aea3711fe51503676853c67c69c6d",
+  "brief": "# Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05)\n\nAuthorized by John's turn 087893eb (2026-10-06T00:42Z): he approved the bounded Foreman heavy contract in `Setup and Mother Ship/IMPLEMENTATION-PLAN-v2.md` and the restart is now done. Read that file completely, plus `Setup and Mother Ship/SCOPE-v6.md` and the landed provider work (`provider_setup.py`, `static/provider-setup.html`, `tests/test_provider_setup.py`, `tests/test_provider_setup_browser.py`, commits 64df9a6 and b24f922). Work only in your assigned worktree. Do not change global model or provider preferences, do not enroll or replace real credentials, do not restart the Anchor service.\n\nRun this as FOREMAN HEAVY, not as a plain coder: write Foreman's three documents from plan v2 (Wave 1 = independent review with reproducible failures and `tests/test_provider_setup_rigor.py` carrying the five required ids; Wave 2 = harden the identified failure paths and `tests/test_provider_setup_hardening.py` carrying the six required ids, then re-review), then launch `node C:/dev/trio/foreman/bin/run-live.mjs <worktree> --reviewers 2 --cap 3 --max-waves 2` headless with `CRUCIBLE_AGENT_LIVE=1`, `TRIO_DRIVER_EXECUTE=claude`, `TRIO_DRIVER_FIX=claude`, `TRIO_DRIVER_REVIEW=grok-cli` (the ChatGPT execute seat never edits files; a ChatGPT reviewer is policy-blocked), highest supported effort, ANTHROPIC_API_KEY unset. Scrub stale `TRIO_*` from the environment first. Two fresh read-only reviewers must return substantive independent findings with file/line evidence; record actual reviewer family and any missing participation honestly. Dispose every finding with evidence; never weaken existing assertions or substitute prose for a failing reproduction. Budget: at most two waves, four fix iterations per wave, 120 minutes; on HALT or budget stop return the actual evidence, do not fake convergence.\n\nDeliver: the two new test files with the required ids, only the production changes demonstrated necessary by findings, and `Setup and Mother Ship/ASSURANCE-EXECUTION-LOG.md` summarizing each finding, its reviewer family, reproduction command, disposition, and the final per-test counts of the gate. Technical readiness is bounded evidence, not acceptance; John's laptop verification and explicit close remain his.",
+  "check": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
+  "status": "done",
+  "started": "2026-10-05 19:22:14",
+  "steward_dir": "C:\\dev\\Anchor\\Setup and Mother Ship",
+  "steward": "Aladdin",
+  "worker": "coder (Foreman not yet switched on)",
+  "finishing_at": 1791251573.3262446,
+  "finished": "2026-10-05 19:52:54",
+  "summary": "I'll start by reading the plan, scope, and landed provider work to understand exactly what the assurance contract requires.The contract resolves cleanly (two waves, config-named docs, `-v` gate). One more parse check with proper file URLs, then I launch the Foreman run in the background with the scrubbed environment.Reviewer failover is fail-closed for verification roles: a failed Grok reviewer is recorded as transport-failed and never silently replaced by a Claude seat, so the panel cannot become same-family without the log saying so. The Wave 1 executor is still reading the codebase (about four minutes in); the rigor test file has not been written yet. I'm waiting on the milestone monitor for the next event.",
+  "error": "",
+  "check_ok": false,
+  "check_output": "============================= test session starts =============================\nplatform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\ncachedir: .pytest_cache\nrootdir: C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261005-192207-b89bab\nconfigfile: pyproject.toml\nplugins: langsmith-0.8.5, anyio-4.13.0\ncollecting ... collected 0 items\n\n============================ no tests ran in 0.01s ============================\nERROR: file or directory not found: tests/test_provider_setup_rigor.py\n\n",
+  "files": [
+   "Setup and Mother Ship/ASSURANCE-EXECUTION-LOG.md",
+   "Setup and Mother Ship/assurance-2026-10-05/DESCRIPTION.md",
+   "Setup and Mother Ship/assurance-2026-10-05/IMPLEMENTATION-PLAN.md",
+   "foreman.config.json"
+  ],
+  "landed": false,
+  "land_note": "not landed: the check failed; the work waits on branch steward-job-20261005-192207-b89bab",
+  "landed_commit": ""
  }
 }
