@@ -2933,9 +2933,12 @@ class Engine:
                     self.open_question = ""
                     self.open_question_kind = ""
                 if not was_tick:
-                    sentences = [s.strip() for s in
-                                 re.split(r"(?<=[.!?])\s+|\n+", txt)      # a line break ends a line such as "Reversible: no"
-                                 if s.strip().endswith("?")]
+                    _all = [s.strip() for s in
+                            re.split(r"(?<=[.!?])\s+|\n+", txt)      # a line break ends a line such as "Reversible: no"
+                            if s.strip()]
+                    # two-lane step 2 (2026-10-05, Opus): a question waits on him only when the reply ENDS on it - a "?"
+                    # mid-reply (rhetorical, or answered in the next sentence) no longer paints orange
+                    sentences = [_all[-1]] if (_all and _all[-1].endswith("?")) else []
                     if sentences and (not question_attention.get("managed_refinement") or
                             question_attention.get("pending_request") or _has_recommendation(txt)):
                         request = question_attention.get("pending_request") or {}
