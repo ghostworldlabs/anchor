@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-06 06:06",
-  "status_id": "01791288419306123500",
+  "at": "2026-10-06 12:07",
+  "status_id": "01791310038856635800",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - attention stale - live owner unconfirmed",
+    "activity": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37",
     "latest_event": null,
     "next": [
       "Independent adversarial review of provider integration"
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - attention stale - live owner unconfirmed"
+        "value": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37"
       },
       {
         "label": "Status",
@@ -55,13 +55,13 @@
   },
   "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
   "now": [
-    "nothing running - attention stale - live owner unconfirmed"
+    "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - attention stale - live owner unconfirmed",
+    "kind": "steward",
+    "label": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
