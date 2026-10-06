@@ -100,5 +100,19 @@
   "landed": false,
   "land_note": "not landed: the check failed; the work waits on branch steward-job-20261005-192207-b89bab",
   "landed_commit": ""
+ },
+ "20261006-120817-dff72f": {
+  "id": "20261006-120817-dff72f",
+  "repo": "C:\\dev\\Anchor",
+  "branch": "steward-job-20261006-120817-dff72f",
+  "worktree": "C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261006-120817-dff72f",
+  "base": "b94269716000463225edd770ff71da1667ff88c8",
+  "brief": "# Land the finished Foreman heavy assurance work for the provider integration\n\nForeman heavy finished DONE (waves 1 and 2 GO, final gate 93 passed / 0 failed) inside the directory `C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261005-192207-b89bab`, but that job reported before Foreman ended, so its git worktree registration was pruned and the work now sits there as plain files on top of base commit f77710c. Your task is landing only: no new design, no new behaviour beyond what that directory holds.\n\n1. Compute the differences between that directory and base commit f77710c (`git diff --no-index` or a file-by-file compare of tracked paths). Exclude engine and job scaffolding: `.foreman/`, `.foreman-job/`, `.anchor/steward-terms.json`, `.pytest_cache/`, `__pycache__/`, `.git`. Include `foreman.config.json`, the production changes (provider_setup.py, provider_native.py, anchor_gui.py, steward_cockpit/steward_engine.py, job_runner.py and anything else that differs), the tests `tests/test_provider_setup_rigor.py` and `tests/test_provider_setup_hardening.py`, and the effort records `Setup and Mother Ship/ASSURANCE-EXECUTION-LOG.md` and `Setup and Mother Ship/assurance-2026-10-05/**` (including evidence/). Apply them into your worktree exactly; do not edit, weaken or reinterpret any of it. If a file in that directory also changed on master since f77710c, merge carefully and say so in your summary.\n2. Confirm the original 63 provider tests are byte-identical to master's, then run the gate. Report per-file pass counts.\n3. Summarize in a few sentences: files landed, any master conflicts resolved, the gate result.",
+  "check": "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py",
+  "status": "running",
+  "started": "2026-10-06 12:08:21",
+  "steward_dir": "C:\\dev\\Anchor\\Setup and Mother Ship",
+  "steward": "Aladdin",
+  "worker": "foreman"
  }
 }

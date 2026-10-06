@@ -1,15 +1,15 @@
 {
-  "at": "2026-10-06 12:07",
-  "status_id": "01791310038856635800",
+  "at": "2026-10-06 12:27",
+  "status_id": "01791311239476123200",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37",
+    "activity": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)",
     "latest_event": null,
     "next": [
       "Independent adversarial review of provider integration"
     ],
-    "question": "",
+    "question": "Restart on green?",
     "facts": [
       {
         "label": "Summary",
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37"
+        "value": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)"
       },
       {
         "label": "Status",
@@ -55,14 +55,14 @@
   },
   "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
   "now": [
-    "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37"
+    "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)"
   ],
   "running": {
-    "kind": "steward",
-    "label": "steward mid-turn since 12:07 (0 min) \u00b7 last status 06:37",
-    "skill": "",
-    "source": "engine",
-    "age": ""
+    "kind": "code_job",
+    "label": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)",
+    "skill": "coder",
+    "source": ".ecgberht/code-jobs.json",
+    "age": "18 min"
   },
   "slice": {
     "n": 3,
