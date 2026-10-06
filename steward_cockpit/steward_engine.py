@@ -644,6 +644,31 @@ def _cli_cmd(cli="claude"):
 STEWARD_CONVERSATION_EFFORT = (os.environ.get("ANCHOR_STEWARD_EFFORT") or "high").strip().lower()
 
 
+# ── Two-lane step 3: THE FENCE (John 2026-10-06, "build 3 anyway ... see how it performs") ───────────────────────
+# A project steward reads anywhere but writes only inside its own effort folder; code anywhere else goes to a code
+# job, a Foundry skill to a skill job - both started by the server, outside the fence, and both wake the steward.
+# Claude: launched without the user's settings (they allow Edit/Write/Bash everywhere) in default permission mode with
+# an allow list - a tool not on it is refused, headless. ChatGPT: the Codex workspace-write sandbox on the folder with
+# localhost reachable (both proven live on Windows 2026-10-06). Grok is not fenced (unproven). Code jobs and terminal
+# threads (general engines) keep full access. ANCHOR_STEWARD_FENCE=0 turns it off.
+STEWARD_FENCE = os.environ.get("ANCHOR_STEWARD_FENCE", "1") == "1"
+FENCE_ALLOWED_TOOLS = (
+    "Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "TodoWrite", "Task", "Skill",
+    "Edit(./**)", "NotebookEdit(./**)",
+    "Bash(python C:/dev/Anchor/tools/steward_code_job.py *)",
+    "Bash(python C:/dev/Anchor/tools/steward_skill.py *)",
+    "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
+)
+FENCE_NOTE = (
+    " YOUR FENCE: you read anywhere, but you write only inside this effort folder, and your shell runs only the two "
+    "hand-off tools and read-only git. Any change outside this folder is a code job (the tool above). A Foundry skill "
+    "(Gandalf, researchPrime, Crucible, Foreman, ...) runs as a SKILL JOB the server starts outside your fence: "
+    "`python C:/dev/Anchor/tools/steward_skill.py start --label \"<what it is for>\" -- node <the skill's run script> "
+    "[args]` - it wakes you with the result and its log. Say in one line what you sent off; never try to work around "
+    "the fence. "
+)
+
+
 def _cap_effort(selection, cap):
     """The selection with its effort no higher than ``cap`` (2026-10-05); unchanged when there is no cap, the cap is not a
     known level, or the selection is already at or below it."""
@@ -1398,12 +1423,16 @@ class Engine:
                        "picked that persona; answer to it. ")
             if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
                 persona += campaign_mode_remit(self.steward)      # the Star Chart's remit (2026-10-03, Grok R1 F8)
+            fenced = STEWARD_FENCE and not self.general and self.cli in ("claude", "chatgpt")
+            self.fenced = fenced
+            if fenced:
+                persona += FENCE_NOTE
             if self.cli in ("chatgpt", "grok"):
                 import sys
                 bridge = "codex_turn_bridge.py" if self.cli == "chatgpt" else "grok_turn_bridge.py"
                 cmd = [sys.executable, str(HERE / bridge),
                        "--target", self.dir, "--model", selection["model"],
-                       "--effort", selection["effort"], "--permission-mode", self.permission_mode]
+                       "--effort", selection["effort"], "--permission-mode", "fenced" if fenced else self.permission_mode]
                 if stored:
                     cmd += ["--resume", stored]
                 self._bridge_system_prompt = persona + self._contract() + "\n" + history_reference
@@ -1413,7 +1442,9 @@ class Engine:
                 "--input-format", "stream-json",
                 "--output-format", "stream-json",
                 "--include-partial-messages",
-                "--permission-mode", self.permission_mode,
+                ] + (["--setting-sources", "project", "--permission-mode", "default",
+                      "--allowedTools", *FENCE_ALLOWED_TOOLS] if fenced else
+                     ["--permission-mode", self.permission_mode]) + [
                 "--disallowedTools", "AskUserQuestion",
                 "--append-system-prompt", persona + self._contract() + "\n" + history_reference,
                 "--name", "steward-proto",

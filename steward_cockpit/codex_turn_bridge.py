@@ -52,7 +52,15 @@ PERMISSIONS = {
     "plan": "read-only",
     "acceptEdits": "workspace-write",
     "bypassPermissions": "danger-full-access",
+    # two-lane step 3 (2026-10-06): writes only inside the steward's folder, localhost reachable for the hand-off tools
+    "fenced": "workspace-write",
 }
+FENCE_CONFIG = (
+    "-c", "sandbox_workspace_write.network_access=true",
+    "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+    "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+    "-c", 'windows.sandbox="unelevated"',
+)
 
 
 _SKILL_FOLDER_RE = re.compile(r"(?:^|[\\/\s\"'])skills[\\/]([A-Za-z0-9_.-]{1,40})[\\/]", re.I)
@@ -290,6 +298,8 @@ def build_argv(
         "-c", 'approval_policy="never"',
         "-c", f'sandbox_mode="{PERMISSIONS[permission_mode]}"',
     ])
+    if permission_mode == "fenced":
+        result.extend(FENCE_CONFIG)
     if thread_id is not None:
         result.append(thread_id)
     result.append("-")

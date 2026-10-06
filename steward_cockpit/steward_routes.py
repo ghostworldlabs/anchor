@@ -1587,6 +1587,19 @@ def handle_post(cdir, verb, body):
         if action == "stop":
             return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False)), 200
         return {"ok": True, "jobs": list(_cj.read_jobs(cdir).values())[-20:]}, 200
+    if verb == "skill_job":
+        # two-lane step 3 (2026-10-06): a fenced steward's skill runs here, outside its fence, and wakes it when done
+        from steward_cockpit import skill_jobs as _sj
+        action = body.get("action") or "list"
+        if action == "start":
+            out = _sj.start(cdir, body.get("argv") or [], str(body.get("label") or ""))
+            eng = get_engine(cdir)
+            if out.get("ok") and eng is not None:
+                eng._emit({"t": "sys", "text": "skill job %s started - %s; the steward stays free to talk" % (out["job"], body.get("label") or "a skill")})
+            return out, (200 if out.get("ok") else 400)
+        if action == "stop":
+            return _sj.stop(cdir, body.get("job")), 200
+        return {"ok": True, "jobs": list(_sj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "engine":
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)
