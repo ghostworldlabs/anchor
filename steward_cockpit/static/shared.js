@@ -22,6 +22,18 @@ const Proto = (() => {
     if (!TILE || window.parent === window) return;
     try { window.parent.postMessage(Object.assign({ proto: "anchor-tile", inst: INST, kind: kind }, data || {}), location.origin); } catch (e) {}
   }
+  // a tile view the Cave preloads hidden for an Active card (2026-10-06, his word: "keep the memory open ... so that it
+  // loads instantly when I click on the tile"): parked, it holds no long-poll (the browser's few connections per host
+  // stay free for the page); shown, it catches up from its seq at once and lays itself out
+  let parked = TILE && PARAMS.get("parked") === "1", _pollAbort = null, _unpark = null;
+  function setParked(p) {
+    parked = !!p;
+    if (parked) { try { if (_pollAbort) _pollAbort.abort(); } catch (e) {} return; }
+    const go = _unpark; _unpark = null; if (go) go();
+    pin(scrollEl(), true); pin(paneEl(), true);   // a hidden frame had no size to scroll by
+    const ta = document.querySelector("[data-say]");
+    if (ta && ta.value) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; }
+  }
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
       opts = {}, map = null, lastState = null, latestStatusId = "";
 
@@ -599,7 +611,7 @@ const Proto = (() => {
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
   let _deliv = {items: [], approved: [], acts: [], warning: ""}, _lastMap = null, _refinementContext = null, _answerQuestionId = null;
-  let _delivOpen = null;   // null until he folds or opens it; current files start shown
+  let _delivOpen = null;   // null until he folds or opens it; starts folded on every open (his word, 2026-10-06)
   function shortWhat(it) {
     return String((it && (it.what || it.label)) || "")
       .replace(/^(?:START HERE|FOR REVIEW|CURRENT)\s*[:\u2014\u2013-]?\s*/i, "")
@@ -706,11 +718,15 @@ const Proto = (() => {
   /* Course/product navigation: one event-derived organization for both views. */
   const navStorageKey = () => 'steward_navigation:' + (window.STEWARD_PID || '') + ':' + DIR;
   let navChoices = null;
+  // the Not done list starts closed whenever a cockpit opens (his word, 2026-10-06); his click holds while the page
+  // lives (the plan repaints on every stamp), and is never restored open from a stored choice on the next open
+  const NAV_FRESH = new Set(["plan:notdone"]), navSession = {};
   function fileUrl(p) {
     return "file:///" + String(p).replace(/\\/g, "/").replace(/^\/+/, "").split("/")
       .map((seg, i) => i === 0 && /^[A-Za-z]:$/.test(seg) ? seg : encodeURIComponent(seg)).join("/");
   }
   function navChoice(key, fallback) {
+    if (NAV_FRESH.has(key)) return Object.prototype.hasOwnProperty.call(navSession,key) ? navSession[key] : false;
     if (!navChoices) { try { navChoices=JSON.parse(localStorage.getItem(navStorageKey())||'{}'); } catch(e) { navChoices={}; } }
     return Object.prototype.hasOwnProperty.call(navChoices,key) ? navChoices[key] : fallback;
   }
@@ -721,7 +737,7 @@ const Proto = (() => {
     summary.appendChild(document.createTextNode((marked ? ' ' : '') + title));
     d.dataset.navGroup=key;summary.dataset.navFocus='group:'+key;
     d.open=navChoice(key,open);d.appendChild(summary);
-    const save=value=>{navChoices[key]=value;try{localStorage.setItem(navStorageKey(),JSON.stringify(navChoices));}catch(e){}};
+    const save=value=>{if(NAV_FRESH.has(key)){navSession[key]=value;return;}navChoices[key]=value;try{localStorage.setItem(navStorageKey(),JSON.stringify(navChoices));}catch(e){}};
     summary.addEventListener('click',()=>save(!d.open));
     d.addEventListener('toggle',()=>{if(d.isConnected)save(d.open);});
     return d;
@@ -1142,7 +1158,7 @@ const Proto = (() => {
     const open = map.steps.map((st, i) => ({st, i})).filter(x => !stepDone(x.st) && !heldOut(x.st));
     const rank = x => stepWaitsOnJohn(x.st) ? 0 : isNow(x.st, map) ? 1 : x.st.status === "active" ? 2 : 3;
     open.sort((a, b) => rank(a) - rank(b) || a.i - b.i);
-    const box = navDisclosure("plan:notdone", "Not done \u00b7 " + open.length, true);
+    const box = navDisclosure("plan:notdone", "Not done \u00b7 " + open.length);   // closed on open; a click opens it
     open.forEach(x => {
       const wait = stepWaitsOnJohn(x.st), bare = wait === "waiting" || wait === "blocked", now = isNow(x.st, map);
       const label = (x.st.navigation && x.st.navigation.label) || x.st.name;
@@ -1241,11 +1257,11 @@ const Proto = (() => {
     if (s) {
       let tile = s.querySelector(".blk.deliv");
       const priorScroll=tile && tile.querySelector(".body") ? tile.querySelector(".body").scrollTop : 0;
-      // starts CLOSED so the status keeps the room; his choice then sticks
+      // starts CLOSED so the status keeps the room - even with current files (his word, 2026-10-06: the lists must not
+      // open up by themselves when a cockpit opens); his choice then sticks for this page
       const currentNow = items.filter(i => i.is_current === true)
         .sort((a,b) => Number(/^START HERE\b/.test(b.what||''))-Number(/^START HERE\b/.test(a.what||'')) || String(b.date || '').localeCompare(String(a.date || '')));
-      const wasOpen = tile ? !tile.classList.contains("folded")
-                           : (_delivOpen === null ? currentNow.length > 0 : _delivOpen === true);
+      const wasOpen = tile ? !tile.classList.contains("folded") : _delivOpen === true;
       if (!tile) {
         tile = el("div", "blk steward deliv" + (wasOpen ? "" : " folded"));
         s.insertBefore(tile, s.firstChild);
@@ -1620,8 +1636,10 @@ const Proto = (() => {
   let epoch = null;
   async function poll() {
     for (;;) {
+      if (parked) { await new Promise(res => { _unpark = res; }); continue; }
       try {
-        const r = await fetch(api("/api/events?since=" + seq));
+        _pollAbort = new AbortController();
+        const r = await fetch(api("/api/events?since=" + seq), { signal: _pollAbort.signal });
         const j = await r.json();
         // engine restarted/rebuilt: its seq counter reset, so our `since` is
         // stale - reset and replay history rather than go silent forever
@@ -1640,6 +1658,7 @@ const Proto = (() => {
         updateState(j.state);
         if (j.stamp && j.stamp !== stamp) { const was = stamp; stamp = j.stamp; await loadMap(); if (was) tileSay("stamp", { stamp: stamp }); }
       } catch (e) {
+        if (parked) continue;   // the park cut the long-poll; nothing failed
         await new Promise(res => setTimeout(res, 3000));
       }
     }
@@ -1650,6 +1669,7 @@ const Proto = (() => {
   async function stampPoll() {
     for (;;) {
       await new Promise(res => setTimeout(res, 3500));
+      if (parked) continue;
       try {
         const r = await fetch(api("/api/state"));
         const j = await r.json();
@@ -2217,6 +2237,7 @@ const Proto = (() => {
       window.addEventListener("message", (ev) => {
         const m = ev.data;
         if (ev.origin !== location.origin || ev.source !== window.parent || !m || m.proto !== "anchor-tile" || m.inst !== INST) return;
+        if (m.kind === "park" || m.kind === "show") { setParked(m.kind === "park"); return; }
         if (m.kind === "prefill" && typeof m.text === "string") {
           ta.value = ta.value.trim() ? (ta.value.replace(/\s+$/, "") + "\n" + m.text) : m.text;
           ta.dispatchEvent(new Event("input"));

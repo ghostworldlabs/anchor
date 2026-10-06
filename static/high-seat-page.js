@@ -433,6 +433,7 @@
     var id = 'talk-' + card.id, d = $('#' + id), bar = $('#' + id + ' .dlg-bar'), chip = $('#' + id + ' .exstate'), gist = $('#' + id + ' .dlg-gist'), frame = $('#' + id + ' .cframe');
     if (!d || !frame) return;
     var inst = 't' + (++TILE_SEQ) + '-' + Date.now().toString(36), ready = false, held = [], heard = false;
+    var warm = !!card._prewarm, shown = !warm;   // a preloaded Active card's view waits parked until he opens the card
     // the words he dictated into the old tile box come back in the cockpit's own box once (its draft key is the cockpit's)
     try {
       var oldKey = 'anchor:draft:tile:' + pid + ':' + (dir || ''), newKey = 'anchor:draft:say:' + pid + ':' + (dir || '') + ':tile', kept = localStorage.getItem(oldKey), there = localStorage.getItem(newKey) || '';
@@ -447,7 +448,7 @@
     function onMsg(ev) {
       var m = ev.data;
       if (ev.origin !== location.origin || ev.source !== frame.contentWindow || !m || m.proto !== 'anchor-tile' || m.inst !== inst) return;
-      if (m.kind === 'ready') { ready = true; var q = held; held = []; q.forEach(function (x) { try { frame.contentWindow.postMessage(x, location.origin); } catch (e) {} }); return; }
+      if (m.kind === 'ready') { ready = true; var q = held; held = []; q.forEach(function (x) { try { frame.contentWindow.postMessage(x, location.origin); } catch (e) {} }); if (warm) post(shown ? 'show' : 'park'); return; }   // a reloaded preloaded view hears where it stands
       if (m.kind === 'state') {
         card._feedbackEpoch = (card._feedbackEpoch || 0) + 1;
         paintDot(card, m.light);
@@ -465,14 +466,39 @@
     // a frame that loads a new document must say ready again before a prefill goes in (ChatGPT 2026-10-02); a view
     // that never reports its state within 20 s is said, not left at "reading"
     frame.addEventListener('load', function () { ready = false; });
-    setTimeout(function () { if (!heard && card._talk && gist) gist.textContent = 'the cockpit view has not answered - open the cockpit, or log in on this page'; }, 20000);
+    function watch() { setTimeout(function () { if (!heard && card._talk && gist) gist.textContent = 'the cockpit view has not answered - open the cockpit, or log in on this page'; }, 20000); }
     if (bar) bar.addEventListener('click', function (e) { e.stopPropagation(); if (d.classList.contains('thin')) grow(card); else shrink(card); });
-    frame.src = '/steward/v1?embed=1&view=tile&inst=' + encodeURIComponent(inst) + '&pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir || '');
-    card._talk = {
+    frame.src = '/steward/v1?embed=1&view=tile&inst=' + encodeURIComponent(inst) + '&pid=' + encodeURIComponent(pid) + '&dir=' + encodeURIComponent(dir || '') + (warm ? '&parked=1' : '');
+    var talk = {
+      dir: dir || '',
       prefill: function (text, focus) { grow(card); post('prefill', { text: text, focus: !!focus }); },
-      stop: function () { window.removeEventListener('message', onMsg); ready = false; held = []; card._typing = false; try { frame.src = 'about:blank'; } catch (e) {} }
+      show: function () { shown = true; post('show'); watch(); },
+      park: function () { shown = false; card._typing = false; post('park'); },
+      stop: function () { window.removeEventListener('message', onMsg); ready = false; held = []; card._typing = false; if (card._warmTalk === talk) card._warmTalk = null; try { frame.src = 'about:blank'; } catch (e) {} }
     };
+    if (warm) card._warmTalk = talk; else { card._talk = talk; watch(); }
   }
+  // 2026-10-06 (his word: "if the tile is up on the top row, can't we keep the memory open/available so that it loads
+  // instantly when I click on the tile"): an Active card's cockpit view loads in the background shortly after the page
+  // is idle, one card every 1.5 s, into the card's CLOSED body - hidden by the body's own hidden attribute (no display
+  // rule reaches a closed card's .t-body; the CSS pins [hidden] to none) and parked, so it holds no long-poll. Opening
+  // the card reveals that view; closing hides it again. On deck and every other card load on the click, as before.
+  var WARM_MAX = 8;   // a bound on the frames held, not a refusal: the rest of a wide Active row loads on the click
+  function warmTile(card) {
+    var body = $('.t-body', card), boot = window.ANCHOR_BOOT || {};
+    if (!body || card._warmTalk || card.classList.contains('open') || !card.closest('#shActive')) return;
+    if (boot.auth_required && !boot.logged_in && !token()) return;   // a browser that cannot read the record preloads nothing
+    if ($$('#shActive .tile[data-tile]').filter(function (c) { return !!c._warmTalk; }).length >= WARM_MAX) return;
+    body.innerHTML = talkHtml('talk-' + card.id); body.hidden = true;
+    card._prewarm = true;
+    try { startTalk(card, card.getAttribute('data-tile'), card.getAttribute('data-dir') || ''); } finally { card._prewarm = false; }
+  }
+  function warmActive() {
+    var cards = $$('#shActive .tile[data-tile]').filter(function (c) { return !!$('.t-body', c); }).slice(0, WARM_MAX), i = 0;
+    (function next() { if (i >= cards.length) return; warmTile(cards[i++]); setTimeout(next, 1500); })();
+  }
+  function warmWhenIdle() { setTimeout(function () { if (window.requestIdleCallback) window.requestIdleCallback(warmActive, { timeout: 3000 }); else warmActive(); }, 1500); }
+  if (document.readyState === 'complete') warmWhenIdle(); else window.addEventListener('load', warmWhenIdle);
   function stopTalk(card) { if (card._talk && card._talk.stop) card._talk.stop(); card._talk = null; }
   // W2e-6 (his ask, 19:0x): a file dropped on the OPEN tile lands in the folder of the cockpit the tile was opened on
   // (the project's root, or the effort's directory), through the cockpit's own upload verb - never overwriting; the
@@ -634,25 +660,44 @@
     if (!body || card.classList.contains('open')) return;   // a card without a record has no body to open
     hidePeek(card);
     $$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });   // one tile open, one dialogue polling (Grok's read of W2e)
+    // the preloaded view (an Active card) is revealed when the card opens on ITS effort; opened on another effort, it goes
+    var warm = card._warmTalk && card._warmTalk.dir === (dir || '') && $('.cdlg', body) ? card._warmTalk : null;
+    if (card._warmTalk && !warm) card._warmTalk.stop();
     card.classList.add('open'); card.classList.remove('talking'); card.setAttribute('aria-expanded', 'true'); card.setAttribute('data-open-dir', dir || ''); body.hidden = false; seen(card);
     rememberTile(card, false);
     // the opened tile goes to the TOP of its shelf (his word, 2026-10-01) and comes back to its place on close
     var grid = card.parentNode;
-    if (grid && grid.classList && grid.classList.contains('grid') && grid.firstElementChild !== card) { card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild); }
+    if (grid && grid.classList && grid.classList.contains('grid') && grid.firstElementChild !== card) {
+      if (warm) { card.style.order = '-1'; card._lifted = true; }   // moving the node would reload its preloaded frame: the grid draws it first instead
+      else { card._homeNext = card.nextElementSibling; card._moved = true; grid.insertBefore(card, grid.firstElementChild); }
+    }
     try { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (err) {}
-    body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id) + dropHtml();
+    if (warm) {
+      // the brief and the detail go in above the kept dialogue, the drop line under it; the frame itself is never touched
+      Array.prototype.slice.call(body.children).forEach(function (n) { if (!n.classList.contains('cdlg')) n.remove(); });
+      body.insertAdjacentHTML('afterbegin', '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>');
+      body.insertAdjacentHTML('beforeend', dropHtml());
+      var dl = $('.cdlg', body), dbar = $('.dlg-bar', dl); dl.classList.remove('thin'); dl.classList.add('big'); if (dbar) dbar.setAttribute('aria-expanded', 'true');
+    } else body.innerHTML = '<div class="cbrief"><div class="cp-quiet">Reading the record\u2026</div></div><div class="cdetail" hidden></div>' + talkHtml('talk-' + card.id) + dropHtml();
     fetchPart(pid, 'brief', dir, false, true)
       .then(function (html) { var b = $('.cbrief', card); if (b && card.classList.contains('open')) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; } })   // the served brief IS the rectangle (never one cbrief inside another)
       .catch(function () { var b = $('.cbrief', card); if (b) b.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
-    startTalk(card, pid, dir);
+    if (warm) { card._talk = warm; warm.show(); }
+    else startTalk(card, pid, dir);
   }
   function rememberTile(card, big) { try { if (!card.classList.contains('open')) return; sessionStorage.setItem('highseat_open_tile', JSON.stringify({ id: card.id, dir: openDir(card), big: !!big })); } catch (e) {} }
   function forgetTile() { try { sessionStorage.removeItem('highseat_open_tile'); } catch (e) {} }
   function closeTile(card, another) {
-    stopTalk(card); card.classList.remove('open', 'talking'); card.setAttribute('aria-expanded', 'false'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile(); card._heldSaid = false;
+    // a preloaded view is hidden and parked, never destroyed: the next open is instant too (2026-10-06)
+    var warm = !!(card._warmTalk && card._talk === card._warmTalk);
+    if (warm) { card._warmTalk.park(); card._talk = null; } else stopTalk(card);
+    card.classList.remove('open', 'talking'); card.setAttribute('aria-expanded', 'false'); card.removeAttribute('data-open'); card.removeAttribute('data-open-dir'); forgetTile(); card._heldSaid = false;
     if (card._moved) { var g = card.parentNode; if (g) { if (card._homeNext && card._homeNext.parentNode === g) g.insertBefore(card, card._homeNext); else g.appendChild(card); } card._moved = false; card._homeNext = null; }
-    var body = $('.t-body', card); if (body) { body.hidden = true; body.innerHTML = ''; }
+    if (card._lifted) { card.style.order = ''; card._lifted = false; }
+    var body = $('.t-body', card);
+    if (body) { body.hidden = true; if (warm) Array.prototype.slice.call(body.children).forEach(function (n) { if (!n.classList.contains('cdlg')) n.remove(); }); else body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
+    if (!warm) setTimeout(function () { warmTile(card); }, 1500);   // an Active card opened the ordinary way is preloaded from here on (warmTile skips the rest)
     if (!another && pendingRenew) renew(pendingRenew);   // the renewal the open tile held back
   }
   function openPart(card, pid, part, btn) {

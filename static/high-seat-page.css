@@ -285,6 +285,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg" "mat mat" "drop drop";column-gap:18px;align-items:start}
 .tile.open>.t-top{grid-area:top}.tile.open>.t-face{grid-area:face}.tile.open>.t-acts{grid-area:acts;align-self:end}
 .tile.open>.t-body{display:contents}
+.tile>.t-body[hidden]{display:none!important}   /* a closed card's body - and an Active card's preloaded cockpit view in it - is never painted (2026-10-06; the token box's lesson: no display rule may beat [hidden]) */
 .tile.open .cbrief{grid-area:brief;margin-top:4px}
 .tile.open .cdetail{grid-area:detail;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .tile.open .cdlg{grid-area:dlg;margin-top:8px;border-top:1px solid var(--line);padding-top:3px;min-width:0}

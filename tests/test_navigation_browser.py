@@ -59,6 +59,7 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(surface.locator('.blk.status.latest .action-needed')).to_have_count(0)   # and no question card
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')            # the pin block lists the current files
     notdone = surface.locator('[data-steps] .notdone')
+    notdone.locator('summary').first.click()                                       # closed when a cockpit opens (his word 2026-10-06); a click opens it
     expect(notdone).to_contain_text('Not done \u00b7 1')                            # the pinned step only: the parked and the supporting step are kept out
     expect(notdone).to_contain_text('Parked \u00b7 1 \u00b7 Supporting steps \u00b7 1')
     expect(notdone.locator('.ndhead .mark.now')).to_have_count(1)                  # the one current step carries the now mark
