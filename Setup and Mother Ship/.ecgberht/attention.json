@@ -1,1 +1,1 @@
-{"state": "working", "reason": "Landing the finished Foreman heavy assurance work (two waves GO, 93 tests green) from its orphaned worktree onto Anchor master through a code job gated on the four provider test files.", "updated_at": "2026-10-06T18:10:00+00:00"}
+{"state":"working","reason":"Recovering the preserved provider assurance changes through Foreman and the provider integration tests."}

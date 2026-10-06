@@ -1,876 +1,916 @@
 {
- "schema": "ecgberht-strip-v0",
- "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
- "face_path": "ECGBERHT.md",
- "as_of": "2026-10-06",
- "phase": "building",
- "active_effort": "Foreman heavy assurance under implementation plan v2 is running as code job 20261005-192207-b89bab; restart done, loading repair live.",
- "effort_status": "RUNNING",
- "tool_depth_cell": "LITE",
- "human_wait": "",
- "capacity": "unknown",
- "negative_heartbeat": {
-  "no_attention_needed": false,
-  "why": null,
-  "until": null
- },
- "anti_starvation_age_days": 0,
- "grasscatch": [
-  {
-   "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
-   "when": "2026-10-04T18:54:12.271688Z",
-   "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
-   "status": "caught"
-  }
- ],
- "next_recommended": "Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop",
- "why_next": "John approved plan v2 and said carry on after the restart (2026-10-06).",
- "uncertainty_flags": [],
- "instruments": [
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "next_recommended": "",
-   "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
-   "phase": "planning",
-   "tool_depth_cell": "LITE",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+  "schema": "ecgberht-strip-v0",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "face_path": "ECGBERHT.md",
+  "as_of": "2026-10-06",
+  "phase": "building",
+  "active_effort": "Recovering the approved provider assurance landing after the subscription limit; work is preserved on its branch.",
+  "effort_status": "RUNNING",
+  "tool_depth_cell": "LITE",
+  "human_wait": "",
+  "capacity": "unknown",
+  "negative_heartbeat": {
+    "no_attention_needed": false,
+    "why": null,
+    "until": null
   },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "next_recommended": "",
-   "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
-   "phase": "planning",
-   "tool_depth_cell": "LITE",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "next_recommended": "Settle whether a mother ship belongs to one person or a shared group.",
-   "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
-   "current_step_id": "gwl-host-client"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-   "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
-   "horizon_source_seq": 16,
-   "horizon_focus": "gwl-host-client",
-   "horizon_steps": [
-    "gwl-host-client",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
-   "why_next": "step set One mother ship and connected client computers",
-   "horizon_source_seq": 16,
-   "horizon_focus": "gwl-host-client",
-   "horizon_steps": [
-    "gwl-host-client",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Discovery: personal ownership settled; clarify who may connect to the mother ship.",
-   "next_recommended": "Clarify owner access versus invited collaborator access.",
-   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "current_step_id": "gwl-access"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
-   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-   "horizon_source_seq": 19,
-   "horizon_focus": "gwl-access",
-   "horizon_steps": [
-    "gwl-access",
-    "gwl-accounts"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
-   "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
-   "horizon_source_seq": 21,
-   "horizon_focus": "gwl-access",
-   "horizon_steps": [
-    "gwl-access",
-    "gwl-accounts"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
-   "next_recommended": "Choose backups kept on another device or a remote storage service.",
-   "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
-   "phase": "planning",
-   "grasscatch": [
+  "anti_starvation_age_days": 0,
+  "grasscatch": [
     {
-     "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
-     "when": "2026-10-04T18:54:12.271688Z",
-     "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
-     "status": "caught"
+      "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+      "when": "2026-10-04T18:54:12.271688Z",
+      "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+      "status": "caught"
     }
-   ],
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "current_step_id": "gwl-backup"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Backups and restore; then Review Setup before building it",
-   "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
-   "horizon_source_seq": 26,
-   "horizon_focus": "gwl-backup",
-   "horizon_steps": [
-    "gwl-backup",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
-   "next_recommended": "Review the provider mockup and refine its controls before implementation.",
-   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "current_step_id": "gwl-provider-status"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-   "horizon_source_seq": 34,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-   "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
-   "horizon_source_seq": 35,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
-   "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
-   "wait_ref": "decision:provider-initial-layout",
-   "next_recommended": "Review the compact Cave tile and shared provider detail panel.",
-   "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
-   "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
-   "horizon_source_seq": 36,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Refining first-launch Setup, multiple provider subscriptions and Star Chart organization.",
-   "human_wait": "",
-   "wait_ref": "none",
-   "next_recommended": "Review Setup mockup Refinement 1 before implementation planning.",
-   "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
-   "horizon_source_seq": 41,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
-   "horizon_source_seq": 42,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Checking Setup mockup Refinement 1 through its actual Anchor link.",
-   "next_recommended": "Review the mother ship, provider and Star Chart walkthrough before implementation.",
-   "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
-   "horizon_source_seq": 43,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
-   "human_wait": "Choose warning versus automatic model-strength reduction in Setup mockup Refinement 1.",
-   "wait_ref": "decision:setup-r1-warning-policy",
-   "next_recommended": "Review Refinement 1 and choose its low-allowance warning policy.",
-   "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
-   "horizon_source_seq": 44,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
-   "horizon_source_seq": 44,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Setup mockup Refinement 1 is ready for continued feedback; the warning default is settled.",
-   "human_wait": "",
-   "wait_ref": "none",
-   "next_recommended": "Review the remaining Setup walkthrough before implementation planning.",
-   "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
-   "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
-   "horizon_source_seq": 45,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-mapping"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Setup mockup Refinement 1 remains in review; laptop testing and Cave settings work follow it.",
-   "human_wait": "",
-   "wait_ref": "none",
-   "next_recommended": "Settle the provider mockup, then test on the laptop and wire Cave settings.",
-   "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
-   "horizon_source_seq": 54,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Building Setup mockup Refinement 2: edit existing settings through the gear and Cave sidebar.",
-   "human_wait": "",
-   "wait_ref": "none",
-   "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
-   "next_recommended": "Check the refined gear and Cave controls, then show the actual mockup for feedback.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
-   "horizon_source_seq": 55,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
-   "horizon_source_seq": 56,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "active_effort": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
-   "human_wait": "Review Setup mockup Refinement 2: keep its provider, gear and Cave layout or refine it.",
-   "wait_ref": "decision:setup-r2-layout",
-   "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
-   "next_recommended": "Keep Refinement 2 as the basis for the laptop implementation plan, or refine its layout.",
-   "phase": "planning",
-   "horizon_source_seq": null,
-   "horizon_focus": null
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
-   "horizon_source_seq": 57,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-04",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
-   "horizon_source_seq": 57,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-04",
-   "source": "verb_update",
-   "wait_ref": "decision:setup-r2-layout",
-   "human_wait": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning."
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "phase": "blocked",
-   "wait_ref": "none",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Provider build dispatch failed; recover it under the saved authorization.",
-   "human_wait": "",
-   "why_next": "Recover the failed dispatch without asking John to authorize the same build again."
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "Recover the failed dispatch without asking John to authorize the same build again.",
-   "horizon_source_seq": 57,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "wait_ref": "none",
-   "phase": "build",
-   "next_recommended": "Build the approved provider integration, then test the existing laptop client.",
-   "why_next": "John accepted the layout and authorized real integration; no further approval blocks the build.",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.",
-   "human_wait": "",
-   "current_step_id": "gwl-provider-status"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
-   "why_next": "John accepted the layout and authorized real integration; no further approval blocks the build.",
-   "horizon_source_seq": 62,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "wait_ref": "none",
-   "phase": "build",
-   "next_recommended": "Verify live Setup and the existing laptop client.",
-   "why_next": "The code job passed; real delivery still needs checking.",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Provider build landed; live Setup and existing laptop verification remain.",
-   "human_wait": "",
-   "current_step_id": "gwl-provider-status"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
-   "why_next": "The code job passed; real delivery still needs checking.",
-   "horizon_source_seq": 63,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "wait_ref": "none",
-   "phase": "build",
-   "next_recommended": "Repair the verified live-state delay, then test the existing laptop client.",
-   "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
-   "human_wait": "",
-   "current_step_id": "gwl-provider-status"
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
-   "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
-   "horizon_source_seq": 63,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
-   "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
-   "horizon_source_seq": 71,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-software-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "phase": "review",
-   "wait_ref": "decision:provider-assurance-v2",
-   "next_recommended": "Confirm the bounded Foreman heavy assurance contract in plan v2.",
-   "why_next": "Passing author tests do not establish independent assurance.",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
-   "human_wait": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review."
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-05",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
-   "why_next": "Passing author tests do not establish independent assurance.",
-   "horizon_source_seq": 71,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-software-review"
-   ]
-  },
-  {
-   "_kind": "instrument",
-   "kind": "update",
-   "as_of": "2026-10-05",
-   "source": "verb_update",
-   "phase": "paused",
-   "wait_ref": "none",
-   "human_wait": "",
-   "next_recommended": "After the restart, resume approved Foreman heavy review and hardening.",
-   "why_next": "John approved plan v2 and explicitly paused execution for the restart.",
-   "horizon_source_seq": null,
-   "horizon_focus": null,
-   "active_effort": "Foreman heavy under implementation plan v2 is approved; work is paused for the restart."
-  },
-  {
-   "_kind": "instrument",
-   "kind": "horizon",
-   "as_of": "2026-10-06",
-   "source": "verb_update:horizon",
-   "derived": true,
-   "next_recommended": "Provider integration: verify live Setup and laptop; then Try and refine the working provider surface",
-   "why_next": "John approved plan v2 and explicitly paused execution for the restart.",
-   "horizon_source_seq": 77,
-   "horizon_focus": "gwl-provider-status",
-   "horizon_steps": [
-    "gwl-provider-status",
-    "gwl-review"
-   ]
-  }
- ],
- "receipts": [
-  {
-   "schema": "ecgberht-receipt-v0",
-   "kind": "face_confirm",
-   "as_of": "2026-10-04",
-   "who": "John",
-   "when": "2026-10-04",
-   "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
-  },
-  {
-   "at": "2026-10-04T16:01:57Z",
-   "source": "engine",
-   "step_id": "gwl-host-client",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "path": "journal/0002-host-ownership-discovery.md",
-   "entry_id": "0002-host-ownership-discovery",
-   "summary": "Mother ship ownership discovery — 2026-10-04"
-  },
-  {
-   "at": "2026-10-04T19:23:57Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "path": "journal/0004-provider-mockup-initial.md",
-   "entry_id": "0004-provider-mockup-initial",
-   "summary": "Provider setup mockup — Initial draft, 2026-10-04"
-  },
-  {
-   "at": "2026-10-04T20:13:23Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "path": "journal/0005-setup-mockup-refinement-1.md",
-   "entry_id": "0005-setup-mockup-refinement-1",
-   "summary": "Setup mockup — Refinement 1, October 4, 2026"
-  },
-  {
-   "at": "2026-10-04T20:48:29Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "path": "journal/0006-laptop-test-and-cave-settings.md",
-   "entry_id": "0006-laptop-test-and-cave-settings",
-   "summary": "Laptop test and Cave settings — October 4, 2026"
-  },
-  {
-   "at": "2026-10-04T21:06:43Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "entry_id": "engine-20261004T210643-turn_error",
-   "summary": "turn_error: Selected model is at capacity. Please try a different model."
-  },
-  {
-   "at": "2026-10-04T21:06:46Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
-   "kind": "journal_update",
-   "entry_id": "engine-20261004T210646-provider_rollover",
-   "summary": "provider_rollover: chatgpt -> grok with a history handoff"
-  },
-  {
-   "at": "2026-10-04T21:07:10Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
-   "kind": "journal_update",
-   "path": "journal/0007-setup-mockup-refinement-2.md",
-   "entry_id": "0007-setup-mockup-refinement-2",
-   "summary": "Setup mockup — Refinement 2, October 4, 2026"
-  },
-  {
-   "at": "2026-10-04T21:36:17Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
-   "kind": "journal_update",
-   "entry_id": "engine-20261004T213617-provider_rollover",
-   "summary": "provider_rollover: grok -> chatgpt with a history handoff"
-  },
-  {
-   "at": "2026-10-04T21:42:30Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a108d8-a633-78b0-9433-92d175405fde",
-   "kind": "journal_update",
-   "path": "journal/0008-provider-handoff-and-review-pickup.md",
-   "entry_id": "0008-provider-handoff-and-review-pickup",
-   "summary": "Interrupted review handback recovered — October 4, 2026"
-  },
-  {
-   "schema": "ecgberht-receipt-v0",
-   "kind": "leave",
-   "as_of": "2026-10-05",
-   "at": "2026-10-05T19:03:56Z",
-   "current_step_id": "gwl-provider-status",
-   "last_event_seq": 57,
-   "last_event_at": "2026-10-04T21:06:38.148Z",
-   "last_event_kind": "step_set",
-   "last_event_step_id": "gwl-provider-status",
-   "presentation_id": null,
-   "active_effort": "Provider build dispatch failed; recover it under the saved authorization.",
-   "wait_ref": "none",
-   "human_wait": "",
-   "_kind": "receipt"
-  },
-  {
-   "at": "2026-10-05T19:23:02Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
-   "kind": "journal_update",
-   "path": "journal/0010-provider-dispatch-recovery.md",
-   "entry_id": "0010-provider-dispatch-recovery",
-   "summary": "Provider dispatch recovery — October 5, 2026"
-  },
-  {
-   "at": "2026-10-05T19:51:56Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
-   "kind": "journal_update",
-   "entry_id": "engine-20261005T195156-turn_error",
-   "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s)."
-  },
-  {
-   "at": "2026-10-05T23:28:09Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
-   "kind": "journal_update",
-   "path": "journal/0011-provider-landed-and-plan-pickup.md",
-   "entry_id": "0011-provider-landed-and-plan-pickup",
-   "summary": "Provider integration landing and plan pickup - October 5, 2026"
-  },
-  {
-   "at": "2026-10-06T00:07:34Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
-   "kind": "journal_update",
-   "entry_id": "engine-20261006T000734-turn_error",
-   "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 2042.7s; idle 900.0s)."
-  },
-  {
-   "at": "2026-10-06T00:48:40Z",
-   "source": "engine",
-   "step_id": "gwl-provider-status",
-   "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
-   "kind": "journal_update",
-   "path": "journal/0013-foreman-approved-restart-pause.md",
-   "entry_id": "0013-foreman-approved-restart-pause",
-   "summary": "Foreman approved; pause for restart - October 5, 2026"
-  }
- ],
- "horizon_source_seq": 77,
- "horizon_focus": "gwl-provider-status",
- "current_step_id": "gwl-provider-status",
- "wait_ref": "none"
+  ],
+  "next_recommended": "Recover the preserved integration; then John reboots and we verify the laptop.",
+  "why_next": "Approved work remains off master after the landing quota failure; current provider seats can recover it.",
+  "uncertainty_flags": [],
+  "instruments": [
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "phase": "planning",
+      "tool_depth_cell": "LITE",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "",
+      "why_next": "Scope recorded; work awaits its own cockpit discovery and review.",
+      "phase": "planning",
+      "tool_depth_cell": "LITE",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Scope recorded; work awaits its own cockpit discovery and review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "next_recommended": "Settle whether a mother ship belongs to one person or a shared group.",
+      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Discovery: clarify who shares a mother ship before drafting Setup.",
+      "current_step_id": "gwl-host-client"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+      "why_next": "Host ownership determines project access and provider sign-ins; implementation planning waits for discovery.",
+      "horizon_source_seq": 16,
+      "horizon_focus": "gwl-host-client",
+      "horizon_steps": [
+        "gwl-host-client",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "One mother ship and connected client computers; then Projects, folders and recommended organization",
+      "why_next": "step set One mother ship and connected client computers",
+      "horizon_source_seq": 16,
+      "horizon_focus": "gwl-host-client",
+      "horizon_steps": [
+        "gwl-host-client",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Discovery: personal ownership settled; clarify who may connect to the mother ship.",
+      "next_recommended": "Clarify owner access versus invited collaborator access.",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "horizon_source_seq": 19,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-accounts"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Token sharing and secure local authentication; then Email and calendars",
+      "why_next": "Personal ownership is settled; it does not yet determine who may use the host.",
+      "horizon_source_seq": 21,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-accounts"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Discovery: personal hosts settled; collaboration between hosts deferred; clarify backups.",
+      "next_recommended": "Choose backups kept on another device or a remote storage service.",
+      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+      "phase": "planning",
+      "grasscatch": [
+        {
+          "text": "Allow different mother ships to share information/projects in order to facilitate collaboration. That still needs some thinking.",
+          "when": "2026-10-04T18:54:12.271688Z",
+          "source": "John turn 84ec3037-96cb-4e13-87c5-f99f49888de2; Setup and Mother Ship",
+          "status": "caught"
+        }
+      ],
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-backup"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Backups and restore; then Review Setup before building it",
+      "why_next": "John wants collaboration between personal hosts later; backup recovery is the next independent choice.",
+      "horizon_source_seq": 26,
+      "horizon_focus": "gwl-backup",
+      "horizon_steps": [
+        "gwl-backup",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Creating the first provider sign-in, capacity, cost and model-control mockup.",
+      "next_recommended": "Review the provider mockup and refine its controls before implementation.",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "horizon_source_seq": 34,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "John wants provider setup and status before email/calendars and requested an interactive mockup.",
+      "horizon_source_seq": 35,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Provider setup mockup Initial draft is ready for John to inspect and refine.",
+      "human_wait": "Choose whether to keep the shared provider-panel layout in the Initial draft.",
+      "wait_ref": "decision:provider-initial-layout",
+      "next_recommended": "Review the compact Cave tile and shared provider detail panel.",
+      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Projects, folders and recommended organization",
+      "why_next": "The requested prototype is ready; refine its layout before an implementation plan.",
+      "horizon_source_seq": 36,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Refining first-launch Setup, multiple provider subscriptions and Star Chart organization.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "next_recommended": "Review Setup mockup Refinement 1 before implementation planning.",
+      "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
+      "horizon_source_seq": 41,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "John supplied concrete mockup changes; the previous Initial draft layout question is superseded.",
+      "horizon_source_seq": 42,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Checking Setup mockup Refinement 1 through its actual Anchor link.",
+      "next_recommended": "Review the mother ship, provider and Star Chart walkthrough before implementation.",
+      "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The refined prototype is saved; verify the actual controls and pixels before handback.",
+      "horizon_source_seq": 43,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 is ready: mother ship, providers, Star Chart and optional integrations.",
+      "human_wait": "Choose warning versus automatic model-strength reduction in Setup mockup Refinement 1.",
+      "wait_ref": "decision:setup-r1-warning-policy",
+      "next_recommended": "Review Refinement 1 and choose its low-allowance warning policy.",
+      "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The complete requested refinement is checked; human feedback precedes implementation planning.",
+      "horizon_source_seq": 44,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "The requested three-stage mockup is produced and checked. John chooses the remaining warning policy before production behavior is planned; this",
+      "horizon_source_seq": 44,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 is ready for continued feedback; the warning default is settled.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "next_recommended": "Review the remaining Setup walkthrough before implementation planning.",
+      "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model; then Third: organize goals and initiatives on the Star Chart",
+      "why_next": "John accepted warnings retaining full strength; the whole mockup remains independently open for feedback.",
+      "horizon_source_seq": 45,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-mapping"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 1 remains in review; laptop testing and Cave settings work follow it.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "next_recommended": "Settle the provider mockup, then test on the laptop and wire Cave settings.",
+      "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "John added conditional laptop integration and a gear that reopens Setup; warning policy stays accepted.",
+      "horizon_source_seq": 54,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Building Setup mockup Refinement 2: edit existing settings through the gear and Cave sidebar.",
+      "human_wait": "",
+      "wait_ref": "none",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "next_recommended": "Check the refined gear and Cave controls, then show the actual mockup for feedback.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "horizon_source_seq": 55,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "New mockup feedback is authorized work; scope recording alone did not finish it.",
+      "horizon_source_seq": 56,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "active_effort": "Setup mockup Refinement 2 is ready: gear edits existing settings; Cave controls and retained state are checked.",
+      "human_wait": "Review Setup mockup Refinement 2: keep its provider, gear and Cave layout or refine it.",
+      "wait_ref": "decision:setup-r2-layout",
+      "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
+      "next_recommended": "Keep Refinement 2 as the basis for the laptop implementation plan, or refine its layout.",
+      "phase": "planning",
+      "horizon_source_seq": null,
+      "horizon_focus": null
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "The authorized revised mockup is now complete for human review; the warning policy stays settled.",
+      "horizon_source_seq": 57,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-04",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "The concrete cumulative prototype is delivered and checked through the actual Current work route. This new layout review is distinct",
+      "horizon_source_seq": 57,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-04",
+      "source": "verb_update",
+      "wait_ref": "decision:setup-r2-layout",
+      "human_wait": "Review Setup mockup Refinement 2: keep its layout or refine before laptop planning."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "phase": "blocked",
+      "wait_ref": "none",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider build dispatch failed; recover it under the saved authorization.",
+      "human_wait": "",
+      "why_next": "Recover the failed dispatch without asking John to authorize the same build again."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "Recover the failed dispatch without asking John to authorize the same build again.",
+      "horizon_source_seq": 57,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "phase": "build",
+      "next_recommended": "Build the approved provider integration, then test the existing laptop client.",
+      "why_next": "John accepted the layout and authorized real integration; no further approval blocks the build.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider integration authorized from accepted Refinement 2; preparing its code-job dispatch.",
+      "human_wait": "",
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider capacity, cost and model controls; then Review Setup before laptop integration",
+      "why_next": "John accepted the layout and authorized real integration; no further approval blocks the build.",
+      "horizon_source_seq": 62,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "phase": "build",
+      "next_recommended": "Verify live Setup and the existing laptop client.",
+      "why_next": "The code job passed; real delivery still needs checking.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider build landed; live Setup and existing laptop verification remain.",
+      "human_wait": "",
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
+      "why_next": "The code job passed; real delivery still needs checking.",
+      "horizon_source_seq": 63,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "phase": "build",
+      "next_recommended": "Repair the verified live-state delay, then test the existing laptop client.",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider build landed; diagnose cached live-state loading before laptop verification.",
+      "human_wait": "",
+      "current_step_id": "gwl-provider-status"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Review Setup before laptop integration",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": 63,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
+      "why_next": "A real-service retry failed; the accepted implementation remains authorized.",
+      "horizon_source_seq": 71,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-software-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "phase": "review",
+      "wait_ref": "decision:provider-assurance-v2",
+      "next_recommended": "Confirm the bounded Foreman heavy assurance contract in plan v2.",
+      "why_next": "Passing author tests do not establish independent assurance.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider repair landed; activation and laptop proof remain. Independent assurance v2 is proposed.",
+      "human_wait": "Approve proposed plan v2: Foreman heavy independent review, failure-path hardening and re-review."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-05",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Independent adversarial review of provider integration",
+      "why_next": "Passing author tests do not establish independent assurance.",
+      "horizon_source_seq": 71,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-software-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-05",
+      "source": "verb_update",
+      "phase": "paused",
+      "wait_ref": "none",
+      "human_wait": "",
+      "next_recommended": "After the restart, resume approved Foreman heavy review and hardening.",
+      "why_next": "John approved plan v2 and explicitly paused execution for the restart.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Foreman heavy under implementation plan v2 is approved; work is paused for the restart."
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-06",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Provider integration: verify live Setup and laptop; then Try and refine the working provider surface",
+      "why_next": "John approved plan v2 and explicitly paused execution for the restart.",
+      "horizon_source_seq": 77,
+      "horizon_focus": "gwl-provider-status",
+      "horizon_steps": [
+        "gwl-provider-status",
+        "gwl-review"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-06",
+      "source": "verb_update",
+      "phase": "building",
+      "next_recommended": "Recover the preserved integration; then John reboots and we verify the laptop.",
+      "why_next": "Approved work remains off master after the landing quota failure; current provider seats can recover it.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Recovering the approved provider assurance landing after the subscription limit; work is preserved on its branch.",
+      "current_step_id": "gwl-provider-status"
+    }
+  ],
+  "receipts": [
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "face_confirm",
+      "as_of": "2026-10-04",
+      "who": "John",
+      "when": "2026-10-04",
+      "note": "John explicitly requested this organization and said let's go; Campaign turn 3c476265-7142-441c-a934-a7a37d5a1e98. Placement authorizes organization, not a software build or publication."
+    },
+    {
+      "at": "2026-10-04T16:01:57Z",
+      "source": "engine",
+      "step_id": "gwl-host-client",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0002-host-ownership-discovery.md",
+      "entry_id": "0002-host-ownership-discovery",
+      "summary": "Mother ship ownership discovery — 2026-10-04"
+    },
+    {
+      "at": "2026-10-04T19:23:57Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0004-provider-mockup-initial.md",
+      "entry_id": "0004-provider-mockup-initial",
+      "summary": "Provider setup mockup — Initial draft, 2026-10-04"
+    },
+    {
+      "at": "2026-10-04T20:13:23Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0005-setup-mockup-refinement-1.md",
+      "entry_id": "0005-setup-mockup-refinement-1",
+      "summary": "Setup mockup — Refinement 1, October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T20:48:29Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "path": "journal/0006-laptop-test-and-cave-settings.md",
+      "entry_id": "0006-laptop-test-and-cave-settings",
+      "summary": "Laptop test and Cave settings — October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T21:06:43Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T210643-turn_error",
+      "summary": "turn_error: Selected model is at capacity. Please try a different model."
+    },
+    {
+      "at": "2026-10-04T21:06:46Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a1079f-04e1-74e0-883e-6b273389021a",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T210646-provider_rollover",
+      "summary": "provider_rollover: chatgpt -> grok with a history handoff"
+    },
+    {
+      "at": "2026-10-04T21:07:10Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
+      "kind": "journal_update",
+      "path": "journal/0007-setup-mockup-refinement-2.md",
+      "entry_id": "0007-setup-mockup-refinement-2",
+      "summary": "Setup mockup — Refinement 2, October 4, 2026"
+    },
+    {
+      "at": "2026-10-04T21:36:17Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "424497a2-32c6-4185-bce2-b2aac29347ae",
+      "kind": "journal_update",
+      "entry_id": "engine-20261004T213617-provider_rollover",
+      "summary": "provider_rollover: grok -> chatgpt with a history handoff"
+    },
+    {
+      "at": "2026-10-04T21:42:30Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a108d8-a633-78b0-9433-92d175405fde",
+      "kind": "journal_update",
+      "path": "journal/0008-provider-handoff-and-review-pickup.md",
+      "entry_id": "0008-provider-handoff-and-review-pickup",
+      "summary": "Interrupted review handback recovered — October 4, 2026"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-05",
+      "at": "2026-10-05T19:03:56Z",
+      "current_step_id": "gwl-provider-status",
+      "last_event_seq": 57,
+      "last_event_at": "2026-10-04T21:06:38.148Z",
+      "last_event_kind": "step_set",
+      "last_event_step_id": "gwl-provider-status",
+      "presentation_id": null,
+      "active_effort": "Provider build dispatch failed; recover it under the saved authorization.",
+      "wait_ref": "none",
+      "human_wait": "",
+      "_kind": "receipt"
+    },
+    {
+      "at": "2026-10-05T19:23:02Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "path": "journal/0010-provider-dispatch-recovery.md",
+      "entry_id": "0010-provider-dispatch-recovery",
+      "summary": "Provider dispatch recovery — October 5, 2026"
+    },
+    {
+      "at": "2026-10-05T19:51:56Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "entry_id": "engine-20261005T195156-turn_error",
+      "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1333.6s; idle 900.0s)."
+    },
+    {
+      "at": "2026-10-05T23:28:09Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "path": "journal/0011-provider-landed-and-plan-pickup.md",
+      "entry_id": "0011-provider-landed-and-plan-pickup",
+      "summary": "Provider integration landing and plan pickup - October 5, 2026"
+    },
+    {
+      "at": "2026-10-06T00:07:34Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "entry_id": "engine-20261006T000734-turn_error",
+      "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 2042.7s; idle 900.0s)."
+    },
+    {
+      "at": "2026-10-06T00:48:40Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "kind": "journal_update",
+      "path": "journal/0013-foreman-approved-restart-pause.md",
+      "entry_id": "0013-foreman-approved-restart-pause",
+      "summary": "Foreman approved; pause for restart - October 5, 2026"
+    },
+    {
+      "at": "2026-10-06T18:37:06Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "b2058b94-93ad-4d36-9715-317e12cca179",
+      "kind": "journal_update",
+      "entry_id": "engine-20261006T183706-turn_error",
+      "summary": "turn_error: You've hit your session limit · resets 3:30pm (America/Denver)"
+    },
+    {
+      "at": "2026-10-06T18:42:54Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "b2058b94-93ad-4d36-9715-317e12cca179",
+      "kind": "journal_update",
+      "entry_id": "engine-20261006T184254-turn_error",
+      "summary": "turn_error: You've hit your session limit · resets 3:30pm (America/Denver)"
+    },
+    {
+      "at": "2026-10-06T18:43:40Z",
+      "source": "engine",
+      "step_id": "gwl-provider-status",
+      "session_id": "b2058b94-93ad-4d36-9715-317e12cca179",
+      "kind": "journal_update",
+      "entry_id": "engine-20261006T184340-provider_rollover",
+      "summary": "provider_rollover: claude -> chatgpt with a history handoff"
+    }
+  ],
+  "horizon_source_seq": null,
+  "horizon_focus": null,
+  "current_step_id": "gwl-provider-status",
+  "wait_ref": "none"
 }

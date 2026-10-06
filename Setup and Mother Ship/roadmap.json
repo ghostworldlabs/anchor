@@ -1331,6 +1331,19 @@
       "client_event_id": "setup-v2-approved-restart-pause-gwl-provider-harden-087893eb-4c35-4177-96cf-c782d5c3a44f",
       "seq": 77,
       "at": "2026-10-06"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-provider-status",
+      "to": "active",
+      "receipt": {
+        "who": "Aladdin",
+        "when": "2026-10-06",
+        "why": "John resumed approved v2; recover preserved landing after subscription-limit failure."
+      },
+      "at": "2026-10-06",
+      "seq": 78,
+      "from": "parked"
     }
   ],
   "roadmap_projection": [
@@ -1379,7 +1392,7 @@
     {
       "id": "gwl-provider-status",
       "name": "Provider integration: verify live Setup and laptop",
-      "status": "parked",
+      "status": "active",
       "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
       "waiting_on": null,
       "commissioned_as": null,
