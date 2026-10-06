@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-05 19:47",
-  "status_id": "01791251274986339400",
+  "at": "2026-10-05 19:53",
+  "status_id": "01791251606191729900",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
+    "activity": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now",
     "latest_event": null,
     "next": [
       "Independent adversarial review of provider integration"
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2,\u2026"
+        "value": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in\u2026"
       },
       {
         "label": "Status",
-        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 stale"
+        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 working"
       },
       {
         "label": "Tests",
@@ -55,16 +55,16 @@
   },
   "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
   "now": [
-    "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
     "landed, waits for a restart \u2014 Anchor provider integration \u2014 approved Setup mockup Refinement 2",
-    "landed, waits for a restart \u2014 Continue the already authorized provider integration from commit 64df9a6 and plan v1 for Anchor / Se"
+    "landed, waits for a restart \u2014 Continue the already authorized provider integration from commit 64df9a6 and plan v1 for Anchor / Se",
+    "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now"
   ],
   "running": {
-    "kind": "code_job",
-    "label": "code job running \u2014 Provider integration assurance - independent adversarial review and hardening (plan v2, approved by John 2026-10-05) (25 min)",
-    "skill": "coder",
-    "source": ".ecgberht/code-jobs.json",
-    "age": "25 min"
+    "kind": "commissioned",
+    "label": "the steward's note says working (Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).) \u2014 but nothing is running now",
+    "skill": "",
+    "source": ".ecgberht/attention.json",
+    "age": ""
   },
   "slice": {
     "n": 3,
@@ -127,7 +127,7 @@
     "waiting_since": null,
     "next": "Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop",
     "why": "John approved plan v2 and said carry on after the restart (2026-10-06).",
-    "attention": "stale",
+    "attention": "working",
     "goal_reread": true
   },
   "map": [

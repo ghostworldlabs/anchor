@@ -1,1 +1,1 @@
-{"state": "working", "reason": "Foreman heavy assurance of the provider integration is running as code job 20261005-192207-b89bab in its own worktree (independent review, then hardening).", "updated_at": "2026-10-06T01:23:00+00:00"}
+{"state": "working", "reason": "Foreman heavy is still reviewing and hardening the provider integration in the code-job worktree (job 20261005-192207-b89bab reported early; the Foreman run itself is alive).", "updated_at": "2026-10-06T02:00:00+00:00"}
