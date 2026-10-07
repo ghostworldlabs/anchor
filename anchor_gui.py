@@ -19835,7 +19835,7 @@ def handle_project_files(handler, path, body):
                     resolved_d = full_d.resolve()
                     resolved_d.relative_to(project_root)
                     rel_d = full_d.relative_to(project_root)
-                    if not _should_ignore_file(rel_d, patterns):
+                    if not _should_ignore_file(rel_d, patterns) and not _provider_private_path(full_d):   # R6-E
                         dirs_to_keep.append(d)
                 except (ValueError, OSError):
                     continue
@@ -19847,7 +19847,7 @@ def handle_project_files(handler, path, body):
                     resolved_f = full_f.resolve()
                     resolved_f.relative_to(project_root)
                     rel_f = full_f.relative_to(project_root)
-                    if not _should_ignore_file(rel_f, patterns):
+                    if not _should_ignore_file(rel_f, patterns) and not _provider_private_path(full_f):   # R6-E
                         stat = full_f.stat()
                         files_list.append({
                             "name": rel_f.as_posix(),
@@ -19876,7 +19876,7 @@ def handle_project_files(handler, path, body):
                     continue
 
                 rel_entry = entry.relative_to(project_root)
-                if _should_ignore_file(rel_entry, patterns):
+                if _should_ignore_file(rel_entry, patterns) or _provider_private_path(entry):   # R6-E
                     continue
 
                 if entry.is_dir():
@@ -22143,9 +22143,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
             _scr.CONFIG["anchor_token"] = _paths.expected_token() or ""
             # runtime state lives OUTSIDE the repo (Anchor's W11 invariant) - not
             # in steward_cockpit/, where it would be committed/pushed and keep git
-            # dirty. Point it at the Anchor data dir (idempotent).
+            # dirty. Point it at the Anchor data dir (idempotent; an explicit
+            # redirect by a test or the healthcheck is honored, never clobbered).
             try:
-                _se.STATE_FILE = _paths.data_dir() / "steward-cockpit-state.json"
+                _se.relocate_state(_paths.data_dir() / "steward-cockpit-state.json")
             except Exception:
                 pass
             _q = parse_qs(urlparse(self.path).query)

@@ -1,0 +1,57 @@
+"""Evidence copy: host paths redacted to <worktree>, <main checkout>, <user home>. Set them to run again."""
+"""Driver reproduction of pre-read hypotheses H1/H2/H3 against the worktree code (temp data dir only)."""
+import os, sys, json, tempfile, pathlib
+from copy import deepcopy
+from datetime import datetime, timezone, timedelta
+WT = r"<worktree>"
+sys.path.insert(0, WT)
+tmp = pathlib.Path(tempfile.mkdtemp(prefix="assure-repro-"))
+data, home = tmp / "data", tmp / "home"; data.mkdir(); home.mkdir()
+os.environ.update(ANCHOR_DATA_DIR=str(data), HOME=str(home), USERPROFILE=str(home), ANCHOR_TOKEN="repro-token")
+os.environ.pop("CODEX_HOME", None); os.environ.pop("CLAUDE_CONFIG_DIR", None)
+pathlib.Path.home = classmethod(lambda cls: home)
+import anchor_settings as settings, model_policy, provider_native as native, provider_settings as metadata, provider_setup as setup
+settings.mirror_path = lambda: home / "model_prefs.json"
+settings.save_settings(default_cli="claude", coding_family="claude", review_family="claude", steward_type="aladdin")
+from tests.test_provider_setup import NativeFixture, row
+backend = NativeFixture(); service = setup.ProviderService(backend); setup.SERVICE = service
+native.executable = lambda family: "native-fixture" if family != "gemini" else None
+rows = [{"model": "frontier", "efforts": ["high", "ultra"], "rank": 0, "upgrade": None, "evidence": "provider_moving_alias"},
+        {"model": "balanced", "efforts": ["low", "high"], "rank": 1, "upgrade": None, "evidence": "provider_catalog_order"}]
+model_policy.discover = lambda family, **kw: (deepcopy(rows), "native-fixture")
+aged = (datetime.now(timezone.utc) - timedelta(seconds=setup.TTL + 1)).isoformat()
+
+def try_apply(label, mutate):
+    before = settings.load_settings(); prefs = deepcopy(before["provider_preferences"]); mutate(prefs)
+    try:
+        service.apply({"preferences": prefs, "expected_revision": before["settings_revision"]}); print(f"{label}: SAVED")
+    except Exception as e:
+        print(f"{label}: REFUSED -> {type(e).__name__}: {e}")
+
+print("== H1 ==")
+try_apply("H1a cold start (no native observation yet), threshold-only apply", lambda p: p.update(warning_threshold=30))
+service.snapshot(True)
+try_apply("H1b fresh observation, threshold-only apply", lambda p: p.update(warning_threshold=40))
+key = service._key("claude-default")
+service.observations[key]["observed_at"] = aged
+print("   selected row after ageing:", {k: row(service.snapshot(), "claude-default")[k] for k in ("auth", "auth_stale")}, "ready=", row(service.snapshot(), "claude-default")["execution"]["ready"])
+try_apply("H1c observation aged past TTL (301 s), threshold-only apply", lambda p: p.update(warning_threshold=50))
+service.snapshot(True)
+backend.failed["claude-default"] = "timeout"; service.refresh(metadata.find_connection(settings.load_settings(), "claude-default")); backend.failed.clear()
+try_apply("H1d after a timed-out refresh, threshold-only apply", lambda p: p.update(warning_threshold=20))
+
+print("== H2 ==")
+service.snapshot(True)
+try_apply("H2a fresh catalog, save exact quality claude=balanced/high", lambda p: p["quality"].__setitem__("claude", {"model": "balanced", "effort": "high"}))
+service.catalogs[key]["observed_at"] = aged
+print("   catalog state after ageing:", row(service.snapshot(), "claude-default")["catalog"]["state"])
+try_apply("H2b catalog aged past TTL, threshold-only apply (quality unchanged)", lambda p: p.update(warning_threshold=10))
+
+print("== H3 ==")
+service.snapshot(True)
+r = row(service.snapshot(), "chatgpt-default")
+print("   before failure: provider_usage state=%s tokens=%s observed_at set=%s" % (r["provider_usage"]["state"], r["provider_usage"]["tokens"], r["provider_usage"]["observed_at"] is not None))
+backend.failed["chatgpt-default"] = "timeout"; service.refresh(metadata.find_connection(settings.load_settings(), "chatgpt-default"))
+r = row(service.snapshot(), "chatgpt-default")
+print("   after timeout: provider_usage state=%s tokens=%s error=%s" % (r["provider_usage"]["state"], r["provider_usage"]["tokens"], r["provider_usage"].get("error")))
+print("   claude-default allowance after its own timeout earlier: state=%s windows=%s" % (row(service.snapshot(), "claude-default")["allowance"]["state"], row(service.snapshot(), "claude-default")["allowance"]["windows"]))

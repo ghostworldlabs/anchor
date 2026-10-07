@@ -40,6 +40,11 @@ def empty_observation():
             "provider_usage": {**unknown("Native account usage"), "tokens": None}}
 
 
+def carries_figures(metric, report):
+    """Whether a metric report holds figures worth retaining across a failure."""
+    return bool(report.get("windows")) if metric == "allowance" else report.get("tokens") is not None
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -90,7 +95,10 @@ class ProviderService:
         key = self._key(family)
         with self.lock:
             existing = self.capabilities.get(key)
-            if existing and (not refresh or time.time() - existing["at"] < TTL):
+            # R1-B / R5-A: an explicit refresh never serves a cached failed or
+            # missing-CLI probe for the whole TTL; it re-probes so a transient
+            # failure, or an install, is seen on the next read.
+            if existing and (not refresh or (time.time() - existing["at"] < TTL and existing["value"].get("state") not in ("error", "unavailable"))):
                 return deepcopy(existing["value"])
         if not refresh:
             return {"installed": bool(native.executable(family)), "state": "not_checked", "version": None,
@@ -98,8 +106,9 @@ class ProviderService:
                     "limit": "Refresh host status to check installed capabilities."}
         try:
             out = self.native.capabilities(family)
-        except (native.NativeError, OSError, ValueError):
+        except (native.NativeError, OSError, ValueError) as exc:
             out = {"installed": bool(native.executable(family)), "state": "error", "version": None, "isolated": False, "login": None,
+                   "error": exc.state if isinstance(exc, native.NativeError) else "error",
                    "limit": "Installed capability check failed. Existing sign-in is retained."}
         out.update(observed_at=stamp(), source="Installed native CLI help/schema")
         with self.lock:
@@ -141,19 +150,29 @@ class ProviderService:
                 elif not cap["installed"]:
                     raise native.NativeError("unavailable")
                 elif not connection["native_default"] and not cap["isolated"]:
-                    raise native.NativeError("unsupported")
+                    # R3-A: a probe that timed out or errored is reported as that
+                    # failure; "unsupported" is reserved for a CLI that answered.
+                    raise native.NativeError(cap.get("error", "error") if cap.get("state") == "error" else "unsupported")
                 else:
                     out = self.native.observe(connection)
                 out["observed_at"] = now
                 for metric in ("allowance", "provider_usage"):
-                    prior = old[metric]
-                    retained = bool(prior.get("windows")) if metric == "allowance" else prior.get("tokens") is not None
-                    if out[metric]["state"] != "fresh" and retained and prior.get("observed_at"):
-                        out[metric] = {**prior, "state": "stale", "attempted_at": now, "error": out[metric]["state"]}
+                    prior, report = old[metric], out[metric]
+                    if report["state"] != "fresh" and carries_figures(metric, prior) and prior.get("observed_at"):
+                        out[metric] = {**prior, "state": "stale", "attempted_at": now, "error": report["state"]}
                     else:
-                        out[metric].update(observed_at=now, attempted_at=now)
+                        # H3: a report that was never produced (unsupported or
+                        # unknown, without figures) has no observation time, so
+                        # a later failed refresh cannot relabel it as stale.
+                        report.update(attempted_at=now, observed_at=now if report["state"] == "fresh"
+                                      or carries_figures(metric, report) else None)
                 if connection["family"] == "claude" and connection["mode"] == "subscription":
-                    out["allowance"] = claude_allowance(connection["id"], now)
+                    report, prior = claude_allowance(connection["id"], now), old["allowance"]
+                    # R0-A: when the account-qualified signal has gone, the last
+                    # window stays, labelled stale; it is never silently dropped.
+                    if not report["windows"] and carries_figures("allowance", prior) and prior.get("observed_at"):
+                        report = {**prior, "state": "stale", "attempted_at": now, "error": report["state"]}
+                    out["allowance"] = report
             except (native.NativeError, ValueError, OSError) as exc:
                 state = exc.state if isinstance(exc, native.NativeError) else "error"
                 out = old
@@ -173,7 +192,7 @@ class ProviderService:
                     public_selection = {"model": selection["model"], "effort": selection["effort"]}
                     with self.lock:
                         self.catalogs[key] = {"state": "fresh", "observed_at": now, "rows": public_rows, "selection": public_selection}
-                except (ValueError, RuntimeError, TypeError, AttributeError):
+                except (ValueError, RuntimeError, TypeError, AttributeError, OSError):   # R4-B: discovery failure never fails the stored refresh
                     with self.lock:
                         self.catalogs[key] = {"state": "unavailable", "observed_at": now, "rows": []}
 
@@ -253,23 +272,33 @@ class ProviderService:
             raise ValueError("Load settings before applying changes")
         settings = anchor_settings.get_launch_settings()
         prefs = metadata.validate_preferences(body.get("preferences"), settings["provider_connections"])
+        saved = settings["provider_preferences"]
+        proposed = {**settings, "provider_preferences": prefs}
         snapshot = self.snapshot()
         by_id = {c["id"]: c for c in snapshot["connections"]}
-        family = prefs["family"] or settings["default_cli"]
-        connection = metadata.selected_connection({**settings, "provider_preferences": prefs}, family)
-        if not by_id[connection["id"]]["execution"]["ready"]:
+        # H1: readiness gates a CHANGE of the account that will execute, not a
+        # threshold- or policy-only save; a stale, failed or absent observation
+        # keeps the existing choice savable.
+        connection = metadata.selected_connection(proposed, prefs["family"] or settings["default_cli"])
+        current = metadata.selected_connection(settings, saved["family"] or settings["default_cli"])
+        if connection["id"] != current["id"] and not by_id[connection["id"]]["execution"]["ready"]:
             raise ValueError("Selected account is unready for execution; refresh its host status")
+        # H2: only a quality choice that differs from the saved one (or that now
+        # rides on another account) is checked against a fresh catalog.
         for candidate_family, quality in prefs["quality"].items():
-            selected = metadata.selected_connection({**settings, "provider_preferences": prefs}, candidate_family)
+            selected = metadata.selected_connection(proposed, candidate_family)
+            if (quality == saved["quality"].get(candidate_family)
+                    and selected["id"] == metadata.selected_connection(settings, candidate_family)["id"]):
+                continue
+            if quality == {"model": "latest_supported", "effort": "highest_supported"}:
+                continue
             catalog = by_id[selected["id"]]["catalog"]
-            if quality != {"model": "latest_supported", "effort": "highest_supported"}:
-                rows = catalog.get("rows") or []
-                if catalog["state"] != "fresh":
-                    raise ValueError("Refresh native model capabilities before choosing an exact model or effort")
-                model = catalog.get("selection", {}).get("model") if quality["model"] == "latest_supported" else quality["model"]
-                row = next((r for r in rows if r["model"] == model), None)
-                if not row or quality["effort"] != "highest_supported" and quality["effort"] not in row["efforts"]:
-                    raise ValueError("Model or reasoning effort is not advertised by this account's native CLI")
+            if catalog["state"] != "fresh":
+                raise ValueError("Refresh native model capabilities before choosing an exact model or effort")
+            model = catalog.get("selection", {}).get("model") if quality["model"] == "latest_supported" else quality["model"]
+            row = next((r for r in catalog.get("rows") or [] if r["model"] == model), None)
+            if not row or quality["effort"] != "highest_supported" and quality["effort"] not in row["efforts"]:
+                raise ValueError("Model or reasoning effort is not advertised by this account's native CLI")
         # Store user choices in the existing settings transaction. Do not touch
         # global family/model policy or any live engine, queue or campaign.
         anchor_settings.save_settings(provider_preferences=prefs, expected_revision=body["expected_revision"])
@@ -285,8 +314,15 @@ class ProviderService:
         # Never replace the source of a live/previously bound bridge. Retry a
         # failed pending login, but renewal of a signed-in home needs a new home.
         self.refresh(connection)
-        if self.observations[self._key(identity)]["auth"] == "signed_in":
+        observation = self.observations[self._key(identity)]
+        if observation["auth"] == "signed_in":
             raise ValueError("This account is already signed in; add a separate subscription to change identity")
+        if observation["test"] == "failed" and observation["auth"] != "expired":
+            # W1-E1: a status read that failed leaves the sign-in state unknown,
+            # so the guard above stays armed: no native login runs against a
+            # possibly signed-in (and bound) home. An expired sign-in is a known
+            # state and may still be renewed in place.
+            raise ValueError("Host status for this account could not be read; refresh it on the mother ship before signing in")
         with self.lock:
             if any(v["key"] == self._key(identity) and v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()):
                 raise ValueError("Sign-in is already in progress for this account")
@@ -310,9 +346,19 @@ class ProviderService:
                 if cancel.is_set():
                     raise native.NativeError("cancelled")
                 self.refresh(connection)
-                if self.observations[self._key(identity)]["auth"] != "signed_in":
+                observation = self.observations[self._key(identity)]
+                if observation["auth"] == "signed_in":
+                    state, message = "completed", "Native sign-in completed; account status refreshed on the mother ship"
+                elif observation.get("error"):
+                    # H6: the native sign-in returned normally; only the follow-up
+                    # status read did not (the failure branch marks `error`). Report
+                    # the sign-in honestly and leave the row's own state to the
+                    # refresh button. A read that ANSWERED (expired, signed out) is a
+                    # failed sign-in, below (R6-B).
+                    state, message = "completed", ("Native sign-in completed; the follow-up host status read did not succeed. "
+                                                   "Refresh this account on the mother ship.")
+                else:
                     raise native.NativeError()
-                state, message = "completed", "Native sign-in completed; account status refreshed on the mother ship"
             except (native.NativeError, ValueError, OSError):
                 state = "cancelled" if cancel.is_set() else "failed"
                 message = "Sign-in cancelled" if cancel.is_set() else "Native sign-in failed or timed out. Retry this account; existing default login is retained."
@@ -336,7 +382,10 @@ class ProviderService:
                 value["cancel"].set()
                 value["state"] = "cancelling"
                 value["message"] = "Cancelling owned native sign-in"
-            return {"ok": True, **{k: v for k, v in value.items() if k in ("id", "connection_id", "state", "message", "url", "user_code", "expires_at")}}
+            # R6-C: the device link and code are shown only while the attempt awaits
+            # the browser; a cancelling or finished attempt never carries them.
+            shown = ("id", "connection_id", "state", "message", "expires_at") + (("url", "user_code") if value["state"] in ("starting", "awaiting_browser") else ())
+            return {"ok": True, **{k: v for k, v in value.items() if k in shown}}
 
 
 def claude_allowance(identity, attempted_at):
@@ -354,6 +403,10 @@ def claude_allowance(identity, attempted_at):
                                    "resets_at": window.get("resets_at"), "window_minutes": 300 if key == "five_hour" else 10080})
             if window.get("resets_at") and window["resets_at"] <= time.time():
                 out["state"] = "stale"
+    if not out["windows"]:
+        # R4-A: a signal without one finite window is no report; it carries no
+        # observation time, so a later failed refresh can never relabel it stale.
+        out.update(state="unsupported", observed_at=None)
     return out
 
 
@@ -539,7 +592,8 @@ def handle_page(handler, path, body):
 def handle_get(handler, path, body):
     query = parse_qs(urlsplit(handler.path).query)
     try:
-        if path == "/api/provider-setup/login":
+        # The dispatcher hands over the full URI (query included); route on the path alone.
+        if urlsplit(path).path == "/api/provider-setup/login":
             out = SERVICE.login_status(query.get("id", [None])[0])
         else:
             out = SERVICE.snapshot(query.get("refresh", ["0"])[0] == "1", query.get("connection_id", [None])[0])

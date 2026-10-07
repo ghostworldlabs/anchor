@@ -1,0 +1,105 @@
+{
+  "answerable": "yes",
+  "note": "Yes. The frozen plan's 'What each required id must establish' states the five mechanisms (real server and cookie auth, blocked observe, 3000-file ledger opens, per-connection attribution, unsupported capacity, failure retention) and the gate command. H5 is not a defect: a cold NativeProviders snapshot(True) really issues 13 hidden commands (4 --version, app-server --help, generate-json-schema, probe listen, auth login --help, observe listen, auth status, claude --help, debug models, debug models --bundled), matching tests/test_provider_setup_rigor.py:257-260. H1, H2, H3, H4, H6 and W1-E1 are honest strict-xfail failures of the claimed mechanism. The wave diff does not weaken existing assertions; provider_setup.py:543 only routes the login GET on the path. The five passing ids are not vacuous mirrors, except the Setup-text check in finding 8.",
+  "findings": [
+    {
+      "severity": "BLOCKER",
+      "file": "provider_native.py",
+      "line": 57,
+      "rule": "credential-exposure",
+      "message": "private_account_path is true only for data_dir/.anchor/provider-accounts. Default homes (~/.codex/auth.json, ~/.claude/.credentials.json, ~/.grok, and CODEX_HOME/CLAUDE_CONFIG_DIR) return false. report_viewer.py:401-417 then read_bytes() any file under a registered project, and anchor_gui.py:23220-23225 sends those bytes. GET /artifact/ is AUTH_OPEN (route_table.py:164), so no cookie is required. H4's strict xfail is an honest reproduction: the first /artifact/p?path= request returns 200 with the sentinel, not 403/404.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_h4_default_native_credential_homes_are_not_project_artifacts",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 260,
+      "rule": "apply-blocks-threshold-save",
+      "message": "apply() refuses every preference write, including a threshold-only change with family/accounts/quality untouched, unless the selected account's execution.ready is true (signed_in, not auth_stale, subscription, claude/chatgpt, isolated or default) at lines 205-207 and 260-261. Aged past TTL, auth timeout, or a fresh ProviderService with an empty observation map (auth unknown, auth_stale false) all raise ValueError before save. The H1 strict xfail fails on that raise for aged, failed and cold.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_h1_threshold_only_save_does_not_need_a_fresh_ready_account",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 267,
+      "rule": "apply-revalidates-unchanged-quality",
+      "message": "apply() rechecks every saved exact quality against catalog state on every save (lines 262-268), including a threshold-only change. After a successful exact save, aging catalogs[key].observed_at past TTL makes snapshot() report state stale (lines 209-210) and the next apply raises 'Refresh native model capabilities...' without changing quality. The H2 strict xfail fails on that second apply.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_h2_threshold_only_save_does_not_revalidate_unchanged_quality",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 288,
+      "rule": "signed-in-guard-disarmed",
+      "message": "start_login refreshes first and only refuses when the post-refresh auth is exactly signed_in (lines 287-289). A timeout/expired/error on that read overwrites auth (lines 157-164), so the guard does not see the previous signed_in observation and native login() runs against that home (lines 307-309), which can replace credentials the comment at 285-286 says must not be replaced. W1-E1's strict xfail fails because start_login does not raise and login_started is set.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_w1e1_failed_status_read_does_not_disarm_the_signed_in_guard",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 156,
+      "rule": "claude-allowance-retention-wiped",
+      "message": "On a successful refresh the retention block (lines 148-154) can keep a prior Claude window as stale, then line 156 unconditionally replaces allowance with claude_allowance(). If latest_limit_signal returns None (usage_capacity.py:125-126 treats any jobs-dir error as no logs), claude_allowance (lines 345-347) returns unsupported, windows [], observed_at null, and the last report is gone. The exception path used by separate-account-allowance-attribution (rigor test lines 427-434) does not call claude_allowance, so that test does not catch this. No required id or existing test removes a previously seen Claude signal and refreshes again.",
+      "repro": {
+        "command": "python -c \"print('no existing test; success-path refresh after latest_limit_signal returns None drops retained Claude windows')\"",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 163,
+      "rule": "never-supported-relabelled-stale",
+      "message": "A first report with state unknown/unsupported and no windows still gets observed_at (lines 147-154). A later failed refresh then sets state stale because observed_at is set (lines 162-164). The UI treats state stale as 'Stale report retained' (static/provider-setup.js:22) for a report that never had windows. H3's strict xfail fails on allowance/provider_usage state == stale.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_h3_never_supported_report_is_not_relabelled_stale",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 313,
+      "rule": "login-status-message-dishonest",
+      "message": "If native login() saved the session but the follow-up refresh's auth is not signed_in, the worker raises NativeError() (lines 312-314) and the handler always reports state failed and 'Native sign-in failed or timed out' (lines 316-318), including when the account is actually signed in. A later start_login refreshes successfully and raises 'already signed in' (lines 287-289). H6's xfail is honest about the failed state; its reason text over-claims the retry refusal, which the test requires via pytest.raises.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_h6_completed_login_with_failed_status_read_is_reported_honestly",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_native.py",
+      "line": 65,
+      "rule": "cross-family-home-not-popped",
+      "message": "account_env pops only CLAUDE_CONFIG_DIR and CODEX_HOME, then sets one of those two. GROK_HOME from the process environment is left in every family's env (model_policy.discover reads it at model_policy.py:218). separate-account-allowance-attribution (rigor test lines 371-421) only plants CODEX_HOME and CLAUDE_CONFIG_DIR, so the contract line 'never another family's home' is unproved for Grok.",
+      "repro": {
+        "command": "python -c \"import os; print('unset in test: GROK_HOME inherited by account_env')\"",
+        "failing": true
+      }
+    },
+    {
+      "severity": "MINOR",
+      "file": "tests/test_provider_setup_rigor.py",
+      "line": 537,
+      "rule": "ui-assertion-partly-vacuous",
+      "message": "unsupported-is-not-usable's server-field checks (lines 488-493) are real, but the rendered-text check is not. 'Not reported' is always present ('Exact tokens remaining', static/provider-setup.js:14). The word unsupported is always present because api_spend.state is hardcoded unsupported (provider_setup.py:225) and rendered at provider-setup.js:18. So state 'unsupported' matches even if the allowance line did not. The percentage regex still catches a window that rendered '% remaining'.",
+      "repro": {
+        "command": "python -m pytest -v tests/test_provider_setup_rigor.py::test_unsupported_is_not_usable",
+        "failing": false
+      }
+    }
+  ]
+}

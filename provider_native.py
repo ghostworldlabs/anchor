@@ -24,6 +24,7 @@ import paths
 
 COMMAND_TIMEOUT = 15
 LOGIN_TIMEOUT = 300
+CANCEL_TIMEOUT = 5   # R2-A: the bound on the cancel RPC a wedged native child may ignore
 MAX_OUTPUT = 1024 * 1024
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -39,11 +40,16 @@ class NativeError(RuntimeError):
                           "error": "Host account command failed"}.get(state, "Host account command failed"))
 
 
+# The documented native redirects and the fixed dotfile homes of each family.
+NATIVE_HOME_ENV = {"claude": "CLAUDE_CONFIG_DIR", "chatgpt": "CODEX_HOME", "grok": "GROK_HOME"}
+NATIVE_HOME_DIRS = {"claude": ".claude", "chatgpt": ".codex", "grok": ".grok", "gemini": ".gemini"}
+
+
 def account_home(connection):
     family = connection["family"]
     if connection["native_default"]:
-        key = {"claude": "CLAUDE_CONFIG_DIR", "chatgpt": "CODEX_HOME"}.get(family)
-        return Path(os.environ.get(key) or Path.home() / (".codex" if family == "chatgpt" else "." + family))
+        redirect = os.environ.get(NATIVE_HOME_ENV[family]) if family in NATIVE_HOME_ENV else None
+        return Path(redirect or Path.home() / NATIVE_HOME_DIRS[family])
     root = paths.data_dir() / ".anchor" / "provider-accounts"
     nominal = root / connection["id"]
     if nominal.absolute() != nominal.resolve():
@@ -52,10 +58,20 @@ def account_home(connection):
 
 
 def private_account_path(path):
-    """Native credential homes are never project artifacts, even under a host repo."""
+    """Native credential homes are never project artifacts, even under a host repo.
+
+    H4: the isolated account store AND every default native home (the fixed
+    dotfile homes plus the documented CODEX_HOME / CLAUDE_CONFIG_DIR redirects)
+    are private, so a registered project folder that encloses them serves none
+    of their files through any artifact or project-file route.
+    """
     try:
-        return Path(path).resolve().is_relative_to((paths.data_dir() / ".anchor" / "provider-accounts").resolve())
-    except (OSError, RuntimeError):
+        target = Path(path).resolve()
+        homes = [paths.data_dir() / ".anchor" / "provider-accounts"]
+        homes += [Path.home() / name for name in NATIVE_HOME_DIRS.values()]
+        homes += [Path(os.environ[key]) for key in NATIVE_HOME_ENV.values() if os.environ.get(key)]
+        return any(target.is_relative_to(home.resolve()) for home in homes)
+    except (OSError, RuntimeError, ValueError):
         return True
 
 
@@ -64,6 +80,8 @@ def account_env(connection):
     # A selected isolated home must never inherit another family's home.
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("CODEX_HOME", None)
+    if connection["family"] != "grok":
+        env.pop("GROK_HOME", None)  # R0-B: another family never inherits the Grok home
     if connection["family"] in ("claude", "chatgpt"):
         env["CLAUDE_CONFIG_DIR" if connection["family"] == "claude" else "CODEX_HOME"] = str(account_home(connection))
     env["ANCHOR_PROVIDER_CONNECTION"] = connection["id"]
@@ -77,8 +95,10 @@ def executable(family):
 
 class HiddenProcess:
     """Own exactly one subprocess and its tree; bound all pipe consumption."""
-    def __init__(self, argv, env, *, timeout=COMMAND_TIMEOUT):
-        self.deadline = time.monotonic() + timeout
+    def __init__(self, argv, env, *, timeout=None):
+        # The bound is read from the module at call time, so a lowered
+        # COMMAND_TIMEOUT governs every hidden command that does not name its own.
+        self.deadline = time.monotonic() + (COMMAND_TIMEOUT if timeout is None else timeout)
         self.events = queue.Queue(maxsize=256)
         self.stop = threading.Event()
         self.total = 0
@@ -178,7 +198,7 @@ class HiddenProcess:
                 pass
 
 
-def run_command(argv, env, cancel=None, timeout=COMMAND_TIMEOUT, progress=None):
+def run_command(argv, env, cancel=None, timeout=None, progress=None):
     child = HiddenProcess(argv, env, timeout=timeout)
     lines, ended = [], set()
     try:
@@ -205,7 +225,7 @@ def catalog_command(argv, env):
 
 
 class CodexAccount:
-    def __init__(self, connection, *, timeout=COMMAND_TIMEOUT):
+    def __init__(self, connection, *, timeout=None):
         binary = executable("chatgpt")
         if not binary:
             raise NativeError("unavailable")
@@ -417,6 +437,11 @@ class NativeProviders:
             finally:
                 if login_id and cancel.is_set():
                     try:
+                        # R2-A: bounded through the owned child's own deadline; a
+                        # native child that never answers the cancel cannot delay the
+                        # reap below past CANCEL_TIMEOUT.
+                        if getattr(client.child, "deadline", None) is not None:
+                            client.child.deadline = min(client.child.deadline, time.monotonic() + CANCEL_TIMEOUT)
                         client.rpc("account/login/cancel", {"loginId": login_id})
                     except NativeError:
                         pass

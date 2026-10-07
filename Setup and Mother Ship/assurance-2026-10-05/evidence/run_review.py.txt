@@ -1,0 +1,24 @@
+"""Evidence copy: host paths redacted to <worktree>, <main checkout>, <user home>. Set them to run again."""
+"""Run one fresh-context, read-only Grok reviewer seat on a prepared prompt file (driver-run, engine-equivalent flags)."""
+import json, os, subprocess, sys, time
+from pathlib import Path
+WT = r"<worktree>"
+prompt_file, out_base = sys.argv[1], sys.argv[2]
+env = {k: v for k, v in os.environ.items() if not (k.upper().startswith(("TRIO_", "CLAUDE_MODEL", "GROK_MODEL")) or k.upper().endswith("_API_KEY"))}
+env.update(NO_COLOR="1", CI="1")
+args = ["grok", "--output-format", "json", "--model", "grok-4.7", "--reasoning-effort", "xhigh", "--permission-mode", "plan",
+        "--max-turns", "40", "--prompt-file", prompt_file]
+t0 = time.time()
+proc = subprocess.run(args, cwd=WT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1500)
+Path(out_base + ".stdout.json").write_text(proc.stdout, encoding="utf-8")
+Path(out_base + ".stderr.txt").write_text(proc.stderr, encoding="utf-8")
+raw = proc.stdout.strip()
+try:
+    i = raw.rfind("\n{"); obj = json.loads(raw if raw.startswith("{") else raw[i + 1:])
+    served = list((obj.get("modelUsage") or {}).keys())
+    meta = {"exit": proc.returncode, "seconds": round(time.time() - t0), "stopReason": obj.get("stopReason"), "num_turns": obj.get("num_turns"),
+            "served": served, "cost_usd": obj.get("total_cost_usd"), "text_chars": len(obj.get("text") or "")}
+except Exception as e:
+    meta = {"exit": proc.returncode, "seconds": round(time.time() - t0), "parse_error": str(e), "stdout_head": raw[:300]}
+Path(out_base + ".meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+print(json.dumps(meta))

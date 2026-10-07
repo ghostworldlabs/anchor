@@ -1,0 +1,10 @@
+/api/rnd/project_file_content?project_id=p&path=.codex/auth.json -> 200 SENTINEL LEAKED
+/artifact/p?path=.codex/auth.json -> 200 SENTINEL LEAKED
+/api/ecgberht/artifact?project_id=p&rel=.codex/auth.json -> 200 SENTINEL LEAKED
+/api/ecgberht/chamber_artifact?project_id=p&rel=.codex/auth.json -> 502 no leak
+/api/rnd/project_file_content?project_id=p&path=.claude/.credentials.json -> 200 SENTINEL LEAKED
+/artifact/p?path=.claude/.credentials.json -> 200 SENTINEL LEAKED
+/api/ecgberht/artifact?project_id=p&rel=.claude/.credentials.json -> 200 SENTINEL LEAKED
+/api/ecgberht/chamber_artifact?project_id=p&rel=.claude/.credentials.json -> 502 no leak
+report_viewer.resolve_project_artifact(home, '.codex/auth.json') -> (b'{"tokens": {"access_token": "DEFAULT-HOME-CREDENTIAL-SENTINEL"}}', 'application/json; charset=utf-8')
+steward deliverable-file -> 200 no leak

@@ -1,0 +1,48 @@
+{
+  "answerable": "yes",
+  "note": "The wave contract states the required behaviours, including the cached-state bullet under \"What each required id must establish\" (block inside the native stand-in; one-second cached GET, /high-seat and login status; launch helpers must not wait) and the H4 production line (extend private_account_path to the default native credential homes). The supplied diff shows no weakened assertion in the pre-existing test module; xfail markers are gone from both new test files.",
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 72,
+      "rule": "H4 credential-download rejection",
+      "message": "private_account_path treats only the isolated store, Path.home() dotfile homes, and the CODEX_HOME / CLAUDE_CONFIG_DIR redirects as private (provider_native.py:44-45 and 70-72). account_env still keeps GROK_HOME for the grok family and describes it as that family's home (provider_native.py:83-84), and account_home never consults GROK_HOME (provider_native.py:50-52). A GROK_HOME that is not under ~/.grok is therefore a credential directory an authenticated project-file or artifact route can serve. test_h4_default_native_credential_homes_are_not_project_artifacts plants ~/.grok, CODEX_HOME and CLAUDE_CONFIG_DIR only (tests/test_provider_setup_rigor.py:756-777), so the green gate does not cover this redirect."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_hardening.py",
+      "line": 727,
+      "rule": "cached-state-does-not-wait-for-refresh",
+      "message": "The frozen id requires a native refresh and a start_login POST blocked inside the native stand-in, with cached GET /api/provider-setup, GET /high-seat and GET login status each finishing within one second, and require_capacity_choice, selected_for_launch and resolve_quality returning without waiting on that refresh. The test instead sets service.native to BlockedBackend (tests/test_provider_setup_hardening.py:695-716, 727-728), a NativeFixture whose observe waits on a threading.Event and whose login waits on the cancel event. It never installs NativeStandIn or NativeProviders. native-timeout-retains-cached-state does hang a real .cmd, but only overlaps GET /api/provider-setup. A stall or lock taken inside HiddenProcess.next or NativeProviders.capabilities is unproved for the Cave page, the login-status read, the usage lock and the launch helpers."
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 178,
+      "rule": "H3 figure-less reports must not be relabelled stale",
+      "message": "The success path stamps observed_at on every fresh metric even when it has no windows or tokens (provider_setup.py:163-164). The exception path then sets the metric to stale whenever observed_at is present, and does not consult carries_figures (provider_setup.py:177-179). claude_allowance writes observed_at and state fresh before it appends windows (provider_setup.py:388-389); a signal whose utilization is not finite is stored with an empty window list. The next timed-out refresh relabels that empty report stale. test_h3 only builds a fixture unknown report with a null observed_at and only asserts the state is not the string stale (tests/test_provider_setup_rigor.py:734-743), so a fresh or timeout label on a never-supported report still passes."
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 348,
+      "rule": "H6 and cancellation after native login returns",
+      "message": "refresh after a normal native login runs while the record is still awaiting_browser, so login_status(cancel=True) still sets the cancel event and state cancelling (provider_setup.py:375-377). The worker does not look at cancel again. When the follow-up read has test failed, H6 assigns completed (provider_setup.py:346-353) and the finally block overwrites cancelling. A cancel that arrives during the status read is reported as a completed sign-in. Separately, catalog discovery catches RuntimeError but not OSError (provider_setup.py:191) after the observation has already been stored (provider_setup.py:180-181). That OSError skips H6 and the worker reports the sign-in failed (provider_setup.py:356-358) even though auth may already be signed_in, so a retry is refused as already signed in. test_h6 uses a fixture observe that raises NativeError and never cancels during refresh (tests/test_provider_setup_rigor.py:786-805)."
+    },
+    {
+      "severity": "MINOR",
+      "file": "tests/test_provider_setup_hardening.py",
+      "line": 376,
+      "rule": "invalid settings must not echo a secret-like field",
+      "message": "The corruption \"secret-like connection field\" writes never-stored-by-a-settings-entry into the primary settings file (tests/test_provider_setup_hardening.py:356-362). The test requires that string to be absent from POST bodies (line 382) but the authenticated GET is only checked for status 200, a settings_error containing \"invalid\", and the default connection ids (lines 374-378). A settings_error that quotes the bad document would still pass. The credentials-not-in-responses sentinel scan never uses this corrupt document."
+    },
+    {
+      "severity": "NIT",
+      "file": "tests/test_provider_setup_hardening.py",
+      "line": 883,
+      "rule": "R2-A bounded cancel must reap the owned tree",
+      "message": "test_r2a_cancel_reap_is_bounded_when_the_native_child_ignores_the_cancel checks that the login thread finishes and that the app-server pid is dead (tests/test_provider_setup_hardening.py:879-883). It does not poll the grandchild spawned at account/login/start and does not assert that account/login/cancel was sent. The responsive cancel test does both (lines 315-327). Dropping the cancel RPC and leaking the sleeper would still satisfy R2-A."
+    }
+  ]
+}

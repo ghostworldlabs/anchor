@@ -1,0 +1,11 @@
+{
+  "exit": 0,
+  "seconds": 674,
+  "stopReason": "end_turn",
+  "num_turns": 36,
+  "served": [
+    "grok-4.7-build"
+  ],
+  "cost_usd": 0.90390972,
+  "text_chars": 10691
+}

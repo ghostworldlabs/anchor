@@ -147,6 +147,14 @@ steward_cockpit/proto-state.json
 steward_cockpit/*.tmp
 steward_cockpit/handoffs/
 steward_cockpit/__pycache__/
+# The orchestrating steward session's own terminal-thread transcript + its
+# PERMANENT lock file (steward_cockpit/conversation_history.py writes
+# .ecgberht/terminal-history/<thread>.json + .lock into the folder it runs
+# against — here, the product repo itself). Runtime state of the session that
+# drives a build, never the build's work product (Foreman wave-1 elegance cut
+# F1/F2, 2026-10-05). ROOT-anchored: a sub-campaign's tracked .ecgberht memory
+# (Ship/, Collaboration/) is untouched.
+/.ecgberht/terminal-history/
 
 # Planning-folder pytest scratch trees (fake exes, disposable fixtures) are never authoring content
 planning/**/pytest-*/

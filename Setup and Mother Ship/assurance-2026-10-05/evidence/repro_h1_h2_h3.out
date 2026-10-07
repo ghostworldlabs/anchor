@@ -1,0 +1,14 @@
+== H1 ==
+H1a cold start (no native observation yet), threshold-only apply: REFUSED -> ValueError: Selected account is unready for execution; refresh its host status
+H1b fresh observation, threshold-only apply: SAVED
+   selected row after ageing: {'auth': 'signed_in', 'auth_stale': True} ready= False
+H1c observation aged past TTL (301 s), threshold-only apply: REFUSED -> ValueError: Selected account is unready for execution; refresh its host status
+H1d after a timed-out refresh, threshold-only apply: REFUSED -> ValueError: Selected account is unready for execution; refresh its host status
+== H2 ==
+H2a fresh catalog, save exact quality claude=balanced/high: SAVED
+   catalog state after ageing: stale
+H2b catalog aged past TTL, threshold-only apply (quality unchanged): REFUSED -> ValueError: Refresh native model capabilities before choosing an exact model or effort
+== H3 ==
+   before failure: provider_usage state=unsupported tokens=None observed_at set=True
+   after timeout: provider_usage state=stale tokens=None error=timeout
+   claude-default allowance after its own timeout earlier: state=unsupported windows=[]

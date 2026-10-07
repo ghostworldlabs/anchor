@@ -38,6 +38,20 @@ from steward_cockpit.question_context import (save_question_context, normalize_q
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "proto-state.json"
+_RELOCATED_STATE_FILE = None   # the last ledger path relocate_state() set — its own move, as against a test/healthcheck swap
+
+
+def relocate_state(target):
+    """Point the ledger at ``target`` — runtime state lives OUTSIDE the repo (Anchor's W11 invariant), so the GUI
+    calls this on every steward API call. An explicit redirect is honored: a STATE_FILE a test or the healthcheck
+    swapped away from the in-repo default (or this function's own last target) is never clobbered (2026-10-05: a Cave
+    load moved the ledger out from under a patched path, and a running conversation's record "vanished")."""
+    global STATE_FILE, _RELOCATED_STATE_FILE
+    if STATE_FILE in (HERE / "proto-state.json", _RELOCATED_STATE_FILE):
+        STATE_FILE = _RELOCATED_STATE_FILE = Path(target)
+    return STATE_FILE
+
+
 # the 10-minute cadence (env-tunable so tests can exercise it in seconds)
 TICK_SECONDS = int(os.environ.get("PROTO_TICK_SECONDS", "600"))
 TICK_CHECK = max(5, min(30, TICK_SECONDS // 2))
@@ -2726,9 +2740,11 @@ class Engine:
         env = model_policy.policy_environment()
         import provider_native
         _account_env = provider_native.account_env(self.provider_connection)
-        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANCHOR_PROVIDER_CONNECTION"):
+        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "ANCHOR_PROVIDER_CONNECTION"):
             if _key in _account_env:
                 env[_key] = _account_env[_key]
+            else:
+                env.pop(_key, None)   # R6-A: another family's home never rides into this child
         # A1 (delegated-work PROPOSAL v0.3; Grok code R1 F1-F3, R2 N1-N2): every git ANY agent session runs - steward,
         # code job or workbench terminal - goes through gitguard, which refuses tree-rewriting verbs outside a code
         # job's own worktree BEFORE git runs: a real git.exe (found for `git` and `git.exe` alike), a `git` script and

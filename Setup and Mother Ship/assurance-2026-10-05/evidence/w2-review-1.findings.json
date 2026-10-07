@@ -1,0 +1,48 @@
+{
+  "answerable": "yes",
+  "note": "Yes. The frozen Wave 2 contract, section \"What each required id must establish\", specifies the mechanism for each required id (real NativeProviders timeout, login_status cancel, settings corruption, sentinel redaction, running-engine account switch, cached reads during blocked native work) and the Done-when gate. Judged against that text plus the numbered current sources. The product diff does not include tests/test_provider_setup.py, so no weakened older assertion is visible there.",
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 150,
+      "rule": "native-timeout-retains-cached-state",
+      "message": "A capability-probe timeout is swallowed and stored as state \"error\" with isolated false (lines 106-110). refresh then hits lines 150-151 for every non-default connection and raises NativeError(\"unsupported\") before observe. The handler at lines 172-176 publishes auth \"unsupported\" and allowance error \"unsupported\", so a hung CLI on an isolated ChatGPT or Claude account is reported as unsupported and the prior signed-in label is replaced. The required timeout outcome (auth timeout, retained figures stale with error timeout) happens only for native_default, which skips line 150. test_native_timeout_retains_cached_state refreshes only chatgpt-default (hardening test lines 267-279), so this path is unproved and the mislabel stays."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_hardening.py",
+      "line": 280,
+      "rule": "native-timeout-retains-cached-state",
+      "message": "The contract requires the timed-out refresh to return within one COMMAND_TIMEOUT plus reaping, and the stand-in process tree to be gone afterwards. With hang mode, capability's --version and then observe's app-server each run a HiddenProcess to its own deadline (provider_setup.py lines 134 and 153; provider_native.py HiddenProcess deadline at line 101). The test records only the first hang record (lines 280-281) and wait_dead's only that pair (lines 297-298), so the later observe process and its grandchild are never polled. The bound at line 289 is COMMAND_TIMEOUT+8 (11s when the patched timeout is 3s), which admits two full timeouts plus two reaps. The assertion matches that two-stage implementation and does not enforce the contract's single deadline."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 72,
+      "rule": "credentials-not-in-responses-or-artifacts",
+      "message": "H4's private_account_path covers the isolated store, Path.home() dotfile dirs, and only the CODEX_HOME and CLAUDE_CONFIG_DIR redirects (lines 44-45 and 70-72). The same module treats GROK_HOME as a real home: account_env keeps it for the grok family and strips it for every other family (lines 83-86), while account_home for grok ignores GROK_HOME and always returns ~/.grok (lines 50-52). A GROK_HOME directory inside a registered project is therefore not private, and the credential-download tests never plant a file there (H4 plants only ~/.grok, CODEX_HOME, and CLAUDE_CONFIG_DIR)."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_rigor.py",
+      "line": 697,
+      "rule": "H1-H2-retained-refusal",
+      "message": "The contract keeps two refusals: selecting an unready account, and choosing a new exact model without a fresh catalog. apply implements the account check at provider_setup.py lines 278-281 and the catalog check at lines 284-297. The Wave 2 proofs only drive the newly allowed saves: test_h1 changes warning_threshold on the same claude-default account (lines 694-697) for aged, failed, and cold, and test_h2 changes warning_threshold while the saved exact quality and account id stay the same (lines 716-718). No supplied test selects a different unready account or posts a changed exact quality against a stale catalog. Removing the readiness condition at line 280 would leave both H1 proofs green. The older test_apply_requires_fresh_advertised_model_and_current_settings_revision is only a gate name here; its body is not in the packet and the name does not mention account readiness."
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 178,
+      "rule": "H3-never-supported-report",
+      "message": "On the success path a figure-less unknown/unsupported report keeps observed_at null (lines 160-164). On the failure path line 178 then sets that metric's state to the auth error (timeout, error, unavailable, ...) whenever observed_at is missing. A report that was unknown becomes timeout. test_h3_never_supported_report_is_not_relabelled_stale only asserts the state is not the string stale (rigor lines 742-743), so this relabel satisfies the reproduction and observed_at is never checked."
+    },
+    {
+      "severity": "MINOR",
+      "file": "tests/test_provider_setup_hardening.py",
+      "line": 883,
+      "rule": "R2-A-cancel-reap",
+      "message": "test_r2a_cancel_reap_is_bounded_when_the_native_child_ignores_the_cancel proves the login thread returns inside CANCEL_TIMEOUT+15 and wait_dead's the app-server pid (lines 879-883). The stand-in still spawns a grandchild sleeper on account/login/start (stand-in lines 158-160). That grandchild pid is not polled on the ignore_cancel path, which is the path where the child never answers and cleanup depends on TerminateJobObject after the shortened deadline (provider_native.py lines 443-448)."
+    }
+  ]
+}

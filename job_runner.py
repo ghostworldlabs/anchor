@@ -891,9 +891,11 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     if provider_connection and backend != BACKEND_CHATGPT:
         import provider_native
         _account_env = provider_native.account_env(provider_connection)
-        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANCHOR_PROVIDER_CONNECTION"):
+        for _key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "ANCHOR_PROVIDER_CONNECTION"):
             if _key in _account_env:
                 full_env[_key] = _account_env[_key]
+            else:
+                full_env.pop(_key, None)   # R6-A: another family's home never rides into this job
     # Propagate Anchor model-family prefs so foundry/trio seats (and any agent
     # reading CODING_FAMILY / REVIEW_FAMILY) honor the dashboard knobs.
     # Saved settings are authoritative and overwrite stale process/setx values.
