@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-06 20:41",
-  "status_id": "01791340890552154500",
+  "at": "2026-10-07 07:26",
+  "status_id": "01791379586462562700",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "landed, waits for a restart \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under implementation pla",
+    "activity": "nothing running - quiet",
     "latest_event": null,
     "next": [
       "Verify the landed upper-left Setup"
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "landed, waits for a restart \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface\u2026"
+        "value": "nothing running - quiet"
       },
       {
         "label": "Status",
@@ -55,9 +55,15 @@
   },
   "lead_line": "Next: Verify the landed upper-left Setup; then Third: organize goals and initiatives on the Star Chart \u2014 Production-shell tests passed; existing-window activation remains unverified.",
   "now": [
-    "landed, waits for a restart \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under implementation pla"
+    "nothing running - quiet"
   ],
-  "running": null,
+  "running": {
+    "kind": "none",
+    "label": "nothing running - quiet",
+    "skill": "",
+    "source": "",
+    "age": ""
+  },
   "slice": {
     "n": 8,
     "total": 11,
@@ -106,7 +112,7 @@
   "effort_line": {
     "text": "Upper-left Anchor Setup gear repair landed; awaiting safe activation and verification in the existing window.",
     "as_of": "2026-10-06",
-    "newest_work": "2026-10-06",
+    "newest_work": "2026-10-07",
     "behind_days": 0,
     "stale": false
   },
