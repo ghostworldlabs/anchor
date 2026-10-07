@@ -36,6 +36,7 @@ def unknown(source, state="unknown"):
 
 def empty_observation():
     return {"auth": "unknown", "test": "not_tested", "auth_source": "Native CLI status", "observed_at": None,
+            "account_identity": None,
             "allowance": {**unknown("Native subscription interface"), "windows": []},
             "provider_usage": {**unknown("Native account usage"), "tokens": None}}
 
@@ -106,7 +107,7 @@ class ProviderService:
                     "limit": "Refresh host status to check installed capabilities."}
         try:
             out = self.native.capabilities(family)
-        except (native.NativeError, OSError, ValueError) as exc:
+        except (native.NativeError, OSError, ValueError, TypeError, AttributeError, RecursionError) as exc:
             out = {"installed": bool(native.executable(family)), "state": "error", "version": None, "isolated": False, "login": None,
                    "error": exc.state if isinstance(exc, native.NativeError) else "error",
                    "limit": "Installed capability check failed. Existing sign-in is retained."}
@@ -153,6 +154,8 @@ class ProviderService:
                     # R3-A: a probe that timed out or errored is reported as that
                     # failure; "unsupported" is reserved for a CLI that answered.
                     raise native.NativeError(cap.get("error", "error") if cap.get("state") == "error" else "unsupported")
+                elif connection["family"] == "grok" and cap.get("status_supported") is False:
+                    raise native.NativeError("unsupported")
                 else:
                     out = self.native.observe(connection)
                 out["observed_at"] = now
@@ -222,19 +225,20 @@ class ProviderService:
                 age = obs.get("observed_at")
                 obs["auth_stale"] = bool(age and time.time() - datetime.fromisoformat(age).timestamp() > TTL)
                 ready = (obs["auth"] == "signed_in" and not obs["auth_stale"] and connection["mode"] == "subscription"
-                         and connection["family"] in ("claude", "chatgpt", "gemini")
+                         and (connection["family"] in ("claude", "chatgpt", "gemini") or connection["family"] == "grok" and cap.get("execution") is True)
                          and (connection["native_default"] or cap["isolated"]))
                 catalog = deepcopy(self.catalogs.get(self._key(connection["id"]), {"state": "unknown", "rows": []}))
                 if catalog.get("observed_at") and time.time() - datetime.fromisoformat(catalog["observed_at"]).timestamp() > TTL:
                     catalog["state"] = "stale"
+                ready = ready and catalog["state"] == "fresh" and bool(catalog.get("rows"))
                 reported = [w["remaining_percent"] for w in obs["allowance"]["windows"]]
                 remaining = reported if obs["allowance"]["state"] == "fresh" else []
                 low = bool(reported and min(reported) <= settings["provider_preferences"]["warning_threshold"])
                 exhausted = bool(remaining and min(remaining) <= 0)
-                out.append({**connection, **obs, "capability": cap, "catalog": catalog,
+                out.append({**connection, **obs, "connection_source": connection_source(connection), "capability": cap, "catalog": catalog,
                             "execution": {"ready": ready and not exhausted, "cockpit": ready and not exhausted,
                                           "jobs": ready and (connection["family"] == "claude" or connection["native_default"]) and not exhausted,
-                                          "reason": "API connections have separate billing; subscription execution adapters do not support API mode." if connection["mode"] == "api" else
+                                          "reason": "API keys use separate provider billing. This subscription-seat architecture has no explicit API execution adapter; saving a key does not enable paid work." if connection["mode"] == "api" else
                                           "Isolated ChatGPT accounts can start new cockpits; the one-shot adapter retains its fixed default home." if connection["family"] == "chatgpt" and not connection["native_default"] else
                                           "Native authentication checked; allowance may still be unknown." if ready else "Execution is unready; refresh host authentication and capabilities."},
                             "capacity": "exhausted" if exhausted else "near_limit" if low and remaining else "usable" if remaining else "unknown",
@@ -245,7 +249,12 @@ class ProviderService:
                             "subscription_price": {**unknown("Provider subscription billing", "unsupported"), "amount": None}})
         return {"ok": True, "host": host_state(), "settings_revision": settings["settings_revision"],
                 "settings_error": settings.get("settings_error"), "preferences": deepcopy(settings["provider_preferences"]),
-                "default_family": settings["default_cli"], "connections": out, "api_storage_available": provider_secrets.available()}
+                "default_family": settings["default_cli"], "connections": out, "api_storage_available": provider_secrets.available(),
+                "provider_matrix": [{"family": family, "transport": {"claude": "Claude Code", "chatgpt": "Codex", "gemini": "agy CLI", "grok": "Grok CLI"}[family],
+                                     "enrollment": bool(capabilities[family].get("isolated") and capabilities[family].get("login")),
+                                     "api_execution": False, "prerequisite": capabilities[family].get("limit")}
+                                    for family in metadata.FAMILIES],
+                "product_complete": False}
 
     def add(self, body):
         settings = anchor_settings.get_launch_settings()
@@ -253,7 +262,9 @@ class ProviderService:
         if connection["mode"] == "subscription":
             cap = self.capability(connection["family"], True)
             if not cap["isolated"]:
-                raise ValueError("This native provider has no verified isolated account home; existing login is preserved")
+                raise ValueError("This native provider has no verified isolated account home; existing login is preserved. " + (cap.get("limit") or "Refresh installed provider capabilities on the mother ship."))
+            if not cap.get("login"):
+                raise ValueError("This installed provider has no supported browser/device sign-in; existing login is preserved")
         anchor_settings.save_settings(provider_connections=settings["provider_connections"] + [connection], expected_revision=body.get("expected_revision"))
         return {"ok": True, "connection_id": connection["id"], "snapshot": self.snapshot()}
 
@@ -265,6 +276,24 @@ class ProviderService:
             if item["id"] == connection["id"]:
                 item["name"] = body.get("name")
         anchor_settings.save_settings(provider_connections=connections, expected_revision=body.get("expected_revision"))
+        return self.snapshot()
+
+    def remove(self, body):
+        settings = anchor_settings.get_launch_settings()
+        connection = metadata.find_connection(settings, body.get("connection_id"))
+        if connection["native_default"]:
+            raise ValueError("Existing default native connections must be retained")
+        if connection["id"] in settings["provider_preferences"]["accounts"].values():
+            raise ValueError("Apply a different account before removing this connection")
+        with self.lock:
+            if any(v["key"] == self._key(connection["id"]) and v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()):
+                raise ValueError("Cancel this account's sign-in before removing its connection")
+            anchor_settings.save_settings(provider_connections=[c for c in settings["provider_connections"] if c["id"] != connection["id"]],
+                                          expected_revision=body.get("expected_revision"))
+            # Native homes are retained: existing and resumable conversations
+            # continue to own the same identity, even after hiding its Setup row.
+            self.observations.pop(self._key(connection["id"]), None)
+            self.catalogs.pop(self._key(connection["id"]), None)
         return self.snapshot()
 
     def apply(self, body):
@@ -283,6 +312,9 @@ class ProviderService:
         current = metadata.selected_connection(settings, saved["family"] or settings["default_cli"])
         if connection["id"] != current["id"] and not by_id[connection["id"]]["execution"]["ready"]:
             raise ValueError("Selected account is unready for execution; refresh its host status")
+        for family, identity in prefs["accounts"].items():
+            if identity != saved["accounts"].get(family, family + "-default") and not by_id[identity]["execution"]["ready"]:
+                raise ValueError("Selected account is unready for execution; refresh its host status")
         # H2: only a quality choice that differs from the saved one (or that now
         # rides on another account) is checked against a fresh catalog.
         for candidate_family, quality in prefs["quality"].items():
@@ -323,7 +355,10 @@ class ProviderService:
             # possibly signed-in (and bound) home. An expired sign-in is a known
             # state and may still be renewed in place.
             raise ValueError("Host status for this account could not be read; refresh it on the mother ship before signing in")
+        if observation["auth"] == "expired" and connection_in_use(identity):
+            raise ValueError("This native account is bound to a conversation; add a separate connection to reconnect without replacing its identity")
         with self.lock:
+            metadata.find_connection(anchor_settings.get_launch_settings(), identity)
             if any(v["key"] == self._key(identity) and v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()):
                 raise ValueError("Sign-in is already in progress for this account")
             if sum(v["state"] in ("starting", "awaiting_browser", "cancelling") for v in self.logins.values()) >= 2:
@@ -386,6 +421,28 @@ class ProviderService:
             # the browser; a cancelling or finished attempt never carries them.
             shown = ("id", "connection_id", "state", "message", "expires_at") + (("url", "user_code") if value["state"] in ("starting", "awaiting_browser") else ())
             return {"ok": True, **{k: v for k, v in value.items() if k in shown}}
+
+
+def connection_source(connection):
+    transport = {"claude": "Claude Code", "chatgpt": "Codex", "gemini": "Google Ultra via agy CLI", "grok": "Grok CLI"}[connection["family"]]
+    if connection["mode"] == "api":
+        return "Host OS credential vault · separate API billing"
+    return transport + (" · existing mother ship sign-in" if connection["native_default"] else " · isolated native account")
+
+
+def connection_in_use(identity):
+    from steward_cockpit import steward_engine
+    with steward_engine._STATE_LOCK:
+        state = steward_engine._load_state()
+        if not isinstance(state, dict):
+            raise ValueError("Native conversation bindings could not be read; existing credentials are retained")
+        for entry in state.values():
+            if not isinstance(entry, dict):
+                continue
+            records = [entry] + list(entry.get("provider_sessions") or [])
+            if any(isinstance(r, dict) and r.get("session_id") and (r.get("provider_connection") or {}).get("id") == identity for r in records):
+                return True
+    return False
 
 
 def claude_allowance(identity, attempted_at):
@@ -549,8 +606,12 @@ def require_capacity_choice(settings, connection):
 
 def selected_for_launch(settings, family, surface="cockpit", check_capacity=False):
     connection = metadata.selected_connection(settings, family)
-    if connection["mode"] != "subscription" or not connection["native_default"] and family not in ("claude", "chatgpt"):
+    if connection["mode"] != "subscription" or not connection["native_default"] and family not in ("claude", "chatgpt", "grok"):
         raise ValueError("Selected connection has no subscription execution adapter")
+    if family == "grok" and not connection["native_default"]:
+        cap = SERVICE.capability(family)
+        if not cap.get("isolated") or not cap.get("execution"):
+            raise ValueError("Selected Grok account has no subscription execution adapter with verified isolated account support")
     if surface == "jobs" and family == "chatgpt" and not connection["native_default"]:
         raise ValueError("The Codex one-shot adapter cannot execute an isolated account; choose its existing native default explicitly")
     if check_capacity:
@@ -578,15 +639,16 @@ def resolve_quality(family, settings, connection, *, surface="cockpit"):
 
 
 def handle_page(handler, path, body):
+    cookie = handler._local_login_cookie() if hasattr(handler, "_local_login_cookie") else None
     if path == "/setup/install":
         from html import escape
         # The existing installer documentation is code, not user project data.
         content = (Path(__file__).parent / "USER-ONBOARD.md").read_text(encoding="utf-8")
         handler._send_html('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
                            '<title>Anchor installation</title><a href="/setup">Return to Setup</a>'
-                           '<pre style="white-space:pre-wrap;max-width:80ch;margin:24px auto">' + escape(content) + '</pre>')
+                           '<pre style="white-space:pre-wrap;max-width:80ch;margin:24px auto">' + escape(content) + '</pre>', cookie=cookie)
         return
-    handler._send_html((Path(__file__).parent / "static" / "provider-setup.html").read_text(encoding="utf-8"))
+    handler._send_html((Path(__file__).parent / "static" / "provider-setup.html").read_text(encoding="utf-8"), cookie=cookie)
 
 
 def handle_get(handler, path, body):
@@ -639,6 +701,10 @@ def handle_post(handler, path, body):
             if set(body) - {"connection_id", "name", "expected_revision"} or type(body.get("expected_revision")) is not int:
                 raise ValueError("Invalid nickname action")
             out = SERVICE.rename(body)
+        elif path.endswith("/remove"):
+            if set(body) != {"connection_id", "expected_revision"} or type(body.get("expected_revision")) is not int:
+                raise ValueError("Invalid account removal")
+            out = SERVICE.remove(body)
         elif path.endswith("/apply"):
             out = SERVICE.apply(body)
         elif path.endswith("/login"):

@@ -2635,7 +2635,12 @@ def _render_activity_reflection_html(refl: dict) -> str:
     return '<div class="rnd-row-activity">' + "".join(parts) + "</div>"
 
 
-def _steward_status_tile_line(entry: dict, summary=None, age=None) -> str:
+def _steward_status_tile_line(entry: dict) -> str:
+    """Read the persisted cockpit status for one project row."""
+    return _steward_status_tile_line_from_summary(entry)
+
+
+def _steward_status_tile_line_from_summary(entry: dict, summary=None, age=None) -> str:
     """The cockpit's persisted 10-minute status for a project row (steward
     cutover 2026-08-25): ONE targeted stat+read of
     ``<folder>/.ecgberht/status-summary.json`` — the universal file the
@@ -2759,7 +2764,7 @@ def render_project_tile_html(entry: dict, facts=None, chrome: bool = True) -> st
         _facts = facts if isinstance(facts, dict) else _hr.project_facts(entry)
     except Exception:
         _facts = {}
-    _stw_line = _steward_status_tile_line(entry, summary=_facts.get("summary"), age=_facts.get("summary_age_s"))
+    _stw_line = _steward_status_tile_line_from_summary(entry, summary=_facts.get("summary"), age=_facts.get("summary_age_s"))
     if not _stw_line and _facts.get("next"):
         # probe 3 — a named project's next step, from the strip when no status line was persisted
         _stw_line = ("next: " + str(_facts["next"]) + ((" — " + str(_facts["why"])) if _facts.get("why") else ""))[:160]
@@ -22492,6 +22497,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
             return True
         if route.method == "POST":
             return True
+        # Setup is the executable's first host page, so it shares Cave's
+        # local browser login. API routes retain their strict token gate.
+        if route.method == "GET" and route.handler == "handle_provider_setup_page":
+            return self._term_token_ok() or bool(self._local_login_cookie())
         return self._term_token_ok()
 
     def _strangler_dispatch(self, method, path, body=None):

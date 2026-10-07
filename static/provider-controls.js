@@ -23,6 +23,7 @@
   }
   function quality(selects, account, choice) {
     const model=selects.model, effort=selects.effort;
+    model.disabled=effort.disabled=!account || !account.execution.ready;
     model.replaceChildren(); option(model,'latest_supported','Current frontier');
     (account && account.catalog.state==='fresh' ? account.catalog.rows : []).forEach(row=>option(model,row.model,row.model));
     if(choice && !Array.from(model.options).some(o=>o.value===choice.model))option(model,choice.model,choice.model+' · unavailable',true);
@@ -42,7 +43,7 @@
     let draft=JSON.parse(JSON.stringify(data.preferences));
     family.replaceChildren(); Object.keys(labels).forEach(value=>option(family,value,labels[value])); family.value=draft.family || data.default_family;
     function accounts() {
-      const f=family.value; account.replaceChildren(); data.connections.filter(c=>c.family===f).forEach(c=>option(account,c.id,c.name+' · '+(c.mode==='api' ? 'API · execution unready' : c.execution.ready ? 'native subscription' : 'execution unready'),c.mode==='api'));
+      const f=family.value; account.replaceChildren(); data.connections.filter(c=>c.family===f).forEach(c=>option(account,c.id,c.name+' · '+(c.mode==='api' ? 'API · execution unready' : c.execution.ready ? 'native subscription' : 'execution unready'),c.mode==='api' || !c.execution.ready));
       account.value=draft.accounts[f] || f+'-default'; if(!account.value)account.selectedIndex=0;
       qualities();
     }
@@ -66,12 +67,25 @@
     cap.className='provider-capacity '+(account ? account.capacity : 'unknown');
     cap.querySelector('strong').textContent=account ? labels[account.family]+' · '+account.name : 'Provider capacity';
     cap.querySelector('span').textContent=capacityText(account)+(account && account.warning ? ' · '+account.warning : '');
+    let summaries=document.getElementById('cave-account-summaries');
+    if(!summaries){summaries=document.createElement('div');summaries.id='cave-account-summaries';summaries.setAttribute('aria-label','Named account usage');document.getElementById('cave-provider-controls').append(summaries);}
+    summaries.replaceChildren();
+    data.connections.forEach(connection=>{
+      const row=document.createElement('div');row.className='cave-account-summary';row.dataset.accountId=connection.id;
+      const heading=document.createElement('strong'),details=document.createElement('span');
+      const isSelected=connection.id===(data.preferences.accounts[connection.family] || connection.family+'-default');
+      const model=data.preferences.quality[connection.family] && data.preferences.quality[connection.family].model || connection.catalog.selection && connection.catalog.selection.model || 'model unknown';
+      heading.textContent=labels[connection.family]+' · '+connection.name+(isSelected?' · selected':'');
+      details.textContent=model+' · '+capacityText(connection)+' · '+(connection.anchor_observed.tokens===null?'observed usage unknown':connection.anchor_observed.tokens.toLocaleString()+' observed tokens · '+connection.anchor_observed.state)+(connection.mode==='api'?' · API cost '+connection.api_spend.state:'');
+      row.append(heading,details);summaries.append(row);
+    });
   }
   async function load(){try{paint(await request('/api/provider-setup'));message.textContent='Apply affects new work; conversations keep their source.';}catch(error){message.textContent=error.message;}}
   function close(){if(dialog && dialog.open){dialog.close();if(opening)opening.focus();load();}}
   function open(from){
     opening=from;
     if(!dialog){dialog=document.createElement('dialog');dialog.className='provider-dialog';dialog.setAttribute('aria-label','Setup settings');const iframe=document.createElement('iframe');iframe.title='Anchor Setup settings';iframe.src='/setup?embed=1';dialog.append(iframe);document.body.append(dialog);dialog.addEventListener('cancel',()=>{if(opening)opening.focus();load();});}
+    else dialog.querySelector('iframe').contentWindow.postMessage({type:'anchor-setup-open'},location.origin);
     dialog.showModal();
   }
   document.getElementById('setup-gear').addEventListener('click',e=>open(e.currentTarget));

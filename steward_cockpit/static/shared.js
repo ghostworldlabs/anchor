@@ -2272,7 +2272,8 @@ const Proto = (() => {
       if (e.key !== "Enter" || e.isComposing) return;
       // Enter sends (John, 2026-09-04); Shift+Enter keeps a newline; for two seconds after a dictated phrase
       // Enter is the new line Win+H and Siri press for "new line" (John, 2026-09-29: dictation broke into pieces)
-      if (e.shiftKey || Date.now() - _dictatedAt < 2000) return;
+      if (e.shiftKey) return;
+      if (Date.now() - _dictatedAt < 2000) return;
       e.preventDefault(); submit();
     });
     // Dictation is Win+H (2026-08-25, jrnl 0088): the in-page Web Speech mic

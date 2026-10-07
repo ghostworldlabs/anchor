@@ -82,8 +82,8 @@ def account_env(connection):
     env.pop("CODEX_HOME", None)
     if connection["family"] != "grok":
         env.pop("GROK_HOME", None)  # R0-B: another family never inherits the Grok home
-    if connection["family"] in ("claude", "chatgpt"):
-        env["CLAUDE_CONFIG_DIR" if connection["family"] == "claude" else "CODEX_HOME"] = str(account_home(connection))
+    if connection["family"] in NATIVE_HOME_ENV:
+        env[NATIVE_HOME_ENV[connection["family"]]] = str(account_home(connection))
     env["ANCHOR_PROVIDER_CONNECTION"] = connection["id"]
     return env
 
@@ -298,19 +298,57 @@ def allowance_windows(raw):
 def safe_auth_url(value, family):
     if not isinstance(value, str) or len(value) > 4096:
         return None
-    url = urlsplit(value)
+    try:
+        url = urlsplit(value)
+        port = url.port
+    except ValueError:
+        return None
     allowed = {"chatgpt": {"auth.openai.com", "chatgpt.com"},
-               "claude": {"claude.ai", "platform.claude.com", "console.anthropic.com"}}[family]
-    if url.scheme != "https" or url.hostname not in allowed or url.username or url.password or url.port not in (None, 443):
+               "claude": {"claude.ai", "platform.claude.com", "console.anthropic.com"},
+               "grok": {"grok.com", "accounts.x.ai", "auth.x.ai"}}[family]
+    if url.scheme != "https" or url.hostname not in allowed or url.username or url.password or port not in (None, 443):
         return None
     return value
+
+
+
+def masked_identity(value):
+    """Show only a masked email from an allowlisted native account field."""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9._+%-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,20}", value):
+        return None
+    local, domain = value.split("@")
+    return local[0] + "***@" + ".".join(part[0] + "***" for part in domain.split(".") if part)
+
+
+def grok_status(connection):
+    code, raw = run_command([executable("grok"), "auth", "status", "--json"], account_env(connection))
+    try:
+        account = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise NativeError() from None
+    if not isinstance(account, dict) or type(account.get("loggedIn")) is not bool:
+        raise NativeError("unsupported")
+    directory = account.get("configDirectory")
+    if not isinstance(directory, str):
+        raise NativeError("unsupported")
+    try:
+        matches = Path(directory).resolve() == account_home(connection).resolve()
+    except (OSError, ValueError, RuntimeError):
+        raise NativeError("unsupported") from None
+    if not matches:
+        raise NativeError("unsupported")
+    if code not in (0, 1):
+        raise NativeError()
+    return account
 
 
 class NativeProviders:
     def capabilities(self, family):
         binary = executable(family)
         if not binary:
-            return {"installed": False, "state": "unavailable", "version": None, "isolated": False, "login": None}
+            transport = {"claude": "Claude Code", "chatgpt": "Codex", "gemini": "agy", "grok": "Grok"}[family]
+            return {"installed": False, "state": "unavailable", "version": None, "isolated": False, "login": None,
+                    "limit": transport + " CLI is not installed on this mother ship. The existing trusted installation mechanism is required; Setup does not install a replacement."}
         code, version = run_command([binary, "--version"], model_policy.policy_environment())
         match = re.search(r"\b\d+\.\d+\.\d+\b", version)
         out = {"installed": True, "state": "available" if code == 0 else "error",
@@ -352,9 +390,38 @@ class NativeProviders:
             # isolated status resolves the requested directory before login.
             version_tuple = tuple(map(int, match.group().split("."))) if match else ()
             out.update(isolated=version_tuple >= (2, 1, 268), login="browser" if code == 0 and "--claudeai" in help_text else None)
+        elif family == "grok":
+            # Only a CLI advertising these interfaces may be probed. A moving
+            # model catalog or a browser password is never sign-in proof.
+            out.update(status_supported=False, execution=False)
+            code, help_text = run_command([binary, "--help"], model_policy.policy_environment())
+            if code == 0 and re.search(r"(?m)^\s*auth\s", help_text) and "GROK_HOME" in help_text:
+                code, help_text = run_command([binary, "auth", "--help"], model_policy.policy_environment())
+                if code == 0 and all(re.search(r"(?m)^\s*" + command + r"\s", help_text) for command in ("status", "login")):
+                    code, status_help = run_command([binary, "auth", "status", "--help"], model_policy.policy_environment())
+                    login_code, login_help = run_command([binary, "auth", "login", "--help"], model_policy.policy_environment())
+                    if code == 0 and login_code == 0 and "--json" in status_help and "--browser" in login_help:
+                        import provider_settings
+                        with tempfile.TemporaryDirectory(prefix=".provider-grok-", dir=paths.data_dir()) as directory:
+                            probe = provider_settings.new_connection("grok", "Capability probe")
+                            env = account_env(probe)
+                            env["GROK_HOME"] = directory
+                            result, raw = run_command([binary, "auth", "status", "--json"], env)
+                            try:
+                                report = json.loads(raw)
+                                isolated = (result in (0, 1) and isinstance(report, dict)
+                                            and report.get("loggedIn") is False
+                                            and isinstance(report.get("configDirectory"), str)
+                                            and Path(report["configDirectory"]).resolve() == Path(directory).resolve())
+                            except (ValueError, TypeError, OSError, RuntimeError):
+                                isolated = False
+                            out.update(isolated=isolated, login="browser" if isolated else None,
+                                       execution=isolated, status_supported=isolated)
+            if not out["isolated"]:
+                out["limit"] = "Requires installed Grok auth status --json, auth login --browser and documented GROK_HOME isolation, with configDirectory and subscription billing attribution. Existing Grok sign-in is retained."
         else:
-            out["limit"] = ("This Grok CLI has no verified read-only account status or isolated credential home for Setup. Existing login remains intact."
-                            if family == "grok" else "The installed agy transport has no verified account/status or terminal-free enrollment interface. Existing native login remains intact.")
+            out.update(status_supported=False, execution=False,
+                       limit="Existing Google Ultra uses the agy CLI. agy must expose a passive account/status report and isolated browser enrollment before Setup can verify or add a subscription. No IDE or replacement CLI is required.")
         return out
 
     def observe(self, connection):
@@ -368,6 +435,7 @@ class NativeProviders:
                 subscription = isinstance(account, dict) and account.get("type") == "chatgpt"
                 out = {"auth": "signed_in" if subscription else "different_billing_mode" if account else "signed_out",
                        "test": "passed" if subscription else "not_tested", "auth_source": "Codex account/read",
+                       "account_identity": masked_identity(account.get("email")) if subscription else None,
                        "allowance": {"state": "unknown", "source": "Codex account/rateLimits/read", "windows": []},
                        "provider_usage": {"state": "unknown", "source": "Codex account/usage/read", "tokens": None}}
                 if subscription:
@@ -393,37 +461,41 @@ class NativeProviders:
                 account = json.loads(raw)
             except (ValueError, RecursionError):
                 raise NativeError() from None
+            if not isinstance(account, dict):
+                raise NativeError()
             if not connection["native_default"]:
-                if Path(account.get("configDirectory") or "").resolve() != account_home(connection).resolve():
+                directory = account.get("configDirectory")
+                if not isinstance(directory, str) or not directory:
+                    raise NativeError("unsupported")
+                try:
+                    matches = Path(directory).resolve() == account_home(connection).resolve()
+                except (OSError, ValueError, RuntimeError):
+                    matches = False
+                if not matches:
                     raise NativeError("unsupported")
             subscription = account.get("loggedIn") is True and account.get("authMethod") == "claude.ai"
             state = "signed_in" if subscription and code == 0 else "different_billing_mode" if account.get("loggedIn") else "signed_out" if code in (0, 1) else "error"
             return {"auth": state, "test": "passed" if state == "signed_in" else "not_tested", "auth_source": "claude auth status",
+                    "account_identity": masked_identity(account.get("email")),
                     "allowance": {"state": "unsupported", "source": "Account-qualified Claude rate_limit_event", "windows": []},
                     "provider_usage": {"state": "unsupported", "source": "Native CLI", "tokens": None}}
-        if family == "gemini":
-            # agy has no account/status command and `agy models` answers without signing in, so the only proof of a
-            # live Antigravity login is one tiny turn on the cheapest Gemini (2026-10-07: ~2 s). Run only on refresh.
-            import tempfile
-            with tempfile.TemporaryDirectory(prefix="agy-auth-") as scratch:
-                log = Path(scratch) / "agy.log"
-                code, raw = run_command([executable(family), "--output-format", "json", "--log-file", str(log),
-                                         "--model", "gemini-3.8-flash-low", "-p=Reply with exactly: OK"], env, timeout=90)
-                try:
-                    log_text = log.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    log_text = ""
-            try:
-                result = json.loads(raw.strip().splitlines()[-1]) if raw.strip() else {}
-            except (ValueError, RecursionError):
-                result = {}
-            result = result.get("result", result) if isinstance(result, dict) else {}
-            signed = "authenticated successfully" in log_text
-            ok = code == 0 and signed and isinstance(result, dict) and result.get("status") == "SUCCESS"
-            state = "signed_in" if ok else "signed_out" if not signed else "error"
-            return {"auth": state, "test": "passed" if ok else "failed", "auth_source": "agy print turn (Antigravity keyring login)",
-                    "allowance": {"state": "unsupported", "source": "agy exposes no allowance", "windows": []},
+        if family == "grok":
+            cap = self.capabilities(family)
+            if not cap.get("status_supported"):
+                raise NativeError("unsupported")
+            account = grok_status(connection)
+            subscription = account.get("loggedIn") and account.get("billingMode") == "subscription"
+            state = "signed_in" if subscription else "different_billing_mode" if account.get("loggedIn") else "signed_out"
+            return {"auth": state, "test": "passed" if subscription else "not_tested",
+                    "auth_source": "Grok auth status --json", "account_identity": masked_identity(account.get("email")),
+                    "allowance": {"state": "unsupported", "source": "Grok exposes no verified allowance report", "windows": []},
                     "provider_usage": {"state": "unsupported", "source": "Native CLI", "tokens": None}}
+        if family == "gemini":
+            # A model catalog is not authentication proof. Never submit a turn
+            # from a display/status refresh, including against the existing agy login.
+            return {"auth": "unknown", "test": "not_tested", "auth_source": "Existing Google Ultra connection via agy CLI",
+                    "allowance": {"state": "unsupported", "source": "agy has no passive allowance report", "windows": []},
+                    "provider_usage": {"state": "unsupported", "source": "agy has no passive usage report", "tokens": None}}
         raise NativeError("unsupported")
 
     def login(self, connection, cancel, progress):
@@ -480,6 +552,22 @@ class NativeProviders:
                         progress({"state": "awaiting_browser", "url": url,
                                   "message": "Complete native Claude sign-in in the browser on the mother ship. Remote callbacks must return there."})
             code, _ = run_command([executable(family), "auth", "login", "--claudeai"], account_env(connection),
+                                  cancel, LOGIN_TIMEOUT, line_progress)
+            if code:
+                raise NativeError()
+            return
+        if family == "grok":
+            cap = self.capabilities(family)
+            if not cap.get("isolated") or not cap.get("login"):
+                raise NativeError("unsupported")
+            self.observe(connection)
+            def line_progress(line):
+                for candidate in re.findall(r"https://[^\s<>]+", line):
+                    url = safe_auth_url(candidate.rstrip(".,)"), family)
+                    if url:
+                        progress({"state": "awaiting_browser", "url": url,
+                                  "message": "Complete Grok subscription sign-in in the provider browser. Native credentials stay on this mother ship."})
+            code, _ = run_command([executable(family), "auth", "login", "--browser"], account_env(connection),
                                   cancel, LOGIN_TIMEOUT, line_progress)
             if code:
                 raise NativeError()

@@ -47,7 +47,13 @@ def normalize(text):
         return None, "Type your mother ship's address."
     if "://" not in t:
         t = "https://" + t
-    parts = urlsplit(t)
+    try:
+        parts = urlsplit(t)
+        port = parts.port
+    except ValueError:
+        return None, "That address is invalid."
+    if parts.username or parts.password:
+        return None, "Use the mother ship HTTPS address without embedded credentials."
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None, "That doesn't look like an address. Example only: " + EXAMPLE
     if parts.hostname.rstrip(".") == urlsplit(EXAMPLE).hostname:
@@ -72,8 +78,8 @@ def choose(data_dir, override=""):
     """The address to open now: an explicit one, local Anchor, else the saved one ('' = ask for an address)."""
     if override:
         return override
-    if reachable(LOCAL, timeout=1.5):
-        return LOCAL
+    # First launch must choose this host or its existing mother ship before
+    # provider work. A returning client must never drift to a local service.
     return load_address(data_dir)
 
 
@@ -127,3 +133,42 @@ def offline_page(address):
 <div class="row"><button class="btn go" onclick="act('retry')">Retry</button>
 <button class="btn" onclick="act('change_address')">Change address</button></div>
 <div class="msg" id="msg"></div></div></main>%s</body></html>""" % (_STYLE, _BAR, html.escape(address), _SCRIPT)
+
+
+def first_launch_page():
+    return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anchor setup</title>%s</head><body>%s<main><div class="card">
+<h1>Choose your mother ship first</h1>
+<p>Your mother ship keeps your provider accounts and runs your work. A connected computer uses those same accounts.</p>
+<div class="row"><button id="choose-mother-ship" class="btn go" onclick="act('select_mother_ship')">This computer is my mother ship</button>
+<button id="choose-existing-host" class="btn" onclick="act('change_address')">Connect to my existing mother ship</button></div>
+<p class="example">An existing host connects through its secure Tailscale HTTPS address and Anchor pairing. Provider credentials stay there.</p>
+<div class="msg" id="msg"></div></div></main>%s</body></html>""" % (_STYLE, _BAR, _SCRIPT)
+
+
+def installation_state(package_root, which_fn=None):
+    # Reuse the existing bootstrap's decisions; the client-only executable
+    # has no bundled server installer or authenticated distribution source.
+    import onboard_bootstrap
+    package = onboard_bootstrap.package_root_has_cold_start(package_root)
+    bootstrap = onboard_bootstrap.bootstrap_plan(which_fn=which_fn)
+    return {"package": package, "bootstrap": bootstrap, "ready": False,
+            "prerequisite": "A trusted complete Anchor/Foundry distribution containing onboard.cmd, onboard.ps1 and share_onboard.py. The standalone Anchor.exe client cannot install a mother ship.",
+            "resume": "Re-run the same package's onboard.cmd after interruption; existing onboarding owns rollback and refuse-to-clobber checks. No completed host choice is saved until Anchor is reachable."}
+
+
+def select_mother_ship(data_dir, package_root, probe_fn=None):
+    probe = probe_fn or reachable
+    if probe(LOCAL):
+        save_address(data_dir, LOCAL)
+        return {"ok": True, "address": LOCAL, "path": "/setup", "installed": False}
+    return {"ok": False, "installation": installation_state(package_root)}
+
+
+def installation_page(package_root):
+    state = installation_state(package_root)
+    missing = ", ".join(state["package"]["missing"]) or "Trusted source and completed service installation"
+    return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anchor host installation</title>%s</head><body>%s<main><div class="card">
+<h1>Install your mother ship</h1><p>%s</p><p>Required package files: <code>%s</code>.</p>
+<p>%s</p><div class="row"><button id="retry-host-setup" class="btn go" onclick="act('select_mother_ship')">Check installed mother ship</button>
+<button class="btn" onclick="act('change_address')">Connect to an existing host instead</button></div><div class="msg" id="msg"></div></div></main>%s</body></html>""" % (
+        _STYLE, _BAR, html.escape(state["prerequisite"]), html.escape(missing), html.escape(state["resume"]), _SCRIPT)

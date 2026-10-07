@@ -150,20 +150,22 @@ class LookThroughTest(unittest.TestCase):
         self.assertIn("slice ▶", st["project"]["parts"])
         self.assertTrue(st["project"]["brief"].startswith("An on-topic corpus"))
 
-    def test_eta_is_the_length_of_the_current_slice_when_no_run_carries_one(self):
+    def test_missing_run_or_receipt_keeps_eta_explicitly_unavailable(self):
         td = tempfile.mkdtemp(prefix="stw-eta-")
         _campaign(td, active_started_min_ago=20, with_log=False)
         st = campaign.compose_status(td, {"busy": True})
         self.assertEqual(st["running"]["kind"], "steward")
         self.assertEqual(st["now"][0], "steward mid-turn")
-        self.assertEqual(st["tests"], "")
-        self.assertIn("min left of a ~45 min slice", st["eta"])
-        self.assertIn("estimate", st["eta"])
-        # past the typical length the ETA says so instead of "0 min left"
+        self.assertEqual(st["tests"], "Unavailable \u2014 no check receipt for the current work and session")
+        self.assertEqual(st["evidence"]["checks"], [])
+        self.assertEqual(st["eta"], "Unavailable \u2014 no current estimate")
+        self.assertEqual(st["evidence"]["eta"]["state"], "unavailable")
+        # Elapsed roadmap time alone is not evidence of a running build.
         td3 = tempfile.mkdtemp(prefix="stw-over-")
         _campaign(td3, active_started_min_ago=70, with_log=False)
         st3 = campaign.compose_status(td3, {"busy": True})
-        self.assertTrue(st3["eta"].startswith("over the ~45 min typical for a slice"), st3["eta"])
+        self.assertEqual(st3["eta"], "Unavailable \u2014 no current estimate")
+        self.assertEqual(st3["evidence"]["eta"]["state"], "unavailable")
         # a stale log is not a running skill
         td2 = tempfile.mkdtemp(prefix="stw-stale-")
         _campaign(td2, with_log=True, log_age_s=2000)
@@ -182,8 +184,10 @@ class LookThroughTest(unittest.TestCase):
         self.assertEqual(campaign._real_wait("None."), "")
         self.assertEqual(campaign._real_wait("your look at the draft"), "your look at the draft")
         self.assertIn("Foreman build finished", st["now"][0])
-        self.assertEqual(st["tests"], "")
-        self.assertIn("~45 min slice", st["eta"])    # the slice estimate, not the run's
+        self.assertEqual(st["tests"], "Unavailable \u2014 no check receipt for the current work and session")
+        self.assertEqual(st["evidence"]["checks"], [])
+        self.assertEqual(st["eta"], "Unavailable \u2014 no current estimate")
+        self.assertEqual(st["evidence"]["eta"]["state"], "unavailable")
 
     def test_the_pane_and_the_top_bar_read_the_new_shape(self):
         js = (STATIC / "shared.js").read_text(encoding="utf-8")

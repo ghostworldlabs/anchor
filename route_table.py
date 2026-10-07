@@ -420,6 +420,7 @@ ROUTES = [
     _r("POST", "/api/provider-setup/accounts", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
     _r("POST", "/api/provider-setup/initialize", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
     _r("POST", "/api/provider-setup/rename", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
+    _r("POST", "/api/provider-setup/remove", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
     _r("POST", "/api/provider-setup/apply", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
     _r("POST", "/api/provider-setup/login", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),
     _r("POST", "/api/provider-setup/cancel", AUTH_TOKEN, handler="handle_provider_setup_post", migrated=True),

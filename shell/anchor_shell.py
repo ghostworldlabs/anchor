@@ -229,6 +229,17 @@ class HostApi:
         self._open(address)
         return ""
 
+    def select_mother_ship(self):
+        import connect
+        result = connect.select_mother_ship(DATA, ROOT)
+        if not result["ok"]:
+            self._show(connect.installation_page(ROOT))
+            return ""
+        self._address = result["address"]
+        self._html = ""
+        self._window.load_url(self._address + result["path"])
+        return ""
+
     def retry(self):
         import connect
         if connect.reachable(self._address):
@@ -291,7 +302,7 @@ def main(argv=None):
     address = "" if args.setup else connect.choose(DATA, args.url.rstrip("/").replace(connect.APP_PATH, ""))
     host._address = address or connect.load_address(DATA)
     if not address:
-        host._html = connect.setup_page(host._address)
+        host._html = connect.setup_page(host._address) if host._address else connect.first_launch_page()
         page = dict(html=host._html)
     elif address != connect.LOCAL and not connect.reachable(address):
         host._html = connect.offline_page(address)

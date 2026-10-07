@@ -161,7 +161,7 @@ def status_facts(effort="", summary="", doing="", status="", tests="",
         ("ETA", eta),
         ("To do", todo),
     )
-    return [{"label": label, "value": one_line(value) or "—"} for label, value in rows]
+    return [{"label": label, "value": one_line(value, limit=400 if label == "ETA" else 110) or "—"} for label, value in rows]
 
 
 def _goal_md(text: str):
@@ -1214,7 +1214,7 @@ def _local_status_evidence(campaign_dir, m, engine_state, step):
 
     def epoch(value):
         try:
-            return _parse_epoch(value) if value else None
+            return _job_epoch(value) if value else None
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -1387,6 +1387,216 @@ def project_line(m):
             "steps_total": m.get("steps_total", 0)}
 
 
+
+def _job_epoch(value):
+    """A finite timestamp; booleans and malformed native evidence are not time."""
+    import math
+    if isinstance(value, bool):
+        return None
+    try:
+        epoch = _parse_epoch(value)
+        if epoch is None or not math.isfinite(epoch) or epoch <= 0:
+            return None
+        time.localtime(epoch)  # Native clocks must also be representable here.
+        return epoch
+    except (OSError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _code_job_native(record, now):
+    """Bounded reads of this job's existing Foreman files, without waking work."""
+    phase = "build" if record["status"] == "running" else record["status"]
+    out = {"phase": phase, "phase_at": record.get("started_epoch"), "observed_at": None,
+           "estimates": [record.get("eta")], "stopped": False}
+    identity, worktree = record["id"], record.get("worktree")
+    if not worktree or not re.fullmatch(r"[A-Za-z0-9_-]+", identity):
+        return out
+    try:
+        root = Path(worktree).resolve()
+        if root.name != identity:
+            return out
+    except (OSError, TypeError, ValueError, RuntimeError):
+        return out
+
+    def read(name):
+        try:
+            path = (root / name).resolve()
+            path.relative_to(root)
+            mt = path.stat().st_mtime
+            if mt > now + 60 or (record.get("started_epoch") and mt < record["started_epoch"] - 5):
+                return "", None
+            with path.open("rb") as stream:
+                stream.seek(max(0, path.stat().st_size - 20000))
+                return stream.read(20000).decode("utf-8", errors="replace"), mt
+        except (OSError, TypeError, ValueError, RuntimeError):
+            return "", None
+
+    def obj(name):
+        text, mt = read(name)
+        try:
+            value = json.loads(text)
+            return (value, mt) if isinstance(value, dict) else ({}, None)
+        except (ValueError, RecursionError):
+            return {}, None
+
+    # The job writer puts its exact id in this plan; inherited repository logs
+    # and a different effort's worktree are not this job's evidence.
+    plan, _ = read(".foreman-job/IMPLEMENTATION-PLAN.md")
+    if not plan.startswith("# Code job " + identity + " - "):
+        return out
+    checkpoint, cp_at = obj("foreman-checkpoint.json")
+    if checkpoint:
+        try:
+            bound = Path(checkpoint.get("plan_path", "")).resolve() == (root / ".foreman-job/IMPLEMENTATION-PLAN.md").resolve()
+        except (OSError, TypeError, ValueError, RuntimeError):
+            bound = False
+        if not bound:
+            checkpoint, cp_at = {}, None
+    if str(checkpoint.get("status", "")).lower() in ("done", "failed", "halt", "paused", "stopped", "cancelled", "budget-stop"):
+        out["stopped"] = True
+        return out
+    phases = ("execute", "gate", "review", "fix", "landing", "finishing", "queued")
+    candidates = []
+    if checkpoint.get("intra_wave_step") in phases and cp_at:
+        candidates.append((cp_at, checkpoint["intra_wave_step"], cp_at))
+    waiting, _ = obj(".foreman/waiting-on.json")
+    wait_at = _job_epoch(waiting.get("ts"))
+    if waiting.get("label") in phases and wait_at and wait_at <= now + 60:
+        if not record.get("started_epoch") or wait_at >= record["started_epoch"]:
+            minutes = waiting.get("minutes")
+            import math
+            if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and math.isfinite(minutes) and 0 <= minutes <= 24 * 60:
+                phase_at = wait_at - minutes * 60
+            elif checkpoint.get("intra_wave_step") == waiting["label"] and cp_at:
+                phase_at = cp_at
+            else:
+                phase_at = wait_at
+            if not record.get("started_epoch") or phase_at >= record["started_epoch"] - 60:
+                candidates.append((wait_at, waiting["label"], phase_at))
+    if candidates and record["status"] == "running":
+        observed_at, phase, phase_at = max(candidates)
+        out.update(phase=phase, phase_at=phase_at, observed_at=observed_at)
+    heartbeat, _ = obj(".foreman/heartbeat.json")
+    hb_at = _job_epoch(heartbeat.get("ts"))
+    if heartbeat.get("alive") is False and hb_at and hb_at <= now + 60:
+        if not record.get("started_epoch") or hb_at >= record["started_epoch"]:
+            out["stopped"] = True
+            return out
+    if heartbeat.get("alive") is True and hb_at and hb_at <= now + 60:
+        if not record.get("started_epoch") or hb_at >= record["started_epoch"]:
+            out["observed_at"] = max(out.get("observed_at") or 0, hb_at)
+    text, log_at = read("_foreman-status.log")
+    parsed = parse_status_table(text)
+    title = str(((parsed or {}).get("head") or {}).get("title") or "")
+    if not title.endswith(" \u00b7 " + identity):
+        parsed = None
+    if parsed and (parsed.get("head") or {}).get("tick") == "final":
+        out["stopped"] = True
+        return out
+    # Native pace is a finish forecast. The runner's timeout/cap is never read.
+    eta = (parsed or {}).get("rows", {}).get("eta", "")
+    match = re.fullmatch(r"~?(\d+(?:\.\d+)?)m to run end \(pace estimate\)", eta.strip())
+    if match and log_at and 0 < float(match[1]) <= 24 * 60:
+        # Waiting lines update mtime; they do not renew the preceding table's
+        # forecast. Resolve the table's own wall clock against the log's date.
+        head = parsed.get("head") or {}
+        clock = head.get("at")
+        tick = re.fullmatch(r"t\+(?:(\d+)h(?:(\d+)m)?|(\d+)m)", head.get("tick", ""))
+        reference = log_at
+        if tick and record.get("started_epoch"):
+            reference = record["started_epoch"] + (int(tick[1] or 0) * 60 + int(tick[2] or tick[3] or 0)) * 60
+        table_at = _job_epoch(time.strftime("%Y-%m-%d", time.localtime(reference)) + "T" + str(clock) + ":00")
+        if table_at and table_at > log_at + 60:
+            table_at = _job_epoch(time.strftime("%Y-%m-%d", time.localtime(reference - 86400)) + "T" + str(clock) + ":00")
+        if table_at and (not record.get("started_epoch") or table_at >= record["started_epoch"] - 60):
+            doing = parsed["rows"].get("doing", "")
+            log_phase = next((p for p in phases if re.search(r"\b" + p + r"\b", doing)), out["phase"])
+            out["estimates"].append({"at": table_at + float(match[1]) * 60, "estimated_at": table_at,
+                                     "basis": "native completed-pass pace", "phase": log_phase,
+                                     "job_id": identity})
+    return out
+
+
+def _code_job_eta(job, now=None):
+    """One current-job forecast for every existing status consumer."""
+    now = time.time() if now is None else now
+    observed = job["native"]
+    if observed["stopped"]:
+        return "", {"state": "unavailable", "source": "code_job", "job_id": job["id"]}
+    phase = observed["phase"]
+    elapsed = job.get("minutes")
+    elapsed_text = "%dm elapsed" % elapsed if elapsed is not None else "elapsed unknown"
+    def estimated_at(value):
+        return (_job_epoch(value.get("estimated_at") or value.get("as_of")) or 0) if isinstance(value, dict) else 0
+
+    native, reason, lower, upper, basis = False, "", None, None, ""
+    first_reason = ""
+    candidates = [value for value in observed["estimates"] if value is not None]
+    for estimate in sorted(candidates, key=estimated_at, reverse=True):
+        reason = ""
+        lower = upper = None
+        basis = ""
+        if isinstance(estimate, dict):
+            at = _job_epoch(estimate.get("estimated_at") or estimate.get("as_of"))
+            lower = _job_epoch(estimate.get("earliest_at", estimate.get("at")))
+            upper = _job_epoch(estimate.get("latest_at", estimate.get("at")))
+            basis = estimate.get("basis")
+            if (estimate.get("job_id", job["id"]) != job["id"]
+                    or estimate.get("phase", phase) != phase):
+                reason = "estimate ownership/phase changed"
+            elif (at is None or at > now + 60 or (job.get("started_epoch") and at < job["started_epoch"])
+                  or lower is None or upper is None or lower > upper or lower < at
+                  or upper > now + 24 * 3600 or not isinstance(basis, str) or not basis.strip()):
+                reason = "native estimate invalid"
+            elif now - at > 15 * 60:
+                reason = "native estimate stale"
+            elif upper <= now:
+                reason = "native estimate exceeded"
+            else:
+                lower = max(now, lower)
+                basis = one_line(basis)[:120]
+        elif estimate is not None:
+            reason = "native estimate invalid"
+        native = bool(lower is not None and upper is not None and not reason)
+        if native:
+            break
+        first_reason = first_reason or reason
+    if not native:
+        reason = first_reason or reason
+        # Remaining-work assumptions, not an operational child timeout or a
+        # roadmap-step count. Review/fixes may extend these provisional windows.
+        lo, hi = {"queued": (30, 90), "execute": (20, 60), "build": (20, 60),
+                  "gate": (15, 45), "review": (10, 40), "fix": (20, 60),
+                  "landing": (5, 15), "finishing": (5, 15)}.get(phase, (20, 60))
+        phase_at = observed.get("phase_at") or now
+        lower, upper = max(now, phase_at + lo * 60), phase_at + hi * 60
+        if upper <= now:
+            reason = reason or "phase window exceeded"
+        freshness = observed.get("observed_at")
+        if freshness and now - freshness > 15 * 60:
+            reason = reason or "phase evidence stale"
+        if reason:
+            lower, upper = now + lo * 60, now + hi * 60
+        basis = "phase allowance including checks/review; fixes may extend; no measured pass pace"
+        at = now
+    point_range = native and "earliest_at" not in estimate and "latest_at" not in estimate
+    if point_range:
+        lower, upper = max(now, lower - 5 * 60), upper + 5 * 60
+        basis += "; +/-5m presentation range assumed"
+    stamp = time.strftime("%H:%M", time.localtime(at))
+    window = time.strftime("%H:%M", time.localtime(lower)) + "-" + time.strftime("%H:%M", time.localtime(upper))
+    qualifier = ("; " + reason + ", rebased") if reason else ""
+    assumption = ("native forecast +/-5m assumed" if point_range else "native forecast") if native else "checks/review/fixes assumed"
+    text = "Provisional job %s finish %s; %s, %s; as of %s; %s%s" % (
+        job["id"], window, phase, elapsed_text, stamp, assumption, qualifier)
+    source = {"state": "provisional", "source": "code_job", "job_id": job["id"],
+              "record": ".ecgberht/code-jobs.json", "phase": phase,
+              "observed_at": observed.get("observed_at"), "phase_at": observed.get("phase_at"), "estimated_at": at,
+              "earliest_at": lower, "latest_at": upper, "elapsed_minutes": elapsed,
+              "basis": basis, "native": native, "qualification": reason, "value": text}
+    return text, source
+
+
 def running_code_jobs(campaign_dir):
     """The code jobs this steward commissioned that are still running, observed from its own job record (2026-10-05, his
     word: the status updates "don't seem to be congruent with what's actually happening" - a job ran for an hour while
@@ -1396,23 +1606,36 @@ def running_code_jobs(campaign_dir):
     except (OSError, ValueError):
         return []
     rows = raw if isinstance(raw, list) else (raw.get("jobs") or list(raw.values()) if isinstance(raw, dict) else [])
+    rows = list(rows.values()) if isinstance(rows, dict) else rows
+    if not isinstance(rows, list):
+        return []
     out = []
     for r in rows:
-        if not isinstance(r, dict) or str(r.get("status")) not in ("running", "landing", "queued"):
+        if not isinstance(r, dict) or str(r.get("status")) not in ("running", "finishing", "landing", "queued"):
             continue
+        if r.get("finished") or not isinstance(r.get("id"), str) or not r["id"].strip():
+            continue
+        if r.get("steward_dir"):
+            try:
+                if Path(r["steward_dir"]).resolve() != Path(campaign_dir).resolve():
+                    continue
+            except (OSError, TypeError, ValueError, RuntimeError):
+                continue
         title = ""
         for line in str(r.get("brief") or "").splitlines():
             line = line.strip().lstrip("#").strip()
             if line:
                 title = line[len("Work order:"):].strip() if line.lower().startswith("work order:") else line
                 break
-        minutes = None
-        try:
-            minutes = int(max(0.0, time.time() - time.mktime(time.strptime(str(r.get("started"))[:19], "%Y-%m-%d %H:%M:%S"))) // 60)
-        except (ValueError, OverflowError):
-            pass
-        out.append({"id": str(r.get("id") or ""), "title": title[:120] or "a code job", "minutes": minutes,
-                    "status": str(r.get("status"))})
+        now = time.time()
+        started = _job_epoch(r.get("started"))
+        if started and started > now + 60:
+            started = None
+        minutes = int(max(0, now - started) // 60) if started else None
+        job = {**r, "id": str(r.get("id") or ""), "title": title[:120] or "a code job",
+               "minutes": minutes, "started_epoch": started, "status": str(r.get("status"))}
+        job["native"] = _code_job_native(job, now)
+        out.append(job)
     return list(reversed(out))
 
 
@@ -1425,6 +1648,9 @@ def landed_not_live(campaign_dir):
     except Exception:
         return []
     rows = raw if isinstance(raw, list) else (raw.get("jobs") or list(raw.values()) if isinstance(raw, dict) else [])
+    rows = list(rows.values()) if isinstance(rows, dict) else rows
+    if not isinstance(rows, list):
+        return []
     today = time.strftime("%Y-%m-%d")
     out = []
     for r in rows:
@@ -1481,7 +1707,7 @@ def compose_status(campaign_dir: str, engine_state=None):
                    "age": ("%d min" % jobs[0]["minutes"]) if jobs[0]["minutes"] is not None else ""}
     # THE LOOK-THROUGH: the commissioned skill is what is happening;
     # "steward working" is the whole story only when nothing else runs.
-    if look and not look["final"]:
+    if look and not look["final"] and not jobs:
         running = {"kind": "skill", "label": look["label"], "skill": look["skill"],
                    "source": look["source"], "age": look["age"]}
         now_lines.append(look["label"])
@@ -1518,7 +1744,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     elif st.get("queued"):
         now_lines.append("steward idle \u00b7 %d held message(s)" % st["queued"])
     halt = None
-    if look and look["final"] and (look.get("halt_reason") or look.get("limit")):
+    if look and look["final"] and not jobs and (look.get("halt_reason") or look.get("limit")):
         reason = look.get("halt_reason") or blocker_text(look)
         short = reason if len(reason) <= 160 else reason[:159].rsplit(" ", 1)[0] + "\u2026"
         halt = {"skill": look["skill"], "reason": reason, "limit": look.get("limit") or "",
@@ -1616,7 +1842,16 @@ def compose_status(campaign_dir: str, engine_state=None):
         now_lines.append("commissioned without a gate command")
     slice_ = slice_of(m)
     started = _slice_started_epoch(campaign_dir, slice_["id"]) if slice_ else None
-    live_skill = bool(look and not look["final"])
+    live_skill = bool(look and not look["final"] and not jobs)
+    eta, eta_source = local_evidence["eta"], local_evidence["eta_source"]
+    if jobs:
+        eta, eta_source = _code_job_eta(jobs[0])
+        if not eta:
+            eta = "Unavailable - the native job has stopped"
+            eta_source["value"] = eta
+    elif live_skill and look.get("eta"):
+        eta = estimate_eta(slice_, look, started)
+        eta_source = {"state": "available", "source": "live_skill", "skill": look.get("skill")}
     if focus_warning:
         now_lines.append(focus_warning)
     # Meaningful work time is separate from this status/heartbeat timestamp.
@@ -1652,7 +1887,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         procs=" · ".join(seats) if seats else (
             ((running or {}).get("skill") + " (commissioned)") if (running or {}).get("kind") == "skill" else ""),
         journal=local_evidence["journal"],
-        eta=(look.get("eta") if live_skill and look and look.get("eta") else None) or local_evidence["eta"],
+        eta=eta,
         todo=todo,
     )
     compact = {"activity": doing,
@@ -1666,13 +1901,12 @@ def compose_status(campaign_dir: str, engine_state=None):
            "now": now_lines,
            "running": running,
            "slice": slice_,
-           "eta": estimate_eta(slice_, look, started) if live_skill and look.get("eta") else local_evidence["eta"],
+           "eta": eta,
            "tests": (look.get("tests") or local_evidence["tests"]) if live_skill else local_evidence["tests"],
            "journal": local_evidence["journal"],
            "evidence": {"source": local_evidence["source"], "checks": local_evidence["checks"],
                         "journal": local_evidence["journal_source"],
-                        "eta": {"state": "available", "source": "live_skill", "skill": look.get("skill")}
-                               if live_skill and look.get("eta") else local_evidence["eta_source"]},
+                        "eta": eta_source},
            "focus_warning": focus_warning,
            "next_bullets": next_bullets(next_text),
            "project": project_line(m),

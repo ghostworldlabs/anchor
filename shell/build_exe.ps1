@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw "pip install pyinstaller failed" }
 & $py -m PyInstaller --noconfirm --clean --onedir --windowed --name Anchor `
     --icon $icon --add-data "$icon;." `
     --paths (Join-Path $root "shell") `
-    --collect-all webview --hidden-import clr --hidden-import connect `
+    --collect-all webview --hidden-import clr --hidden-import connect --hidden-import onboard_bootstrap `
     --distpath $out --workpath $work --specpath $work `
     (Join-Path $root "shell\anchor_shell.py")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
