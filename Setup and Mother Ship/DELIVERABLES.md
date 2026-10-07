@@ -2,7 +2,10 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| Current ecgberht provider implementation plan v2 Refinement 2 PDF - Google Ultra via agy; four-provider account work | `IMPLEMENTATION-PLAN-v2-refinement-2.pdf` | 2026-10-07 | gwl-access |
+| FOR REVIEW ecgberht provider plan v2 Refinement 3 - bounded resolution and testing before activation | `IMPLEMENTATION-PLAN-v2-refinement-3.pdf` | 2026-10-07 | gwl-access |
+| ecgberht provider plan v2 Refinement 3 editable source | `IMPLEMENTATION-PLAN-v2-refinement-3.md` | 2026-10-07 | gwl-access |
+| Foreman provider refinement evidence - landed; unresolved review concerns; not activated | `assurance-2026-10-05/evidence/provider-account-refinement-execute.md` | 2026-10-07 | gwl-access |
+| Previous ecgberht provider implementation plan v2 Refinement 2 PDF - Google Ultra via agy; four-provider account work | `IMPLEMENTATION-PLAN-v2-refinement-2.pdf` | 2026-10-07 | gwl-access |
 | ecgberht provider implementation plan v2 Refinement 2 source - settled sign-in and Google connection | `IMPLEMENTATION-PLAN-v2-refinement-2.md` | 2026-10-07 | gwl-access |
 | Previous ecgberht provider implementation plan v2 Refinement 1 PDF - sign-in accepted; Google identity clarified in Refinement 2 | `IMPLEMENTATION-PLAN-v2-refinement-1.pdf` | 2026-10-07 | gwl-access |
 | ecgberht provider implementation plan v2 Refinement 1 source - cumulative account requirements | `IMPLEMENTATION-PLAN-v2-refinement-1.md` | 2026-10-07 | gwl-access |

@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Recovering preserved provider code and the requested ETA fix after timeout; tests and review remain.
+Provider code landed; seven concerns remain. Plan v2 Refinement 3 awaits John before repair.
 
 ## Why next
 
-Saved edits avoid rebuilding; retain accepted ChatGPT/Grok recovery and required account-isolation assurance.
+John stopped the unrelated Anchor job and requires a visible plan before implementing.
 
 ## Human wait
 
-none
+Approve proposed provider repair plan v2 Refinement 3.
 
 ## Why stakes
 

@@ -1544,6 +1544,64 @@
       "at": "2026-10-07",
       "seq": 95,
       "from": "waiting"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "done_when": "Follow proposed plan v2 Refinement 3: resolve seven retained findings, verify named-account enrollment and execution, preserve existing sessions; wait for John before further implementation."
+      },
+      "at": "2026-10-07",
+      "seq": 96
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "done_when": "Follow plan v2 Refinement 3: prove separate named-account usage-only summaries and new-work model selection in Cave; management stays in Setup, existing conversations preserved."
+      },
+      "at": "2026-10-07",
+      "seq": 97
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-software-review",
+      "fields": {
+        "done_when": "Disposition every retained serious finding with reproductions and independent re-review; controller GO alone does not establish readiness. Follow plan v2 Refinement 3."
+      },
+      "at": "2026-10-07",
+      "seq": 98
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "waiting_on": "Approve bounded resolution and testing plan v2 Refinement 3 before implementation."
+      },
+      "at": "2026-10-07",
+      "seq": 99
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true,
+          "featured_paths": [
+            "IMPLEMENTATION-PLAN-v2-refinement-3.pdf",
+            "IMPLEMENTATION-PLAN-v2-refinement-3.md"
+          ]
+        }
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "John requested the plan before implementing; expose this exact revision."
+      },
+      "seq": 100,
+      "at": "2026-10-07"
     }
   ],
   "roadmap_projection": [
@@ -1577,8 +1635,8 @@
       "id": "gwl-access",
       "name": "Connect named provider accounts; Google Ultra uses agy",
       "status": "active",
-      "done_when": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok. John confirms Google Ultra already authenticates agy CLI; retain it without IDE setup or a new Gemini CLI. Keep optional API connections distinct. Prove supported enrollment and routing; return precise unsupported prerequisites. Follow plan v2 Refinement 2.",
-      "waiting_on": null,
+      "done_when": "Follow proposed plan v2 Refinement 3: resolve seven retained findings, verify named-account enrollment and execution, preserve existing sessions; wait for John before further implementation.",
+      "waiting_on": "Approve bounded resolution and testing plan v2 Refinement 3 before implementation.",
       "commissioned_as": null,
       "part": "integrate",
       "gate": null,
@@ -1586,7 +1644,11 @@
         "path": [
           "gwl-setup"
         ],
-        "current": true
+        "current": true,
+        "featured_paths": [
+          "IMPLEMENTATION-PLAN-v2-refinement-3.pdf",
+          "IMPLEMENTATION-PLAN-v2-refinement-3.md"
+        ]
       }
     },
     {
@@ -1615,7 +1677,7 @@
       "id": "gwl-software-review",
       "name": "Independent adversarial review of provider integration",
       "status": "parked",
-      "done_when": "Two substantive independent reviewer responses examine the complete integration and repair; findings have reproductions and disposition, required failure tests pass, and missing or same-family review is not represented as cross-family assurance. Foreman contract confirmation is still required.",
+      "done_when": "Disposition every retained serious finding with reproductions and independent re-review; controller GO alone does not establish readiness. Follow plan v2 Refinement 3.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "rigor",
@@ -1681,7 +1743,7 @@
       "id": "gwl-cave-settings",
       "name": "Show usage-only summaries for each saved account in Cave",
       "status": "active",
-      "done_when": "Lower-left Cave shows only separate named-account usage/allowance/status and account/model selection; no signup or credential/install controls. Show both Claude subscriptions. Gear reopens editable saved accounts in Setup. Disable unavailable models; preserve ongoing sessions. Follow plan v2 Refinement 2 and John feedback efeca945-c130-4ccf-8d23-b32b3fff3d07.",
+      "done_when": "Follow plan v2 Refinement 3: prove separate named-account usage-only summaries and new-work model selection in Cave; management stays in Setup, existing conversations preserved.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
