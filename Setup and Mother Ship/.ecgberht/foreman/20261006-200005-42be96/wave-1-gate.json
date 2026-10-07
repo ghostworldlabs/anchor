@@ -1,0 +1,24 @@
+{
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 0,
+  "command": "python -m pytest -v tests/test_provider_setup_anchor_shell.py tests/test_provider_setup_browser.py",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261006-200005-42be96",
+  "exit_code": 0,
+  "green": true,
+  "gate_class": "GREEN",
+  "timed_out": false,
+  "timeout_ms": 1200000,
+  "progress_pct": null,
+  "gate_ms": 12698,
+  "vacuous_reason": null,
+  "tap": {
+    "tests": 6,
+    "pass": 6,
+    "fail": 0,
+    "skipped": 0,
+    "todo": null
+  },
+  "stdout": "============================= test session starts =============================\r\nplatform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\r\ncachedir: .pytest_cache\r\nrootdir: C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261006-200005-42be96\r\nconfigfile: pyproject.toml\r\nplugins: langsmith-0.8.5, anyio-4.13.0\r\ncollecting ... collected 6 items\r\n\r\ntests/test_provider_setup_anchor_shell.py::test_shell_bar_carries_the_setup_gear_left_of_the_anchor_mark[viewport0] PASSED [ 16%]\r\ntests/test_provider_setup_anchor_shell.py::test_shell_bar_carries_the_setup_gear_left_of_the_anchor_mark[viewport1] PASSED [ 33%]\r\ntests/test_provider_setup_anchor_shell.py::test_shell_gear_opens_the_saved_setup_page_once_and_reuses_it PASSED [ 50%]\r\ntests/test_provider_setup_browser.py::test_setup_cached_page_loads_while_native_refresh_is_busy PASSED [ 66%]\r\ntests/test_provider_setup_browser.py::test_setup_gear_retains_settings_draft_and_cave_controls[viewport0] PASSED [ 83%]\r\ntests/test_provider_setup_browser.py::test_setup_gear_retains_settings_draft_and_cave_controls[viewport1] PASSED [100%]\r\n\r\n============================= 6 passed in 10.79s ==============================\r\n",
+  "stderr": ""
+}

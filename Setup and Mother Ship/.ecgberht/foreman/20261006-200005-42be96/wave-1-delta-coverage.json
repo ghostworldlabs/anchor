@@ -1,0 +1,21 @@
+{
+  "pass": true,
+  "severity": "OK",
+  "uncovered": [],
+  "scanned": {
+    "files": [
+      ".foreman-job/foreman-run.log",
+      "Setup and Mother Ship/assurance-2026-10-05/evidence/anchor-shell-gear-2026-10-06.md",
+      "static/app.css",
+      "static/app.html",
+      "static/app.js",
+      "tests/test_provider_setup_anchor_shell.py"
+    ],
+    "tests": [
+      "tests/test_provider_setup_anchor_shell.py"
+    ]
+  },
+  "detail": "3 surface change(s), each named by a test in this wave",
+  "wave": 1,
+  "at": "2026-10-07T02:33:52.445Z"
+}

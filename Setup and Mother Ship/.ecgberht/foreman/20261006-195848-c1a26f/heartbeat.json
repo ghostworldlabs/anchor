@@ -1,0 +1,8 @@
+{
+  "label": "foreman-run-live",
+  "pid": 11280,
+  "startedAt": "2026-10-07T01:58:50.803Z",
+  "ts": "2026-10-07T01:58:50.804Z",
+  "note": "guards installed",
+  "node": "v26.1.0"
+}

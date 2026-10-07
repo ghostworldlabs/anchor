@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-06 19:35",
-  "status_id": "01791336911240312900",
+  "at": "2026-10-06 20:37",
+  "status_id": "01791340631599211500",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)",
+    "activity": "code job running \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under implementation plan v2. This is an exi (37 min)",
     "latest_event": null,
     "next": [
-      "Provider integration: verify live Setup and laptop"
+      "Repair the missing upper-left Setup"
     ],
     "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Provider integration: verify live Setup and laptop \u2014 Build and integrate the accepted Refinement 2 provider\u2026"
+        "value": "Repair the missing upper-left Setup gear in Anchor \u2014 In the authorized provider integration, wire the\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only."
+        "value": "code job running \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under\u2026"
       },
       {
         "label": "Status",
-        "value": "slice: Provider integration: verify live Setup and laptop \u00b7 0/11 done \u00b7 stale"
+        "value": "integrate: Repair the missing upper-left Setup gear in Anchor \u00b7 0/11 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0015-assurance-live-handoff: Assurance landed and activated; laptop proof follows"
+        "value": "0019-gear-job-reference-guard-recovery: Gear job stopped on an irrelevant parent-repository reference"
       },
       {
         "label": "ETA",
@@ -49,46 +49,46 @@
       },
       {
         "label": "To do",
-        "value": "Provider integration: verify live Setup and laptop"
+        "value": "Repair the missing upper-left Setup"
       }
     ]
   },
-  "lead_line": "Next: Provider integration: verify live Setup and laptop; then Try and refine the working provider surface \u2014 Approved work remains off master after the landing quota failure; current provider seats can recover it.",
+  "lead_line": "Next: Repair the missing upper-left Setup; then Third: organize goals and initiatives on the Star Chart \u2014 John reports it missing; fresh-browser proof does not establish delivery in his existing window.",
   "now": [
-    "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)"
+    "code job running \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under implementation plan v2. This is an exi (37 min)"
   ],
   "running": {
     "kind": "code_job",
-    "label": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)",
+    "label": "code job running \u2014 Repair the approved Setup gear's delivery in John's actual Anchor interface under implementation plan v2. This is an exi (37 min)",
     "skill": "coder",
     "source": ".ecgberht/code-jobs.json",
-    "age": "27 min"
+    "age": "37 min"
   },
   "slice": {
-    "n": 3,
+    "n": 8,
     "total": 11,
-    "id": "gwl-provider-status",
-    "name": "Provider integration: verify live Setup and laptop",
-    "part": "slice",
-    "summary": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login,\u2026",
+    "id": "gwl-cave-settings",
+    "name": "Repair the missing upper-left Setup gear in Anchor",
+    "part": "integrate",
+    "summary": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0015-assurance-live-handoff: Assurance landed and activated; laptop proof follows",
+  "journal": "0019-gear-job-reference-guard-recovery: Gear job stopped on an irrelevant parent-repository reference",
   "evidence": {
     "source": {
       "path": "strip.json",
-      "step_id": "gwl-provider-status",
+      "step_id": "gwl-cave-settings",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0015-assurance-live-handoff.md",
-      "entry_id": "0015-assurance-live-handoff",
-      "at": "2026-10-07T01:08:06Z",
-      "step_id": "gwl-provider-status",
+      "path": "journal/0019-gear-job-reference-guard-recovery.md",
+      "entry_id": "0019-gear-job-reference-guard-recovery",
+      "at": "2026-10-07T02:00:19Z",
+      "step_id": "gwl-cave-settings",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
     },
@@ -98,32 +98,32 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Provider integration: verify live Setup and laptop",
-    "then Try and refine the working provider surface"
+    "Repair the missing upper-left Setup",
+    "then Third: organize goals and initiatives on the Star Chart"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
+    "parts": "slice \u25b6 \u00b7 integrate \u25b6 \u00b7 rigor \u00b7 harden \u00b7 research",
     "steps_done": 0,
     "steps_total": 11
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Recovering the approved provider assurance landing after the subscription limit; work is preserved on its branch.",
+    "text": "Repairing the missing Setup gear in the actual Anchor client; provider assurance and fresh-browser proof already landed.",
     "as_of": "2026-10-06",
     "newest_work": "2026-10-06",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "slice: Provider integration: verify live Setup and laptop",
+    "step": "integrate: Repair the missing upper-left Setup gear in Anchor",
     "steps_done": 0,
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Provider integration: verify live Setup and laptop; then Try and refine the working provider surface",
-    "why": "Approved work remains off master after the landing quota failure; current provider seats can recover it.",
+    "next": "Repair the missing upper-left Setup; then Third: organize goals and initiatives on the Star Chart",
+    "why": "John reports it missing; fresh-browser proof does not establish delivery in his existing window.",
     "attention": "stale",
     "goal_reread": true
   },
@@ -135,7 +135,7 @@
     "rigor: Independent adversarial review of provider integration (parked) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
     "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
-    "integrate: Wire Cave controls and reopen Setup (proposed) \u00b7 no gate",
+    "integrate: Repair the missing upper-left Setup gear in Anchor (active) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
     "harden: Harden provider failures, concurrency and credential boundaries (parked) \u00b7 gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
@@ -233,7 +233,7 @@
             "path": [
               "gwl-setup"
             ],
-            "current": true,
+            "current": false,
             "featured_paths": [
               "IMPLEMENTATION-PLAN-v2.pdf",
               "IMPLEMENTATION-PLAN-v1.md",
@@ -356,8 +356,8 @@
         },
         {
           "id": "gwl-cave-settings",
-          "name": "Wire Cave controls and reopen Setup",
-          "status": "proposed",
+          "name": "Repair the missing upper-left Setup gear in Anchor",
+          "status": "active",
           "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
           "if_then": "",
           "waiting_on": null,
@@ -374,7 +374,8 @@
           "navigation": {
             "path": [
               "gwl-setup"
-            ]
+            ],
+            "current": true
           }
         },
         {
@@ -462,5 +463,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 18
+  "deliverables_count": 21
 }
