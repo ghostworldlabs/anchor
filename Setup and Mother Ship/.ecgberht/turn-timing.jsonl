@@ -19,3 +19,16 @@
 {"at": "2026-10-07T08:06:12", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.4, "first_word_s": 7.2, "turn_s": 218.4, "tools": 11}
 {"at": "2026-10-07T08:23:54", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 29.7, "turn_s": 599.4, "tools": 12}
 {"at": "2026-10-07T08:56:44", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 40.9, "turn_s": 1516.0, "tools": 7}
+{"at": "2026-10-07T10:32:20", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 8.7, "turn_s": 329.8, "tools": 14}
+{"at": "2026-10-07T10:51:12", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 7.0, "turn_s": 155.1, "tools": 5}
+{"at": "2026-10-07T10:57:00", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 6.1, "turn_s": 268.4, "tools": 8}
+{"at": "2026-10-07T11:02:25", "origin": "control", "cli": "gemini", "effort": "high", "queued_s": null, "first_word_s": 7.5, "turn_s": 84.9, "tools": 20}
+{"at": "2026-10-07T11:02:36", "origin": "human", "cli": "gemini", "effort": "high", "queued_s": 85.3, "first_word_s": 5.8, "turn_s": 10.4, "tools": 1}
+{"at": "2026-10-07T11:02:47", "origin": "human", "cli": "gemini", "effort": "high", "queued_s": 0.0, "first_word_s": 5.7, "turn_s": 7.1, "tools": 0}
+{"at": "2026-10-07T11:54:30", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 5.9, "turn_s": 314.6, "tools": 7}
+{"at": "2026-10-07T12:19:37", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 7.2, "turn_s": 130.5, "tools": 3}
+{"at": "2026-10-07T12:25:53", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 11.8, "turn_s": 285.7, "tools": 5}
+{"at": "2026-10-07T12:38:30", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 22.1, "turn_s": 97.1, "tools": 4}
+{"at": "2026-10-07T12:51:43", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 140.0, "first_word_s": 20.8, "turn_s": 540.4, "tools": 8}
+{"at": "2026-10-07T12:58:52", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 541.1, "first_word_s": 31.1, "turn_s": 428.0, "tools": 5}
+{"at": "2026-10-07T13:01:16", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 419.6, "first_word_s": 48.8, "turn_s": 144.2, "tools": 1}

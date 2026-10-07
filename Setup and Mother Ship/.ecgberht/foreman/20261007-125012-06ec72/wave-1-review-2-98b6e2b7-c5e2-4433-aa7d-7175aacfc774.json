@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 2,
+  "round_id": "98b6e2b7-c5e2-4433-aa7d-7175aacfc774",
+  "phase": "skipped",
+  "review_status": "skipped-red-gate",
+  "configured_reviewers": 2,
+  "expected_reviewers": [],
+  "completed_reviewers": [],
+  "failed_reviewers": [],
+  "responses": [],
+  "merged_findings": [],
+  "decision": {
+    "go": false,
+    "reason": "gate RED (exit 1, fail 2)",
+    "blocking": []
+  }
+}

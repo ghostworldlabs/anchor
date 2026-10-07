@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-07 08:56",
-  "status_id": "01791385004258130100",
+  "at": "2026-10-07 14:00",
+  "status_id": "01791403216056234000",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - quiet",
+    "activity": "code job running \u2014 Recover the preserved provider implementation; include the requested status ETA correction (70 min)",
     "latest_event": null,
     "next": [
-      "Connect named accounts for Claude,"
+      "Connect named provider accounts"
     ],
     "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Connect named accounts for Claude, ChatGPT, Gemini and Grok \u2014 Provider-owned sign-in launched from Anchor\u2026"
+        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Use provider-owned sign-in and isolated named\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - quiet"
+        "value": "code job running \u2014 Recover the preserved provider implementation; include the requested status ETA\u2026"
       },
       {
         "label": "Status",
-        "value": "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok \u00b7 0/11 done \u00b7 quiet"
+        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "engine-20261007T145644-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s\u2026"
+        "value": "0026-active-job-eta: Active-job ETA correction"
       },
       {
         "label": "ETA",
@@ -49,33 +49,33 @@
       },
       {
         "label": "To do",
-        "value": "Connect named accounts for Claude,"
+        "value": "Connect named provider accounts"
       }
     ]
   },
-  "lead_line": "Next: Connect named accounts for Claude,; then Show authentication and allowance for each named provider account \u2014 Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
+  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Productive code was interrupted; saved source enables focused recovery without duplicate implementation.",
   "now": [
-    "nothing running - quiet"
+    "code job running \u2014 Recover the preserved provider implementation; include the requested status ETA correction (70 min)"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - quiet",
-    "skill": "",
-    "source": "",
-    "age": ""
+    "kind": "code_job",
+    "label": "code job running \u2014 Recover the preserved provider implementation; include the requested status ETA correction (70 min)",
+    "skill": "coder",
+    "source": ".ecgberht/code-jobs.json",
+    "age": "70 min"
   },
   "slice": {
     "n": 2,
     "total": 11,
     "id": "gwl-access",
-    "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+    "name": "Connect named provider accounts; Google Ultra uses agy",
     "part": "integrate",
-    "summary": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an\u2026",
+    "summary": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok.",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "engine-20261007T145644-turn_error: turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1515.9s; idle 900.0s).",
+  "journal": "0026-active-job-eta: Active-job ETA correction",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -85,9 +85,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": null,
-      "entry_id": "engine-20261007T145644-turn_error",
-      "at": "2026-10-07T14:56:44Z",
+      "path": "journal/0026-active-job-eta.md",
+      "entry_id": "0026-active-job-eta",
+      "at": "2026-10-07T18:51:43Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
@@ -98,7 +98,8 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Connect named accounts for Claude,",
+    "Connect named provider accounts",
+    "Google",
     "then Show authentication and allowance for each named provider account"
   ],
   "project": {
@@ -110,21 +111,21 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.",
+    "text": "Recovering preserved provider code and the requested ETA fix after timeout; tests and review remain.",
     "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+    "step": "integrate: Connect named provider accounts; Google Ultra uses agy",
     "steps_done": 0,
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Connect named accounts for Claude,; then Show authentication and allowance for each named provider account",
-    "why": "Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
-    "attention": "quiet",
+    "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+    "why": "Productive code was interrupted; saved source enables focused recovery without duplicate implementation.",
+    "attention": "stale",
     "goal_reread": true
   },
   "map": [
@@ -134,8 +135,8 @@
     "slice: Try and refine the working provider surface (proposed) \u00b7 no gate",
     "rigor: Independent adversarial review of provider integration (parked) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
-    "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok (active) \u00b7 no gate",
-    "integrate: Show named account summaries and switching in Cave (active) \u00b7 no gate",
+    "integrate: Connect named provider accounts; Google Ultra uses agy (active) \u00b7 no gate",
+    "integrate: Show usage-only summaries for each saved account in Cave (active) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
     "harden: Harden provider failures, concurrency and credential boundaries (parked) \u00b7 gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
@@ -182,7 +183,7 @@
           "id": "gwl-host-client",
           "name": "First: choose or connect to the mother ship",
           "status": "proposed",
-          "done_when": "On first launch choose this computer as the personal mother ship or connect to an existing personal host through a guided Tailscale and secure pairing-token flow. Install Anchor and Foundry skills only on a new mother ship; client devices use that host.",
+          "done_when": "First Anchor.exe launch chooses this personal mother ship or guided Tailscale secure pairing. Clients reuse host accounts; new hosts use the established trusted Anchor/Foundry installation, automated where supported or one subscription before essential agent help. Prove real bootstrap and interrupted-install recovery.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -332,9 +333,9 @@
       "steps": [
         {
           "id": "gwl-access",
-          "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+          "name": "Connect named provider accounts; Google Ultra uses agy",
           "status": "active",
-          "done_when": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an explicit supported billing route. Preserve existing sign-ins and sessions. Gemini/Google AI versus Antigravity subscription identity remains the adapter prerequisite. Follow plan v2 Refinement 1.",
+          "done_when": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok. John confirms Google Ultra already authenticates agy CLI; retain it without IDE setup or a new Gemini CLI. Keep optional API connections distinct. Prove supported enrollment and routing; return precise unsupported prerequisites. Follow plan v2 Refinement 2.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -356,9 +357,9 @@
         },
         {
           "id": "gwl-cave-settings",
-          "name": "Show named account summaries and switching in Cave",
+          "name": "Show usage-only summaries for each saved account in Cave",
           "status": "active",
-          "done_when": "John confirms Cave gear opens Providers and accepts that placement in turn 113e63ee-c4dd-4a35-9668-7b6b027de92a. Preserve the gear opening existing Setup. In the lower-left sidebar show provider, nickname, account and model/version; switch accounts for new work using the same saved preferences, preserving existing conversations, drafts and full-strength policy.",
+          "done_when": "Lower-left Cave shows only separate named-account usage/allowance/status and account/model selection; no signup or credential/install controls. Show both Claude subscriptions. Gear reopens editable saved accounts in Setup. Disable unavailable models; preserve ongoing sessions. Follow plan v2 Refinement 2 and John feedback efeca945-c130-4ccf-8d23-b32b3fff3d07.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -463,5 +464,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 24
+  "deliverables_count": 26
 }

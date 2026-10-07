@@ -1,0 +1,269 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 3,
+  "round_id": "5084a380-a573-4e1c-a195-25140e47f136",
+  "phase": "complete",
+  "review_status": "completed",
+  "configured_reviewers": 2,
+  "expected_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "completed_reviewers": [
+    "reviewer-1",
+    "reviewer-0"
+  ],
+  "failed_reviewers": [],
+  "responses": [
+    {
+      "seat": "reviewer-1",
+      "reviewer": "reviewer-1",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-1",
+        "answerable": "yes",
+        "note": "Frozen plan line 18 requires a provisional current-job finish range that prefers a valid native estimate. The gate is green, but the native-pace reader cannot see the table the engine actually writes.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "steward_cockpit/steward_campaign.py",
+            "line": 897,
+            "rule": "native-estimate-not-read",
+            "message": "Plan line 18 says prefer a valid native estimate. _STATUS_HEAD requires the header to end in t=0, final, or t+Nm. run-live.mjs emitStatusTable tags only the opening call (line 562, t=0, whose ETA is always 'estimating (no completed wave yet)') and the terminal call (line 637, 'final'). The 10-minute tables that carry '~Nm to run end (pace estimate)' (run-live.mjs:533 and :563) have an empty tag, so the header is '[HH:MM] Foreman build · <job id>' — this run's _foreman-status.log:30. parse_status_table then returns no head, and line 1491 discards the table because the title does not end with the job id. The pace cell is never read. The clock at line 1504 also needs a t+ tick the engine never puts on those tables, so file mtime (moved by later waiting lines) would be the only clock. tests/test_status_code_job_eta.py:320 writes the missing ' · t+10m' itself, so the 176/176 gate does not exercise the engine format."
+          }
+        ]
+      }
+    },
+    {
+      "seat": "reviewer-0",
+      "reviewer": "reviewer-0",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-0",
+        "answerable": "yes",
+        "note": "Wave 1's contract is stated in .foreman-job/IMPLEMENTATION-PLAN.md line 7 and the product plus ETA requirements at lines 16-18; done-when is line 24. Refinement 2 is incorporated by line 14. The gate artifact is green (176/176) and the changed files do implement the wave, so this is not wave-not-implemented.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "shell/anchor_shell.py",
+            "line": 302,
+            "rule": "remote-address-unchecked",
+            "message": "The documented --url flag is passed through connect.choose (shell/connect.py:79-83), which returns the override without connect.normalize. The typed-address path rejects non-local http and embedded userinfo (shell/connect.py:55-63); --url does not, and reachable() then requests that URL. tests/test_setup_first_launch_browser.py only asserts normalize()."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "provider_setup.py",
+            "line": 693,
+            "rule": "post-full-uri-miss",
+            "message": "_strangler_dispatch always hands the handler the full request URI, query included (anchor_gui.py:22527-22532). handle_get routes login with urlsplit(path).path (provider_setup.py:657-658). handle_post still uses path.endswith for initialize, accounts, rename, remove, apply, login, cancel, and api-key (provider_setup.py:693-714). A POST such as /api/provider-setup/apply?token=… matches none of those suffixes and returns Unknown provider action, so the mutation does not run."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "provider_native.py",
+            "line": 496,
+            "rule": "gemini-execution-gated-on-unknown-auth",
+            "message": "Gemini observe always returns auth unknown and does not prove or deny the existing agy login (provider_native.py:493-498). Catalog discovery runs only when auth is signed_in (provider_setup.py:190), and snapshot ready requires signed_in plus a fresh catalog (provider_setup.py:227-233), so the retained Google Ultra account is execution.ready false forever. Cave disables that option (static/provider-controls.js:46) and apply refuses a switch onto it (provider_setup.py:313-317). selected_for_launch still allows the native default (provider_setup.py:609-610), but the user cannot choose that existing account for new work."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "provider_setup.py",
+            "line": 104,
+            "rule": "unchecked-capability-denies-grok",
+            "message": "capability() without refresh returns isolated false and does not probe or store a result (provider_setup.py:104-107). selected_for_launch for an isolated Grok account uses that cold value and raises (provider_setup.py:611-614). Cave loads GET /api/provider-setup without refresh, so after a process start a previously verified isolated Grok subscription cannot be applied or launched until some other request in the same process refreshes capabilities. The error says the adapter is absent, not that it is unchecked."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "provider_native.py",
+            "line": 483,
+            "rule": "grok-status-probed-twice",
+            "message": "refresh() already probes with capability(family, True) and returns unsupported when status_supported is false (provider_setup.py:137 and 157-158). Grok observe ignores that result and calls NativeProviders.capabilities() again (provider_native.py:482-485), repeating help and a disposable auth status before grok_status. A transient second probe raises, the stored observation becomes a failed read, and start_login then refuses sign-in (provider_setup.py:352-357) even when the first probe succeeded."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "steward_cockpit/steward_campaign.py",
+            "line": 1428,
+            "rule": "tail-read-drops-job-evidence",
+            "message": "_code_job_native read() returns only the last 20000 bytes (steward_campaign.py:1428-1430), then requires that slice to start with '# Code job {id} - ' (1444-1446) and json.loads the same tail for foreman-checkpoint.json (1434-1440). A plan or checkpoint larger than that window fails the identity check or parses as empty, so native pace is dropped and a done, failed, or paused checkpoint does not clear the running forecast. This wave's ETA contract is to prefer a valid native estimate and to remove the forecast when the native job has stopped."
+          }
+        ]
+      }
+    }
+  ],
+  "merged_findings": [
+    {
+      "severity": "MAJOR",
+      "file": "shell/anchor_shell.py",
+      "line": 302,
+      "rule": "remote-address-unchecked",
+      "message": "The documented --url flag is passed through connect.choose (shell/connect.py:79-83), which returns the override without connect.normalize. The typed-address path rejects non-local http and embedded userinfo (shell/connect.py:55-63); --url does not, and reachable() then requests that URL. tests/test_setup_first_launch_browser.py only asserts normalize().",
+      "id": "shell/anchor_shell.py:302+remote-address-unchecked",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "shell/anchor_shell.py",
+          "line": 302,
+          "rule": "remote-address-unchecked",
+          "message": "The documented --url flag is passed through connect.choose (shell/connect.py:79-83), which returns the override without connect.normalize. The typed-address path rejects non-local http and embedded userinfo (shell/connect.py:55-63); --url does not, and reachable() then requests that URL. tests/test_setup_first_launch_browser.py only asserts normalize().",
+          "id": "shell/anchor_shell.py:302+remote-address-unchecked",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 693,
+      "rule": "post-full-uri-miss",
+      "message": "_strangler_dispatch always hands the handler the full request URI, query included (anchor_gui.py:22527-22532). handle_get routes login with urlsplit(path).path (provider_setup.py:657-658). handle_post still uses path.endswith for initialize, accounts, rename, remove, apply, login, cancel, and api-key (provider_setup.py:693-714). A POST such as /api/provider-setup/apply?token=… matches none of those suffixes and returns Unknown provider action, so the mutation does not run.",
+      "id": "provider_setup.py:693+post-full-uri-miss",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_setup.py",
+          "line": 693,
+          "rule": "post-full-uri-miss",
+          "message": "_strangler_dispatch always hands the handler the full request URI, query included (anchor_gui.py:22527-22532). handle_get routes login with urlsplit(path).path (provider_setup.py:657-658). handle_post still uses path.endswith for initialize, accounts, rename, remove, apply, login, cancel, and api-key (provider_setup.py:693-714). A POST such as /api/provider-setup/apply?token=… matches none of those suffixes and returns Unknown provider action, so the mutation does not run.",
+          "id": "provider_setup.py:693+post-full-uri-miss",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 496,
+      "rule": "gemini-execution-gated-on-unknown-auth",
+      "message": "Gemini observe always returns auth unknown and does not prove or deny the existing agy login (provider_native.py:493-498). Catalog discovery runs only when auth is signed_in (provider_setup.py:190), and snapshot ready requires signed_in plus a fresh catalog (provider_setup.py:227-233), so the retained Google Ultra account is execution.ready false forever. Cave disables that option (static/provider-controls.js:46) and apply refuses a switch onto it (provider_setup.py:313-317). selected_for_launch still allows the native default (provider_setup.py:609-610), but the user cannot choose that existing account for new work.",
+      "id": "provider_native.py:496+gemini-execution-gated-on-unknown-auth",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_native.py",
+          "line": 496,
+          "rule": "gemini-execution-gated-on-unknown-auth",
+          "message": "Gemini observe always returns auth unknown and does not prove or deny the existing agy login (provider_native.py:493-498). Catalog discovery runs only when auth is signed_in (provider_setup.py:190), and snapshot ready requires signed_in plus a fresh catalog (provider_setup.py:227-233), so the retained Google Ultra account is execution.ready false forever. Cave disables that option (static/provider-controls.js:46) and apply refuses a switch onto it (provider_setup.py:313-317). selected_for_launch still allows the native default (provider_setup.py:609-610), but the user cannot choose that existing account for new work.",
+          "id": "provider_native.py:496+gemini-execution-gated-on-unknown-auth",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_setup.py",
+      "line": 104,
+      "rule": "unchecked-capability-denies-grok",
+      "message": "capability() without refresh returns isolated false and does not probe or store a result (provider_setup.py:104-107). selected_for_launch for an isolated Grok account uses that cold value and raises (provider_setup.py:611-614). Cave loads GET /api/provider-setup without refresh, so after a process start a previously verified isolated Grok subscription cannot be applied or launched until some other request in the same process refreshes capabilities. The error says the adapter is absent, not that it is unchecked.",
+      "id": "provider_setup.py:104+unchecked-capability-denies-grok",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_setup.py",
+          "line": 104,
+          "rule": "unchecked-capability-denies-grok",
+          "message": "capability() without refresh returns isolated false and does not probe or store a result (provider_setup.py:104-107). selected_for_launch for an isolated Grok account uses that cold value and raises (provider_setup.py:611-614). Cave loads GET /api/provider-setup without refresh, so after a process start a previously verified isolated Grok subscription cannot be applied or launched until some other request in the same process refreshes capabilities. The error says the adapter is absent, not that it is unchecked.",
+          "id": "provider_setup.py:104+unchecked-capability-denies-grok",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 483,
+      "rule": "grok-status-probed-twice",
+      "message": "refresh() already probes with capability(family, True) and returns unsupported when status_supported is false (provider_setup.py:137 and 157-158). Grok observe ignores that result and calls NativeProviders.capabilities() again (provider_native.py:482-485), repeating help and a disposable auth status before grok_status. A transient second probe raises, the stored observation becomes a failed read, and start_login then refuses sign-in (provider_setup.py:352-357) even when the first probe succeeded.",
+      "id": "provider_native.py:483+grok-status-probed-twice",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_native.py",
+          "line": 483,
+          "rule": "grok-status-probed-twice",
+          "message": "refresh() already probes with capability(family, True) and returns unsupported when status_supported is false (provider_setup.py:137 and 157-158). Grok observe ignores that result and calls NativeProviders.capabilities() again (provider_native.py:482-485), repeating help and a disposable auth status before grok_status. A transient second probe raises, the stored observation becomes a failed read, and start_login then refuses sign-in (provider_setup.py:352-357) even when the first probe succeeded.",
+          "id": "provider_native.py:483+grok-status-probed-twice",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "steward_cockpit/steward_campaign.py",
+      "line": 1428,
+      "rule": "tail-read-drops-job-evidence",
+      "message": "_code_job_native read() returns only the last 20000 bytes (steward_campaign.py:1428-1430), then requires that slice to start with '# Code job {id} - ' (1444-1446) and json.loads the same tail for foreman-checkpoint.json (1434-1440). A plan or checkpoint larger than that window fails the identity check or parses as empty, so native pace is dropped and a done, failed, or paused checkpoint does not clear the running forecast. This wave's ETA contract is to prefer a valid native estimate and to remove the forecast when the native job has stopped.",
+      "id": "steward_cockpit/steward_campaign.py:1428+tail-read-drops-job-evidence",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "steward_cockpit/steward_campaign.py",
+          "line": 1428,
+          "rule": "tail-read-drops-job-evidence",
+          "message": "_code_job_native read() returns only the last 20000 bytes (steward_campaign.py:1428-1430), then requires that slice to start with '# Code job {id} - ' (1444-1446) and json.loads the same tail for foreman-checkpoint.json (1434-1440). A plan or checkpoint larger than that window fails the identity check or parses as empty, so native pace is dropped and a done, failed, or paused checkpoint does not clear the running forecast. This wave's ETA contract is to prefer a valid native estimate and to remove the forecast when the native job has stopped.",
+          "id": "steward_cockpit/steward_campaign.py:1428+tail-read-drops-job-evidence",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "steward_cockpit/steward_campaign.py",
+      "line": 897,
+      "rule": "native-estimate-not-read",
+      "message": "Plan line 18 says prefer a valid native estimate. _STATUS_HEAD requires the header to end in t=0, final, or t+Nm. run-live.mjs emitStatusTable tags only the opening call (line 562, t=0, whose ETA is always 'estimating (no completed wave yet)') and the terminal call (line 637, 'final'). The 10-minute tables that carry '~Nm to run end (pace estimate)' (run-live.mjs:533 and :563) have an empty tag, so the header is '[HH:MM] Foreman build · <job id>' — this run's _foreman-status.log:30. parse_status_table then returns no head, and line 1491 discards the table because the title does not end with the job id. The pace cell is never read. The clock at line 1504 also needs a t+ tick the engine never puts on those tables, so file mtime (moved by later waiting lines) would be the only clock. tests/test_status_code_job_eta.py:320 writes the missing ' · t+10m' itself, so the 176/176 gate does not exercise the engine format.",
+      "id": "steward_cockpit/steward_campaign.py:897+native-estimate-not-read",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "steward_cockpit/steward_campaign.py",
+          "line": 897,
+          "rule": "native-estimate-not-read",
+          "message": "Plan line 18 says prefer a valid native estimate. _STATUS_HEAD requires the header to end in t=0, final, or t+Nm. run-live.mjs emitStatusTable tags only the opening call (line 562, t=0, whose ETA is always 'estimating (no completed wave yet)') and the terminal call (line 637, 'final'). The 10-minute tables that carry '~Nm to run end (pace estimate)' (run-live.mjs:533 and :563) have an empty tag, so the header is '[HH:MM] Foreman build · <job id>' — this run's _foreman-status.log:30. parse_status_table then returns no head, and line 1491 discards the table because the title does not end with the job id. The pace cell is never read. The clock at line 1504 also needs a t+ tick the engine never puts on those tables, so file mtime (moved by later waiting lines) would be the only clock. tests/test_status_code_job_eta.py:320 writes the missing ' · t+10m' itself, so the 176/176 gate does not exercise the engine format.",
+          "id": "steward_cockpit/steward_campaign.py:897+native-estimate-not-read",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    }
+  ],
+  "decision": {
+    "go": true,
+    "reason": "gate GREEN and no verified blocking finding",
+    "blocking": []
+  }
+}
