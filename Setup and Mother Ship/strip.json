@@ -1123,6 +1123,15 @@
    "path": "journal/0021-provider-sign-in-answer-and-account-refinement.md",
    "entry_id": "0021-provider-sign-in-answer-and-account-refinement",
    "summary": "Provider sign-in settled; account refinement - October 7, 2026"
+  },
+  {
+   "at": "2026-10-07T14:56:44Z",
+   "source": "engine",
+   "step_id": "gwl-access",
+   "session_id": "01a11287-5787-7532-af96-84f668e596cb",
+   "kind": "journal_update",
+   "entry_id": "engine-20261007T145644-turn_error",
+   "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1515.9s; idle 900.0s)."
   }
  ],
  "horizon_source_seq": 89,
