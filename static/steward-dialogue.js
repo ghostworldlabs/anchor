@@ -43,8 +43,14 @@
     function follow(el) {
       if (!el || el._followWired) return el;
       el._followWired = true; el._follow = true;
-      var stick = function () { if (el._follow) el.scrollTop = el.scrollHeight; };
-      el.addEventListener('scroll', function () { el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }, { passive: true });
+      // any upward move of his stops following; only the very bottom resumes it (a near-bottom band re-armed it)
+      var lastTop = el.scrollTop;
+      var stick = function () { if (el._follow) { el.scrollTop = el.scrollHeight; lastTop = el.scrollTop; } };
+      el.addEventListener('scroll', function () {
+        var gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (gap < 4) el._follow = true; else if (el.scrollTop < lastTop - 1) el._follow = false;
+        lastTop = el.scrollTop;
+      }, { passive: true });
       el.addEventListener('wheel', function (e) { if (e.deltaY < 0) el._follow = false; }, { passive: true });
       if (window.ResizeObserver) {
         var ro = new ResizeObserver(stick); ro.observe(el);

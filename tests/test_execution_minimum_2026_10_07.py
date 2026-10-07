@@ -47,6 +47,36 @@ def test_review_acts_one_row_per_product_with_companions():
     assert acts[2]["companions"][0]["item"]["what"] == "Guide - Refinement 1 HTML"
 
 
+def test_grouping_never_merges_different_products_or_versions():
+    items = [
+        {"what": "FOR REVIEW: Summary (PDF)", "path": "a/Summary.pdf", "step": "s1"},
+        {"what": "FOR REVIEW: Summary (PDF)", "path": "b/Summary.pdf", "step": "s1"},          # another folder
+        {"what": "Guide-PDF", "product_id": "Guide-PDF", "managed": True, "phase": "awaiting_review",
+         "round": 2, "path": "deliverables/Guide-PDF/x.pdf", "step": "s1"},
+        {"what": "Guide-HTML", "product_id": "Guide-HTML", "managed": True, "phase": "awaiting_review",
+         "round": 1, "path": "deliverables/Guide-HTML/y.html", "step": "s1"},                  # an older round
+        {"what": "Bank (PDF; held)", "path": "q/Bank.pdf", "step": "s1"},
+        {"what": "Bank (browser; held)", "path": "q/Bank.html", "step": "s1"},
+    ]
+    acts = [a for a in sc.review_acts({}, items) if a["act"] != "Next"]
+    assert len(acts) == 5
+    bank = [a for a in acts if a["label"].startswith("Bank")]
+    assert len(bank) == 1 and bank[0]["label"] == "Bank (held)" and len(bank[0]["companions"]) == 1
+
+
+def test_a_newer_unrelated_product_does_not_hide_an_older_pending_one():
+    step = {"id": "s1", "name": "Step", "status": "active", "navigation": {"current": True, "role": "primary"}}
+    map_ = {"steps": [step]}                                              # the one pinned step is the focus
+    items = [
+        {"what": "Guide - Draft 1", "path": "g/Guide - Draft 1.pdf", "step": "s1", "date": "2026-10-05"},
+        {"what": "Guide - Draft 2", "path": "g/Guide - Draft 2.pdf", "step": "s1", "date": "2026-10-06"},
+        {"what": "Calendar", "path": "c/Calendar.pdf", "step": "s1", "date": "2026-10-07"},
+    ]
+    assert sc._focused_step(map_)[0] is step
+    whats = {it["what"] for it in sc.current_review_items(map_, items)}
+    assert whats == {"Guide - Draft 2", "Calendar"}
+
+
 # ---------- browser: the cockpit as John sees it ----------
 
 def _frame(page):
@@ -77,9 +107,9 @@ def test_dialogue_follows_the_newest_until_john_scrolls_up(cockpit):
     page.wait_for_timeout(300)
     gap = scroll.evaluate("s => s.scrollHeight - s.scrollTop - s.clientHeight")
     assert gap < 5, gap
-    # John scrolls up: arriving content no longer moves him
+    # John scrolls up - even a little: arriving content no longer moves him
     scroll.hover()
-    page.mouse.wheel(0, -600)
+    page.mouse.wheel(0, -60)
     page.wait_for_timeout(300)
     top = scroll.evaluate("s => s.scrollTop")
     scroll.evaluate("""s => { const d = document.createElement('div'); d.style.height = '400px'; d.textContent = 'late';

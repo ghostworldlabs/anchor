@@ -2581,10 +2581,15 @@ def current_review_items(map_, items):
                if not it.get("managed") and not (it.get("accepted") or it.get("accepted_current"))
                and resolve_step(steps, it.get("step")) is focus
                and not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
-        newest = max((str(it.get("date") or "") for it in own), default="")
-        if newest:
-            seen = {id(it) for it in current}
-            current.extend(it for it in own if str(it.get("date") or "") == newest and id(it) not in seen)
+        # per PRODUCT, not per step (ChatGPT review): the newest version of each product family is current, so a new
+        # unrelated product never hides an older one still waiting; Draft 1 -> Draft 3 of one product keeps only Draft 3
+        newest = {}
+        for it in own:
+            fam = _family_key(it)
+            newest[fam] = max(newest.get(fam, ""), str(it.get("date") or ""))
+        seen = {id(it) for it in current}
+        current.extend(it for it in own
+                       if str(it.get("date") or "") == newest[_family_key(it)] and id(it) not in seen)
     current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
     return current
 
@@ -2597,20 +2602,49 @@ _FORMAT_TAG = re.compile(
     r"|\b(?:md|pdf|html|htm|docx|pptx))\s*$", re.I)
 
 
-def _strip_format_tag(text):
+_FORMAT_NOTE = re.compile(r"\((pdf|md|html|htm|docx|pptx|browser(?: reading)?|ta download)\s*[;,]\s*([^)]*)\)\s*$", re.I)
+
+
+def _strip_format_tag(text, keep_note=False):
     """A product's title without its format tag: ' MD', '-PDF', '(PDF)', '(browser)', '(browser reading)',
-    '(TA download)'."""
-    return _FORMAT_TAG.sub("", str(text or "").strip()).strip()
+    '(TA download)', and '(PDF; held)' - whose note ('held') stays in a label (keep_note) but not in a key."""
+    text = str(text or "").strip()
+    m = _FORMAT_NOTE.search(text)
+    if m:
+        return (text[:m.start()].strip() + (" (" + m.group(2).strip() + ")" if keep_note and m.group(2).strip() else "")).strip()
+    return _FORMAT_TAG.sub("", text).strip()
 
 
-def _product_key(it):
-    """One product, whatever formats it was published in: the same step + the same title once its format tag
-    (' MD', ' PDF', ' HTML', '(PDF)') is removed; a row without a title falls back to its path minus the extension."""
+_VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)\s*\d+(?:\.\d+)*\b.*$",
+                          re.I)
+
+
+def _family_key(it):
+    """A product across its versions: the title without its format tag and without 'Draft 3' / 'Refinement 1' /
+    'v2' (and anything after it)."""
+    title = _strip_format_tag(it.get("what") or it.get("product_id") or "")
+    return _VERSION_TAG.sub("", title).strip().lower() or str(it.get("path") or "").lower()
+
+
+def _product_key(it, steps=None):
+    """One product version, whatever formats it was published in. Unmanaged: the resolved owner step, the folder,
+    and the title without its format tag (' MD', '-PDF', '(PDF)', '(browser)'). Managed: the owner, the product id
+    without its format suffix, and the round - formats pair only at the same round (ChatGPT review: never pair two
+    different versions, never merge two files that merely share a title in different folders)."""
+    owner = str(it.get("step") or "")
+    if steps is not None:
+        from .navigation_compat import resolve_step
+        st = resolve_step(steps, it.get("step"))
+        if st is not None:
+            owner = str(st.get("id") or owner)
+    path = str(it.get("path") or "").replace(chr(92), "/").lower()
+    if it.get("managed"):
+        return (owner, _strip_format_tag(it.get("product_id") or it.get("what")).lower(), str(it.get("round")))
     title = _strip_format_tag(it.get("what")).lower()
     if not title:
-        path = str(it.get("path") or "").replace(chr(92), "/").lower()
         title = path.rsplit(".", 1)[0] if "." in path.rsplit("/", 1)[-1] else path
-    return (str(it.get("step") or ""), title)
+    folder = path.rsplit("/", 1)[0] if "/" in path else ""
+    return (owner, folder, title)
 
 
 def _format_rank(it):
@@ -2648,7 +2682,7 @@ def review_acts(map_, current_items):
         reviewing = bool(it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"))
         if it.get("managed") and not reviewing:
             continue
-        key = ("Review" if reviewing else "Open",) + _product_key(it)
+        key = ("Review" if reviewing else "Open",) + _product_key(it, (map_ or {}).get("steps"))
         if key not in groups:
             groups[key] = []
             order.append(key)
@@ -2658,7 +2692,7 @@ def review_acts(map_, current_items):
     for key in order:
         group = sorted(groups[key], key=_format_rank)
         row = group[0]
-        label = _strip_format_tag(row.get("what") or row.get("product_id") or row.get("path") or "")
+        label = _strip_format_tag(row.get("what") or row.get("product_id") or row.get("path") or "", keep_note=True)
         if key[0] == "Review":
             label = label.replace("-", " ")
         act = {"act": key[0], "label": label, "path": row.get("path"), "step": row.get("step"), "item": row}

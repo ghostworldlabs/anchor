@@ -30,7 +30,7 @@ const Proto = (() => {
     parked = !!p;
     if (parked) { try { if (_pollAbort) _pollAbort.abort(); } catch (e) {} return; }
     const go = _unpark; _unpark = null; if (go) go();
-    pin(scrollEl(), true); pin(paneEl(), true);   // a hidden frame had no size to scroll by
+    { const d = scrollEl(); pin(d, !!d && d._follow !== false); } pin(paneEl(), true);   // a hidden frame had no size to scroll by; the dialogue keeps his place
     const ta = document.querySelector("[data-say]");
     if (ta && ta.value) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; }
   }
@@ -347,6 +347,7 @@ const Proto = (() => {
   function scrollEl() { return $(".scroll"); }
   function paneEl() { return $("[data-statuspane] .pscroll"); }
   function atBottom(s) {
+    if (s && s._followWired) return s._follow;   // the dialogue: John's own scrolling decides (wireFollow)
     return s.scrollHeight - s.scrollTop - s.clientHeight < 120;
   }
   function pin(s, force) {
@@ -359,8 +360,16 @@ const Proto = (() => {
     if (!s || s._followWired) return;
     s._followWired = true;
     s._follow = true;
-    const stick = () => { if (s._follow) s.scrollTop = s.scrollHeight; };
-    s.addEventListener("scroll", () => { s._follow = atBottom(s); }, { passive: true });
+    // following stops on ANY upward move of his and resumes only when he reaches the very bottom again (ChatGPT
+    // review: a 120 px "near the bottom" band re-armed it after a small upward scroll, then yanked him down)
+    let lastTop = s.scrollTop;
+    const stick = () => { if (s._follow) { s.scrollTop = s.scrollHeight; lastTop = s.scrollTop; } };
+    s.addEventListener("scroll", () => {
+      const gap = s.scrollHeight - s.scrollTop - s.clientHeight;
+      if (gap < 4) s._follow = true;                       // at the bottom (also a clamp after content shrank)
+      else if (s.scrollTop < lastTop - 1) s._follow = false;
+      lastTop = s.scrollTop;
+    }, { passive: true });
     s.addEventListener("wheel", (e) => { if (e.deltaY < 0) s._follow = false; }, { passive: true });
     s.addEventListener("load", stick, true);                     // an image or frame inside finished loading
     if (window.ResizeObserver) {
@@ -447,34 +456,67 @@ const Proto = (() => {
     });
     return box;
   }
+  function questionSig() {
+    // everything the question row shows: every pending question (its others are buttons), the open one, the decisions
+    const st = lastState || {};
+    return JSON.stringify([st.pending_questions || [], st.question_context || null, st.open_question || "",
+                           (st.decision_history || []).length]);
+  }
   function _paintNextSteps(host) {
-    host.textContent = "";
+    // 2026-10-07 (ChatGPT review of item 1): KEYED rows. A row is rebuilt only when its own content changed; every
+    // other row keeps its node - so its focus, an expanded disclosure, and a click that spans a poll all survive.
+    const rows = host._rows || (host._rows = new Map());
+    const want = [], used = new Set();
+    const keep = (key, sig, build, after) => {
+      let k = key, n = 1;
+      while (used.has(k)) k = key + "#" + (++n);   // two rows with one key stay two rows
+      used.add(k); key = k;
+      let r = rows.get(key);
+      if (!r || r.sig !== sig) {
+        const node = r && r.reuse ? r.node : build();
+        r = {sig, node, reuse: r ? r.reuse : false};
+        rows.set(key, r);
+        if (after) after(node);
+      }
+      want.push(r.node);
+      return r.node;
+    };
     const q = currentQuestion();
-    const ask = el("div", "action-needed");
-    ask.dataset.statusAction = "1";
-    host.appendChild(ask);
-    paintActionNeeded(ask);
+    // the question row keeps its node and its open state; a changed question set repaints inside it
+    keep("ask", questionSig(), () => { const ask = el("div", "action-needed"); ask.dataset.statusAction = "1"; return ask; },
+         (ask) => { delete ask.dataset.questionId; paintActionNeeded(ask); });
+    rows.get("ask").reuse = true;
     const acts = _deliv.acts || [];
-    if (_deliv.warning) host.appendChild(el("div", "navempty", _deliv.warning));   // the current item, honestly
+    if (_deliv.warning) keep("warning", _deliv.warning, () => el("div", "navempty", _deliv.warning));   // the current item, honestly
     acts.forEach(a => {
-      const row = el("div", "navact navact-" + a.act.toLowerCase());
-      row.appendChild(el("span", "navactkind", a.act));
-      if (a.item) row.appendChild(navFile(a.item, "next:act"));
-      else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
-      else row.appendChild(el("span", "navactlabel", a.label));
-      if (a.companions && a.companions.length) row.appendChild(companionLinks(a));
-      host.appendChild(row);
+      keep("act:" + a.act + ":" + (a.path || a.label || ""), JSON.stringify(a), () => {
+        const row = el("div", "navact navact-" + a.act.toLowerCase());
+        row.appendChild(el("span", "navactkind", a.act));
+        if (a.item) row.appendChild(navFile(a.item, "next:act"));
+        else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
+        else row.appendChild(el("span", "navactlabel", a.label));
+        if (a.companions && a.companions.length) row.appendChild(companionLinks(a));
+        return row;
+      });
     });
     const waits = (q && q.question ? 1 : 0) + acts.length;
-    if (!waits) host.appendChild(el("div", "navempty", "Nothing waits on you."));
+    if (!waits) keep("empty", "", () => el("div", "navempty", "Nothing waits on you."));
     // W1 of the steward revision (2026-09-28): the next-in-the-plan horizon is computed ONCE on the server
     // (steward_campaign.next_in_plan: the declared focus, then what follows it; never a guess from the first
     // active step) and read here from the map — the card on the High Seat reads the same list. No focus: nothing.
     const plan = (_lastMap && Array.isArray(_lastMap.next_in_plan)) ? _lastMap.next_in_plan : [];
     if (plan.length) {
-      host.appendChild(el("div", "naveyebrow", "Next in the plan"));
-      plan.forEach(st => host.appendChild(el("div", "navactlabel", ((st.navigation && st.navigation.label) || st.name) + (st.due ? " · due " + fmtDue(st.due) : ""))));
+      keep("plan:eyebrow", "", () => el("div", "naveyebrow", "Next in the plan"));
+      plan.forEach((st, i) => {
+        const text = ((st.navigation && st.navigation.label) || st.name) + (st.due ? " · due " + fmtDue(st.due) : "");
+        keep("plan:" + i, text, () => el("div", "navactlabel", text));
+      });
     }
+    // place the wanted nodes in order, moving only what is out of place (a moved node would lose its focus)
+    want.forEach((node, i) => { if (host.children[i] !== node) host.insertBefore(node, host.children[i] || null); });
+    while (host.children.length > want.length) host.removeChild(host.lastChild);
+    const live = new Set(want);
+    Array.from(rows.keys()).forEach(k => { if (!live.has(rows.get(k).node)) rows.delete(k); });
     return waits;
   }
   function renderNextStepsTile() {
@@ -492,8 +534,7 @@ const Proto = (() => {
     }
     // 2026-10-07: repaint only when what the tile shows changed. It was rebuilt from scratch every second (the
     // 1 s busy-clock tick), which re-created icons, swallowed clicks that spanned a rebuild, and reset focus.
-    const q0 = currentQuestion();
-    const sig = JSON.stringify([q0 || null,
+    const sig = JSON.stringify([questionSig(),
       _deliv.acts || [], _deliv.warning || "", (_lastMap && _lastMap.next_in_plan) || []]);
     if (tile.dataset.sig === sig) return;
     tile.dataset.sig = sig;
@@ -2234,7 +2275,7 @@ const Proto = (() => {
       const last = j.turns[j.turns.length - 1];
       tileSay("turn", { who: last.role === "john" ? "you" : "steward", text: String(last.text || "").slice(-600) });
     }
-    pin(scrollEl(), true);
+    { const d = scrollEl(); if (d) d._follow = true; pin(d, true); }   // a page opens at the newest
   }
 
   /* ---------- composer + dictation ---------- */
@@ -2287,6 +2328,7 @@ const Proto = (() => {
                         "then carry on with the step in hand): " + later[2];
       const keep = ta.value;
       ta.value = ""; grow();
+      { const d = scrollEl(); if (d) { d._follow = true; pin(d, true); } }   // his own message brings him to the newest
       const j = await sendSay(text, _answerQuestionId);
       if (!j.ok) { ta.value = keep; grow(); saveDraft(); } else { clearDraft(); }
     };
