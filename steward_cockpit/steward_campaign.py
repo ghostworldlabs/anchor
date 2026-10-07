@@ -2577,7 +2577,20 @@ def current_review_items(map_, items):
     # 2026-10-07 (John: Next steps showed "a fraction"): the newest batch published on the focused step is current
     # even when the steward did not label it START HERE / FOR REVIEW — e.g. the MBA Version 3 documents.
     focus, _warn = _focused_step(map_ or {})
-    if focus is not None and focus.get("status") not in ("done", "parked"):
+    # when the steward DID designate what is current on the focused step (START HERE / CURRENT / FOR REVIEW, or a
+    # featured path), that designation is the record - the newest-per-family fallback is only for a step where
+    # nothing was designated (the MBA Version 3 case)
+    designated = focus is not None and any(resolve_step(steps, it.get("step")) is focus and not it.get("managed")
+                                           for it in current)
+    if designated:
+        # the other formats of a designated product (same owner, folder and file stem) are that product too
+        chosen = {(_owner_id(it, steps),) + _split_path(it) for it in current if not it.get("managed")}
+        seen = {id(it) for it in current}
+        current.extend(it for it in items or []
+                       if id(it) not in seen and not it.get("managed")
+                       and not (it.get("accepted") or it.get("accepted_current"))
+                       and (_owner_id(it, steps),) + _split_path(it) in chosen)
+    if focus is not None and focus.get("status") not in ("done", "parked") and not designated:
         own = [it for it in items or []
                if not it.get("managed") and not (it.get("accepted") or it.get("accepted_current"))
                and resolve_step(steps, it.get("step")) is focus
@@ -2589,7 +2602,7 @@ def current_review_items(map_, items):
         best = {}
         for it in own:
             fam = _family_key(it)
-            best[fam] = max(best.get(fam, ("", -1)), _version_rank(it))
+            best[fam] = max(best.get(fam, ("", ())), _version_rank(it))
         seen = {id(it) for it in current}
         current.extend(it for it in own if _version_rank(it) == best[_family_key(it)] and id(it) not in seen)
     current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
@@ -2617,7 +2630,7 @@ def _strip_format_tag(text, keep_note=False):
     return _FORMAT_TAG.sub("", text).strip()
 
 
-_VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)\s*(\d+(?:\.\d+)*)\b.*$",
+_VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)[\s_-]*(\d+(?:\.\d+)*)\b",
                           re.I)
 
 
@@ -2639,20 +2652,18 @@ def _split_path(it):
 
 
 def _version_rank(it):
-    """(date, version number) - the order of one family's versions; -1 when the name carries no number."""
+    """(date, version) - the order of one family's versions; the version is a tuple of integers (v1.10 > v1.9,
+    v1.2.4 > v1.2.3); () when the name carries none."""
     m = _VERSION_TAG.search(_split_path(it)[1]) or _VERSION_TAG.search(_strip_format_tag(it.get("what") or ""))
-    try:
-        num = float(m.group(1).split(".")[0]) + (float("0." + m.group(1).split(".", 1)[1]) if "." in m.group(1) else 0)
-    except (AttributeError, ValueError, IndexError):
-        num = -1
-    return (str(it.get("date") or ""), num)
+    version = tuple(int(x) for x in m.group(1).split(".")) if m else ()
+    return (str(it.get("date") or ""), version)
 
 
 def _family_key(it, steps=None):
     """A product across its versions: owner, folder and file stem with every version tag removed ('Quiz 1 - Draft
     3/Bank - Draft 3' and 'Quiz 1 - Draft 1/Bank - Draft 1' are one family; 'a/Summary' and 'b/Summary' are two)."""
     folder, stem = _split_path(it)
-    clean = lambda t: _VERSION_TAG.sub("", t).strip().lower()
+    clean = lambda t: re.sub(r"\s+", " ", _VERSION_TAG.sub("", t)).strip(" -_,").lower()
     folder = "/".join(clean(seg) for seg in folder.split("/"))
     return (_owner_id(it, steps), folder, clean(_strip_format_tag(stem)) or clean(_strip_format_tag(it.get("what"))))
 

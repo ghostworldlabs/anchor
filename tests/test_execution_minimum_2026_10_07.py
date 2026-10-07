@@ -386,3 +386,23 @@ def test_a_shell_made_document_named_by_its_full_path_gets_a_link(tmp_path, monk
     doc.write_text("x", encoding="utf-8")
     eng._publish_delivery_receipt("t1", reply="I rendered it to " + str(doc) + " for you.", written=[])
     assert len(said) == 1 and "path=out%20dir%2FWeek%203%20Plan%20%28draft%29.pdf" in said[0][1]
+
+
+# ---------- item 1, review round 3 ----------
+
+def test_version_tokens_alone_are_removed_and_versions_order_as_numbers():
+    assert sc._family_key({"path": "g/Guide-v1-instructor.pdf"}) != sc._family_key({"path": "g/Guide-v1-student.pdf"})
+    assert sc._family_key({"path": "g/Guide - Draft 1.pdf"}) == sc._family_key({"path": "g/Guide - Draft 3.pdf"})
+    assert sc._version_rank({"path": "Guide-v1.10.pdf"}) > sc._version_rank({"path": "Guide-v1.9.pdf"})
+    assert sc._version_rank({"path": "Guide-v1.2.4.pdf"}) > sc._version_rank({"path": "Guide-v1.2.3.pdf"})
+
+
+def test_a_designated_product_brings_its_other_formats_and_nothing_else():
+    step = {"id": "s1", "name": "Step", "status": "active", "navigation": {"current": True, "role": "primary"}}
+    items = [
+        {"what": "START HERE: Guide", "path": "g/Guide.pdf", "step": "s1", "date": "2026-10-07"},
+        {"what": "Guide (browser)", "path": "g/Guide.html", "step": "s1", "date": "2026-10-07"},
+        {"what": "Chapter 1", "path": "c/ch1.docx", "step": "s1", "date": "2026-10-07"},   # undesignated: not current
+    ]
+    paths = sorted(it["path"] for it in sc.current_review_items({"steps": [step]}, items))
+    assert paths == ["g/Guide.html", "g/Guide.pdf"]

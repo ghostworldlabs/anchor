@@ -213,7 +213,16 @@ const Proto = (() => {
       };
       host.appendChild(source);
     }
-    // what John already decided, one click away (never re-asked)
+    // what John already decided, one click away (never re-asked) - its own box, refreshed apart
+    const decisions = el("div", "question-decisions");
+    fillDecisions(decisions);
+    host.appendChild(decisions);
+    const others = el("div", "question-others");
+    fillOtherQuestions(others, q);
+    host.appendChild(others);
+  }
+  function fillDecisions(host) {
+    host.textContent = "";
     const decided = (lastState && lastState.decision_history) || [];
     if (decided.length) {
       const d = el("details", "action-history");
@@ -233,9 +242,6 @@ const Proto = (() => {
       });
       host.appendChild(d);
     }
-    const others = el("div", "question-others");
-    fillOtherQuestions(others, q);
-    host.appendChild(others);
   }
   function fillOtherQuestions(box, q) {
     // the other pending questions: refreshed on their own when one arrives or resolves, so the open question's
@@ -471,10 +477,9 @@ const Proto = (() => {
                            (st.decision_history || []).length]);
   }
   function openQuestionSig() {
-    // the open question itself - a change here repaints the row; the OTHER questions refresh on their own
+    // the open question itself - a change here repaints the row; the other questions and the decisions refresh apart
     const st = lastState || {};
-    return JSON.stringify([currentQuestion(), st.question_context || null, st.open_question || "",
-                           (st.decision_history || []).length]);
+    return JSON.stringify([currentQuestion(), st.question_context || null, st.open_question || ""]);
   }
   function _paintNextSteps(host) {
     // 2026-10-07 (ChatGPT review of item 1): KEYED rows. A row is rebuilt only when its own content changed; every
@@ -502,6 +507,12 @@ const Proto = (() => {
     const ask = keep("ask", openQuestionSig(), () => { const n = el("div", "action-needed"); n.dataset.statusAction = "1"; return n; },
          (n) => { delete n.dataset.questionId; paintActionNeeded(n); n._othersSig = questionSig(); });
     rows.get("ask").reuse = true;
+    const decSig = JSON.stringify((lastState && lastState.decision_history) || []);
+    if (ask._decSig !== decSig) {                      // a decision was recorded: only the decisions box moves
+      ask._decSig = decSig;
+      const box = ask.querySelector(".question-decisions");
+      if (box) fillDecisions(box);
+    }
     if (ask._othersSig !== questionSig()) {            // another question arrived or resolved: only the list moves
       ask._othersSig = questionSig();
       const box = ask.querySelector(".question-others");

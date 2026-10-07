@@ -162,8 +162,11 @@ def test_choose_sends_the_alternative_as_the_answer(cockpit):
 def test_side_panel_expansion_preserves_conversation_at_laptop_width(cockpit):
     page, server = cockpit
     navigation(server)
-    page.set_viewport_size({'width':1024, 'height':768})
     surface = open_surface(page)
+    # 2026-10-07 (PROPOSAL v1.1, evidence E6): a laptop-width cockpit closes the plan rail and the status pane for
+    # now (never in his preferences); he opens the rail himself, and it overlays instead of squeezing the dialogue
+    page.set_viewport_size({'width':1024, 'height':768})
+    surface.locator('[data-railtoggle2]').click()
     grip = surface.locator('[data-plangrip]')
     grip.focus()
     for _ in range(25): grip.press('ArrowRight')
