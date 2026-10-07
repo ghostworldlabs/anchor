@@ -1,28 +1,52 @@
-"""Foreman as the code worker (his word, 2026-10-05: no generic coder - Foundry skills): a code job whose check is a
-real test run is built by Foreman in its worktree; its DONE or HALT is the job's result."""
+"""2026-10-05 made Foreman the code-job worker; 2026-10-07 (execution minimum item 3, John's binding) HOLDS Foreman and
+Crucible at Anchor's managed entries until their best-in-class review. A code job is a coder in its own worktree. These
+tests pin the hold: every managed entry refuses before anything starts, and lifting it is one explicit switch."""
 import os
 import sys
+from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from steward_cockpit import code_jobs as cj  # noqa: E402
 
 
-def test_a_real_test_run_is_a_foreman_gate():
-    assert cj.is_test_gate("python -m pytest tests/x.py") and cj.is_test_gate("node --test test/a.test.mjs")
-    assert cj.is_test_gate("npm test") and cj.is_test_gate("npm run test")
-    assert not cj.is_test_gate("python tools/look.py") and not cj.is_test_gate("")
+@pytest.fixture
+def held(monkeypatch):
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
 
 
-def test_the_documents_are_one_wave_gated_by_the_check():
-    d, p, l = cj.foreman_docs({"id": "J", "brief": "# Do X\n## detail\nmore", "check": "python -m pytest -q t.py"})
-    assert "test-command: `python -m pytest" in p and " -q" not in p, "Foreman refuses -q"
-    assert p.count("## Wave") == 1 and "## Wave 1 - Do X" in p and "\n## detail" not in p, "the brief's headings are flattened"
-    assert "Do X" in d and l.startswith("# Code job J")
+def test_the_code_job_has_no_foreman_worker_and_no_regex_dispatch():
+    for gone in ("is_test_gate", "_TEST_GATE", "_start_foreman", "foreman_docs", "foreman_result", "FOREMAN_ON"):
+        assert not hasattr(cj, gone), gone
 
 
-def test_done_is_the_result_and_halt_is_an_error():
-    ok = cj.foreman_result('x\nRUN_JSON_START {"status": "DONE", "waveResults": [{"wave": 1, "status": "GREEN"}]} RUN_JSON_END\n', 0)
-    assert ok["error"] == "" and "wave 1 GREEN" in ok["text"]
-    bad = cj.foreman_result('RUN_JSON_START {"status": "HALT", "haltReason": "vacuous green"} RUN_JSON_END', 0)
-    assert "HALT" in bad["error"] and "vacuous green" in bad["error"]
-    assert "did not finish" in cj.foreman_result("no record", None)["error"]
+def test_job_runner_refuses_build_and_plan_before_anything_starts(held, tmp_path):
+    import job_runner
+    for lane in ("build", "plan", "planning"):
+        with pytest.raises(ValueError, match="foreman-crucible-hold"):
+            job_runner.launch(lane, cwd=str(tmp_path), prompt="x")
+    with pytest.raises(ValueError, match="foreman-crucible-hold"):
+        job_runner.launch("general", cwd=str(tmp_path), command=["node", "C:/dev/trio/foreman/bin/run-live.mjs"])
+
+
+def test_skill_jobs_refuse_a_foreman_or_crucible_script(held, tmp_path, monkeypatch):
+    from steward_cockpit import skill_jobs
+    root = tmp_path / "skills"
+    for name in ("foreman", "crucible", "gandalf"):
+        (root / name / "bin").mkdir(parents=True)
+        (root / name / "bin" / "run.mjs").write_text("", encoding="utf-8")
+    monkeypatch.setattr(skill_jobs, "skill_roots", lambda: [root])
+    for name in ("foreman", "crucible"):
+        ok, why = skill_jobs.validate(["node", str(root / name / "bin" / "run.mjs")])
+        assert not ok and "on hold" in why
+    assert skill_jobs.validate(["node", str(root / "gandalf" / "bin" / "run.mjs")]) == (True, "")
+
+
+def test_lifting_the_hold_is_one_explicit_switch(monkeypatch):
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
+    assert cj.foreman_crucible_held()
+    monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD")
+    assert cj.foreman_crucible_held(), "held by default"
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
+    assert not cj.foreman_crucible_held()

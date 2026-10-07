@@ -1623,12 +1623,16 @@ def handle_post(cdir, verb, body):
             eng = get_engine(cdir)
             out = _cj.start(cdir, body.get("repo") or "", body.get("brief") or "", body.get("check") or "",
                             engine_factory=lambda wt: get_engine(wt, general=True, tid="1"),
-                            steward=(eng.steward if eng else ""))
+                            steward=(eng.steward if eng else ""), coder=str(body.get("coder") or ""),
+                            actor=str(body.get("actor") or "the steward"))
             if out.get("ok") and eng is not None:
-                eng._emit({"t": "sys", "text": "code job %s started on %s (best model, full effort); the steward stays free to talk" % (out["job"], body.get("repo"))})
+                eng._emit({"t": "sys", "text": "code job %s started on %s - coder %s, in its own worktree; it lands only "
+                           "after another family's review passes; the steward stays free to talk" % (
+                               out["job"], body.get("repo"), out.get("coder"))})
             return out, (200 if out.get("ok") else 400)
         if action == "stop":
-            return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False)), 200
+            return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False),
+                            actor=str(body.get("actor") or "the steward")), 200
         return {"ok": True, "jobs": list(_cj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "skill_job":
         # two-lane step 3 (2026-10-06): a fenced steward's skill runs here, outside its fence, and wakes it when done

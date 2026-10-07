@@ -64,6 +64,10 @@ if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
     # (terminal_session._resolve_engine_cmd), so ANCHOR_PTY_BACKEND is no longer
     # a single point of failure for every terminal test.
     os.environ["ANCHOR_ENGINE_CMD"] = f"{sys.executable} -c pass"
+    # Foreman/Crucible are held in production (2026-10-07, execution minimum item 3). Hermetic tests drive the plan/
+    # build lane MACHINERY through the fake runner above, never a real Foreman or Crucible, so the hold is lifted for
+    # them here; the hold's own tests set it back on per test.
+    os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "0"
     # gh reachable a real `gh repo create` from two healthcheck/cli tests.
     if _STUB_GH.exists():
         os.environ["ANCHOR_GH_CMD"] = f"python {_STUB_GH}"

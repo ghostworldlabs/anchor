@@ -14,6 +14,22 @@ running job. One coder by default; a swarm only when his brief asks for one (the
 
 Records: ``<steward folder>/.ecgberht/code-jobs.json`` {job_id: {...}}. Never raises to a caller; every failure is a
 record field and a line to the steward.
+
+Execution minimum item 3 (PROPOSAL v1.1, 2026-10-07) - one commit: preservation, safe checks, the Foreman/Crucible
+hold, and the review gate.
+- HOLD: a code job is always a coder; Foreman never starts from here (nor Crucible) until John lifts the hold after a
+  separate best-in-class review (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0). This claims Anchor's managed entries only.
+- CHECKS: an argument list, or the full command text run from a temp script - never cut, never re-quoted - in the
+  job's OWN tree; the live tree is touched only by the landing itself.
+- MANIFEST: only the paths the coder's tools wrote are staged and placed (no ``git add -A``); any other changed path
+  blocks the landing and the worktree is KEPT with everything in it, listed; foreman.config.json never lands; after
+  a landing every placed file is verified in the repository before the worktree goes.
+- REVIEW GATE: ``land`` refuses unless a review record (tools/steward_review.mjs, the trio's runAgent review role)
+  names a family other than the author's AND the exact candidate tree; an error, the author's own family, a missing
+  family or a changed tree keeps the worktree and says why. A change after review (integrating newer commits) gets a
+  review of that delta only.
+- SEATS: the coder's family is the job's choice, else the dashboard's Coder seat; a family known to be exhausted is
+  not called again (the other family may run); model preferences are never written.
 """
 from __future__ import annotations
 
@@ -146,96 +162,226 @@ def _repo_root(path):
     return Path(out).resolve() if code == 0 and out else None
 
 
-# ── Foreman as the code worker (his word, 2026-10-05: "no generic coder - Foundry skills") ─────────────────────────
-# A code job whose check is a real test run is built by FOREMAN (execute -> adversarial review -> fix -> re-review,
-# gated by the check) in the same worktree, landed by the same safe path. Foreman needs a real test runner (per-test
-# results, a changed file reached by a test - it refuses a vacuous green), so a job without one stays a coder job and
-# says so plainly.
-FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
-                        (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
-FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(4 * 3600)))
-FOREMAN_ON = os.environ.get("ANCHOR_CODE_JOB_FOREMAN", "1") == "1"   # ON: proven live 2026-10-05 19:58 (Claude writes, Grok reviews, landed)
-_TEST_GATE = re.compile(r"\b(pytest|node\s+--test|npm\s+(?:run\s+)?test)\b")
-_FOREMAN_PROCS = {}
+# ── The Foreman/Crucible hold (execution minimum item 3) ────────────────────────────────────────────────────────────
+def foreman_crucible_held():
+    """True while Foreman and Crucible may not start from Anchor's managed entries (John's binding, 2026-10-07:
+    off until a separate Gandalf + researchPrime best-in-class review). ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it."""
+    return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0"
 
 
-def is_test_gate(check):
-    """True when the check is a real test run Foreman can gate on."""
-    return bool(_TEST_GATE.search(str(check or "")))
+HOLD_REASON = ("Foreman and Crucible are on hold in Anchor until their best-in-class review (John, 2026-10-07); "
+               "a code job is a coder in its own worktree, and Anchor did not start Foreman or Crucible")
 
 
-def foreman_docs(job):
-    """The three documents Foreman reads, from the job's brief and check (one wave; the gate is the check)."""
-    title = next((ln.strip().lstrip("#").strip() for ln in job["brief"].splitlines() if ln.strip()), "the change")[:120]
-    brief = "\n".join(ln.lstrip("#").strip() if ln.lstrip().startswith("#") else ln for ln in job["brief"].splitlines())
-    check = re.sub(r"(?<=\s)-q(?=\s|$)", "", job["check"]).strip()      # Foreman refuses pytest -q (it needs per-test lines)
-    job = dict(job, brief=brief, check=check)
-    description = "# Code job %s - description\n\n%s\n" % (job["id"], job["brief"])
-    plan = ("# Code job %s - Implementation Plan\n\n**North Star:** %s\n\ntest-command: `%s`\n\n"
-            "## Wave 1 - %s\n\n%s\n\nDone when: `%s` passes and the change is reached by a test.\n") % (
-        job["id"], title, job["check"], title, job["brief"], job["check"])
-    return description, plan, "# Code job %s - execution log\n" % job["id"]
+# ── Seats: the coder's family, never the model preferences ─────────────────────────────────────────────────────────
+FAMILIES = ("claude", "chatgpt", "grok", "gemini")
+CLI_FAMILY = {"claude": "claude", "codex": "chatgpt", "chatgpt": "chatgpt", "grok": "grok", "gemini": "gemini"}
+EXHAUSTED_FOR_S = 5 * 3600
+_LIMIT_WORDS = re.compile(r"usage limit|rate limit|quota|session limit|limit reached|too many requests|exhausted", re.I)
 
 
-def _start_foreman(cdir, job, wt):
-    """Write the docs (git-ignored), launch Foreman headless in the worktree, and finish the job when it ends."""
-    d = Path(wt) / ".foreman-job"
-    d.mkdir(parents=True, exist_ok=True)
-    desc, plan, log = foreman_docs(job)
-    (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
-    (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
-    (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
-    (Path(wt) / "foreman.config.json").write_text(json.dumps({"docs": {
-        "description": ".foreman-job/DESCRIPTION.md", "plan": ".foreman-job/IMPLEMENTATION-PLAN.md",
-        "execution_log": ".foreman-job/EXECUTION-LOG.md"}}), encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)      # subscription billing, as go.ps1 does
-    env["CRUCIBLE_AGENT_LIVE"] = "1"
-    # Who writes and who reviews = the dashboard seats (Coder / Reviewer); Foreman stamps them over any env.
-    out = open(d / "foreman-run.log", "w", encoding="utf-8")
-    proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--reviewers", "2", "--cap", "3"], cwd=str(wt),
-                            stdout=out, stderr=subprocess.STDOUT, env=env,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
-    _FOREMAN_PROCS[job["id"]] = proc
+def _exhausted_path():
+    return jobs_base() / "exhausted.json"
 
-    def wait():
-        try:
-            rc = proc.wait(timeout=FOREMAN_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            _kill_tree(proc)
-            rc = None
-        finally:
-            out.close()
-            _FOREMAN_PROCS.pop(job["id"], None)
-            try:   # Foreman's own records outlive the worktree, so a HALT can be read (2026-10-05)
-                keep = Path(cdir) / ".ecgberht" / "foreman" / job["id"]
-                keep.mkdir(parents=True, exist_ok=True)
-                for f in list((Path(wt) / ".foreman").glob("*.json")) + [d / "foreman-run.log"]:
-                    if f.is_file():
-                        shutil.copy2(f, keep / f.name)
-            except Exception:
+
+def exhausted_families():
+    """Families whose last code-job turn hit a usage limit within EXHAUSTED_FOR_S - not called again until then."""
+    try:
+        d = json.loads(_exhausted_path().read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    now = time.time()
+    return {f for f, until in (d.items() if isinstance(d, dict) else []) if isinstance(until, (int, float)) and until > now}
+
+
+def mark_exhausted(family):
+    if family not in FAMILIES:
+        return
+    try:
+        d = json.loads(_exhausted_path().read_text(encoding="utf-8")) if _exhausted_path().is_file() else {}
+    except Exception:
+        d = {}
+    d[family] = time.time() + EXHAUSTED_FOR_S
+    tmp = _exhausted_path().with_suffix(".json.%s.tmp" % uuid.uuid4().hex[:6])
+    tmp.write_text(json.dumps(d), encoding="utf-8")
+    os.replace(str(tmp), str(_exhausted_path()))
+
+
+def choose_coder(requested=""):
+    """(family, None) or (None, reason): the job's own choice, else the Coder seat, else the Terminal seat - never a
+    family known to be exhausted. Reads the dashboard settings; writes nothing."""
+    try:
+        import anchor_settings
+        settings = anchor_settings.get_launch_settings()
+    except Exception as exc:
+        return None, "the dashboard settings could not be read: %s" % exc
+    tired = exhausted_families()
+    asked = str(requested or "").strip().lower()
+    if asked:
+        if asked not in FAMILIES:
+            return None, "unknown coder family %r" % asked
+        if asked in tired:
+            return None, "%s hit its usage limit recently; choose another family or wait" % asked
+        return asked, None
+    for fam in (settings.get("coding_family"), settings.get("default_cli"), settings.get("review_family")):
+        fam = str(fam or "").lower()
+        if fam in FAMILIES and fam not in tired:
+            return fam, None
+    return None, "every configured family is exhausted for now"
+
+
+# ── Checks: an argument list or a temp script; never cut, never re-quoted ──────────────────────────────────────────
+CHECK_MAX = 20000
+
+
+def normalize_check(check):
+    """(check, None) or (None, reason). A list is an argument list (no shell); a string is the full command text."""
+    if isinstance(check, (list, tuple)):
+        argv = [str(a) for a in check]
+        if not argv or not all(a.strip() for a in argv):
+            return None, "a check given as a list needs a program and its arguments"
+        return argv, None
+    text = str(check or "")
+    if len(text) > CHECK_MAX:
+        return None, "the check is %d characters - put it in a script file in the repository" % len(text)
+    return text, None
+
+
+def run_check(job, tree):
+    """Run the job's check in ``tree`` (the job's own worktree). (ok, output tail). A string runs from a temp script
+    so its quotes and length reach the shell unchanged; a list runs with no shell at all."""
+    check = job.get("check")
+    if not check:
+        return None, ""
+    script = None
+    try:
+        if isinstance(check, list):
+            argv = check
+        else:
+            d = jobs_base() / "checks"
+            d.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                script = d / ("%s-%s.cmd" % (job["id"], uuid.uuid4().hex[:6]))
+                script.write_text("@echo off\r\n" + check.replace("\r\n", "\n").replace("\n", "\r\n") + "\r\n",
+                                  encoding="utf-8")
+                argv = ["cmd.exe", "/d", "/c", "call", str(script)]
+            else:
+                script = d / ("%s-%s.sh" % (job["id"], uuid.uuid4().hex[:6]))
+                script.write_text(check + "\n", encoding="utf-8")
+                argv = ["sh", str(script)]
+        r = subprocess.run(argv, cwd=str(tree), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=CHECK_TIMEOUT_S, shell=False,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+        return r.returncode == 0, ((r.stdout or "") + (r.stderr or ""))[-1200:]
+    except subprocess.TimeoutExpired:
+        return False, "the check ran longer than %ss" % CHECK_TIMEOUT_S
+    except Exception as e:
+        return False, "the check did not run: %s" % e
+    finally:
+        if script is not None:
+            try:
+                script.unlink()
+            except OSError:
                 pass
-        finish(cdir, job["id"], foreman_result((d / "foreman-run.log").read_text(encoding="utf-8", errors="replace"), rc))
-    threading.Thread(target=wait, name="foreman-job-" + job["id"], daemon=True).start()
 
 
-def foreman_result(text, rc):
-    """Foreman's run, as the job's result: DONE -> its summary; HALT / BUDGET-STOP / no run record -> an error."""
-    m = re.search(r"RUN_JSON_START\s*(\{.*?\})\s*RUN_JSON_END", text or "", re.S)
-    run = {}
-    if m:
-        try:
-            run = json.loads(m.group(1))
-        except ValueError:
-            run = {}
-    status = str(run.get("status") or "")
-    waves = run.get("waveResults") or []
-    summary = "Foreman %s: %s" % (status or "ended without a run record", "; ".join(
-        "wave %s %s" % (w.get("wave") or w.get("n") or "?", w.get("status") or w.get("verdict") or "") for w in waves if isinstance(w, dict))[:600])
-    if status == "DONE":
-        return {"text": summary, "error": ""}
-    why = str(run.get("haltReason") or ("exit %s" % rc if rc is not None else "timed out"))
-    return {"text": summary, "error": "Foreman %s: %s" % (status or "did not finish", why[:400])}
+# ── The manifest: what the coder's tools wrote ─────────────────────────────────────────────────────────────────────
+NEVER_LAND = {"foreman.config.json"}
+
+
+def _rel_in(tree, raw):
+    try:
+        root = Path(tree).resolve()
+        fp = Path(raw)
+        fp = (fp if fp.is_absolute() else root / fp).resolve()
+        return fp.relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def manifest_of(engine, tree):
+    """The coder's own written paths (its Write/Edit/file_change tool calls), relative to its worktree."""
+    out = []
+    for raw in list(getattr(engine, "files", None) or []):
+        rel = _rel_in(tree, raw)
+        if rel and rel not in out:
+            out.append(rel)
+    return out
+
+
+def changed_paths(tree, base):
+    """Every path that differs from ``base`` in the worktree: committed, staged, unstaged and untracked (ignored
+    files excepted). None when git cannot say."""
+    code, out, _ = _git(tree, "-c", "core.quotepath=false", "diff", "--name-only", "-z", base, timeout=600)
+    code2, untracked, _ = _git(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
+                               timeout=600)
+    if code != 0 or code2 != 0:
+        return None
+    names = [n for n in (out + "\0" + untracked).split("\0") if n.strip()]
+    return sorted(set(names))
+
+
+# ── The review gate ────────────────────────────────────────────────────────────────────────────────────────────────
+REVIEW_TIMEOUT_S = int(os.environ.get("ANCHOR_CODE_REVIEW_TIMEOUT_S", "2400"))
+REVIEW_TOOL = Path(__file__).resolve().parents[1] / "tools" / "steward_review.mjs"
+
+
+def run_review(job, tree, head, delta_from=""):
+    """One review of the candidate ``head`` in ``tree`` by a family other than the author's. Returns the review
+    record; ``record["ok"]`` is False on ANY failure. ANCHOR_REVIEW_CMD (a JSON argv) is the test seam."""
+    brief = jobs_base() / "checks" / ("%s-brief.md" % job["id"])
+    try:
+        brief.parent.mkdir(parents=True, exist_ok=True)
+        brief.write_text(job.get("brief") or "", encoding="utf-8")
+    except OSError:
+        pass
+    seam = os.environ.get("ANCHOR_REVIEW_CMD")
+    try:
+        cmd = json.loads(seam) if seam else ["node", str(REVIEW_TOOL)]
+    except ValueError:
+        return {"ok": False, "error": "ANCHOR_REVIEW_CMD is not a JSON argument list"}
+    argv = cmd + ["--repo", str(tree), "--base", job["base"], "--head", head,
+                  "--author-family", job.get("coder_family") or "", "--brief-file", str(brief),
+                  "--exhausted", ",".join(sorted(exhausted_families()))]
+    if delta_from:
+        argv += ["--delta-from", delta_from]
+    try:
+        r = subprocess.run(argv, cwd=str(tree), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=REVIEW_TIMEOUT_S, shell=False,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "the review ran longer than %ss" % REVIEW_TIMEOUT_S}
+    except Exception as e:
+        return {"ok": False, "error": "the review could not run: %s" % e}
+    lines = [ln for ln in (r.stdout or "").splitlines() if ln.strip().startswith("{")]
+    try:
+        rec = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        rec = None
+    if not isinstance(rec, dict):
+        return {"ok": False, "error": "the review gave no record (exit %s): %s" % (r.returncode, (r.stderr or "")[-300:])}
+    rec["at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    rec["delta_from"] = delta_from or None
+    return rec
+
+
+def review_blocks(job, rec, tree, head):
+    """The reason this review does NOT allow landing, or "" when it does. Fail closed on every doubt."""
+    if not isinstance(rec, dict) or not rec.get("ok"):
+        return "the review failed: %s" % ((rec or {}).get("error") or "no record")
+    fam = str(rec.get("family") or "").lower()
+    if not fam:
+        return "the review record names no family"
+    if fam == str(job.get("coder_family") or "").lower():
+        return "the review was done by the author's own family (%s)" % fam
+    code, tree_hash, _ = _git(tree, "rev-parse", head + "^{tree}")
+    if code != 0 or not tree_hash or rec.get("tree_hash") != tree_hash:
+        return "the reviewed tree is not the candidate (reviewed %s, candidate %s)" % (rec.get("tree_hash"), tree_hash)
+    if rec.get("verdict") != "PASS":
+        found = "; ".join("%s %s" % (f.get("severity", "?"), str(f.get("issue", ""))[:160])
+                          for f in (rec.get("findings") or [])[:4] if isinstance(f, dict))
+        return "the %s reviewer did not pass it: %s" % (fam, found or "no findings given")
+    return ""
 
 
 def _kill_tree(proc):
@@ -248,12 +394,19 @@ def _kill_tree(proc):
         pass
 
 
-def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
+def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor=""):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
-    ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine)."""
+    ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
+    family choice (else the Coder seat); ``check`` is an argument list or the full command text."""
     brief = str(brief or "").strip()
     if not brief:
         return {"ok": False, "error": "a code job needs a brief"}
+    check, why = normalize_check(check)
+    if why:
+        return {"ok": False, "error": why}
+    family, why = choose_coder(coder)
+    if why:
+        return {"ok": False, "error": why}
     root = _repo_root(repo or "")
     if root is None:
         return {"ok": False, "error": "not a git repository: %s" % repo}
@@ -270,8 +423,9 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
         if code != 0:
             return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
         job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
-               "check": str(check or "")[:500], "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-               "steward_dir": str(cdir), "steward": steward}
+               "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+               "steward_dir": str(cdir), "steward": steward, "worker": "coder", "coder_family": family,
+               "started_by": str(actor or "the steward")}
         _write_job(cdir, job)
         b = _busy_read()
         b[_norm(root)] = {"job": job_id, "cdir": str(cdir)}
@@ -281,22 +435,20 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
     terms.parent.mkdir(parents=True, exist_ok=True)
     terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
     _exclude_local(wt)
-    if FOREMAN_ON and is_test_gate(job["check"]) and FOREMAN_RUN_LIVE.is_file():
-        try:
-            _transition(cdir, job_id, LIVE, worker="foreman")
-            _start_foreman(cdir, job, wt)
-            return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "foreman"}
-        except Exception as e:
-            j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error="Foreman could not start: %s" % e)
-            _cleanup(j or job, keep_branch=False)
-            return {"ok": False, "error": "Foreman could not start: %s" % e, "job": job_id}
-    _transition(cdir, job_id, LIVE, worker="coder" + ("" if FOREMAN_ON else " (Foreman not yet switched on)") if not is_test_gate(job["check"]) or not FOREMAN_ON else "coder")
     try:
         eng = engine_factory(str(wt)) if engine_factory else None
         if eng is None:
             raise RuntimeError("no engine slot for the coder")
         eng.code_job = {"cdir": str(cdir), "id": job_id, "repo": str(root)}
-        eng.on_turn_done = lambda result: threading.Thread(target=finish, args=(cdir, job_id, result), name="code-job-" + job_id, daemon=True).start()
+        try:   # this job's family, for this engine only (the dashboard's preferences are never written)
+            import anchor_settings
+            eng.policy_override = {"family": family, "revision": anchor_settings.get_launch_settings()["settings_revision"],
+                                   "reason": "code_job_choice"}
+        except Exception:
+            pass
+        eng.on_turn_done = lambda result: threading.Thread(
+            target=finish, args=(cdir, job_id, dict(result or {}, manifest=manifest_of(eng, wt))),
+            name="code-job-" + job_id, daemon=True).start()
         ok, why = eng.wake(fresh=True, seed=coder_brief(job))
         if not ok:
             raise RuntimeError(why)
@@ -304,7 +456,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward=""):
         j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error="the coder could not start: %s" % e)
         _cleanup(j or job, keep_branch=False)
         return {"ok": False, "error": "the coder could not start: %s" % e, "job": job_id}
-    return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt)}
+    return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "coder", "coder": family}
 
 
 def _exclude_local(wt):
@@ -316,7 +468,7 @@ def _exclude_local(wt):
             f = ex / "info" / "exclude"
             f.parent.mkdir(parents=True, exist_ok=True)
             cur = f.read_text(encoding="utf-8") if f.exists() else ""
-            add = [x for x in ("/.anchor/", "/.ecgberht/", "/.foreman-job/", "/foreman.config.json", "/.foreman/",
+            add = [x for x in ("/.anchor/", "/.ecgberht/", "/.foreman-job/", "/.foreman/",
                                "/_foreman-status.log", "/foreman-checkpoint.json", "__pycache__/", ".pytest_cache/",
                                "*.pyc") if x not in cur]
             if add:
@@ -330,9 +482,12 @@ def coder_brief(job):
             "%s on branch %s. Do the work in the brief below completely, at your best; you may use sub-agents if "
             "the brief asks for a swarm. Do not ask questions back: if something is genuinely John's to decide, "
             "stop and say so in your final message. Do not write plan pages, reports, journals or status files; "
-            "edit the code, run the checks that apply, and end with a plain summary of what you changed and how "
-            "you checked it. Do not commit; the job commits and lands your work.%s\n\nBRIEF:\n%s") % (
-        job["repo"], job["branch"], ("\nThe job will run this check after you finish: " + job["check"]) if job.get("check") else "", job["brief"])
+            "edit the code with your file tools (only the files your tools write will land; anything else that "
+            "changes keeps the work from landing), run the checks that apply, and end with a plain summary of what "
+            "you changed and how you checked it. Do not commit; the job commits your files, a reviewer of another "
+            "model family reviews them, and they land only if that review passes.%s\n\nBRIEF:\n%s") % (
+        job["repo"], job["branch"], ("\nThe job will run this check after you finish: " + (
+            " ".join(job["check"]) if isinstance(job["check"], list) else job["check"])) if job.get("check") else "", job["brief"])
 
 
 def finish(cdir, job_id, result):
@@ -354,97 +509,142 @@ def _finish(cdir, job_id, job, result):
     wt, repo = job["worktree"], job["repo"]
     summary = str((result or {}).get("text") or "")[-1500:]
     err = str((result or {}).get("error") or "")
-    check_out, check_ok = "", None
-    if job.get("check") and not err:
-        try:
-            r = subprocess.run(job["check"], cwd=wt, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S)
-            check_ok = r.returncode == 0
-            check_out = ((r.stdout or "") + (r.stderr or ""))[-1200:]
-        except Exception as e:
-            check_ok, check_out = False, "the check did not run: %s" % e
-    commit_err = ""
-    files = []
-    code, _, gerr = _git(wt, "add", "-A", timeout=600)
-    if code != 0:
-        commit_err = "git add failed: " + gerr[:250]
-    if not commit_err:
-        code, staged, gerr = _git(wt, "diff", "--cached", "--name-only", timeout=600)
-        if code != 0:
-            commit_err = "git diff failed: " + gerr[:250]
-        elif staged:
-            code, out, gerr = _git(wt, "commit", "-q", "-m", "Code job %s for the steward\n\n%s" % (job_id, job["brief"][:600]), timeout=600)
-            if code != 0:
-                commit_err = "git commit failed: " + (gerr or out)[:250]
-    if not commit_err:
-        # the change is what the branch holds beyond its base (the coder may have committed itself)
-        code, names, gerr = _git(wt, "diff", "--name-only", job["base"], "HEAD", timeout=600)
-        if code != 0:
-            commit_err = "git diff failed: " + gerr[:250]
-        else:
-            files = [n for n in names.splitlines() if n.strip()]
-    landed, land_note = False, ""
-    if commit_err:
-        land_note = "not landed: the commit failed (%s); the worktree is kept at %s" % (commit_err, wt)
-    elif not files:
-        land_note = "nothing changed"
-    elif err:
-        land_note = "not landed: the coder's turn ended in an error; the work waits on branch %s" % job["branch"]
-    elif check_ok is False:
-        land_note = "not landed: the check failed; the work waits on branch %s" % job["branch"]
+    if err and _LIMIT_WORDS.search(err):
+        mark_exhausted(job.get("coder_family"))          # not called again for a while; the other family may run
+    manifest = [p for p in ((result or {}).get("manifest") or []) if isinstance(p, str)]
+    changed = changed_paths(wt, job["base"])
+    fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
+              "unexpected": [], "landed": False, "landed_commit": "", "review": None}
+    keep = True                                            # the worktree stays unless the work is safely placed
+    if changed is None:
+        note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
+    elif not changed:
+        note, status, error, keep = "nothing changed", ("failed" if err else "done"), err, False
     else:
-        landed, land_note = land(job, files)
-    landed_commit = ""
-    if landed:
-        c, out, _ = _git(repo, "rev-parse", "HEAD")
-        landed_commit = out.strip() if c == 0 else ""
-    done = _transition(cdir, job_id, ("finishing",), status="failed" if (err or commit_err) else "done",
-                       finished=time.strftime("%Y-%m-%d %H:%M:%S"), summary=summary, error=err or commit_err,
-                       check_ok=check_ok, check_output=check_out, files=files, landed=landed, land_note=land_note,
-                       landed_commit=landed_commit)
+        allowed = {p for p in manifest if p not in NEVER_LAND}
+        unexpected = [p for p in changed if p not in allowed]
+        files = [p for p in changed if p in allowed]
+        fields.update(unexpected=unexpected, files=files)
+        status, error = ("failed" if err else "done"), err
+        if err:
+            note = "not landed: the coder's turn ended in an error; the work is kept at %s" % wt
+        elif unexpected:
+            note = ("not landed: %d changed path(s) the coder's tools did not write (%s); everything is kept at %s"
+                    % (len(unexpected), ", ".join(unexpected[:12]) + (" ..." if len(unexpected) > 12 else ""), wt))
+        elif not files:
+            note = "not landed: nothing the coder wrote changed; the worktree is kept at %s" % wt
+        else:
+            fields["check_ok"], fields["check_output"] = run_check(job, wt)
+            if fields["check_ok"] is False:
+                note = "not landed: the check failed in the job's tree; the work is kept at %s" % wt
+            else:
+                commit_err = _commit_manifest(wt, job, files)
+                if commit_err:
+                    note, status, error = "not landed: %s; the worktree is kept at %s" % (commit_err, wt), "failed", commit_err
+                else:
+                    landed, note, extra = land(job, files)
+                    fields.update(extra)
+                    fields["landed"] = landed
+                    keep = not (landed and extra.get("verified"))
+    done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                       error=error, land_note=note, kept_worktree=(wt if keep else ""), **fields)
     if done is None:
         return
-    if not commit_err:
-        _cleanup(done, keep_branch=not (landed or not files))
+    if not keep:
+        _cleanup(done, keep_branch=False)
     _report(cdir, done)
 
 
+def _commit_manifest(wt, job, files):
+    """Stage ONLY the coder's own changed paths, by literal path, and commit them on the job's branch."""
+    present = [p for p in files if (Path(wt) / p).exists()]
+    gone = [p for p in files if p not in present]
+    if present:
+        code, _, err = _git(wt, "--literal-pathspecs", "add", "--", *present, timeout=600)
+        if code != 0:
+            return "git add failed: " + err[:250]
+    if gone:
+        code, _, err = _git(wt, "--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", *gone, timeout=600)
+        if code != 0:
+            return "git rm failed: " + err[:250]
+    code, staged, err = _git(wt, "diff", "--cached", "--name-only", timeout=600)
+    if code != 0:
+        return "git diff failed: " + err[:250]
+    if staged:
+        code, out, err = _git(wt, "commit", "-q", "-m", "Code job %s for the steward\n\n%s" % (job["id"], job["brief"][:600]),
+                              timeout=600)
+        if code != 0:
+            return "git commit failed: " + (err or out)[:250]
+    return ""
+
+
 def land(job, files):
-    """A2 (PROPOSAL v0.3): bring the job's branch up to the repository's current HEAD inside the job's OWN worktree
-    (never in the shared tree), re-run its check there, then land only its own files with git_safety.land, which
-    refuses any file someone else has changed or staged and commits by path. Returns (landed, note)."""
+    """Bring the job's branch up to the repository's current HEAD inside the job's OWN worktree, review the candidate
+    (and, when integration changed it, the delta), re-run the check there, then - under the repository's commit lock,
+    with HEAD unchanged - place only the job's own files with git_safety.land_locked and verify each placed file.
+    Returns (landed, note, fields)."""
     import git_safety as _gs
     repo, wt = job["repo"], job["worktree"]
-    with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
-        if not held:
-            return False, "not landed: the repository's commit lock is busy; the work waits on branch %s" % job["branch"]
-        return _land_under_lock(job, _gs)
-
-
-def _land_under_lock(job, _gs):
-    repo, wt = job["repo"], job["worktree"]
+    fields = {"verified": False}
+    code, cand, _ = _git(wt, "rev-parse", "HEAD")
+    if code != 0:
+        return False, "not landed: could not read the candidate; the work is kept at %s" % wt, fields
+    rec = run_review(job, wt, cand)
+    fields["review"] = rec
+    why = review_blocks(job, rec, wt, cand)
+    if why:
+        return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
     code, head, err = _git(repo, "rev-parse", "HEAD")
     if code != 0:
-        return False, "not landed: could not read %s HEAD (%s)" % (repo, err[:120])
-    code, out, err = _git(wt, "merge", "--no-edit", head, timeout=600)       # the job's own worktree: safe
-    if code != 0:
-        _git(wt, "merge", "--abort")
-        return False, "not landed: the work conflicts with newer changes in %s; it waits on branch %s" % (repo, job["branch"])
-    if job.get("check"):
-        try:
-            r = subprocess.run(job["check"], cwd=wt, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S)
-            if r.returncode != 0:
-                return False, "not landed: the check failed after bringing in newer changes; the work waits on branch %s" % job["branch"]
-        except Exception as e:
-            return False, "not landed: the check could not run after integration (%s)" % e
-    code, src, _ = _git(wt, "rev-parse", "HEAD")
-    code2, names, _ = _git(wt, "diff", "--name-only", head, src)
-    if code != 0 or code2 != 0:
-        return False, "not landed: could not read the integrated change"
-    land_files = [n for n in names.splitlines() if n.strip()]
-    if not land_files:
-        return False, "nothing changed beyond what %s already has" % repo
-    return _gs.land_locked(repo, src, land_files, "Code job %s for the steward\n\n%s" % (job["id"], job["brief"][:600]),
-                           who="code job " + job["id"], expect_head=head)
+        return False, "not landed: could not read %s HEAD (%s)" % (repo, err[:120]), fields
+    code, _, _ = _git(wt, "merge-base", "--is-ancestor", head, cand)
+    if code != 0:                                          # newer commits in the repository: integrate in the job's tree
+        code, _, _ = _git(wt, "merge", "--no-edit", head, timeout=600)
+        if code != 0:
+            _git(wt, "merge", "--abort")
+            return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
+        code, merged, _ = _git(wt, "rev-parse", "HEAD")
+        ok, out = run_check(job, wt)
+        if ok is False:
+            return False, "not landed: the check failed after bringing in newer changes; the work is kept at %s" % wt, fields
+        delta = run_review(job, wt, merged, delta_from=cand)
+        fields["delta_review"] = delta
+        why = review_blocks(job, delta, wt, merged)
+        if why:
+            return False, "not landed (after integration): %s; the work is kept at %s" % (why, wt), fields
+        cand = merged
+    code2, names, _ = _git(wt, "-c", "core.quotepath=false", "diff", "--name-only", "-z", head, cand)
+    land_files = [n for n in names.split("\0") if n.strip()]
+    if code2 != 0 or not land_files:
+        return False, "not landed: nothing changed beyond what %s already has" % repo, fields
+    stray = [n for n in land_files if n not in set(files)]
+    if stray:
+        return False, "not landed: the candidate would place paths outside the job's own files (%s); kept at %s" % (
+            ", ".join(stray[:8]), wt), fields
+    with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
+        if not held:
+            return False, "not landed: the repository's commit lock is busy; the work is kept at %s" % wt, fields
+        code, now, _ = _git(repo, "rev-parse", "HEAD")
+        if code != 0 or now != head:
+            return False, "not landed: %s moved during the review; the work is kept at %s - start the landing again" % (
+                repo, wt), fields
+        landed, note = _gs.land_locked(repo, cand, land_files, "Code job %s for the steward\n\n%s" % (
+            job["id"], job["brief"][:600]), who="code job " + job["id"], expect_head=head)
+    if not landed:
+        return False, note + "; the work is kept at %s" % wt, fields
+    c, out, _ = _git(repo, "rev-parse", "HEAD")
+    fields["landed_commit"] = out.strip() if c == 0 else ""
+    bad = []
+    for n in land_files:                                   # every placed file is the candidate's, byte for byte
+        a1 = _git(repo, "rev-parse", "HEAD:" + n)
+        a2 = _git(wt, "rev-parse", cand + ":" + n)
+        if (a1[0] == 0) != (a2[0] == 0) or (a1[0] == 0 and a1[1] != a2[1]):
+            bad.append(n)
+    if bad:
+        return True, "landed, but %d placed file(s) differ from the candidate (%s); the worktree is kept at %s" % (
+            len(bad), ", ".join(bad[:8]), wt), fields
+    fields["verified"] = True
+    return True, note, fields
 
 
 def _cleanup(job, keep_branch=True):
@@ -521,20 +721,25 @@ def _report(cdir, job):
         pass
 
 
-def stop(cdir, job_id=None, engine_lookup=None):
-    """His "stop": kill the running job (the newest when no id); its work so far stays on its branch."""
+def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
+    """Stop the running job (the newest when no id) on behalf of ``actor`` (recorded as said - never assumed to be
+    John). Nothing is committed or removed: the worktree is kept exactly as the coder left it."""
     jobs = [j for j in read_jobs(cdir).values() if j.get("status") in LIVE and (not job_id or j["id"] == job_id)]
     if not jobs:
         return {"ok": False, "error": "no code job is running"}
     job = sorted(jobs, key=lambda j: j["started"])[-1]
+    who = str(actor or "unknown")
     if job.get("status") == "finishing":
-        if time.time() - float(job.get("finishing_at") or 0) < CHECK_TIMEOUT_S + 900:
+        if time.time() - float(job.get("finishing_at") or 0) < CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S + 900:
             return {"ok": False, "error": "the code job is already finishing; its result is on the way"}
         _transition(cdir, job["id"], ("finishing",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
-                    error="the job's finish never completed", land_note="released by stop; the work waits on branch %s" % job["branch"])
-        return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True}
+                    error="the job's finish never completed", stopped_by=who, kept_worktree=job["worktree"],
+                    land_note="released by %s; the work is kept at %s" % (who, job["worktree"]))
+        return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True, "kept": job["worktree"]}
     stopped = _transition(cdir, job["id"], ("running",), status="stopped", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
-                          land_note="stopped by John; nothing landed; the work so far stays on branch %s" % job["branch"])
+                          stopped_by=who, kept_worktree=job["worktree"],
+                          land_note="stopped by %s; nothing landed; the work so far is kept at %s (branch %s)" % (
+                              who, job["worktree"], job["branch"]))
     if stopped is None:
         return {"ok": False, "error": "the code job is already finishing; its result is on the way"}
     try:
@@ -544,13 +749,4 @@ def stop(cdir, job_id=None, engine_lookup=None):
             eng.stop()
     except Exception:
         pass
-    proc = _FOREMAN_PROCS.pop(job["id"], None)     # a Foreman job: its process tree goes too (2026-10-05)
-    if proc is not None:
-        _kill_tree(proc)
-    try:
-        _git(job["worktree"], "add", "-A")
-        _git(job["worktree"], "commit", "-q", "-m", "Code job %s stopped by John (unfinished)" % job["id"])
-        _git(job["repo"], "worktree", "remove", "--force", job["worktree"], timeout=300)
-    except Exception:
-        pass
-    return {"ok": True, "job": job["id"], "branch": job["branch"]}
+    return {"ok": True, "job": job["id"], "branch": job["branch"], "kept": job["worktree"], "stopped_by": who}

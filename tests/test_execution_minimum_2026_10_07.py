@@ -488,3 +488,205 @@ def test_a_backticked_name_with_brackets_keeps_them(tmp_path, monkeypatch):
     (eff / "(accepted).ics").write_text("BEGIN:VCALENDAR", encoding="utf-8")
     eng._publish_delivery_receipt("t1", reply="Made `(accepted).ics` for you.", written=[])
     assert len(said) == 1 and "%28accepted%29.ics" in said[0][1]
+
+
+# ---------- item 1, review round 4 ----------
+
+def test_a_superseded_format_never_returns_and_a_managed_designation_counts():
+    step = {"id": "s1", "name": "Step", "status": "active", "navigation": {"current": True, "role": "primary"}}
+    items = [
+        {"what": "CURRENT: Guide", "path": "g/Guide.html", "step": "s1", "date": "2026-10-07"},
+        {"what": "SUPERSEDED: Guide", "path": "g/Guide.pdf", "step": "s1", "date": "2026-10-06"},
+    ]
+    assert [it["path"] for it in sc.current_review_items({"steps": [step]}, items)] == ["g/Guide.html"]
+    managed = [{"what": "Plan-PDF", "product_id": "Plan-PDF", "managed": True, "phase": "awaiting_review",
+                "path": "deliverables/Plan-PDF/a.pdf", "step": "s1", "date": "2026-10-07"},
+               {"what": "Notes v1", "path": "n/Notes-v1.pdf", "step": "s1", "date": "2026-10-07"}]
+    assert [it["path"] for it in sc.current_review_items({"steps": [step]}, managed)] == ["deliverables/Plan-PDF/a.pdf"]
+
+
+# ---------- item 3: preservation, safe checks, the hold, the review gate ----------
+
+import json as _json
+import subprocess as _sp
+import sys as _sys
+import time as _time
+from pathlib import Path as _P
+
+from steward_cockpit import code_jobs
+
+
+def _git_repo(root):
+    root.mkdir(parents=True)
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        _sp.run(["git", "-C", str(root), *args], check=True)
+    (root / "a.txt").write_text("one\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(root), "add", "-A"], check=True)
+    _sp.run(["git", "-C", str(root), "commit", "-q", "-m", "start"], check=True)
+    return root
+
+
+class _Coder:
+    """A fake coder engine: writes with its 'file tool' (recorded in .files) and optionally behind its back."""
+    def __init__(self, wt, tool_writes=None, stray=None, error=""):
+        self.wt, self.tool_writes, self.stray, self.error = wt, tool_writes or {"a.txt": "two\n"}, stray or {}, error
+        self.files, self.on_turn_done, self.code_job, self.policy_override = [], None, None, None
+
+    def wake(self, fresh=False, seed=None):
+        for name, text in self.tool_writes.items():
+            _P(self.wt, name).write_text(text, encoding="utf-8")
+            self.files.append(str(_P(self.wt, name)))
+        for name, text in self.stray.items():                     # e.g. a script it ran rewrote strip.json
+            _P(self.wt, name).parent.mkdir(parents=True, exist_ok=True)
+            _P(self.wt, name).write_text(text, encoding="utf-8")
+        self.on_turn_done({"text": "done", "error": self.error})
+        return True, "awake"
+
+    def stop(self):
+        pass
+
+
+def _job(tmp_path, monkeypatch, coder_kw=None, check="", coder_family="claude", repo_name="repo"):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": (coder_family, None))
+    repo, cdir = _git_repo(tmp_path / repo_name), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt to two.", check,
+                          engine_factory=lambda wt: _Coder(wt, **(coder_kw or {})))
+    assert out["ok"], out
+    for _ in range(300):
+        j = code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}
+        if j.get("status") in ("done", "failed", "stopped"):
+            return repo, j
+        _time.sleep(0.1)
+    raise AssertionError(code_jobs.read_jobs(str(cdir)))
+
+
+def test_a_reviewed_job_lands_only_its_own_files(tmp_path, monkeypatch):
+    repo, job = _job(tmp_path, monkeypatch)
+    assert job["landed"] is True and job["files"] == ["a.txt"] and job["review"]["family"] == "chatgpt"
+    assert (repo / "a.txt").read_text(encoding="utf-8") == "two\n" and not job["kept_worktree"]
+
+
+def test_a_planted_defect_the_reviewer_objects_to_is_not_landed(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REVIEW_VERDICT", "FAIL")
+    repo, job = _job(tmp_path, monkeypatch)
+    assert job["landed"] is False and "did not pass it" in job["land_note"] and "planted defect" in job["land_note"]
+    assert (repo / "a.txt").read_text(encoding="utf-8") == "one\n"
+    assert _P(job["kept_worktree"], "a.txt").read_text(encoding="utf-8") == "two\n"     # the work is kept
+
+
+def test_a_reviewer_that_throws_lands_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REVIEW_MODE", "crash")
+    repo, job = _job(tmp_path, monkeypatch)
+    assert job["landed"] is False and "the review failed" in job["land_note"] and _P(job["kept_worktree"]).is_dir()
+
+
+def test_a_review_by_the_authors_family_or_of_another_tree_lands_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REVIEW_FAMILY", "claude")
+    repo, job = _job(tmp_path, monkeypatch, coder_family="claude")
+    assert job["landed"] is False and "author's own family" in job["land_note"]
+    monkeypatch.setenv("FAKE_REVIEW_FAMILY", "chatgpt")
+    monkeypatch.setenv("FAKE_REVIEW_TREE", "0" * 40)
+    repo, job = _job(tmp_path / "second", monkeypatch)
+    assert job["landed"] is False and "not the candidate" in job["land_note"]
+
+
+def test_a_long_check_in_a_path_with_a_space_runs_whole(tmp_path, monkeypatch):
+    pad = "x" * 600
+    check = ('python -c "import sys; s=open(' + "'a.txt'" + ').read(); pad=' + "'" + pad + "'" + '; '
+             'sys.exit(0 if s.strip() == ' + "'two'" + ' and len(pad) == 600 else 3)"')
+    assert len(check) > 600
+    repo, job = _job(tmp_path, monkeypatch, check=check, repo_name="repo with space")
+    assert job["check_ok"] is True and job["landed"] is True, job["land_note"]
+    assert job["check"] == check                                     # stored whole, never cut
+
+
+def test_an_unexpected_change_blocks_landing_and_everything_is_kept(tmp_path, monkeypatch):
+    repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"report.pdf": "%PDF-1.4"},
+                                                      "stray": {"strip.json": "{}"}})
+    assert job["landed"] is False and job["status"] == "done"
+    assert job["unexpected"] == ["strip.json"] and job["files"] == ["report.pdf"]
+    kept = _P(job["kept_worktree"])
+    assert (kept / "report.pdf").read_text(encoding="utf-8") == "%PDF-1.4" and (kept / "strip.json").is_file()
+    assert not (repo / "report.pdf").exists() and not (repo / "strip.json").exists()
+
+
+def test_foreman_config_never_lands_even_when_the_coder_writes_it(tmp_path, monkeypatch):
+    repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"a.txt": "two\n", "foreman.config.json": "{}"}})
+    assert job["landed"] is False and "foreman.config.json" in job["unexpected"]
+    assert not (repo / "foreman.config.json").exists()
+
+
+def test_an_exhausted_family_is_not_called_again(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    code_jobs.mark_exhausted("chatgpt")
+    assert "chatgpt" in code_jobs.exhausted_families()
+    import anchor_settings
+    monkeypatch.setattr(anchor_settings, "get_launch_settings",
+                        lambda: {"coding_family": "chatgpt", "default_cli": "claude", "review_family": "grok",
+                                 "settings_revision": "r"})
+    assert code_jobs.choose_coder() == ("claude", None)              # the other family runs
+    fam, why = code_jobs.choose_coder("chatgpt")
+    assert fam is None and "usage limit" in why
+
+
+def test_model_preferences_are_byte_identical_after_a_job(tmp_path, monkeypatch):
+    import anchor_settings
+    paths = [anchor_settings.settings_path(), anchor_settings.mirror_path()]
+    before = [p.read_bytes() if p.is_file() else None for p in paths]
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", "", engine_factory=lambda wt: _Coder(wt), coder="grok")
+    assert out["ok"] and out["coder"] == "grok"
+    for _ in range(300):
+        if (code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}).get("status") in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert [p.read_bytes() if p.is_file() else None for p in paths] == before
+
+
+def test_stop_records_who_stopped_it_and_keeps_the_worktree_as_it_is(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+
+    class Slow(_Coder):
+        def wake(self, fresh=False, seed=None):
+            _P(self.wt, "a.txt").write_text("half\n", encoding="utf-8")
+            return True, "awake"
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "Long.", "", engine_factory=lambda wt: Slow(wt))
+    r = code_jobs.stop(str(cdir), actor="John")
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]
+    assert r["ok"] and job["stopped_by"] == "John" and "stopped by John" in job["land_note"]
+    assert _P(job["kept_worktree"], "a.txt").read_text(encoding="utf-8") == "half\n"
+
+
+# ---------- item 2, review round 3 ----------
+
+def test_the_first_write_to_a_never_seen_effort_is_announced_not_swallowed(tmp_path, monkeypatch):
+    from steward_cockpit.conversation_history import read_history_document
+    monkeypatch.delenv("STEWARD_COCKPIT_FAKE", raising=False)
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "eff"))
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (eff / "Plan.md").write_text("# p", encoding="utf-8")
+    assert dr.register(eff, "Plan", "`Plan.md`")["written"]                # no baseline existed before this write
+    turns = read_history_document(str(eff))["turns"]
+    assert any("ready to read: [Plan]" in t["text"] for t in turns), turns   # saved before register() returned
+
+
+def test_office_routes_read_in_the_preview_and_download_apart():
+    r = dr.reading_target({"route": "/artifact/p?path=reports/Guide.docx"}, pid="p", effort_rel="")
+    assert r["read"].endswith("&view=1") and r["download"].endswith("&download=1")
+
+
+def test_a_deck_whose_pdf_arrives_later_is_announced_again_as_ready():
+    deck = {"path": "deliverables/D/a.pptx", "hash": "h", "date": "2026-10-07", "what": "Deck", "managed": True}
+    assert steward_engine._deliv_key(deck) != steward_engine._deliv_key({**deck, "visual_companion": {"path": "a.pdf"}})

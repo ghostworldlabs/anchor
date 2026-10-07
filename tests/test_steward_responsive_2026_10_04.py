@@ -3,6 +3,7 @@ R1 the queued receipt and Take this now; R2 small by default (the contract split
 R3 the code job (a coder in its own worktree, best model at full effort, lands when clean, wakes the steward; one
 writer; stop). Hermetic: temp folders, a temp git repo, fake engines; never the live server or a real model."""
 import json
+import sys
 import subprocess
 import time
 from pathlib import Path
@@ -116,14 +117,25 @@ def _repo(tmp_path):
     return repo
 
 
+@pytest.fixture(autouse=True)
+def _code_job_seats(monkeypatch):
+    """2026-10-07 (execution minimum item 3): a code job lands only after another family's review of the exact
+    candidate; here the reviewer is tests/fake_review.py (ANCHOR_REVIEW_CMD) and the coder's family is fixed."""
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", json.dumps([sys.executable, str(Path(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ((requested or "claude"), None))
+
+
 class FakeCoder:
-    """Stands in for the workbench engine: on wake it does the brief (writes a file) and ends its turn."""
+    """Stands in for the workbench engine: on wake it does the brief (writes a file with its file tool, so the
+    file is in its manifest) and ends its turn."""
     def __init__(self, wt, content="two\n"):
         self.wt, self.content, self.on_turn_done, self.code_job, self.seed = wt, content, None, None, None
+        self.files = []
 
     def wake(self, fresh=False, seed=None):
         self.seed = seed
         Path(self.wt, "a.txt").write_text(self.content, encoding="utf-8")
+        self.files.append(str(Path(self.wt, "a.txt")))
         self.on_turn_done({"text": "Changed a.txt to two; checked it.", "error": ""})
         return True, "awake"
 
@@ -154,6 +166,7 @@ def test_a_code_job_runs_in_its_worktree_lands_when_clean_and_wakes_the_steward(
     assert job["status"] == "done" and job["check_ok"] is True and job["landed"] is True and job["files"] == ["a.txt"]
     assert (repo / "a.txt").read_text(encoding="utf-8") == "two\n", "landed in the repository"
     assert "Change a.txt to say two." in coders[0].seed and "Do not commit" in coders[0].seed
+    assert job["review"]["verdict"] == "PASS" and job["review"]["family"] == "chatgpt"   # another family passed it
     for _ in range(50):
         if reports:
             break
@@ -216,6 +229,7 @@ def test_a_coder_that_commits_its_own_work_is_kept_and_landed(tmp_path, monkeypa
     class Committer(FakeCoder):
         def wake(self, fresh=False, seed=None):
             Path(self.wt, "a.txt").write_text("committed by the coder\n", encoding="utf-8")
+            self.files.append(str(Path(self.wt, "a.txt")))
             subprocess.run(["git", "-C", self.wt, "commit", "-qam", "coder"], check=True)
             self.on_turn_done({"text": "done", "error": ""})
             return True, "awake"
@@ -311,7 +325,7 @@ def test_a_git_failure_in_finish_keeps_the_work(tmp_path, monkeypatch):
     real = code_jobs._git
 
     def flaky(repo, *args, **kw):
-        if args and args[0] == "add":
+        if tuple(args[:2]) == ("--literal-pathspecs", "add"):   # the job staging its own files
             return 1, "", "git add timed out after 600s"
         return real(repo, *args, **kw)
     monkeypatch.setattr(code_jobs, "_git", flaky)

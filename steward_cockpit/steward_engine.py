@@ -1843,8 +1843,9 @@ class Engine:
                 try:
                     from steward_cockpit import code_jobs as _cj
                     from steward_cockpit import steward_routes as _sr
-                    r = _cj.stop(self.dir, engine_lookup=lambda wt: _sr.get_engine(wt, general=True, tid="1", create=False))
-                    self._emit({"t": "sys", "text": ("code job stopped; its work so far stays on branch " + r["branch"]) if r.get("ok") else ("no code job to stop: " + str(r.get("error")))})
+                    r = _cj.stop(self.dir, engine_lookup=lambda wt: _sr.get_engine(wt, general=True, tid="1", create=False),
+                                 actor="John")
+                    self._emit({"t": "sys", "text": ("code job stopped; its work so far is kept at " + str(r.get("kept") or r["branch"])) if r.get("ok") else ("no code job to stop: " + str(r.get("error")))})
                 except Exception as e:
                     self._emit({"t": "sys", "text": "the code job could not be stopped: %s" % e})
         answer_context = None
@@ -3773,7 +3774,9 @@ def _receipt_lock(cdir):
 
 
 def _deliv_key(it):
-    return "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
+    key = "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
+    # a deck whose reading copy (its verified PDF companion) arrives later is a NEW announcement: "ready to read"
+    return key + ("|reading-copy" if it.get("visual_companion") else "")
 
 
 def _read_seen(cdir):

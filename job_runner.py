@@ -749,6 +749,16 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
       tool_result, so the model re-asks in plain text and we answer with a
       stream-json user TEXT turn — best-effort continuation, not guaranteed.
     """
+    # Execution minimum item 3 (John, 2026-10-07): Foreman (build) and Crucible (plan) are held at Anchor's managed
+    # entries until their best-in-class review - refused BEFORE any job id, record or process exists. A control-plane
+    # command that reaches into either engine is refused the same way. (This patch claims no machine-wide ban.)
+    from steward_cockpit import code_jobs as _cj_hold
+    if _cj_hold.foreman_crucible_held():
+        if not command and str(lane or "").lower() in ("plan", "planning", "build"):
+            raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+        if command and any(seg.lower() in ("foreman", "crucible")
+                           for arg in command for seg in str(arg).replace("\\", "/").split("/")):
+            raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
     import anchor_settings as _aset
     import model_policy as _mp
     settings_snapshot = None if command else _aset.get_launch_settings()

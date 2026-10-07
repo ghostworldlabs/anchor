@@ -36,6 +36,8 @@ def main():
     ap.add_argument("action", choices=("start", "stop", "list"))
     ap.add_argument("--repo"); ap.add_argument("--brief-file"); ap.add_argument("--brief")
     ap.add_argument("--check", default=""); ap.add_argument("--job")
+    ap.add_argument("--check-argv", default="", help="the check as a JSON argument list (no shell)")
+    ap.add_argument("--coder", default="", help="this job's coder family (claude|chatgpt|grok|gemini); default: the Coder seat")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args()
     pid, rel = project_for(os.getcwd())
@@ -44,7 +46,10 @@ def main():
         brief = a.brief or (Path(a.brief_file).read_text(encoding="utf-8") if a.brief_file else "")
         if not (a.repo and brief.strip()):
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
-        body.update(repo=a.repo, brief=brief, check=a.check)
+        check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
+        body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward")
+    if a.action == "stop":
+        body["actor"] = "the steward"
     if a.job:
         body["job"] = a.job
     req = urllib.request.Request("http://127.0.0.1:%s/api/steward/code_job?pid=%s" % (a.port, pid),

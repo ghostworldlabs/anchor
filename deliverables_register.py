@@ -188,6 +188,7 @@ def register(effort_dir, what, where, *, date=None, step=None,
             if any(e.get("kind") == "refinement_update" for e in state.get("roadmap_events", [])):
                 return {"written": False, "reason": "managed-refinement-update-required"}
         target = d / REGISTER_NAME
+        receipt_baseline(d)          # before the write, so the write itself is announced (never taken as baseline)
         with _paths.WRITE_LOCK:
             d.mkdir(parents=True, exist_ok=True)
             text = ""
@@ -317,10 +318,14 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
         target = re.search(r"[?&]path=([^&]*)", url or "")
         from urllib.parse import unquote as _uq
         rext = os.path.splitext(_uq(target.group(1)))[1].lower() if target else ""
+        if url is None:
+            return out
         if rext in _DOWNLOAD:
-            out["download"] = url
+            out["download"] = url + "&download=1"
         if rext == ".pptx":
             out["preparing"] = True                     # a deck behind a route has no bound reading copy
+        elif rext in _OFFICE_VIEW:
+            out["read"] = url + "&view=1"               # Word / Excel read in the text preview, as before
         else:
             out["read"] = url
         return out
@@ -361,33 +366,35 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
     return out
 
 
+def receipt_baseline(effort_dir):
+    """Every writer calls this BEFORE it changes the register: an effort seen for the first time takes what it holds
+    now as its starting point, so the write that follows is announced (never swallowed as the baseline)."""
+    try:
+        from steward_cockpit import steward_engine as _se
+        _se.receipt_baseline(str(effort_dir))
+    except Exception:
+        pass
+
+
 def notify_receipt(effort_dir):
-    """Every writer of a product version calls this after a successful write: the new version is announced in the
-    effort's dialogue now - persisted through the conversation writer whether or not a steward is loaded, and shown
-    live on an open page when one is. In the background; never raises."""
-    def run():
+    """Every writer of a product version calls this after a successful write. The announcement is SAVED in the
+    effort's dialogue before this returns (a short-lived writer process cannot lose it); only the live line on an
+    open page rides the loaded steward, if any. Never raises."""
+    try:
+        from steward_cockpit import steward_engine as _se
+        emit, record = None, None
         try:
-            from steward_cockpit import steward_engine as _se
-            emit = None
-            try:
-                from steward_cockpit import steward_routes as _sr
-                want = os.path.normcase(str(Path(effort_dir).resolve()))
-                with _sr.ENGINES_LOCK:
-                    live = [e for e in _sr.ENGINES.values() if not getattr(e, "general", False)
-                            and os.path.normcase(str(Path(e.dir).resolve())) == want]
-                if live:
-                    eng = live[0]
-                    emit = eng._emit
-                    record = lambda line, rid: eng._record_conversation("steward", line, turn_id=rid)
-                else:
-                    record = None
-            except Exception:
-                record = None
-            _se.publish_delivery_receipts(str(effort_dir), record=record, emit=emit)
+            from steward_cockpit import steward_routes as _sr
+            want = os.path.normcase(str(Path(effort_dir).resolve()))
+            with _sr.ENGINES_LOCK:
+                live = [e for e in _sr.ENGINES.values() if not getattr(e, "general", False)
+                        and os.path.normcase(str(Path(e.dir).resolve())) == want]
+            if live:
+                eng = live[0]
+                emit = eng._emit
+                record = lambda line, rid: eng._record_conversation("steward", line, turn_id=rid)
         except Exception:
             pass
-    try:
-        import threading
-        threading.Thread(target=run, daemon=True, name="delivery-receipt-writer").start()
+        _se.publish_delivery_receipts(str(effort_dir), record=record, emit=emit)
     except Exception:
         pass

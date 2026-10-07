@@ -61,6 +61,9 @@ def validate(argv):
         return False, "the script path does not resolve"
     if not script.is_file():
         return False, "no such script: %s" % argv[1]
+    from steward_cockpit import code_jobs as _cj
+    if _cj.foreman_crucible_held() and any(part.lower() in ("foreman", "crucible") for part in script.parts):
+        return False, _cj.HOLD_REASON
     for root in skill_roots():
         try:
             script.relative_to(root)

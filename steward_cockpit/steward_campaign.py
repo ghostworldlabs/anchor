@@ -338,7 +338,7 @@ def refinement_items(campaign_dir, state):
                 item['history'].append({'what':('Initial draft' if n == 0 else f'Refinement {n}'),
                     'path':old['path'],'hash':old['hash'],'step':step_id,'product_id':product_id,
                     'revision_id':old['revision_id'],'date':origin['at'],'managed':True,'openable':True,
-                    'source_history':origin})
+                    'visual_companion':old.get('visual_companion'),'source_history':origin})
             items.append(item)
     return items
 
@@ -2550,6 +2550,9 @@ def work_stream_model(map_, items):
     return {"roots": roots, "featured": featured}
 
 
+_HISTORICAL_LABEL = re.compile(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", re.I)
+
+
 def current_review_items(map_, items):
     from .navigation_compat import resolve_step
     steps = (map_ or {}).get("steps") or []
@@ -2581,8 +2584,7 @@ def current_review_items(map_, items):
     # when the steward DID designate what is current on the focused step (START HERE / CURRENT / FOR REVIEW, or a
     # featured path), that designation is the record - the newest-per-family fallback is only for a step where
     # nothing was designated (the MBA Version 3 case)
-    designated = focus is not None and any(resolve_step(steps, it.get("step")) is focus and not it.get("managed")
-                                           for it in current)
+    designated = focus is not None and any(resolve_step(steps, it.get("step")) is focus for it in current)
     if designated:
         # the other formats of a designated product (same owner, folder and file stem) are that product too
         chosen = {(_owner_id(it, steps),) + _split_path(it) for it in current if not it.get("managed")}
@@ -2590,6 +2592,7 @@ def current_review_items(map_, items):
         current.extend(it for it in items or []
                        if id(it) not in seen and not it.get("managed")
                        and not (it.get("accepted") or it.get("accepted_current"))
+                       and not _HISTORICAL_LABEL.match(str(it.get("what") or ""))
                        and (_owner_id(it, steps),) + _split_path(it) in chosen)
     if focus is not None and focus.get("status") not in ("done", "parked") and not designated:
         own = [it for it in items or []
