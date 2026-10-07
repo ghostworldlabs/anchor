@@ -21,11 +21,10 @@
     { name: "chekhov",          icon: "chekhov-icon.svg",         aliases: ["chekhov", "writing skill"] },
     { name: "Skill Foundry",    icon: "skill-foundry-icon.jpg",   aliases: ["skill foundry"] }
   ];
-  var BASE = (function () {
-    // the cockpit pages sit under /steward/ where the shim rewrites /brand/ → /vendor/brand/;
-    // every other page reaches the assets directly
-    return (location.pathname.indexOf("/steward/") === 0) ? "/brand/" : "/vendor/brand/";
-  })();
+  // 2026-10-07: always /vendor/brand/. The page shim rewrites /brand/ only inside HTML, never inside this separately
+  // served script, so cockpit pages asked /brand/ (served from foundry-gui/dist/brand, which lacks several marks) and
+  // got 404s — the image appeared, failed and vanished on every 1 s repaint, jittering the row ("nervous cat").
+  var BASE = "/vendor/brand/";
   function entryFor(text) {
     var t = String(text || "").toLowerCase();
     if (!t) return null;
@@ -48,7 +47,8 @@
     im.alt = e.name; im.title = e.name;
     im.width = size || 18; im.height = size || 18;
     im.style.cssText = "width:" + (size || 18) + "px;height:" + (size || 18) + "px;border-radius:4px;object-fit:cover;vertical-align:-4px;margin-right:5px";
-    im.onerror = function () { im.style.display = "none"; };
+    // a failed mark keeps its slot (hidden, not removed) so the text beside it never shifts
+    im.onerror = function () { im.style.visibility = "hidden"; };
     return im;
   }
   /* Prepend a mark before the FIRST mention of a skill inside each matching element (idempotent). */

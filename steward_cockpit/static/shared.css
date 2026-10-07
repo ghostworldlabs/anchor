@@ -598,3 +598,6 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .blk.sys .take-now { font: inherit; font-style: normal; font-size: 12px; margin-left: 6px; padding: 1px 10px; border-radius: 999px;
   border: 1px solid var(--accent, #6c9cfc); background: transparent; color: var(--accent, #9ec0ff); cursor: pointer; }
 .blk.sys .take-now:disabled { opacity: .6; cursor: default; }
+
+/* 2026-10-07: the Next steps header names the whole item (it wraps; it was cut at 48 characters) */
+.pdeliv .blk.next .who { white-space: normal; overflow-wrap: anywhere; }

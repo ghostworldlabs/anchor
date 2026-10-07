@@ -443,9 +443,16 @@ const Proto = (() => {
       tile.appendChild(el("div", "body"));
       s.appendChild(tile);
     }
+    // 2026-10-07: repaint only when what the tile shows changed. It was rebuilt from scratch every second (the
+    // 1 s busy-clock tick), which re-created icons, swallowed clicks that spanned a rebuild, and reset focus.
+    const q0 = currentQuestion();
+    const sig = JSON.stringify([q0 || null,
+      _deliv.acts || [], _deliv.warning || "", (_lastMap && _lastMap.next_in_plan) || []]);
+    if (tile.dataset.sig === sig) return;
+    tile.dataset.sig = sig;
     const n = paintNextSteps(tile.querySelector(".body"));
     const act = (_deliv.acts || []).find(a => a && (a.label || (a.item && a.item.what)));
-    const actLabel = act ? shortWhat(act.item || {what: act.label}).slice(0, 48) : "";
+    const actLabel = act ? shortWhat(act.item || {what: act.label}) : "";
     tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you") + (actLabel ? " \u2014 " + actLabel : "");
   }
   function renderStatus(stat) {

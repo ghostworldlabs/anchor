@@ -2573,8 +2573,38 @@ def current_review_items(map_, items):
             historical = re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)
             if not historical and (normalize(it.get("path")) in featured or designation):
                 current.append(it)
+    # 2026-10-07 (John: Next steps showed "a fraction"): the newest batch published on the focused step is current
+    # even when the steward did not label it START HERE / FOR REVIEW — e.g. the MBA Version 3 documents.
+    focus, _warn = _focused_step(map_ or {})
+    if focus is not None and focus.get("status") not in ("done", "parked"):
+        own = [it for it in items or []
+               if not it.get("managed") and not (it.get("accepted") or it.get("accepted_current"))
+               and resolve_step(steps, it.get("step")) is focus
+               and not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
+        newest = max((str(it.get("date") or "") for it in own), default="")
+        if newest:
+            seen = {id(it) for it in current}
+            current.extend(it for it in own if str(it.get("date") or "") == newest and id(it) not in seen)
     current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
     return current
+
+
+_READ_RANK = {".pdf": 0, ".html": 1, ".htm": 1, ".md": 2, ".docx": 3, ".pptx": 3}
+
+
+def _product_key(it):
+    """One product, whatever formats it was published in: the same step + the same title once its format tag
+    (' MD', ' PDF', ' HTML', '(PDF)') is removed; a row without a title falls back to its path minus the extension."""
+    title = re.sub(r"\s*(?:\((?:pdf|md|html|docx|pptx)\)|(?:md|pdf|html|docx|pptx))\s*$", "",
+                   str(it.get("what") or "").strip(), flags=re.I).strip().lower()
+    if not title:
+        path = str(it.get("path") or "").replace(chr(92), "/").lower()
+        title = path.rsplit(".", 1)[0] if "." in path.rsplit("/", 1)[-1] else path
+    return (str(it.get("step") or ""), title)
+
+
+def _format_rank(it):
+    return _READ_RANK.get("." + str(it.get("path") or "").rsplit(".", 1)[-1].lower(), 9)
 
 
 def read_deliverables(campaign_dir: str):
@@ -2599,15 +2629,33 @@ def review_acts(map_, current_items):
     current list), open the current step's featured file, then what the steward
     said comes next. (The open decision is added by the page from the engine state.)"""
     acts = []
+    # 2026-10-07: EVERY current product gets its own row (was: only the first unmanaged one). The formats of one product
+    # (its .md and its .pdf) are ONE decision: show the most readable (PDF, then HTML, then Markdown) and keep the other
+    # formats as companions. Managed products awaiting review come first ("Review"), then the rest ("Open").
+    groups = {}
+    order = []
     for it in current_items:
-        if it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"):
-            acts.append({"act": "Review", "label": str(it.get("what") or it.get("product_id") or it.get("path") or "").replace("-", " "),
-                         "path": it.get("path"), "step": it.get("step"), "item": it})
+        reviewing = bool(it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"))
+        if it.get("managed") and not reviewing:
+            continue
+        key = ("Review" if reviewing else "Open",) + _product_key(it)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(it)
+    order.sort(key=lambda k: 0 if k[0] == "Review" else 1)
     cur, _warn = _focused_step(map_)
-    row = next((it for it in current_items if not it.get("managed")), None)   # the current step's own file (featured or designated)
-    if row:
-        acts.append({"act": "Open", "label": str(row.get("what") or row.get("path") or "").strip(),
-                     "path": row.get("path"), "step": row.get("step"), "item": row})
+    for key in order:
+        group = sorted(groups[key], key=_format_rank)
+        row = group[0]
+        label = re.sub(r"\s*(?:\((?:pdf|md|html)\)|(?:MD|PDF|HTML))\s*$", "",
+                       str(row.get("what") or row.get("product_id") or row.get("path") or "").strip())
+        if key[0] == "Review":
+            label = label.replace("-", " ")
+        act = {"act": key[0], "label": label, "path": row.get("path"), "step": row.get("step"), "item": row}
+        if len(group) > 1:
+            act["companions"] = [{"path": g.get("path"), "route": g.get("route")} for g in group[1:]]
+        acts.append(act)
     nxt = ((map_ or {}).get("heartbeat") or {}).get("next_recommended") or ""
     if str(nxt).strip():
         acts.append({"act": "Next", "label": str(nxt).strip(), "step": (cur or {}).get("id")})
