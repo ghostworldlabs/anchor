@@ -379,8 +379,16 @@ def _busy_engine_keys():
 
 def _running_job_ids():
     import job_runner as _jr
-    return [str(r.get("job_id") or "?") for r in _jr.list_records()
-            if r.get("status") == _jr.STATUS_RUNNING]
+    ids = [str(r.get("job_id") or "?") for r in _jr.list_records()
+           if r.get("status") == _jr.STATUS_RUNNING]
+    # 2026-10-07: a steward code job (Foreman in its own worktree) is a child of this server too; the drained
+    # restart once fired mid-job because only job_runner records counted. The busy ledger names every live one.
+    try:
+        from steward_cockpit import code_jobs as _cj
+        ids += ["code:" + str(entry.get("job") or "?") for entry in _cj._busy_read().values() if isinstance(entry, dict)]
+    except Exception:
+        ids.append("code:unreadable")   # cannot prove none are running: never restart over one
+    return ids
 
 
 def api_post(proot, verb, body):
@@ -1577,6 +1585,11 @@ def handle_post(cdir, verb, body):
         from steward_cockpit import code_jobs as _cj
         action = body.get("action") or "list"
         if action == "start":
+            from steward_cockpit import maintenance as _maint
+            if _maint.is_active():
+                # 2026-10-07: a pending drained restart would kill a job started now; the steward retries after it
+                return {"ok": False, "error": "Anchor is restarting once running work finishes; start this code job "
+                                              "after the restart"}, 409
             eng = get_engine(cdir)
             out = _cj.start(cdir, body.get("repo") or "", body.get("brief") or "", body.get("check") or "",
                             engine_factory=lambda wt: get_engine(wt, general=True, tid="1"),
