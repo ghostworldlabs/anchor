@@ -184,7 +184,7 @@ class ProviderService:
             with self.lock:
                 self.observations[key] = deepcopy(out)
             # Capability discovery reads native model catalogs and help only.
-            if out["auth"] == "signed_in" and connection["family"] in ("claude", "chatgpt", "grok"):
+            if out["auth"] == "signed_in" and connection["family"] in ("claude", "chatgpt", "grok", "gemini"):
                 try:
                     rows, _ = model_policy.discover(connection["family"], env=native.account_env(connection), runner=native.catalog_command)
                     selection = model_policy.select_model(connection["family"], rows)
@@ -222,7 +222,7 @@ class ProviderService:
                 age = obs.get("observed_at")
                 obs["auth_stale"] = bool(age and time.time() - datetime.fromisoformat(age).timestamp() > TTL)
                 ready = (obs["auth"] == "signed_in" and not obs["auth_stale"] and connection["mode"] == "subscription"
-                         and connection["family"] in ("claude", "chatgpt")
+                         and connection["family"] in ("claude", "chatgpt", "gemini")
                          and (connection["native_default"] or cap["isolated"]))
                 catalog = deepcopy(self.catalogs.get(self._key(connection["id"]), {"state": "unknown", "rows": []}))
                 if catalog.get("observed_at") and time.time() - datetime.fromisoformat(catalog["observed_at"]).timestamp() > TTL:

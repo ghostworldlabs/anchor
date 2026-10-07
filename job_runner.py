@@ -448,7 +448,8 @@ def _build_gemini_argv(prompt, output_dir, gated, permission_mode=None) -> list:
         fh.write(prompt or "")
     adapter = (os.environ.get("ANCHOR_AGY_ADAPTER") or
                os.path.join(os.path.dirname(os.path.abspath(__file__)), "agy_job_adapter.mjs"))
-    model = (os.environ.get("GEMINI_MODEL") or os.environ.get("TRIO_MODEL") or "gemini-3.1-pro")
+    # launch() replaces this with the model policy's agy id; the fallback is a real agy 1.3 id
+    model = (os.environ.get("GEMINI_MODEL") or os.environ.get("TRIO_MODEL") or "gemini-3.8-flash-high")
     argv = ["node", adapter, "--prompt-file", prompt_file, "--model", model,
             "--target", str(output_dir or ".")]
     if permission_mode == "plan" or gated == "plan":
@@ -880,6 +881,9 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
                                   expected_artifacts=normalized_expected_artifacts)
         if backend == BACKEND_CHATGPT:
             argv += ["--resolved-model", selection["model"], "--resolved-effort", selection["effort"]]
+        elif backend == BACKEND_GEMINI and not os.environ.get(RUNNER_CMD_ENV) and "--model" in argv:
+            # the adapter takes ONE --model: the policy's agy id (gemini-3.8-flash-high) replaces its default
+            argv[argv.index("--model") + 1] = _mp.launch_args(selection)[1]
         elif not os.environ.get(RUNNER_CMD_ENV):
             argv += _mp.launch_args(selection)
 
@@ -906,7 +910,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
                         CODING_FAMILY=coding, REVIEW_FAMILY=review,
                         CROSS_MODEL="true" if coding != review else "false")
     if backend == BACKEND_GEMINI:
-        full_env["TRIO_DRIVER"] = "gemini-cli-native"
+        full_env["TRIO_DRIVER"] = "gemini-cli"     # the trio's registered agy driver
     elif backend == BACKEND_CHATGPT:
         full_env["TRIO_DRIVER"] = "chatgpt-cli"
         full_env = _codex.subscription_only_env(full_env)

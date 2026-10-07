@@ -106,6 +106,9 @@ def normalize_catalog(family, raw):
             if hidden(info):
                 continue
             row(model, info.get("reasoning_efforts", []), index, None, "provider_catalog_order")
+    elif family == "gemini":
+        for index, entry in enumerate(raw.get("models", [])):
+            row(entry["model"], entry["efforts"], index, None, "provider_catalog_order")
     elif family == "claude":
         # `best` is the provider's moving frontier alias, not a product-name pin.
         rows.append({"model": "best", "efforts": raw.get("efforts", []), "rank": 0,
@@ -115,6 +118,35 @@ def normalize_catalog(family, raw):
     if not rows:
         raise PolicyUnavailable(family, "no visible subscription models were advertised")
     return rows
+
+
+_AGY_EFFORT_SUFFIX = re.compile(r"^(gemini-[A-Za-z0-9.\-]+?)-(minimal|low|medium|high|xhigh|max)$")
+
+
+def parse_agy_models(text):
+    """``agy models`` -> [{"model": base, "efforts": [...]}] in the CLI's order. agy encodes the effort in the id
+    (gemini-3.8-flash-high); the base is the model, the suffixes its efforts. Use :func:`agy_model_id` to rebuild."""
+    order, efforts = [], {}
+    for line in str(text or "").splitlines():
+        ident = line.split("	", 1)[0].strip()
+        if not ident.startswith("gemini-"):
+            continue
+        m = _AGY_EFFORT_SUFFIX.match(ident)
+        base, effort = (m.group(1), m.group(2)) if m else (ident, None)
+        if base not in efforts:
+            order.append(base)
+            efforts[base] = []
+        if effort and effort not in efforts[base]:
+            efforts[base].append(effort)
+    # a model agy lists without an effort suffix runs at its one default effort, which agy calls medium
+    return [{"model": base, "efforts": efforts[base] or ["medium"]} for base in order]
+
+
+def agy_model_id(model, effort):
+    """The id agy accepts for a Gemini base model at an effort (the suffixed form when the base has efforts)."""
+    if effort and not _AGY_EFFORT_SUFFIX.match(str(model)):
+        return f"{model}-{effort}"
+    return str(model)
 
 
 def select_model(family, catalog):
@@ -242,8 +274,12 @@ def discover(family, *, env=None, runner=_run):
             if not match:
                 raise RuntimeError("Installed Claude CLI does not advertise effort capabilities")
             raw = {"efforts": [part.strip() for part in match.group(1).split(",")]}
+        elif family == "gemini":
+            # agy (the Antigravity CLI, 2026-10-07: 1.3.x) lists "<id>	<display name>" rows, newest first. It
+            # also serves other vendors' models; only gemini-* rows belong to the Gemini family.
+            raw = {"models": parse_agy_models(runner([command, "models"], env))}
         else:
-            raise RuntimeError("agy capability discovery is not supported; configure a verified transport")
+            raise RuntimeError("capability discovery is not supported; configure a verified transport")
         return normalize_catalog(family, raw), command
     except (RuntimeError, ValueError, OSError, KeyError, TypeError, AttributeError) as error:
         # codex-discipline-2026-09-15: a dead subscription login is a capacity
@@ -258,7 +294,8 @@ def _cache_identity(family, env):
     binary = {"chatgpt": "codex", "claude": "claude", "grok": "grok", "gemini": "agy"}.get(family, "")
     command = shutil.which(binary, path=env.get("PATH")) if binary else None
     provider_root = Path(env.get("CODEX_HOME") or profile / ".codex") if family == "chatgpt" else (
-        Path(env.get("GROK_HOME") or profile / ".grok") if family == "grok" else Path(env.get("CLAUDE_CONFIG_DIR") or profile / ".claude"))
+        Path(env.get("GROK_HOME") or profile / ".grok") if family == "grok" else (
+            profile / ".gemini" / "antigravity-cli" if family == "gemini" else Path(env.get("CLAUDE_CONFIG_DIR") or profile / ".claude")))
     paths = ([Path(command)] if command else []) + [provider_root / name for name in
              ("auth.json", "config.toml", "settings.json", ".credentials.json", "session.json", "models_cache.json")]
     stamps = []
@@ -328,4 +365,7 @@ def launch_args(selection, *, subagents=True):
         return ["--model", model, "--effort", effort]
     if family == "grok":
         return ["--model", model, "--reasoning-effort", effort]
+    if family == "gemini":
+        # agy names the effort inside the model id (gemini-3.8-flash-high); it has no separate effort flag for it.
+        return ["--model", agy_model_id(model, effort)]
     raise PolicyUnavailable(family, "no supported highest-effort launch contract")

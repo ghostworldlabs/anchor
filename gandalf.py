@@ -1674,8 +1674,8 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 # Over-cap trees route Gemini-backend shards to the strong
                 # long-context tier. (Was the RETIRED gemini-1.5-pro — a dead
                 # model id that made every over-cap Gemini shard fail.)
-                actual_env["GEMINI_MODEL"] = "gemini-3.1-pro"
-                actual_env["TRIO_MODEL"] = "gemini-3.1-pro"
+                actual_env["GEMINI_MODEL"] = "gemini-3.1-pro-high"
+                actual_env["TRIO_MODEL"] = "gemini-3.1-pro-high"
 
             _use_mapreduce = _gandalf_mode() != MODE_AGENTIC
             if not _use_mapreduce:

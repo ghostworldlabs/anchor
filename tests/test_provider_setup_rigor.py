@@ -255,11 +255,13 @@ def test_repeated_cached_page_load(server, monkeypatch, required_id):
     assert row(cold_snapshot, "chatgpt-default")["capability"]["isolated"] is True
     breakdown = {}
     for tail in commands:
-        breakdown[" ".join(tail)] = breakdown.get(" ".join(tail), 0) + 1
+        # 2026-10-07: the Gemini login check is one tiny agy print turn with a throwaway log path
+        key = "agy auth probe" if tail[:2] == ("--output-format", "json") else " ".join(tail)
+        breakdown[key] = breakdown.get(key, 0) + 1
     assert breakdown == {"--version": 4, "app-server --help": 1, "app-server generate-json-schema --out": 1,
                          "app-server --listen stdio://": 2, "auth login --help": 1, "auth status": 1,
-                         "--help": 1, "debug models": 1, "debug models --bundled": 1}, breakdown
-    assert len(commands) == 13
+                         "--help": 1, "debug models": 1, "debug models --bundled": 1, "agy auth probe": 1}, breakdown
+    assert len(commands) == 14
     measured(f"[{required_id}] cold ?refresh=1 with four native CLIs installed issued {len(commands)} hidden native "
              f"commands on the request thread: {breakdown}")
 

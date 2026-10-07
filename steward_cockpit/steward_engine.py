@@ -355,7 +355,7 @@ def _reported_cost(value):
     return None
 
 
-SUBSCRIPTION_CLIS = {"chatgpt": "ChatGPT", "grok": "Grok"}
+SUBSCRIPTION_CLIS = {"chatgpt": "ChatGPT", "grok": "Grok", "gemini": "Gemini"}
 
 
 def infer_subscription_cli(cli=None, usage_source=None):
@@ -368,6 +368,8 @@ def infer_subscription_cli(cli=None, usage_source=None):
         return "chatgpt"
     if "grok" in src:
         return "grok"
+    if "gemini" in src or "agy" in src:
+        return "gemini"
     return ""
 
 
@@ -1271,10 +1273,12 @@ class Engine:
             if family in excluded:
                 continue
             try:
-                if family not in ("claude", "chatgpt", "grok"):
+                if family not in ("claude", "chatgpt", "grok", "gemini"):
                     raise RuntimeError("native cockpit capability contract is not verified")
                 if family == "grok" and not (HERE / "grok_turn_bridge.py").is_file():
                     raise RuntimeError("native Grok cockpit adapter is unavailable")
+                if family == "gemini" and not (HERE / "gemini_turn_bridge.py").is_file():
+                    raise RuntimeError("native Gemini cockpit adapter is unavailable")
                 if self.provider_connection["family"] == family and (not self.provider_connection["native_default"] or self.provider_quality):
                     import provider_setup as _provider_setup
                     bound_settings = {**settings, "provider_preferences": {**settings["provider_preferences"],
@@ -1306,7 +1310,7 @@ class Engine:
         except (ValueError, RuntimeError) as exc:
             self._emit({"t": "sys", "text": "Pending provider switch could not start: " + str(exc)})
             return False
-        if target not in ("claude", "chatgpt", "grok"):
+        if target not in ("claude", "chatgpt", "grok", "gemini"):
             self._emit({"t": "sys", "text": target + " cockpit transport is not yet verified; message retained"})
             return False
         try:
@@ -1428,7 +1432,7 @@ class Engine:
             import sys
             cmd = [sys.executable, str(HERE / "fake_claude.py")]
         else:
-            base = _cli_cmd("codex" if self.cli == "chatgpt" else self.cli)
+            base = _cli_cmd({"chatgpt": "codex", "gemini": "agy"}.get(self.cli, self.cli))
             if not base:
                 self._emit({"t": "sys", "text": f"{self.cli} CLI not found on PATH"})
                 return False, f"{self.cli} CLI not found"
@@ -1444,9 +1448,10 @@ class Engine:
             self.fenced = fenced
             if fenced:
                 persona += FENCE_NOTE
-            if self.cli in ("chatgpt", "grok"):
+            if self.cli in ("chatgpt", "grok", "gemini"):
                 import sys
-                bridge = "codex_turn_bridge.py" if self.cli == "chatgpt" else "grok_turn_bridge.py"
+                bridge = {"chatgpt": "codex_turn_bridge.py", "grok": "grok_turn_bridge.py",
+                          "gemini": "gemini_turn_bridge.py"}[self.cli]
                 cmd = [sys.executable, str(HERE / bridge),
                        "--target", self.dir, "--model", selection["model"],
                        "--effort", selection["effort"], "--permission-mode", "fenced" if fenced else self.permission_mode]
@@ -1754,7 +1759,7 @@ class Engine:
                 settings = anchor_settings.get_launch_settings()
                 if target not in {settings[key] for key in ("default_cli", "coding_family", "review_family")}:
                     return {"ok": False, "error": "provider is not selected on the dashboard"}
-                if target not in ("claude", "chatgpt", "grok"):
+                if target not in ("claude", "chatgpt", "grok", "gemini"):
                     return {"ok": False, "error": target + " cockpit transport is not yet verified"}
                 model_policy.resolve(target, settings=settings)
                 self.policy_override = {"family": target, "revision": settings["settings_revision"], "reason": "explicit_session_choice"}
@@ -2122,7 +2127,7 @@ class Engine:
                            "content": [{"type": "text", "text": text}]}}
         if self._bridge_system_prompt:
             msg["system_prompt"] = self._bridge_system_prompt
-        if self.cli in ("chatgpt", "grok"):
+        if self.cli in ("chatgpt", "grok", "gemini"):
             msg["standing_rules"] = self._contract()   # every bridge turn is a new process: the rules ride each one
             if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
                 # the Star Chart's remit rides every bridge turn too, resumed or not (Grok code R1 F4)

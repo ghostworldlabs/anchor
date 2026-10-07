@@ -401,6 +401,29 @@ class NativeProviders:
             return {"auth": state, "test": "passed" if state == "signed_in" else "not_tested", "auth_source": "claude auth status",
                     "allowance": {"state": "unsupported", "source": "Account-qualified Claude rate_limit_event", "windows": []},
                     "provider_usage": {"state": "unsupported", "source": "Native CLI", "tokens": None}}
+        if family == "gemini":
+            # agy has no account/status command and `agy models` answers without signing in, so the only proof of a
+            # live Antigravity login is one tiny turn on the cheapest Gemini (2026-10-07: ~2 s). Run only on refresh.
+            import tempfile
+            with tempfile.TemporaryDirectory(prefix="agy-auth-") as scratch:
+                log = Path(scratch) / "agy.log"
+                code, raw = run_command([executable(family), "--output-format", "json", "--log-file", str(log),
+                                         "--model", "gemini-3.8-flash-low", "-p=Reply with exactly: OK"], env, timeout=90)
+                try:
+                    log_text = log.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    log_text = ""
+            try:
+                result = json.loads(raw.strip().splitlines()[-1]) if raw.strip() else {}
+            except (ValueError, RecursionError):
+                result = {}
+            result = result.get("result", result) if isinstance(result, dict) else {}
+            signed = "authenticated successfully" in log_text
+            ok = code == 0 and signed and isinstance(result, dict) and result.get("status") == "SUCCESS"
+            state = "signed_in" if ok else "signed_out" if not signed else "error"
+            return {"auth": state, "test": "passed" if ok else "failed", "auth_source": "agy print turn (Antigravity keyring login)",
+                    "allowance": {"state": "unsupported", "source": "agy exposes no allowance", "windows": []},
+                    "provider_usage": {"state": "unsupported", "source": "Native CLI", "tokens": None}}
         raise NativeError("unsupported")
 
     def login(self, connection, cancel, progress):

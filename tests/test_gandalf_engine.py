@@ -280,8 +280,8 @@ def test_dynamic_router_overrides_when_exceeds_max(gandalf, project, monkeypatch
     assert env is not None
     # 2026-07-02: the over-cap tier is the CURRENT strong long-context model
     # (gemini-1.5-pro is retired — a dead id that failed every over-cap shard).
-    assert env.get("GEMINI_MODEL") == "gemini-3.1-pro"
-    assert env.get("TRIO_MODEL") == "gemini-3.1-pro"
+    assert env.get("GEMINI_MODEL") == "gemini-3.1-pro-high"
+    assert env.get("TRIO_MODEL") == "gemini-3.1-pro-high"
 
 
 def test_dynamic_router_no_override_under_max(gandalf, project, monkeypatch):
