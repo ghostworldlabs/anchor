@@ -343,6 +343,12 @@
       "text": "I’ll check the repair’s current state and confirm which screen has the gear.\nYes—Foreman is actively working on the missing gear. The gear verified so far is inside the Cave of Wonders page, at the upper left beside the Anchor mark. Your outer Anchor header is still being checked and repaired; that repair has not landed yet.",
       "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:8:34",
       "at": "2026-10-07T02:05:21.202318+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "The gear repair has landed and its tests passed. I’ll update the campaign record and check what still needs to happen before it appears in your Anchor window.\nThe earlier gear was added only inside Cave; this repair puts it in Anchor’s top bar, immediately left of the Anchor mark, and checks that it opens your saved Setup. The job also replaced the build configuration again, so I’m restoring that file before finishing the handback.\nThe repair landed and passed its tests; it adds the gear at the far upper left of Anchor’s own top bar, immediately before the Anchor mark. Your current window still needs an Anchor restart before you’ll see it. I’ve updated the record and status and restored the build configuration.",
+      "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:8:35",
+      "at": "2026-10-07T02:41:30.350732+00:00"
     }
   ]
 }
