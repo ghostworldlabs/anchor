@@ -3,11 +3,11 @@
   "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-07",
-  "phase": "building",
-  "active_effort": "Building four-provider named accounts and Cave summaries; Google Ultra stays on the existing agy CLI.",
+  "phase": "blocked",
+  "active_effort": "Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "Choose temporary Coder recovery or restore Claude usage.",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Build named accounts and Cave switching using Google Ultra through agy.",
-  "why_next": "John settled provider-owned sign-in and confirmed Google Ultra already authenticates agy CLI.",
+  "next_recommended": "Choose temporary ChatGPT coding with Grok review, then retry the unchanged provider build.",
+  "why_next": "The selected Claude model is limited; a shared Coder change needs an explicit scoped choice.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -852,6 +852,36 @@
       "horizon_focus": null,
       "active_effort": "Building four-provider named accounts and Cave summaries; Google Ultra stays on the existing agy CLI.",
       "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-07",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "John settled provider-owned sign-in and confirmed Google Ultra already authenticates agy CLI.",
+      "horizon_source_seq": 92,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-07",
+      "source": "verb_update",
+      "phase": "blocked",
+      "wait_ref": "step:gwl-access",
+      "next_recommended": "Choose temporary ChatGPT coding with Grok review, then retry the unchanged provider build.",
+      "why_next": "The selected Claude model is limited; a shared Coder change needs an explicit scoped choice.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.",
+      "human_wait": "Choose temporary Coder recovery or restore Claude usage.",
+      "current_step_id": "gwl-access"
     }
   ],
   "receipts": [
@@ -1150,5 +1180,5 @@
   "horizon_source_seq": null,
   "horizon_focus": null,
   "current_step_id": "gwl-access",
-  "wait_ref": "none"
+  "wait_ref": "step:gwl-access"
 }

@@ -6,17 +6,15 @@
 
 ## Active effort
 
-Building four-provider named accounts and Cave summaries; Google Ultra stays on the existing agy CLI.
+Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.
 
 ## Why next
 
-Sign-in and Google transport are settled; implement the existing account refinement through isolated Foreman execution and review.
+Foreman stopped before tests; the existing native handoff has no per-job coder override, so changing Coder affects other new jobs.
 
 ## Human wait
 
-## Why stakes
-
-The mockup makes provider sign-in, allowance, API cost and model controls tangible before an implementation plan; email and calendars follow later.
+Choose temporary Coder recovery or restore Claude usage.
 
 ## Why stakes
 
