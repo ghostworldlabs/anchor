@@ -599,6 +599,15 @@ def refinement2(rig):
     Markdown documents the Library opens."""
     base = rig['content'] / 'researchprime'
     ins, prog = rig['instruction'], rig['program']
+    # Real cited controls sit DEEP in a long source (the registered a108 is
+    # skill.md line 208): pad the instruction source well past a screenful so
+    # the browser checks only pass when the anchored line is actually brought
+    # into view inside the sandboxed (script-less) frame — never the file top.
+    ins.write_text(ins.read_text(encoding='utf-8')
+                   + ''.join('Deep clause %d of the governed procedure.\n' % i for i in range(1, 140))
+                   + '- **G-deep** the cited governance control.\n'
+                   + 'Closing clause A.\nClosing clause B.\n', encoding='utf-8')
+    deep = len(ins.read_text(encoding='utf-8').splitlines()) - 2
 
     def source(path, sid, kind):
         return dict(id=sid, kind=kind, origin=str(path),
@@ -651,7 +660,7 @@ def refinement2(rig):
                   'model_policy': {'mode': 'latest_supported', 'effort': 'highest_supported'},
                   'settings_revision': 23},
         sources=[source(ins, 'skill', 'instructions'), source(prog, 'runner', 'code')],
-        anchors=[anchor(ins, 'a_ins', 'skill', 7), anchor(ins, 'a_ins2', 'skill', 6),
+        anchors=[anchor(ins, 'a_ins', 'skill', deep), anchor(ins, 'a_ins2', 'skill', 6),
                  anchor(prog, 'a_code', 'runner', 1), anchor(prog, 'a_code2', 'runner', 2)],
         resources=[resource('purpose', 'Original North Star', 'resources/purpose.html', 'a_ins2'),
                    resource('human-guide', 'Human guide', 'resources/human-guide.html', 'a_ins'),
@@ -713,6 +722,31 @@ def visible_height(box, viewport_height):
     if not box:
         return 0
     return min(box['y'] + box['height'], viewport_height) - max(box['y'], 0)
+
+
+def cited_line_in_view(tab, viewport_height, timeout_ms=5000):
+    """After a source-anchor click, the cited ``.hit`` line must ACTUALLY
+    intersect the visible iframe AND the screen viewport — not merely exist
+    attached somewhere in the frame's full pre text (Playwright counts
+    off-screen boxes, and ``inner_text`` includes off-screen lines). The frame
+    sandbox runs no scripts, so only the host-side scroll can satisfy this.
+    Returns ``(hit_box, frame_box)`` in page coordinates, or fails."""
+    frame = tab.frame_locator('#resource-frame')
+    frame.locator('.hit').wait_for()
+    hit_box = frame_box = None
+    for _ in range(max(1, timeout_ms // 100)):
+        hit_box = frame.locator('.hit').bounding_box()
+        frame_box = tab.locator('#resource-frame').bounding_box()
+        if (hit_box and frame_box
+                and hit_box['y'] >= frame_box['y'] - 1
+                and hit_box['y'] + hit_box['height'] <= frame_box['y'] + frame_box['height'] + 1
+                and hit_box['x'] >= frame_box['x'] - 1
+                and hit_box['x'] < frame_box['x'] + frame_box['width']
+                and visible_height(hit_box, viewport_height) >= hit_box['height'] - 1):
+            return hit_box, frame_box
+        tab.wait_for_timeout(100)
+    raise AssertionError('cited source line never intersected the visible iframe '
+                         'and viewport: hit=%r frame=%r' % (hit_box, frame_box))
 
 
 @pytest.fixture
@@ -861,9 +895,17 @@ def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, se
                 detail.locator('.reconcile-node details.difference > summary').click()
                 assert 'The code path — reports are session work.' in detail.inner_text()
 
-                # Source anchors open through the EXISTING hash-checked viewer.
-                detail.locator('.anchor-list a[data-source]').first.click()
-                tab.frame_locator('#resource-frame').locator('.hit').wait_for()
+                # Source anchors open through the EXISTING hash-checked viewer,
+                # and the DEEP cited line — not the file top — actually
+                # intersects the visible iframe and the screen viewport: the
+                # sandboxed frame runs no scripts, so only the host scroll
+                # can land there.
+                detail.locator('.reconcile-node .anchor-list a[data-source]').first.click()
+                cited_line_in_view(tab, height)
+                deep = len(rig['instruction'].read_text(encoding='utf-8').splitlines()) - 2
+                hit = tab.frame_locator('#resource-frame').locator('.hit')
+                assert hit.get_attribute('id') == 'L%d' % deep
+                assert 'the cited governance control' in hit.inner_text()
                 assert '/foundry/source?' in tab.locator('#resource-frame').get_attribute('src')
                 tab.locator('#close-resource').click()
 
@@ -1131,7 +1173,7 @@ def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_se
                          'source_bundle_commit': SOURCE_BUNDLE_COMMIT,
                          'steps': len(steps), 'resources': len(data['resources']),
                          'disagreement': disagreement['id']},
-             'served_assets': {}, 'documents': {}, 'screenshots': {},
+             'served_assets': {}, 'documents': {}, 'downloads': {}, 'screenshots': {},
              'other_request_failures': []}
     # The served display assets are byte-identical to the shipped files.
     for asset in DISPLAY_ASSETS:
@@ -1195,7 +1237,13 @@ def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_se
                         == 2 * on_node)
                 detail.locator('.reconcile-node .anchor-list a[data-source]').first.click()
                 frame = tab.frame_locator('#resource-frame')
-                frame.locator('.hit').wait_for()
+                # The CITED line (a108 → skill.md line 208) — not the file top —
+                # must intersect the visible iframe AND the screen viewport: the
+                # sandboxed frame runs no scripts, so the host does the scroll.
+                cited_line_in_view(tab, height)
+                hit = frame.locator('.hit')
+                assert hit.get_attribute('id') == 'L%d' % instruction_anchor['start']
+                assert instruction_anchor['quote'].splitlines()[0].strip() in hit.inner_text()
                 viewer_src = tab.locator('#resource-frame').get_attribute('src')
                 assert '/foundry/source?' in viewer_src
                 assert source_viewer_path(viewer_src).parent == sources_dir
@@ -1210,6 +1258,17 @@ def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_se
                 tab.locator('.head .actions').get_by_role('link', name='Human guide', exact=True).click()
                 frame.get_by_role('heading', name='Human guide', exact=True).wait_for()
                 shot('human-guide')
+                # The REAL document's Download source button hands over the
+                # exact declared source bytes through the contained viewer
+                # (sandbox allow-downloads; scripts stay blocked) — an actual
+                # captured browser download, not a surrogate or simulation.
+                with tab.expect_download() as guide_dl:
+                    frame.get_by_role('link', name='Download source', exact=True).click()
+                guide_download = guide_dl.value
+                assert guide_download.suggested_filename == 'human.md'
+                guide_bytes = Path(guide_download.path()).read_bytes()
+                assert guide_bytes == (bundle / 'sources/human.md').read_bytes()
+                proof['downloads']['human.md'] = _sha256(guide_bytes)
                 frame.get_by_role('link', name='← researchPrime Library', exact=True).click()
                 tab.locator('#level-dial').wait_for()
                 assert not tab.locator('#resource-dialog').is_visible()
@@ -1221,6 +1280,14 @@ def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_se
                 frame.get_by_role('heading', name='What researchPrime is for', exact=True).wait_for()
                 assert 'LOCKED' in frame.locator('body').inner_text()
                 shot('north-star')
+                # Its real Download source button: the declared skill.md bytes.
+                with tab.expect_download() as star_dl:
+                    frame.get_by_role('link', name='Download source', exact=True).click()
+                star_download = star_dl.value
+                assert star_download.suggested_filename == 'skill.md'
+                star_bytes = Path(star_download.path()).read_bytes()
+                assert star_bytes == (bundle / 'sources/skill.md').read_bytes()
+                proof['downloads']['skill.md'] = _sha256(star_bytes)
                 frame.get_by_role('link', name='A question arrives', exact=True).click()
                 tab.locator('.flow-diagram').wait_for()
                 assert not tab.locator('#resource-dialog').is_visible()

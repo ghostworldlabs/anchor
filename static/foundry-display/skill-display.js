@@ -251,8 +251,18 @@
   $('#resource-frame').addEventListener('load', () => {
     // Same-origin srcdoc/src loads expose their document; an opaque (CSP-
     // sandboxed) load yields null and simply stays contained.
-    const doc = $('#resource-frame').contentDocument;
-    if (doc) doc.addEventListener('click', serveTopNav, true);
+    const frame = $('#resource-frame');
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    doc.addEventListener('click', serveTopNav, true);
+    // The sandbox has no allow-scripts, so the source viewer's own
+    // scrollIntoView never runs inside the frame. For a /foundry/source load
+    // the HOST brings the server-validated anchored line (the #L<n> the
+    // viewer marked .hit) into view instead — containment unchanged.
+    if (/^\/foundry\/source\?/.test(frame.getAttribute('src') || '')) {
+      const hit = doc.querySelector('pre span.hit');
+      if (hit) hit.scrollIntoView({block: 'center'});
+    }
   });
   function dialTo(level) {
     let path = [...state.libPath];

@@ -924,8 +924,11 @@ def display_page(skill_id):
        never run and it can never replace the live Foundry page.
        allow-same-origin only empowers the HOST page, which intercepts the
        document's real target="_top" Back-to-Library returns and serves them
-       in-surface (serveTopNav in skill-display.js). -->
-  <iframe id="resource-frame" title="Actual library resource" sandbox="allow-same-origin"></iframe>
+       in-surface, and brings a source viewer's anchored #L<n> line into
+       view (the frame's own scroll script never runs) — both in
+       skill-display.js. allow-downloads lets the documents' declared
+       <a download> source links hand over their file; scripts stay blocked. -->
+  <iframe id="resource-frame" title="Actual library resource" sandbox="allow-same-origin allow-downloads"></iframe>
 </dialog>
 </body>
 </html>''' % {'title': esc(skill['name']), 'assets': DISPLAY_ASSET_ROUTE,
