@@ -172,3 +172,9 @@ test_tmp*/
 
 # Walkthrough-gate screenshot/byte proof (tests/test_foundry_page_walkthrough.py)
 /.proof/
+
+# Wave-1 review-links proof (2026-10-07): the IMMUTABLE real-evidence input — the
+# approved plan-review PDF acquired from the live service (identity recorded in
+# .foreman-job/wave1-evidence/EVIDENCE.json). The blanket *.pdf rule above would
+# silently drop it from the committed wave; the gate verifies it byte-for-byte.
+!.foreman-job/wave1-evidence/*.pdf
