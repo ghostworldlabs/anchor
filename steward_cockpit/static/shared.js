@@ -1328,7 +1328,13 @@ const Proto = (() => {
       (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
   }
   function routeName(r) {
-    try { const m = /[?&]path=([^&]+)/.exec(r); const seg = decodeURIComponent(m ? m[1] : r).split("/").filter(Boolean); return seg[seg.length - 1] || r; }
+    try {
+      // (2026-10-07) a Foundry review route is named by its skill — the live
+      // page it opens — never the raw query string
+      const sk = /^\/foundry\?skill=([^&]+)$/.exec(String(r || ""));
+      if (sk) return decodeURIComponent(sk[1]) + " — live Foundry page";
+      const m = /[?&]path=([^&]+)/.exec(r); const seg = decodeURIComponent(m ? m[1] : r).split("/").filter(Boolean); return seg[seg.length - 1] || r;
+    }
     catch (e) { return r; }
   }
   function delivRow(it) {

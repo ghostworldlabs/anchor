@@ -173,7 +173,10 @@ if (grip) grip.addEventListener("pointerdown", (e) => {
 });
 function fitConversation(){
   if(app.classList.contains('tileview')){app.classList.add('railhide');app.classList.remove('statusopen');return;}
-  if(innerWidth<850){app.classList.add('railhide');app.classList.remove('statusopen');}
+  // narrow screens collapse the plan rail only — the status pane (deliverables
+  // + next steps) keeps its default-open/remembered state; the 849px media
+  // query renders it as a fixed overlay, and his toggle still closes it.
+  if(innerWidth<850){app.classList.add('railhide');}
   else {
     const left=app.classList.contains('railhide')?0:document.querySelector('.leftcol').offsetWidth;
     const maximum=Math.max(280,innerWidth-left-320);

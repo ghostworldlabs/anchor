@@ -1805,13 +1805,28 @@ def classify_route(token: str):
     - ``/report/<pid>/<lane>[/<job_id>]`` — every segment in the safe class
       :func:`_safe_route_seg` (mirrors ``anchor_gui._unsafe_path_seg``);
     - ``/artifact/<pid>?path=<rel>`` — ``rel`` relative, with no ``..`` /
-      absolute / drive / backslash segment and no second query key.
+      absolute / drive / backslash segment and no second query key;
+    - ``/foundry?skill=<id>`` — the live Foundry review page (wave 1,
+      2026-10-07: John's clickable-review-links standard — a FOR REVIEW row
+      whose target is the running walkthrough page must OPEN it, not render
+      as text). Exactly ONE query key (``skill``), its value in the strict
+      id class ``[A-Za-z0-9][A-Za-z0-9_-]*`` — no second key, no ``/``, no
+      ``..``, no percent/scheme/fragment escapes. This is the whole Foundry
+      grammar: ``/foundry/source`` and friends stay unclassified (they are
+      per-anchor links the page itself mints, never register targets).
 
     Any ``http(s)://``, protocol-relative ``//``, ``../`` or other
     traversal-bearing token yields None (the row renders as text)."""
     if not token or not isinstance(token, str):
         return None
     t = token.strip()
+    if t.startswith("/foundry?"):
+        query = t[len("/foundry?"):]
+        if "&" in query or not query.startswith("skill="):
+            return None
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", query[len("skill="):]):
+            return None
+        return t
     if t.startswith("/report/"):
         if "?" in t:
             return None
@@ -1898,10 +1913,13 @@ def _read_deliverables(campaign_dir: str):
                         break
             if m_bt or cand_plain:
                 cand = (m_bt.group(1).strip() if m_bt else cand_plain)
-                if cand.startswith("/report/") or cand.startswith("/artifact/"):
-                    # (2026-09-05) a route-shaped token is judged by the
-                    # contained grammar ONLY — a hostile cell gets route None
-                    # and stays text; it never reaches the filesystem branch.
+                if cand.startswith("/"):
+                    # (2026-09-05, widened 2026-10-07) ANY route-shaped
+                    # (leading-slash) token is judged by the contained grammar
+                    # ONLY — /report/…, /artifact/… and now /foundry?skill=…
+                    # classify; a hostile or unsupported cell gets route None
+                    # and stays text; it never reaches the filesystem branch
+                    # (a leading-slash token was never a contained file path).
                     route = classify_route(cand)
                     openable = route is not None
                 else:
