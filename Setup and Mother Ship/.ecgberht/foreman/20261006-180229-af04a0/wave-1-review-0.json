@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 0,
+  "round_id": "1ac64f18-3420-4c57-96ae-9512906ac659",
+  "phase": "complete",
+  "review_status": "completed",
+  "configured_reviewers": 2,
+  "expected_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "completed_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "failed_reviewers": [],
+  "responses": [
+    {
+      "seat": "reviewer-0",
+      "reviewer": "reviewer-0",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-0",
+        "answerable": "yes",
+        "note": "Yes. Wave 1's contract is Setup and Mother Ship/assurance-2026-10-05/IMPLEMENTATION-PLAN.md lines 23-56: the five required ids at line 29, and H4's default native homes at line 50. Those ids are in the gate's -v output and the named homes are private. The findings are holes that text does not close.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "provider_native.py",
+            "line": 71,
+            "rule": "credential-exposure",
+            "message": "private_account_path treats as private only the isolated provider-accounts store, Path.home() joined with NATIVE_HOME_DIRS (.claude, .codex, .grok, .gemini), and the CODEX_HOME / CLAUDE_CONFIG_DIR / GROK_HOME redirects (provider_native.py:44-45 and 70-73). A live call of that function returned False for Path.home()/'.claude.json', Path.home()/'.config'/'claude'/'credentials.json', and Path.home()/'.agy'/'settings.json'. share_onboard.py:476-487 already lists those as Claude and Gemini login/session markers. report_viewer.resolve_project_artifact (report_viewer.py:401-417) then read_bytes() any in-project file the guard does not mark private, and GET /artifact/ is AUTH_OPEN (route_table.py:164), so a registered project folder that encloses the home — the precondition test_h4 uses — serves those files with no cookie. The same false result lets handle_project_file_content (anchor_gui.py:19938-19939) and the deliverable-file route (steward_cockpit/steward_routes.py:991-992) through. The green proofs plant only .codex/auth.json, .claude/.credentials.json, .grok, CODEX_HOME, and CLAUDE_CONFIG_DIR (tests/test_provider_setup_rigor.py:761, tests/test_provider_setup_hardening.py:414)."
+          },
+          {
+            "severity": "MINOR",
+            "file": "provider_setup.py",
+            "line": 348,
+            "rule": "cancel-during-follow-up-refresh",
+            "message": "The login worker checks cancel only before the follow-up refresh (provider_setup.py:346-348). login_status(cancel=True) still sets the cancel event and state cancelling while the record is awaiting_browser (provider_setup.py:381-383), and that is still the record's state for the whole refresh. refresh swallows NativeError, so a cancel during the read never reaches the except at line 362. Lines 350-359 then set state completed when auth is signed_in or the observation has error, and the finally at line 369 overwrites cancelling. A cancel that arrives after native login returns and during the status read is reported as a completed sign-in, including the H6 case where the status read itself failed. test_h6 never cancels, and test_r2a cancels while the stand-in is still inside login, so this window stays green."
+          }
+        ]
+      }
+    },
+    {
+      "seat": "reviewer-1",
+      "reviewer": "reviewer-1",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-1",
+        "answerable": "yes",
+        "note": "Yes. Setup and Mother Ship/assurance-2026-10-05/IMPLEMENTATION-PLAN.md:37 states the cached-read contract in mechanism terms, and lines 37-41 plus the H1-H6 hypotheses are specific enough to judge this tree. The five required ids are present and the H1-H6 bodies now pass because the fixes are in the product code; that is the post-fix proof, not an unimplemented wave.",
+        "findings": [
+          {
+            "severity": "MINOR",
+            "file": "usage_capacity.py",
+            "line": 278,
+            "rule": "account-attribution",
+            "message": "The Cave and Desk capacity rail still builds its single Claude row from latest_limit_signal(now, j) with no connection id (usage_capacity.py:278). The account filter at usage_capacity.py:128-137 runs only when connection_id is not None, so the newest job log wins, including another connection's qualified log or a legacy unqualified log. The row note still says two accounts cannot be told apart (usage_capacity.py:255-256). anchor_gui._high_seat_context and the Desk both publish that row (anchor_gui.py:7899 and anchor_gui.py:8175). separate-account-allowance-attribution proves ProviderService.snapshot and latest_limit_signal(connection_id=...) only. The browser half of failure-keeps-existing-session-and-quality replaces the seat context capacity with an empty list (tests/test_provider_setup_rigor.py:630), so the green gate never renders this rail.",
+            "repro": {
+              "command": "python -c \"import inspect, usage_capacity; src=inspect.getsource(usage_capacity.anchor_seen); assert 'latest_limit_signal(now, j)' in src\"",
+              "failing": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "merged_findings": [
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 71,
+      "rule": "credential-exposure",
+      "message": "private_account_path treats as private only the isolated provider-accounts store, Path.home() joined with NATIVE_HOME_DIRS (.claude, .codex, .grok, .gemini), and the CODEX_HOME / CLAUDE_CONFIG_DIR / GROK_HOME redirects (provider_native.py:44-45 and 70-73). A live call of that function returned False for Path.home()/'.claude.json', Path.home()/'.config'/'claude'/'credentials.json', and Path.home()/'.agy'/'settings.json'. share_onboard.py:476-487 already lists those as Claude and Gemini login/session markers. report_viewer.resolve_project_artifact (report_viewer.py:401-417) then read_bytes() any in-project file the guard does not mark private, and GET /artifact/ is AUTH_OPEN (route_table.py:164), so a registered project folder that encloses the home — the precondition test_h4 uses — serves those files with no cookie. The same false result lets handle_project_file_content (anchor_gui.py:19938-19939) and the deliverable-file route (steward_cockpit/steward_routes.py:991-992) through. The green proofs plant only .codex/auth.json, .claude/.credentials.json, .grok, CODEX_HOME, and CLAUDE_CONFIG_DIR (tests/test_provider_setup_rigor.py:761, tests/test_provider_setup_hardening.py:414).",
+      "id": "provider_native.py:71+credential-exposure",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_native.py",
+          "line": 71,
+          "rule": "credential-exposure",
+          "message": "private_account_path treats as private only the isolated provider-accounts store, Path.home() joined with NATIVE_HOME_DIRS (.claude, .codex, .grok, .gemini), and the CODEX_HOME / CLAUDE_CONFIG_DIR / GROK_HOME redirects (provider_native.py:44-45 and 70-73). A live call of that function returned False for Path.home()/'.claude.json', Path.home()/'.config'/'claude'/'credentials.json', and Path.home()/'.agy'/'settings.json'. share_onboard.py:476-487 already lists those as Claude and Gemini login/session markers. report_viewer.resolve_project_artifact (report_viewer.py:401-417) then read_bytes() any in-project file the guard does not mark private, and GET /artifact/ is AUTH_OPEN (route_table.py:164), so a registered project folder that encloses the home — the precondition test_h4 uses — serves those files with no cookie. The same false result lets handle_project_file_content (anchor_gui.py:19938-19939) and the deliverable-file route (steward_cockpit/steward_routes.py:991-992) through. The green proofs plant only .codex/auth.json, .claude/.credentials.json, .grok, CODEX_HOME, and CLAUDE_CONFIG_DIR (tests/test_provider_setup_rigor.py:761, tests/test_provider_setup_hardening.py:414).",
+          "id": "provider_native.py:71+credential-exposure",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MINOR",
+      "file": "provider_setup.py",
+      "line": 348,
+      "rule": "cancel-during-follow-up-refresh",
+      "message": "The login worker checks cancel only before the follow-up refresh (provider_setup.py:346-348). login_status(cancel=True) still sets the cancel event and state cancelling while the record is awaiting_browser (provider_setup.py:381-383), and that is still the record's state for the whole refresh. refresh swallows NativeError, so a cancel during the read never reaches the except at line 362. Lines 350-359 then set state completed when auth is signed_in or the observation has error, and the finally at line 369 overwrites cancelling. A cancel that arrives after native login returns and during the status read is reported as a completed sign-in, including the H6 case where the status read itself failed. test_h6 never cancels, and test_r2a cancels while the stand-in is still inside login, so this window stays green.",
+      "id": "provider_setup.py:348+cancel-during-follow-up-refresh",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MINOR",
+          "file": "provider_setup.py",
+          "line": 348,
+          "rule": "cancel-during-follow-up-refresh",
+          "message": "The login worker checks cancel only before the follow-up refresh (provider_setup.py:346-348). login_status(cancel=True) still sets the cancel event and state cancelling while the record is awaiting_browser (provider_setup.py:381-383), and that is still the record's state for the whole refresh. refresh swallows NativeError, so a cancel during the read never reaches the except at line 362. Lines 350-359 then set state completed when auth is signed_in or the observation has error, and the finally at line 369 overwrites cancelling. A cancel that arrives after native login returns and during the status read is reported as a completed sign-in, including the H6 case where the status read itself failed. test_h6 never cancels, and test_r2a cancels while the stand-in is still inside login, so this window stays green.",
+          "id": "provider_setup.py:348+cancel-during-follow-up-refresh",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MINOR",
+      "file": "usage_capacity.py",
+      "line": 278,
+      "rule": "account-attribution",
+      "message": "The Cave and Desk capacity rail still builds its single Claude row from latest_limit_signal(now, j) with no connection id (usage_capacity.py:278). The account filter at usage_capacity.py:128-137 runs only when connection_id is not None, so the newest job log wins, including another connection's qualified log or a legacy unqualified log. The row note still says two accounts cannot be told apart (usage_capacity.py:255-256). anchor_gui._high_seat_context and the Desk both publish that row (anchor_gui.py:7899 and anchor_gui.py:8175). separate-account-allowance-attribution proves ProviderService.snapshot and latest_limit_signal(connection_id=...) only. The browser half of failure-keeps-existing-session-and-quality replaces the seat context capacity with an empty list (tests/test_provider_setup_rigor.py:630), so the green gate never renders this rail.",
+      "repro": {
+        "command": "python -c \"import inspect, usage_capacity; src=inspect.getsource(usage_capacity.anchor_seen); assert 'latest_limit_signal(now, j)' in src\"",
+        "failing": false
+      },
+      "id": "usage_capacity.py:278+account-attribution",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MINOR",
+          "file": "usage_capacity.py",
+          "line": 278,
+          "rule": "account-attribution",
+          "message": "The Cave and Desk capacity rail still builds its single Claude row from latest_limit_signal(now, j) with no connection id (usage_capacity.py:278). The account filter at usage_capacity.py:128-137 runs only when connection_id is not None, so the newest job log wins, including another connection's qualified log or a legacy unqualified log. The row note still says two accounts cannot be told apart (usage_capacity.py:255-256). anchor_gui._high_seat_context and the Desk both publish that row (anchor_gui.py:7899 and anchor_gui.py:8175). separate-account-allowance-attribution proves ProviderService.snapshot and latest_limit_signal(connection_id=...) only. The browser half of failure-keeps-existing-session-and-quality replaces the seat context capacity with an empty list (tests/test_provider_setup_rigor.py:630), so the green gate never renders this rail.",
+          "repro": {
+            "command": "python -c \"import inspect, usage_capacity; src=inspect.getsource(usage_capacity.anchor_seen); assert 'latest_limit_signal(now, j)' in src\"",
+            "failing": false
+          },
+          "id": "usage_capacity.py:278+account-attribution",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    }
+  ],
+  "decision": {
+    "go": true,
+    "reason": "gate GREEN and no verified blocking finding",
+    "blocking": []
+  }
+}

@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 0,
+  "round_id": "b0ca5c43-ad60-47d9-ae04-7d71c02716d6",
+  "phase": "complete",
+  "review_status": "completed",
+  "configured_reviewers": 2,
+  "expected_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "completed_reviewers": [
+    "reviewer-1",
+    "reviewer-0"
+  ],
+  "failed_reviewers": [],
+  "responses": [
+    {
+      "seat": "reviewer-1",
+      "reviewer": "reviewer-1",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-1",
+        "answerable": "yes",
+        "note": "Answerable from frozen .foreman-job/IMPLEMENTATION-PLAN.md line 10 (live criteria) and line 13 (done-when). Gate is green 4/4; the test does reach :8777. No plan amendment: the holes are assertions that pass short of that plan, not a falsified plan.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "tests/test_provider_setup_live.py",
+            "line": 317,
+            "rule": "retained-account-false-pass",
+            "message": "Retained-settings passes when the saved account was dropped. Line 314 builds expected_account from preferences.accounts[family] or family+'-default', then line 317 asserts the control equals that id only if it is in the dropdown; otherwise it expects options[0]. static/provider-controls.js:46 does the same selectedIndex=0 fallback, so a saved account missing from the list still greens 'Setup controls equal saved preferences'. Plan line 10 requires retained settings."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "tests/test_provider_setup_live.py",
+            "line": 416,
+            "rule": "dialog-settings-undercounted",
+            "message": "cave-gear-opens-same-setup is marked passed, and the receipt text at lines 435-437 says the dialog shows the same retained settings, after checking only #setup-family and #setup-threshold inside the iframe (lines 414-417). Account, model, effort, and warning policy in the dialog are never read. A dialog that kept family and threshold but showed a different account or model would still pass. Plan line 10 requires the gear to open the same Setup page."
+          },
+          {
+            "severity": "MAJOR",
+            "file": "tests/test_provider_setup_live.py",
+            "line": 153,
+            "rule": "preservation-claim-unproven",
+            "message": "Docstring lines 18-20 say accounts, secrets, preferences, drafts, conversations, and running sessions are preserved, proven by the before/after settings snapshot. _preservation_view (lines 153-162) only keeps settings_revision, preferences, connection id/family/name/mode, and data_directory; the assert at line 450 compares that slice alone. Secrets, composer/conversation drafts, conversations, and running sessions are not observed, yet preservation-read-only is recorded passed at lines 453-457. The #say fill at line 402 only proves the fresh browser's local draft survived the dialog. Plan line 10 names those six preservation targets."
+          }
+        ]
+      }
+    },
+    {
+      "seat": "reviewer-0",
+      "reviewer": "reviewer-0",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-0",
+        "answerable": "yes",
+        "note": "Frozen plan line 10 states this wave's live criteria, the preserve list, the explicit client-distinction report, and the fail-if-unverified rule (.foreman-job/IMPLEMENTATION-PLAN.md:10). The test file implements those checks against the live service; the gate being green does not make the preservation claim true.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "tests/test_provider_setup_live.py",
+            "line": 18,
+            "rule": "preservation-not-proven",
+            "message": "The module contract says accounts, secrets, preferences, drafts, conversations and running sessions are preserved, proven by a before/after snapshot of the live settings projection (tests/test_provider_setup_live.py:18-20; plan .foreman-job/IMPLEMENTATION-PLAN.md:10). _preservation_view compares only settings_revision, preferences, connection id/family/name/mode, and data_directory (lines 153-162). test_preservation_and_receipt_with_actual_client_distinction then marks preservation-read-only passed on that equality (lines 446-456) and the receipt repeats it (Setup and Mother Ship/assurance-2026-10-05/evidence/live-laptop-check.json:49-51). Cave drafts are localStorage key anchor:draft:highseat, written on input (static/high-seat-page.js:956-960); this run fills #say (tests/test_provider_setup_live.py:402) and the settings snapshot cannot see that write. No assertion reads the secret store, conversation records, or running sessions, so those plan items are marked verified without a measurement."
+          },
+          {
+            "severity": "MINOR",
+            "file": "tests/test_provider_setup_live.py",
+            "line": 317,
+            "rule": "retained-settings-fallback",
+            "message": "Saved account is treated as retained even when it is not an option: account == (expected_account if expected_account in options else options[0]) (tests/test_provider_setup_live.py:314-317). The criterion is then recorded as passed with the text 'Setup controls equal saved preferences' (lines 349-352). This run's receipt shows chatgpt-default (live-laptop-check.json:39), so the fallback did not fire; the assertion still passes a mismatch and labels it equality."
+          }
+        ]
+      }
+    }
+  ],
+  "merged_findings": [
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_live.py",
+      "line": 18,
+      "rule": "preservation-not-proven",
+      "message": "The module contract says accounts, secrets, preferences, drafts, conversations and running sessions are preserved, proven by a before/after snapshot of the live settings projection (tests/test_provider_setup_live.py:18-20; plan .foreman-job/IMPLEMENTATION-PLAN.md:10). _preservation_view compares only settings_revision, preferences, connection id/family/name/mode, and data_directory (lines 153-162). test_preservation_and_receipt_with_actual_client_distinction then marks preservation-read-only passed on that equality (lines 446-456) and the receipt repeats it (Setup and Mother Ship/assurance-2026-10-05/evidence/live-laptop-check.json:49-51). Cave drafts are localStorage key anchor:draft:highseat, written on input (static/high-seat-page.js:956-960); this run fills #say (tests/test_provider_setup_live.py:402) and the settings snapshot cannot see that write. No assertion reads the secret store, conversation records, or running sessions, so those plan items are marked verified without a measurement.",
+      "id": "tests/test_provider_setup_live.py:18+preservation-not-proven",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "tests/test_provider_setup_live.py",
+          "line": 18,
+          "rule": "preservation-not-proven",
+          "message": "The module contract says accounts, secrets, preferences, drafts, conversations and running sessions are preserved, proven by a before/after snapshot of the live settings projection (tests/test_provider_setup_live.py:18-20; plan .foreman-job/IMPLEMENTATION-PLAN.md:10). _preservation_view compares only settings_revision, preferences, connection id/family/name/mode, and data_directory (lines 153-162). test_preservation_and_receipt_with_actual_client_distinction then marks preservation-read-only passed on that equality (lines 446-456) and the receipt repeats it (Setup and Mother Ship/assurance-2026-10-05/evidence/live-laptop-check.json:49-51). Cave drafts are localStorage key anchor:draft:highseat, written on input (static/high-seat-page.js:956-960); this run fills #say (tests/test_provider_setup_live.py:402) and the settings snapshot cannot see that write. No assertion reads the secret store, conversation records, or running sessions, so those plan items are marked verified without a measurement.",
+          "id": "tests/test_provider_setup_live.py:18+preservation-not-proven",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MINOR",
+      "file": "tests/test_provider_setup_live.py",
+      "line": 317,
+      "rule": "retained-settings-fallback",
+      "message": "Saved account is treated as retained even when it is not an option: account == (expected_account if expected_account in options else options[0]) (tests/test_provider_setup_live.py:314-317). The criterion is then recorded as passed with the text 'Setup controls equal saved preferences' (lines 349-352). This run's receipt shows chatgpt-default (live-laptop-check.json:39), so the fallback did not fire; the assertion still passes a mismatch and labels it equality.",
+      "id": "tests/test_provider_setup_live.py:317+retained-settings-fallback",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MINOR",
+          "file": "tests/test_provider_setup_live.py",
+          "line": 317,
+          "rule": "retained-settings-fallback",
+          "message": "Saved account is treated as retained even when it is not an option: account == (expected_account if expected_account in options else options[0]) (tests/test_provider_setup_live.py:314-317). The criterion is then recorded as passed with the text 'Setup controls equal saved preferences' (lines 349-352). This run's receipt shows chatgpt-default (live-laptop-check.json:39), so the fallback did not fire; the assertion still passes a mismatch and labels it equality.",
+          "id": "tests/test_provider_setup_live.py:317+retained-settings-fallback",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_live.py",
+      "line": 317,
+      "rule": "retained-account-false-pass",
+      "message": "Retained-settings passes when the saved account was dropped. Line 314 builds expected_account from preferences.accounts[family] or family+'-default', then line 317 asserts the control equals that id only if it is in the dropdown; otherwise it expects options[0]. static/provider-controls.js:46 does the same selectedIndex=0 fallback, so a saved account missing from the list still greens 'Setup controls equal saved preferences'. Plan line 10 requires retained settings.",
+      "id": "tests/test_provider_setup_live.py:317+retained-account-false-pass",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "tests/test_provider_setup_live.py",
+          "line": 317,
+          "rule": "retained-account-false-pass",
+          "message": "Retained-settings passes when the saved account was dropped. Line 314 builds expected_account from preferences.accounts[family] or family+'-default', then line 317 asserts the control equals that id only if it is in the dropdown; otherwise it expects options[0]. static/provider-controls.js:46 does the same selectedIndex=0 fallback, so a saved account missing from the list still greens 'Setup controls equal saved preferences'. Plan line 10 requires retained settings.",
+          "id": "tests/test_provider_setup_live.py:317+retained-account-false-pass",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_live.py",
+      "line": 416,
+      "rule": "dialog-settings-undercounted",
+      "message": "cave-gear-opens-same-setup is marked passed, and the receipt text at lines 435-437 says the dialog shows the same retained settings, after checking only #setup-family and #setup-threshold inside the iframe (lines 414-417). Account, model, effort, and warning policy in the dialog are never read. A dialog that kept family and threshold but showed a different account or model would still pass. Plan line 10 requires the gear to open the same Setup page.",
+      "id": "tests/test_provider_setup_live.py:416+dialog-settings-undercounted",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "tests/test_provider_setup_live.py",
+          "line": 416,
+          "rule": "dialog-settings-undercounted",
+          "message": "cave-gear-opens-same-setup is marked passed, and the receipt text at lines 435-437 says the dialog shows the same retained settings, after checking only #setup-family and #setup-threshold inside the iframe (lines 414-417). Account, model, effort, and warning policy in the dialog are never read. A dialog that kept family and threshold but showed a different account or model would still pass. Plan line 10 requires the gear to open the same Setup page.",
+          "id": "tests/test_provider_setup_live.py:416+dialog-settings-undercounted",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "tests/test_provider_setup_live.py",
+      "line": 153,
+      "rule": "preservation-claim-unproven",
+      "message": "Docstring lines 18-20 say accounts, secrets, preferences, drafts, conversations, and running sessions are preserved, proven by the before/after settings snapshot. _preservation_view (lines 153-162) only keeps settings_revision, preferences, connection id/family/name/mode, and data_directory; the assert at line 450 compares that slice alone. Secrets, composer/conversation drafts, conversations, and running sessions are not observed, yet preservation-read-only is recorded passed at lines 453-457. The #say fill at line 402 only proves the fresh browser's local draft survived the dialog. Plan line 10 names those six preservation targets.",
+      "id": "tests/test_provider_setup_live.py:153+preservation-claim-unproven",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "tests/test_provider_setup_live.py",
+          "line": 153,
+          "rule": "preservation-claim-unproven",
+          "message": "Docstring lines 18-20 say accounts, secrets, preferences, drafts, conversations, and running sessions are preserved, proven by the before/after settings snapshot. _preservation_view (lines 153-162) only keeps settings_revision, preferences, connection id/family/name/mode, and data_directory; the assert at line 450 compares that slice alone. Secrets, composer/conversation drafts, conversations, and running sessions are not observed, yet preservation-read-only is recorded passed at lines 453-457. The #say fill at line 402 only proves the fresh browser's local draft survived the dialog. Plan line 10 names those six preservation targets.",
+          "id": "tests/test_provider_setup_live.py:153+preservation-claim-unproven",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    }
+  ],
+  "decision": {
+    "go": true,
+    "reason": "gate GREEN and no verified blocking finding",
+    "blocking": []
+  }
+}

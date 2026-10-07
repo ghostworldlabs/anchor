@@ -1,15 +1,15 @@
 {
-  "at": "2026-10-06 12:27",
-  "status_id": "01791311239476123200",
+  "at": "2026-10-06 19:35",
+  "status_id": "01791336911240312900",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)",
+    "activity": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)",
     "latest_event": null,
     "next": [
-      "Independent adversarial review of provider integration"
+      "Provider integration: verify live Setup and laptop"
     ],
-    "question": "Restart on green?",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)"
+        "value": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only."
       },
       {
         "label": "Status",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0013-foreman-approved-restart-pause: Foreman approved; pause for restart - October 5, 2026"
+        "value": "0015-assurance-live-handoff: Assurance landed and activated; laptop proof follows"
       },
       {
         "label": "ETA",
@@ -49,20 +49,20 @@
       },
       {
         "label": "To do",
-        "value": "Independent adversarial review of provider integration"
+        "value": "Provider integration: verify live Setup and laptop"
       }
     ]
   },
-  "lead_line": "Next: Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop \u2014 John approved plan v2 and said carry on after the restart (2026-10-06).",
+  "lead_line": "Next: Provider integration: verify live Setup and laptop; then Try and refine the working provider surface \u2014 Approved work remains off master after the landing quota failure; current provider seats can recover it.",
   "now": [
-    "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)"
+    "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)"
   ],
   "running": {
     "kind": "code_job",
-    "label": "code job running \u2014 Land the finished Foreman heavy assurance work for the provider integration (18 min)",
+    "label": "code job running \u2014 Continue approved implementation plan v2 with live laptop verification only. Provider assurance already landed as becc56 (27 min)",
     "skill": "coder",
     "source": ".ecgberht/code-jobs.json",
-    "age": "18 min"
+    "age": "27 min"
   },
   "slice": {
     "n": 3,
@@ -75,21 +75,21 @@
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0013-foreman-approved-restart-pause: Foreman approved; pause for restart - October 5, 2026",
+  "journal": "0015-assurance-live-handoff: Assurance landed and activated; laptop proof follows",
   "evidence": {
     "source": {
       "path": "strip.json",
       "step_id": "gwl-provider-status",
-      "session_id": "b2058b94-93ad-4d36-9715-317e12cca179"
+      "session_id": "01a11287-5787-7532-af96-84f668e596cb"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0013-foreman-approved-restart-pause.md",
-      "entry_id": "0013-foreman-approved-restart-pause",
-      "at": "2026-10-06T00:48:40Z",
+      "path": "journal/0015-assurance-live-handoff.md",
+      "entry_id": "0015-assurance-live-handoff",
+      "at": "2026-10-07T01:08:06Z",
       "step_id": "gwl-provider-status",
-      "session_id": "01a10d74-4813-73f1-986b-23bf6a50c383",
+      "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
     },
     "eta": {
@@ -98,22 +98,21 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Independent adversarial review of provider integration",
-    "then harden failure paths",
-    "then verify on the laptop"
+    "Provider integration: verify live Setup and laptop",
+    "then Try and refine the working provider surface"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
-    "parts": "slice \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
+    "parts": "slice \u25b6 \u00b7 integrate \u00b7 rigor \u00b7 harden \u00b7 research",
     "steps_done": 0,
     "steps_total": 11
   },
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Foreman heavy assurance under implementation plan v2 is running as code job 20261005-192207-b89bab; restart done, loading repair live.",
-    "as_of": "2026-10-05",
-    "newest_work": "2026-10-05",
+    "text": "Recovering the approved provider assurance landing after the subscription limit; work is preserved on its branch.",
+    "as_of": "2026-10-06",
+    "newest_work": "2026-10-06",
     "behind_days": 0,
     "stale": false
   },
@@ -123,15 +122,15 @@
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Independent adversarial review of provider integration; then harden failure paths; then verify on the laptop",
-    "why": "John approved plan v2 and said carry on after the restart (2026-10-06).",
+    "next": "Provider integration: verify live Setup and laptop; then Try and refine the working provider surface",
+    "why": "Approved work remains off master after the landing quota failure; current provider seats can recover it.",
     "attention": "stale",
     "goal_reread": true
   },
   "map": [
     "research: Third: organize goals and initiatives on the Star Chart (proposed)",
     "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
-    "slice: Provider integration: verify live Setup and laptop (parked) \u00b7 gate",
+    "slice: Provider integration: verify live Setup and laptop (active) \u00b7 gate",
     "slice: Try and refine the working provider surface (proposed) \u00b7 no gate",
     "rigor: Independent adversarial review of provider integration (parked) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
@@ -216,7 +215,7 @@
         {
           "id": "gwl-provider-status",
           "name": "Provider integration: verify live Setup and laptop",
-          "status": "parked",
+          "status": "active",
           "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
           "if_then": "",
           "waiting_on": null,
@@ -463,5 +462,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 17
+  "deliverables_count": 18
 }

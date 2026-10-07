@@ -1,0 +1,46 @@
+[12:47:21] === FOREMAN LIVE RUN ===
+[12:47:21] project: C:\Users\john\AppData\Local\anchor-code-jobs\20261006-124717-187472
+[12:47:21] reviewers=2 fixIterCap=3 maxWaves=∞ maxWallClock=∞min git=false branch=foreman/run
+[12:47:21] binding: headless `claude -p … --permission-mode acceptEdits --allowedTools Bash,Edit,Write,Read,Glob,Grep` (cwd=project); ground truth = orchestrator gate
+[12:47:21] model routing: execute=chatgpt-cli:driver-default · review=grok-cli:driver-default · fix=chatgpt-cli:driver-default
+[12:47:21] lock: acquired C:\Users\john\AppData\Local\anchor-code-jobs\20261006-124717-187472\.foreman\run.lock (pid 189944)
+[12:47:21] [12:47] Foreman build · 20261006-124717-187472 · t=0
+---------------------------------
+Effort   (resolving contract) (? waves)
+Doing    wave ? · starting (iter 0)
+Status   0/? waves · elapsed 0m
+Tests    last verdict -
+Blocker  none
+Procs    agent_calls 0 · est $0.00 (subscription equiv)
+---------------------------------
+ETA      estimating (no completed wave yet)
+To do    waves 1..?
+[12:47:21] contract: 1 wave(s) · gate "python -m pytest -v tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py" (plan declaration)
+[12:47:21] ── wave 1/1 "Recover the already approved provider-assurance landing under implementation plan v2. This is landing only, no new desig" ───────────────
+[12:47:23] waiting on agent:execute 0m
+[12:48:23] waiting on agent:execute 1m
+[12:49:23] waiting on agent:execute 2m
+[12:50:23] waiting on agent:execute 3m
+[12:51:23] waiting on agent:execute 4m
+[12:52:23] waiting on agent:execute 5m
+[12:53:23] waiting on agent:execute 6m
+[12:54:23] waiting on agent:execute 7m
+[12:55:23] waiting on agent:execute 8m
+[12:56:23] waiting on agent:execute 9m
+[12:57:17] execute: agent execute complete
+[12:57:20] waiting on agent:gate 0m
+[12:57:21] [12:57] Foreman build · 20261006-124717-187472
+---------------------------------
+Effort   IMPLEMENTATION-PLAN.md (1 waves)
+Doing    wave 1 · execute (iter 0) · waiting on agent:gate 0m
+Status   0/1 waves · elapsed 10m
+Tests    last verdict -
+Blocker  none
+Procs    agent_calls 0 · est $0.00 (subscription equiv)
+---------------------------------
+ETA      estimating (no completed wave yet)
+To do    waves 1..1
+[12:58:09] gate (iter 0): exit 0 · tests 93 pass 93 fail 0
+[12:58:11] checkpoint: stamped intra_wave_step=review after GREEN gate (crash-resilience)
+[12:58:11] waiting on agent:review 0m
+[12:59:11] waiting on agent:review 1m

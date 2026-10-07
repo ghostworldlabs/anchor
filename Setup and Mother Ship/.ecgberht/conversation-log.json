@@ -253,6 +253,54 @@
       "text": "So are we at a point where everything is integrated and we can do a resart? If so, I will do a restart (actually a hard reboot of puter, which will restart Anchor). Then once everthing comes back on  line, you can carry on.",
       "turn_id": "bd119370-be65-4ad3-9537-e57eb5bf713a",
       "at": "2026-10-06T18:27:45.901614+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "Not yet: the landing job 20261006-120817-dff72f still owns Anchor and the hardened provider work is not on master until it reports green, so please hold the reboot until I tell you it has landed, which I will do the moment the job comes back.",
+      "turn_id": "claude:b2058b94-93ad-4d36-9715-317e12cca179:6:24",
+      "at": "2026-10-06T18:27:56.469523+00:00"
+    },
+    {
+      "role": "john",
+      "text": "Another Claude session says that your foreman run is still going. Is that correct?",
+      "turn_id": "4516b031-34be-4665-9edb-fc523697805c",
+      "at": "2026-10-06T18:30:57.756016+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "Pickup: the review-and-hardening Foreman run itself finished last night with both waves green and 93 tests passing, and what is still running is the separate landing job 20261006-120817-dff72f, which I sent this morning to carry that finished work onto Anchor master through the same gate, and which the engine is running as a Foreman job of its own. So the other session is right that a Foreman run is live on Anchor, but it is the landing pass, not the review. The engine is stopping me from even reading inside the repository while that job owns it, so I cannot give you its exact progress until it reports back; please keep holding the reboot until I tell you it has landed.",
+      "turn_id": "claude:b2058b94-93ad-4d36-9715-317e12cca179:6:25",
+      "at": "2026-10-06T18:31:08.818476+00:00"
+    },
+    {
+      "role": "john",
+      "text": "Did it land?",
+      "turn_id": "f3ecd7a3-8053-4ea8-81d4-4d1866cb6495",
+      "at": "2026-10-06T18:42:53.501974+00:00"
+    },
+    {
+      "role": "john",
+      "text": "Did it land?",
+      "turn_id": "1f3ab874-1d90-4a66-ab17-2be42de2624f",
+      "at": "2026-10-06T18:43:39.725211+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "I’ll check the conversation history and the latest job result to see whether it landed.\nI found the landing handoff in the saved history. I’m checking its result against Anchor’s commit history before saying it’s ready for your reboot.\nIt has not landed. The landing job stopped at Claude’s session limit, and its changes are preserved on a branch; please hold the reboot while I recover that handoff.\nI’m using Ecgberht to preserve the approved work and recover the landing without overlapping another Anchor writer.\nThe preserved changes are committed, but they are still off Anchor’s main branch. I’m handing the recovery to Foreman using the currently selected ChatGPT writer and Grok reviewers, with the same provider tests.\nNot yet—the landing stopped at Claude’s session limit, with the changes safely preserved. Foreman is now recovering the landing through the same tests; please hold the reboot until it reports success.",
+      "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:6:28",
+      "at": "2026-10-06T18:47:27.793168+00:00"
+    },
+    {
+      "role": "john",
+      "text": "(From John's Claude Code session, sent on his word - not typed by John.) Your landing job finished while you were not woken (it was started outside the server, so no wake reached you). Code job 20261006-180229-af04a0: DONE, Foreman wave 1 GO, review 0 agreed blockers; the provider-setup check passed. It LANDED on Anchor master as becc567 (27 files; snapshot refs/anchor-snapshots/20261006-184049-c0be07). One side effect: the job also landed its temporary foreman.config.json over the tracked root file; that is restored in e35f598. Anchor restarted (reboot) and is now LIVE on e35f598+7b84dad, so the provider-assurance work is live. Please update your record and status, and tell John the result in two or three plain sentences; ask him only what is genuinely his to decide.",
+      "turn_id": "268f6ea1-69ec-4e91-b000-e099a4b497ae",
+      "at": "2026-10-07T01:04:21.401093+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "The landing and reboot are confirmed, and the integration gate passed all 93 tests. I’m sending the remaining laptop verification to Foreman; it will check Setup and Cave on the live service without restarting Anchor or disturbing your sessions.\nThe provider assurance work landed and is live after your reboot, with 93 integration tests passing. Foreman now has the remaining laptop verification. I recorded the landing; the rail update remains pending because its writer cannot start in this session.",
+      "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:7:29",
+      "at": "2026-10-07T01:08:06.472213+00:00"
     }
   ]
 }
