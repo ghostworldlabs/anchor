@@ -2592,11 +2592,21 @@ def current_review_items(map_, items):
 _READ_RANK = {".pdf": 0, ".html": 1, ".htm": 1, ".md": 2, ".docx": 3, ".pptx": 3}
 
 
+_FORMAT_TAG = re.compile(
+    r"[\s_-]*(?:\((?:pdf|md|html|htm|docx|pptx|browser(?: reading)?|ta download)\)"
+    r"|\b(?:md|pdf|html|htm|docx|pptx))\s*$", re.I)
+
+
+def _strip_format_tag(text):
+    """A product's title without its format tag: ' MD', '-PDF', '(PDF)', '(browser)', '(browser reading)',
+    '(TA download)'."""
+    return _FORMAT_TAG.sub("", str(text or "").strip()).strip()
+
+
 def _product_key(it):
     """One product, whatever formats it was published in: the same step + the same title once its format tag
     (' MD', ' PDF', ' HTML', '(PDF)') is removed; a row without a title falls back to its path minus the extension."""
-    title = re.sub(r"\s*(?:\((?:pdf|md|html|docx|pptx)\)|(?:md|pdf|html|docx|pptx))\s*$", "",
-                   str(it.get("what") or "").strip(), flags=re.I).strip().lower()
+    title = _strip_format_tag(it.get("what")).lower()
     if not title:
         path = str(it.get("path") or "").replace(chr(92), "/").lower()
         title = path.rsplit(".", 1)[0] if "." in path.rsplit("/", 1)[-1] else path
@@ -2648,8 +2658,7 @@ def review_acts(map_, current_items):
     for key in order:
         group = sorted(groups[key], key=_format_rank)
         row = group[0]
-        label = re.sub(r"\s*(?:\((?:pdf|md|html)\)|(?:MD|PDF|HTML))\s*$", "",
-                       str(row.get("what") or row.get("product_id") or row.get("path") or "").strip())
+        label = _strip_format_tag(row.get("what") or row.get("product_id") or row.get("path") or "")
         if key[0] == "Review":
             label = label.replace("-", " ")
         act = {"act": key[0], "label": label, "path": row.get("path"), "step": row.get("step"), "item": row}
