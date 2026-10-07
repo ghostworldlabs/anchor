@@ -4,10 +4,10 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-07",
   "phase": "building",
-  "active_effort": "Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.",
+  "active_effort": "Recovering preserved provider code and the requested ETA fix after timeout; tests and review remain.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
-  "human_wait": "",
+  "human_wait": "none",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Build the agreed provider accounts and usage-only Cave summary through the unchanged tests.",
-  "why_next": "Accepted recovery uses temporary ChatGPT coding and Grok review; restore prior seats after this build.",
+  "next_recommended": "Recover saved provider code and ETA, then run the required tests and review.",
+  "why_next": "Productive code was interrupted; saved source enables focused recovery without duplicate implementation.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -926,6 +926,36 @@
       "horizon_focus": null,
       "active_effort": "Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.",
       "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-07",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "Accepted recovery uses temporary ChatGPT coding and Grok review; restore prior seats after this build.",
+      "horizon_source_seq": 95,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-07",
+      "source": "verb_update",
+      "phase": "building",
+      "wait_ref": "none",
+      "next_recommended": "Recover saved provider code and ETA, then run the required tests and review.",
+      "why_next": "Productive code was interrupted; saved source enables focused recovery without duplicate implementation.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Recovering preserved provider code and the requested ETA fix after timeout; tests and review remain.",
+      "human_wait": "none",
+      "current_step_id": "gwl-access"
     }
   ],
   "receipts": [
@@ -1245,6 +1275,16 @@
       "wait_ref": "step:gwl-access",
       "human_wait": "",
       "_kind": "receipt"
+    },
+    {
+      "at": "2026-10-07T17:54:30Z",
+      "source": "engine",
+      "step_id": "gwl-access",
+      "session_id": "01a11287-5787-7532-af96-84f668e596cb",
+      "kind": "journal_update",
+      "path": "journal/0024-provider-recovery-accepted.md",
+      "entry_id": "0024-provider-recovery-accepted",
+      "summary": "Temporary provider build recovery accepted - October 7, 2026"
     }
   ],
   "horizon_source_seq": null,

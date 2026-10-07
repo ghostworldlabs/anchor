@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.
+Recovering preserved provider code and the requested ETA fix after timeout; tests and review remain.
 
 ## Why next
 
-John accepted the temporary Coder recovery; original account, sidebar and first-launch requirements remain intact.
+Saved edits avoid rebuilding; retain accepted ChatGPT/Grok recovery and required account-isolation assurance.
 
 ## Human wait
 
-Choose temporary Coder recovery or restore Claude usage.
+none
 
 ## Why stakes
 
