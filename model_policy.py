@@ -186,9 +186,40 @@ def select_model(family, catalog):
     return result
 
 
+def _agy_bin_dir(env):
+    """agy (Gemini) installs per user under %LOCALAPPDATA%/agy/bin. The Anchor service's PATH is the machine PATH plus
+    a few user folders, so agy is not on it (2026-10-07); Codex has the same shape and codex_adapter finds it by its
+    known folder. LOCALAPPDATA may be unset in the service, so USERPROFILE/AppData/Local is the fallback."""
+    if os.name != "nt":
+        return None
+    bases = [env.get("LOCALAPPDATA")]
+    if env.get("USERPROFILE"):
+        bases.append(os.path.join(env["USERPROFILE"], "AppData", "Local"))
+    for base in filter(None, bases):
+        folder = os.path.join(base, "agy", "bin")
+        if os.path.isfile(os.path.join(folder, "agy.exe")):
+            return folder
+    return None
+
+
+def ensure_agy_on_path(env):
+    """Append agy's folder to ``env``'s PATH when agy is installed but not reachable; returns ``env``."""
+    folder = _agy_bin_dir(env)
+    key = next((k for k in env if k.upper() == "PATH"), "PATH")
+    entries = [p for p in str(env.get(key) or "").split(os.pathsep) if p]
+    if folder and not any(os.path.normcase(os.path.normpath(p)) == os.path.normcase(folder) for p in entries):
+        env[key] = os.pathsep.join(entries + [folder])
+    return env
+
+
+# Every provider lookup and child launch in the Anchor process (stewards, job runner, Setup checks, Foreman's trio
+# seats) inherits this process's PATH, so agy is made reachable once, here.
+ensure_agy_on_path(os.environ)
+
+
 def policy_environment(env=None):
     """Ignore stale model-only pins; preserve credentials and permission policy."""
-    out = dict(os.environ if env is None else env)
+    out = ensure_agy_on_path(dict(os.environ if env is None else env))
     for key in list(out):
         if (key.startswith("ANTHROPIC_DEFAULT_") and key.endswith("_MODEL")) or key in {
             "ANTHROPIC_MODEL", "CLAUDE_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "GROK_DEFAULT_MODEL",
