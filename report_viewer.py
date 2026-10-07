@@ -70,18 +70,74 @@ _ITALIC = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
+_SAFE_HREF = re.compile(r"^(?:https?://|mailto:|/|#|\./|\.\./|[\w .()%~-]+(?:/|$|\.))", re.I)
+
+
+def _href(raw: str) -> str:
+    """A link target as an attribute value: spaces encoded, a scheme that could run code refused (empty)."""
+    raw = html.unescape(raw.strip())
+    if raw.startswith("<") and raw.endswith(">"):
+        raw = raw[1:-1].strip()
+    if re.match(r"^\s*(?:javascript|data|vbscript):", raw, re.I) or not _SAFE_HREF.match(raw):
+        return ""
+    return html.escape(raw.replace(" ", "%20"), quote=True)
+
+
+def _links(text: str) -> str:
+    """[label](target) where the target may hold spaces, balanced ( ) or the <...> form (2026-10-07: a name like
+    `Calendar (accepted).ics` or `MBA Teaching AI/...` used to break the link at the first space or ')')."""
+    out, i = [], 0
+    while True:
+        j = text.find("[", i)
+        if j < 0:
+            break
+        k = text.find("](", j)
+        if k < 0 or "]" in text[j + 1:k]:
+            out.append(text[i:j + 1]); i = j + 1
+            continue
+        depth, m = 1, k + 2
+        while m < len(text) and depth:
+            if text[m] == "(":
+                depth += 1
+            elif text[m] == ")":
+                depth -= 1
+            m += 1
+        if depth:
+            out.append(text[i:k + 2]); i = k + 2
+            continue
+        label, target = text[j + 1:k], text[k + 2:m - 1]
+        href = _href(target)
+        out.append(text[i:j])
+        out.append(f'<a href="{href}" rel="noopener noreferrer">{label}</a>' if href else label)
+        i = m
+    out.append(text[i:])
+    return "".join(out)
+
+
 def _inline(text: str) -> str:
     """Apply inline markdown to an already-escaped line."""
-    # text arrives HTML-escaped; apply inline formatting on top.
-    text = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", text)
-    text = _BOLD.sub(lambda m: f"<strong>{m.group(1)}</strong>", text)
-    text = _ITALIC.sub(lambda m: f"<em>{m.group(1)}</em>", text)
-    text = _LINK.sub(
-        lambda m: f'<a href="{m.group(2)}" rel="noopener noreferrer">'
-                  f"{m.group(1)}</a>",
-        text,
-    )
-    return text
+    # text arrives HTML-escaped; apply inline formatting on top. Links first, so a target's own `*` or backticks
+    # are never formatted.
+    parts = re.split(r"(<a [^>]*>.*?</a>)", _links(text))
+    for n, part in enumerate(parts):
+        if n % 2:
+            continue
+        part = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", part)
+        part = _BOLD.sub(lambda m: f"<strong>{m.group(1)}</strong>", part)
+        parts[n] = _ITALIC.sub(lambda m: f"<em>{m.group(1)}</em>", part)
+    return "".join(parts)
+
+
+_TABLE_SEP = re.compile(r"^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$")
+
+
+def _table_cells(line: str):
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"):
+        line = line[:-1]
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line)]
 
 
 def markdown_to_html(md_text: str) -> str:
@@ -127,6 +183,23 @@ def markdown_to_html(md_text: str) -> str:
         if not stripped:
             close_list()
             i += 1
+            continue
+
+        # GitHub tables: a header row, a |---| separator row, then body rows (2026-10-07: they rendered as
+        # paragraphs of pipes).
+        if stripped.startswith("|") and i + 1 < len(lines) and _TABLE_SEP.match(lines[i + 1].strip()):
+            close_list()
+            head = _table_cells(stripped)
+            rows = []
+            i += 2
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                rows.append(_table_cells(lines[i]))
+                i += 1
+            cell = lambda tag, c: f"<{tag}>{_inline(html.escape(c))}</{tag}>"
+            out.append("<div class=\"tblwrap\"><table><thead><tr>" + "".join(cell("th", c) for c in head)
+                       + "</tr></thead><tbody>"
+                       + "".join("<tr>" + "".join(cell("td", c) for c in r) + "</tr>" for r in rows)
+                       + "</tbody></table></div>")
             continue
 
         # Headings.
@@ -253,6 +326,8 @@ def reader_html(md_text: str, title: str = "Report",
         "font-size:.92em}\n"
         "  pre{background:#1b1f2a;padding:14px;border-radius:8px;overflow:auto}\n"
         "  pre code{background:none;padding:0}\n"
+        "  .tblwrap{overflow-x:auto;margin:12px 0} table{border-collapse:collapse}\n"
+        "  th,td{border:1px solid #39404f;padding:6px 10px;text-align:left;vertical-align:top} th{background:#1b1f2a}\n"
         "</style>\n</head>\n<body>\n"
         "<article class=\"anchor-reader\">\n" + skill_icon_html(skill) + body + "\n</article>\n"
         "<script defer src=\"" + js_src + "\"></script>\n"

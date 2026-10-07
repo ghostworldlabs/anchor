@@ -1,7 +1,7 @@
 /* Safe, small markdown renderer for human-facing reports.
    DOM-building only (textContent) - never innerHTML with document text.
    Covers: #-#### headings, hr, > quotes, -/* lists, 1. lists, ``` fences,
-   | tables, paragraphs; inline **bold**, `code`, [text](http-links). */
+   | tables, paragraphs; inline **bold**, `code`, [text](links - spaces and ( ) survive). */
 "use strict";
 // Report links belong to the Anchor origin the reader is using. Historical
 // steward replies hard-coded the author's loopback host, which is another
@@ -18,6 +18,9 @@ function mdReportHref(raw) {
       (dest.origin === current.origin || legacy)) {
     dest.searchParams.delete("token");
     if (window.STEWARD_TOKEN) dest.searchParams.set("token", window.STEWARD_TOKEN);
+    // 2026-10-07: a markdown product opens formatted (the canonical reading URL carries render=1)
+    if (dest.pathname === "/api/steward/deliverable-file" && /\.(md|markdown|txt)$/i.test(dest.searchParams.get("path") || "")
+        && !dest.searchParams.has("download")) dest.searchParams.set("render", "1");
     return dest.pathname + dest.search + dest.hash;
   }
   return raw;
@@ -25,17 +28,41 @@ function mdReportHref(raw) {
 function mdRender(container, text) {
   const el = (t, c, x) => { const n = document.createElement(t);
     if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+  // [label](target): the target may hold spaces, balanced ( ) or the <...> form (2026-10-07: "Calendar
+  // (accepted).ics" or "MBA Teaching AI/..." broke the link at the first space or ")"). Only report links and http(s)
+  // become links; anything else stays text. Bare paths are never auto-linked.
+  const LINKABLE = /^(?:https?:\/\/|\/artifact\/|\/report\/|\/api\/steward\/deliverable-file\?)/;
+  function splitLinks(s) {
+    const out = []; let i = 0;
+    while (i < s.length) {
+      const j = s.indexOf("[", i);
+      if (j < 0) break;
+      const k = s.indexOf("](", j);
+      if (k < 0) break;
+      if (s.slice(j + 1, k).includes("[") || s.slice(j + 1, k).includes("]")) { out.push(s.slice(i, j + 1)); i = j + 1; continue; }
+      let depth = 1, m = k + 2;
+      while (m < s.length && depth) { if (s[m] === "(") depth++; else if (s[m] === ")") depth--; m++; }
+      let target = s.slice(k + 2, m - 1).trim();
+      if (target.startsWith("<") && target.endsWith(">")) target = target.slice(1, -1).trim();
+      if (depth || !LINKABLE.test(target)) { out.push(s.slice(i, k + 2)); i = k + 2; continue; }
+      if (j > i) out.push(s.slice(i, j));
+      out.push({label: s.slice(j + 1, k), target});
+      i = m;
+    }
+    if (i < s.length) out.push(s.slice(i));
+    return out;
+  }
   function inline(node, s) {
-    const parts = String(s).split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https?:\/\/[^\s)]+|\/artifact\/[^\s)]+|\/api\/steward\/deliverable-file\?[^\s)]+)\))/g);
-    parts.forEach(p => {
-      if (/^\*\*[^*]+\*\*$/.test(p)) node.appendChild(el("strong", "", p.slice(2, -2)));
-      else if (/^`[^`]+`$/.test(p)) node.appendChild(el("code", "", p.slice(1, -1)));
-      else if (/^\[[^\]]+\]\(/.test(p)) {
-        const m = p.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/);
-        if (m) { const a = el("a", "", m[1]); a.href = mdReportHref(m[2]);
-                 a.target = "_blank"; a.rel = "noopener noreferrer"; node.appendChild(a); }
-        else node.appendChild(document.createTextNode(p));
-      } else if (p) node.appendChild(document.createTextNode(p));
+    splitLinks(String(s)).forEach(seg => {
+      if (typeof seg !== "string") {
+        const a = el("a", "", seg.label); a.href = mdReportHref(seg.target);
+        a.target = "_blank"; a.rel = "noopener noreferrer"; node.appendChild(a); return;
+      }
+      seg.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).forEach(p => {
+        if (/^\*\*[^*]+\*\*$/.test(p)) node.appendChild(el("strong", "", p.slice(2, -2)));
+        else if (/^`[^`]+`$/.test(p)) node.appendChild(el("code", "", p.slice(1, -1)));
+        else if (p) node.appendChild(document.createTextNode(p));
+      });
     });
   }
   container.textContent = "";

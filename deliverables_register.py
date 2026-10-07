@@ -220,3 +220,83 @@ def register(effort_dir, what, where, *, date=None, step=None,
     except Exception as exc:
         return {"written": False,
                 "reason": ("%s: %s" % (type(exc).__name__, exc))[:200]}
+
+
+# ── The reading target (execution minimum item 2, 2026-10-07) ────────────────
+# ONE function says how a product is read. Every surface that offers a product - the dialogue's receipt line,
+# Deliverables, Next steps - takes its link from here, so the three can never disagree. A product with nothing that
+# renders yet (a deck with no PDF companion) gets no Read link: "preparing a reading copy", never a dead page.
+
+_RENDERED = {".md", ".markdown", ".txt"}
+_INLINE = {".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+_OFFICE_VIEW = {".docx", ".xlsx"}
+_DOWNLOAD = {".docx", ".pptx", ".xlsx", ".zip", ".ics", ".csv", ".json"}
+
+
+def project_and_rel(folder):
+    """(project id, forward-slash rel of ``folder`` inside it) for the innermost registered project holding the
+    folder; (None, None) when no registered project holds it. Never raises."""
+    try:
+        import rnd_registry
+        here = Path(folder).resolve()
+        best = None
+        for p in rnd_registry.list_projects(include_archived=True, include_future=True, include_retired=False):
+            fp = p.get("folder_path")
+            if not fp:
+                continue
+            root = Path(fp).resolve()
+            if (here == root or root in here.parents) and (best is None or len(str(root)) > len(str(best[1]))):
+                best = (p.get("id"), root)
+        if best is None:
+            return None, None
+        return best[0], ("" if here == best[1] else here.relative_to(best[1]).as_posix())
+    except Exception:
+        return None, None
+
+
+def _file_url(pid, effort_rel, rel_path, file_hash=None, **extra):
+    q = [("pid", pid), ("dir", effort_rel), ("path", rel_path)]
+    if file_hash:
+        q.append(("hash", file_hash))
+    q.extend((k, v) for k, v in extra.items())
+    return "/api/steward/deliverable-file?" + "&".join(
+        "%s=%s" % (k, quote(str(v or ""), safe="")) for k, v in q)
+
+
+def reading_target(product, *, pid, effort_rel, effort_dir=None):
+    """How John reads one product version: ``{"read": url|None, "download": url|None, "preparing": bool}``.
+
+    ``product`` is a register item (``path`` relative to the effort, or a classified ``route``; managed items carry
+    ``open_path`` / ``hash``). Markdown opens formatted (``render=1``); PDF/HTML/images open as they are; Word and
+    Excel open in the text preview with a download; a PowerPoint deck is readable only through its PDF companion (a
+    sibling PDF of the same name, or the ledger's visual companion) - without one it is ``preparing``. Every value in
+    the URL is encoded, so a path with spaces or parentheses survives."""
+    out = {"read": None, "download": None, "preparing": False}
+    route = (product or {}).get("route")
+    if route:
+        out["read"] = str(route)
+        return out
+    rel = str((product or {}).get("open_path") or (product or {}).get("path") or "").replace(chr(92), "/").strip()
+    if not rel or not pid:
+        return out
+    if effort_dir is not None and not (Path(effort_dir) / rel).is_file():
+        return out
+    file_hash = (product or {}).get("hash") if (product or {}).get("managed") else None
+    ext = os.path.splitext(rel)[1].lower()
+    if ext in _DOWNLOAD:
+        out["download"] = _file_url(pid, effort_rel, rel, file_hash, download="1")
+    if ext in _RENDERED:
+        out["read"] = _file_url(pid, effort_rel, rel, file_hash, render="1")
+    elif ext in _INLINE:
+        out["read"] = _file_url(pid, effort_rel, rel, file_hash)
+    elif ext in _OFFICE_VIEW:
+        out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
+    elif ext == ".pptx":
+        sibling = rel[: -len(ext)] + ".pdf"
+        if (product or {}).get("visual_companion"):
+            out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
+        elif effort_dir is not None and (Path(effort_dir) / sibling).is_file():
+            out["read"] = _file_url(pid, effort_rel, sibling)
+        else:
+            out["preparing"] = True
+    return out

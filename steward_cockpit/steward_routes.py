@@ -989,7 +989,24 @@ def handle_get(cdir, verb, qs):
         # 2026-08-25 (John's ask; campaign journal 0010 "where is the thing I paid
         # for?"): the effort's DELIVERABLES.md register, parsed disk-true — the ONE
         # source the tile, the map links, and the steward's own answer all read.
-        return campaign.read_deliverables(cdir), 200
+        data = campaign.read_deliverables(cdir)
+        # 2026-10-07 (item 2): every item carries its ONE reading target - the URL the dialogue's receipt also uses
+        try:
+            import deliverables_register as _dr
+            pid_q, dir_q = str(qs.get("pid", "")), str(qs.get("dir", ""))
+            for coll in (data.get("items") or [], data.get("approved") or []):
+                for it in coll:
+                    if isinstance(it, dict):
+                        it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+            for a in data.get("acts") or []:
+                if isinstance(a.get("item"), dict):
+                    a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                for c in a.get("companions") or []:
+                    if isinstance(c.get("item"), dict):
+                        c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+        except Exception:
+            pass   # the tile still builds its own link from the path
+        return data, 200
     if verb == "deliverable-file":
         # Serve ONE deliverable's bytes, HARD-CONTAINED to the effort dir (realpath
         # prefix check — ../ or symlink escapes 404; active content served inert).
@@ -1042,6 +1059,14 @@ def handle_get(cdir, verb, qs):
             return {"__html__": "<!doctype html><meta charset='utf-8'><title>Slide preview unavailable</title>"
                     "<h1>Slide preview not yet registered</h1><p>This PowerPoint version needs a verified PDF companion.</p>"
                     '<p><a href="' + html.escape(dl, quote=True) + '">Download the PowerPoint</a></p>'}, 200
+        if str(qs.get("render", "")).strip() in ("1", "true") and not want_download and ext in (".md", ".markdown", ".txt"):
+            # 2026-10-07 (execution minimum item 2): the canonical reading URL of a markdown product - formatted
+            # (tables, links, math), never raw bytes; plain text keeps its lines in a code block
+            import report_viewer
+            text = Path(real).read_text(encoding="utf-8", errors="replace")
+            if ext == ".txt":
+                text = "```\n" + text.replace("```", "'''") + "\n```"
+            return {"__html__": report_viewer.reader_html(text, title=os.path.basename(real))}, 200
         if want_view and not want_download and ext in OFFICE_PREVIEW_EXTENSIONS:
             import office_preview as _op
             with open(real, "rb") as fh:

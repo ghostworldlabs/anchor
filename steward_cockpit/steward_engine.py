@@ -883,8 +883,113 @@ class Engine:
         # with an empty list, so a restart blanked the pane while the record
         # still held them.
         self.files = list(stored_entry.get("files") or [])
+        # the delivery receipt (execution minimum item 2): products already announced in the dialogue, durable across
+        # restarts; None until the first read (which announces nothing - it is the baseline)
+        _seen = stored_entry.get("receipted_deliverables")
+        self._deliv_seen = set(_seen) if isinstance(_seen, list) else None
         self._lock = threading.Lock()
         self._status_lock = threading.Lock()
+
+    # ---------- the delivery receipt (execution minimum item 2, 2026-10-07) ----------
+    @staticmethod
+    def _deliv_key(it):
+        return "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
+
+    def _publish_delivery_receipt(self, turn_id="", reply="", written=()):
+        """When a turn ends, every product version registered since the last receipt gets ONE application line in
+        the dialogue with its Read link (and Download for Office files) - the same URL Deliverables and Next steps
+        use (deliverables_register.reading_target). Mechanical: whatever wrote the register (the legacy registrar,
+        the managed update, the steward's own edit) and whatever the reply said. A product with nothing that renders
+        yet is 'preparing a reading copy', never 'ready'. Never raises; never a model call."""
+        if self.general:
+            return
+        try:
+            from steward_cockpit import steward_campaign as campaign
+            import deliverables_register as dr
+            data = campaign.read_deliverables(self.dir)
+            items = [it for it in (data.get("items") or [])
+                     if not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
+            keys = {self._deliv_key(it) for it in items}
+            if self._deliv_seen is None:                 # first read: the baseline, nothing announced
+                self._deliv_seen = keys
+                _update_state(self.skey(), {"receipted_deliverables": sorted(keys)})
+                return
+            fresh = [it for it in items if self._deliv_key(it) not in self._deliv_seen]
+            self._deliv_seen |= keys
+            fresh += self._named_unregistered(items, reply, written)
+            _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)})
+            if not fresh:
+                return
+            if not hasattr(self, "_deliv_project"):
+                self._deliv_project = dr.project_and_rel(self.dir)
+            pid, rel = self._deliv_project
+            steps = (campaign.read_map(self.dir) or {}).get("steps")
+            groups, order = {}, []
+            for it in fresh:
+                k = campaign._product_key(it, steps)
+                if k not in groups:
+                    groups[k] = []
+                    order.append(k)
+                groups[k].append(it)
+            for n, k in enumerate(order):
+                line = self._receipt_line(sorted(groups[k], key=campaign._format_rank), pid, rel, campaign)
+                if not line:
+                    continue
+                self._record_conversation("steward", line, turn_id="receipt:%s:%d" % (turn_id, n))
+                self._emit({"t": "receipt", "text": line})
+        except Exception as exc:   # a receipt never breaks a turn; the miss is said, not swallowed
+            self._emit({"t": "sys", "text": "delivery receipt unavailable: %s" % (str(exc)[:160],)})
+
+    _READABLE_DOC = re.compile(r"[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)$", re.I)
+    _RECORD_FILE = re.compile(r"(?:^|/)(?:[.]ecgberht|journal|[.]git)(?:/|$)|(?:^|/)(?:DELIVERABLES|ECGBERHT|STATUS[^/]*|"
+                              r"MEMORY|CLAUDE|AGENTS|README)[.]md$", re.I)
+
+    def _named_unregistered(self, items, reply, written):
+        """A document this turn WROTE inside the effort and NAMED in its reply, but never registered: it still gets
+        its Read link (John: a reply that only says C:/.../file.md showed no link). Record files never count."""
+        if not reply or not written:
+            return []
+        root = Path(self.dir).resolve()
+        registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
+        out = []
+        for raw in written:
+            try:
+                fp = Path(raw)
+                fp = (fp if fp.is_absolute() else root / fp).resolve()
+                rel = fp.relative_to(root).as_posix()
+            except (OSError, ValueError):
+                continue
+            if (not fp.is_file() or not self._READABLE_DOC.search(rel) or self._RECORD_FILE.search(rel)
+                    or rel.lower() in registered or fp.name.lower() not in reply.replace(chr(92), "/").lower()):
+                continue
+            out.append({"what": fp.stem, "path": rel, "date": time.strftime("%Y-%m-%d"), "written_this_turn": True})
+        return out
+
+    def _receipt_line(self, group, pid, rel, campaign):
+        import deliverables_register as dr
+        head = group[0]
+        title = campaign._strip_format_tag(head.get("what") or head.get("product_id") or head.get("path") or "",
+                                           keep_note=True).replace("[", "(").replace("]", ")")
+        if head.get("managed"):
+            title = title.replace("-", " ")
+        if not pid:
+            return "**Anchor** · new: %s (this folder is not in a registered project, so no link)" % title
+        targets = [(it, dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=self.dir)) for it in group]
+        readable = [(it, t) for it, t in targets if t["read"]]
+        bits = []
+        if readable:
+            bits.append("ready to read: [%s](%s)" % (title, readable[0][1]["read"]))
+            for it, t in readable[1:]:
+                ext = os.path.splitext(str(it.get("open_path") or it.get("path") or ""))[1].lstrip(".").upper() or "other"
+                bits.append("[%s](%s)" % (ext, t["read"]))
+        elif any(t["preparing"] for _it, t in targets):
+            bits.append("preparing a reading copy: %s" % title)
+        else:
+            bits.append("new: %s" % title)
+        dl = next((t["download"] for _it, t in targets if t["download"]), None)
+        if dl:
+            bits.append("[Download](%s)" % dl)
+        return "**Anchor** · " + " · ".join(bits)
 
     # ---------- events ----------
     def _emit(self, ev):
@@ -2982,6 +3087,9 @@ class Engine:
                 if not saved:
                     self._emit({"t": "sys", "text": "Refinement handoff persistence needs repair; automatic continuation is held."})
             self._retry_refinement_handoffs()
+            if history_saved and not err_text:
+                self._publish_delivery_receipt(completed_turn_id, reply=txt,
+                                               written=list(getattr(self, "_turn_output_refs", []) or []))
 
             # The complete result boundary is one arbitration transaction.
             # Exactly one next writer wins: an already accepted human message,

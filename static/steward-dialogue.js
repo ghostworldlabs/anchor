@@ -138,6 +138,7 @@
       }
       if (ev.t === 'john') { var t = String(ev.text || ''); if (live.skipJohn && t === live.skipJohn) { live.skipJohn = ''; return; } live.target = null; live.goal = null; appendLine('you', t, ''); return; }
       if (ev.t === 'sys' && ev.text) { appendLine('sys', ev.text, 'dim'); return; }
+      if (ev.t === 'receipt' && ev.text) { each(appendLine('st', ev.text, ''), md); return; }   // the delivery receipt, its links live
       if (ev.t === 'tool') {
         // the cockpit's rule: a tool step ends the block the words were in; the next words open a new one
         if (live.line) { each(live.line, function (li) { li.classList.remove('live'); if (li.querySelector('.ext').textContent.trim()) md(li); else li.remove(); }); live.line = null; }

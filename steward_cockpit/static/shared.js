@@ -1463,8 +1463,17 @@ const Proto = (() => {
       // text docs (.md/.txt/.csv/.json/.log) through the report VIEWER so
       // they render human-readable instead of as raw bytes.
       const dirRel = it.dir !== undefined ? it.dir : DIR;
-      const isText = /\.(md|txt|csv|json|log)$/i.test(openPath) && !(it.managed && it.open_path && it.hash);
-      if (isText) {
+      const isText = /\.(csv|json|log)$/i.test(openPath) && !(it.managed && it.open_path && it.hash);
+      // 2026-10-07 (item 2): markdown opens through the ONE canonical reading URL (deliverables_register.reading_target:
+      // deliverable-file + render=1) - the same link the dialogue's receipt and Next steps carry
+      const isMarkdown = /\.(md|markdown|txt)$/i.test(openPath);
+      const reading = it.reading && it.reading.read && /^\/api\/steward\/deliverable-file\?/.test(it.reading.read) ? it.reading.read : "";
+      if (reading) {
+        // the server's reading target (deliverables_register.reading_target) - the receipt's URL, token added
+        a.href = reading + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+        a.target = "_blank";
+        a.rel = "noopener";
+      } else if (isText) {
         a.href = "#";
         a.onclick = (ev) => { ev.preventDefault();
           window.open("/report?dir=" + encodeURIComponent(dirRel) +
@@ -1476,6 +1485,7 @@ const Proto = (() => {
           "&path=" + encodeURIComponent(openPath) +
           (it.hash ? "&hash=" + encodeURIComponent(it.hash) : "") +
           (/\.(docx|pptx|xlsx)$/i.test(it.path) ? "&view=1" : "") +
+          (isMarkdown ? "&render=1" : "") +
           (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
         a.target = "_blank";
         a.rel = "noopener";
@@ -1707,6 +1717,10 @@ const Proto = (() => {
       // state, zero-model) — pane only, never the conversation
       closeCurrent();
       renderStatus(ev.status);
+    } else if (ev.t === "receipt") {
+      // the engine's delivery receipt (item 2): one line, the Read link the Deliverables tile also carries
+      closeCurrent();
+      addBlock("steward", "ANCHOR", ev.text, "receipt");
     } else if (ev.t === "sys") {
       closeCurrent();
       // a session that ended/slept emits sys, never turn_end — finalize the

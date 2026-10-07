@@ -136,3 +136,117 @@ def test_narrow_cockpit_closes_rail_and_status_for_now_only(cockpit):
     page.set_viewport_size({"width": 1700, "height": 1050})
     expect(app).to_have_class(__import__('re').compile(r'\bstatusopen\b'))   # his wide layout comes back as it was
     assert surface.locator('body').evaluate("() => localStorage.getItem('steward_status_pane')") == saved
+
+
+# ---------- item 2: reading and links, made mechanical ----------
+
+import report_viewer
+import deliverables_register as dr
+from steward_cockpit import steward_engine
+
+
+def test_reader_renders_tables_and_links_that_survive_spaces_and_parentheses():
+    md = "\n".join(["| Week | File |", "|---|:--:|",
+                    "| 1 | [Calendar](BA 815/Calendar (accepted).ics) |", "",
+                    "See [y](<My Doc.md>) and [bad](javascript:alert(1)) and [z](https://e.com/a_(b))"])
+    out = report_viewer.markdown_to_html(md)
+    assert "<table>" in out and "<th>Week</th>" in out and "<td>1</td>" in out
+    assert 'href="BA%20815/Calendar%20(accepted).ics"' in out
+    assert 'href="My%20Doc.md"' in out and 'href="https://e.com/a_(b)"' in out
+    assert "javascript" not in out and ">bad<" not in out
+
+
+def test_reading_target_is_one_encoded_url_per_kind(tmp_path):
+    eff = tmp_path / "MBA Teaching AI"
+    (eff / "q").mkdir(parents=True)
+    for name in ("Guide (v1).md", "Guide (v1).pdf", "Deck.pptx", "Talk.pptx", "Talk.pdf", "Cal (accepted).ics"):
+        (eff / "q" / name).write_text("x", encoding="utf-8")
+    t = lambda p: dr.reading_target({"path": p}, pid="p 1", effort_rel="MBA Teaching AI", effort_dir=eff)
+    md = t("q/Guide (v1).md")
+    assert md["read"] == ("/api/steward/deliverable-file?pid=p%201&dir=MBA%20Teaching%20AI"
+                          "&path=q%2FGuide%20%28v1%29.md&render=1")
+    assert t("q/Guide (v1).pdf")["read"].endswith("Guide%20%28v1%29.pdf")
+    deck = t("q/Deck.pptx")
+    assert deck["read"] is None and deck["preparing"] and deck["download"].endswith("&download=1")
+    assert t("q/Talk.pptx")["read"].endswith("path=q%2FTalk.pdf")          # its PDF companion is the reading copy
+    assert t("q/Cal (accepted).ics")["download"]
+    assert t("q/missing.md")["read"] is None                                # nothing on disk: no link
+
+
+def _receipt_engine(tmp_path, monkeypatch, rows):
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (eff / "DELIVERABLES.md").write_text(
+        "| What | Where | Date | Step |\n|---|---|---|---|\n" + "".join(rows), encoding="utf-8")
+    eng = steward_engine.Engine.__new__(steward_engine.Engine)
+    eng.dir, eng.general, eng._deliv_seen = str(eff), False, None
+    said, emitted = [], []
+    eng.skey = lambda: "test"
+    eng._record_conversation = lambda role, text, turn_id=None, goal=None: said.append((role, text, turn_id)) or True
+    eng._emit = lambda ev: emitted.append(ev)
+    monkeypatch.setattr(steward_engine, "_update_state", lambda key, patch: True)
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "eff"))
+    return eng, eff, said, emitted
+
+
+def test_the_engine_announces_each_new_product_once_with_its_read_link(tmp_path, monkeypatch):
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")                                     # baseline: announces nothing
+    assert said == []
+    (eff / "Report (final).md").write_text("# r", encoding="utf-8")
+    (eff / "Report (final).pdf").write_text("x", encoding="utf-8")
+    (eff / "Deck.pptx").write_text("x", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Report (final) MD | `Report (final).md` | 2026-10-07 | 1 |\n"
+                 "| Report (final) PDF | `Report (final).pdf` | 2026-10-07 | 1 |\n"
+                 "| Deck | `Deck.pptx` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t1")
+    lines = [text for _role, text, _tid in said]
+    assert len(lines) == 2, lines                                           # the md+pdf pair is ONE product
+    report = next(l for l in lines if "Report" in l)
+    assert "ready to read: [Report (final)](/api/steward/deliverable-file?pid=p1&dir=eff&path=Report%20%28final%29.pdf)" in report
+    assert "[MD](/api/steward/deliverable-file?pid=p1&dir=eff&path=Report%20%28final%29.md&render=1)" in report
+    deck = next(l for l in lines if "Deck" in l)
+    assert "preparing a reading copy: Deck" in deck and "ready" not in deck and "[Download](" in deck
+    assert [e["t"] for e in emitted] == ["receipt", "receipt"]
+    eng._publish_delivery_receipt("t2")                                     # nothing new: nothing said again
+    assert len(said) == 2
+
+
+def test_cockpit_links_survive_spaces_and_parentheses_and_markdown_opens_formatted(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    (server.campaign / "notes (draft).md").write_text("# Notes\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
+    links = surface.locator('.scroll').first.evaluate("""s => {
+        const box = document.createElement('div'); s.appendChild(box);
+        mdRender(box, 'Read [the notes](/api/steward/deliverable-file?pid=p&dir=d&path=notes (draft).md) and ' +
+                      '[bare path](C:/x/y.md) and [web](https://e.com/a_(b))');
+        return Array.from(box.querySelectorAll('a')).map(a => a.getAttribute('href'));
+    }""")
+    assert len(links) == 2, links                                   # a bare path never becomes a link
+    from urllib.parse import urlsplit, parse_qs
+    q = parse_qs(urlsplit(links[0]).query)
+    assert q["path"] == ["notes (draft).md"] and q["render"] == ["1"]
+    assert links[1] == "https://e.com/a_(b)"
+    # the canonical reading URL renders the markdown formatted, with its table
+    from urllib.parse import quote
+    url = (f"{server.origin}/api/steward/deliverable-file?pid={quote(server.project_id, safe='')}"
+           f"&dir={quote(server.campaign.name, safe='')}&path={quote('notes (draft).md', safe='')}&render=1")
+    reader = page.context.new_page()
+    reader.goto(url)
+    expect(reader.locator("table th").first).to_have_text("A")
+    expect(reader.locator("h1")).to_have_text("Notes")
+    reader.close()
+
+
+def test_a_document_only_named_in_the_reply_still_gets_its_read_link(tmp_path, monkeypatch):
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    (eff / "x").mkdir()
+    doc = eff / "x" / "Teaching Plan (v2).md"
+    doc.write_text("# plan", encoding="utf-8")
+    (eff / "ECGBERHT.md").write_text("record", encoding="utf-8")
+    reply = "Done - it is at " + str(doc) + " and I updated ECGBERHT.md."
+    eng._publish_delivery_receipt("t1", reply=reply, written=[str(doc), str(eff / "ECGBERHT.md"), str(eff / "x" / "other.md")])
+    assert len(said) == 1, said
+    assert "ready to read: [Teaching Plan (v2)](/api/steward/deliverable-file?pid=p1&dir=eff&path=x%2FTeaching%20Plan%20%28v2%29.md&render=1)" in said[0][1]
