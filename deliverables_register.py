@@ -323,7 +323,12 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
         if rext in _DOWNLOAD:
             out["download"] = url + "&download=1"
         if rext == ".pptx":
-            out["preparing"] = True                     # a deck behind a route has no bound reading copy
+            # a deck behind a route reads through the same-name PDF route only when the register declares that too
+            pdf_route = _canonical_route(re.sub(r"[.]pptx(?=$|&)", ".pdf", str(route), flags=re.I))
+            if pdf_route and registered is not None and pdf_route.lower() in registered:
+                out["read"] = pdf_route
+            else:
+                out["preparing"] = True
         elif rext in _OFFICE_VIEW:
             out["read"] = url + "&view=1"               # Word / Excel read in the text preview, as before
         else:

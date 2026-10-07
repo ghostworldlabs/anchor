@@ -1666,6 +1666,139 @@ def landed_not_live(campaign_dir):
     return out
 
 
+# ── Status, John's requirement (execution minimum item 6, 2026-10-07): who is working, what comes next, a finish
+# time always. No model call; read from the job/skill/turn records. A calculated finish time is labelled as one.
+_RESTART_PAUSE = re.compile(r"paus\w*\s+for\s+(?:a\s+)?restart|after john confirms the restart", re.I)
+
+
+def restart_pause_is_stale(campaign_dir, engine_state):
+    """True when the Strip's "paused for restart" wording was written BEFORE John's last durably accepted message -
+    then it is history, not the state (it was the steward's note, never cleared by anyone)."""
+    accepted = float((engine_state or {}).get("human_accepted_at") or 0)
+    if not accepted:
+        return False
+    try:
+        strip = json.loads((Path(campaign_dir) / "strip.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    text = " ".join(str(strip.get(k) or "") for k in ("active_effort", "next_recommended", "human_wait"))
+    if not _RESTART_PAUSE.search(text):
+        return False
+    stamp = _job_epoch(strip.get("as_of") or strip.get("active_effort_as_of"))
+    return bool(stamp) and stamp < accepted
+
+
+def _median(values):
+    vals = sorted(v for v in values if isinstance(v, (int, float)) and v > 0)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def typical_duration_s(campaign_dir, kind, worker=""):
+    """The median duration of finished work of the same kind in this effort's own ledgers: code jobs (started ->
+    finished, same worker), skill jobs (same label word), steward turns (turn-timing.jsonl, human turns). None when
+    there is no history."""
+    root = Path(campaign_dir) / ".ecgberht"
+    out = []
+    try:
+        if kind == "code_job":
+            raw = json.loads((root / "code-jobs.json").read_text(encoding="utf-8"))
+            for r in (raw.values() if isinstance(raw, dict) else raw or []):
+                if isinstance(r, dict) and r.get("finished") and str(r.get("worker") or "coder").split()[0] == (worker or "coder"):
+                    a, b = _job_epoch(r.get("started")), _job_epoch(r.get("finished"))
+                    if a and b and b > a:
+                        out.append(b - a)
+        elif kind == "skill_job":
+            raw = json.loads((root / "skill-jobs.json").read_text(encoding="utf-8"))
+            for r in (raw.values() if isinstance(raw, dict) else raw or []):
+                if isinstance(r, dict) and r.get("finished") and (not worker or worker.split()[0].lower() in str(r.get("label") or "").lower()):
+                    a, b = _job_epoch(r.get("started")), _job_epoch(r.get("finished"))
+                    if a and b and b > a:
+                        out.append(b - a)
+        elif kind == "turn":
+            for line in (root / "turn-timing.jsonl").read_text(encoding="utf-8").splitlines()[-200:]:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("origin") == "human":
+                    out.append(float(row.get("turn_s") or 0))
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    return _median(out)
+
+
+def finish_time(started, now, kind, campaign_dir, worker="", own_eta=None, own_eta_at=None):
+    """Always a clock time. The work's own last estimate (with the time it was given); else start + the typical
+    duration of the same kind of work here (labelled an estimate); past that, now + max(25% of elapsed, 5 min)
+    (labelled running longer than usual); with no history at all, start + max(2 x elapsed, 10 min) (labelled
+    provisional). The calculation is never a promise and is never called one."""
+    hm = lambda t: time.strftime("%H:%M", time.localtime(t))
+    if own_eta:
+        return "%s (its own estimate%s)" % (own_eta, (", given " + hm(own_eta_at)) if own_eta_at else "")
+    started = started or now
+    elapsed = max(0.0, now - started)
+    typical = typical_duration_s(campaign_dir, kind, worker)
+    if typical:
+        if started + typical >= now:
+            return "about %s (estimate: a typical %s here takes %d min)" % (hm(started + typical), {
+                "code_job": "code job", "skill_job": "run", "turn": "turn"}.get(kind, "run"), max(1, round(typical / 60)))
+        return "about %s (estimate - running longer than usual)" % hm(now + max(0.25 * elapsed, 300))
+    return "about %s (provisional - no history here to estimate from)" % hm(started + max(2 * elapsed, 600))
+
+
+def running_skill_jobs(campaign_dir):
+    try:
+        raw = json.loads((Path(campaign_dir) / ".ecgberht" / "skill-jobs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    rows = raw.values() if isinstance(raw, dict) else (raw or [])
+    return [r for r in rows if isinstance(r, dict) and r.get("status") == "running"]
+
+
+def who_is_working(campaign_dir, engine_state, jobs, look, now=None):
+    """(who, phase, started_epoch, tests, finish) - John's three lines' first and third, from records only."""
+    now = time.time() if now is None else now
+    st = engine_state or {}
+    if jobs:
+        j = jobs[0]
+        worker = str(j.get("worker") or "coder").split()[0]
+        name = "Foreman" if worker.lower() == "foreman" else ("the %s coder" % j.get("coder_family") if j.get("coder_family") else "a coder")
+        phase = (j.get("native") or {}).get("phase") or str(j.get("status") or "running")
+        tests = {True: "tests passed", False: "tests failed"}.get(j.get("check_ok"), "tests not run yet")
+        eta, src = _code_job_eta(j, now)
+        if (src or {}).get("native"):
+            finish = eta                                   # the job's own forecast, with the time it was given
+        elif typical_duration_s(campaign_dir, "code_job", worker):
+            finish = finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)
+        else:
+            finish = eta or finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)   # phase window
+        return ("The steward is running %s on a code job (%s) and is in charge of it" % (name, j["title"]),
+                phase, j.get("started_epoch"), tests, finish)
+    skills = running_skill_jobs(campaign_dir)
+    if skills:
+        k = skills[-1]
+        started = _job_epoch(k.get("started"))
+        label = str(k.get("label") or "a skill")
+        return ("The steward is running %s and is in charge of it" % label, "running", started, "tests not run yet",
+                finish_time(started, now, "skill_job", campaign_dir, label))
+    if look and not look.get("final"):
+        own = look.get("eta") or None
+        return ("The steward is running %s and is in charge of it" % look.get("skill"), str(look.get("label") or "running")[:80],
+                None, look.get("tests") or "tests not run yet",
+                finish_time(now, now, "skill_job", campaign_dir, str(look.get("skill") or ""), own, None) if own
+                else finish_time(None, now, "skill_job", campaign_dir, str(look.get("skill") or "")))
+    if st.get("busy"):
+        started = float(st.get("turn_started") or 0) or None
+        what = one_line(st.get("activity") or "") or "your request"
+        who = ("The steward is doing this — " + what) if st.get("turn_origin") != "control" else \
+              ("The steward is handling a job report — " + what)
+        return (who, "working", started, "tests not run", finish_time(started, now, "turn", campaign_dir))
+    return ("Nobody is working right now — the steward waits for you", "idle", None, "", "nothing running, so nothing to finish")
+
+
 def compose_status(campaign_dir: str, engine_state=None):
     """The deterministic TWO-PART 10-minute status (handoff 2026-08-25 #2b;
     reworked 2026-09-04 on John's word).
@@ -1802,6 +1935,9 @@ def compose_status(campaign_dir: str, engine_state=None):
     else:
         plan_step = active["name"] if active else "(no active step)"
     next_text = (m["heartbeat"]["next_recommended"] or "").strip()
+    pause_stale = restart_pause_is_stale(campaign_dir, st)
+    if pause_stale and _RESTART_PAUSE.search(next_text):
+        next_text = ""                                   # the old "resume after the restart" is history, not the next step
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
     if "pending_request" in m["heartbeat"]:
         pending = m["heartbeat"]["pending_request"]
@@ -1869,12 +2005,23 @@ def compose_status(campaign_dir: str, engine_state=None):
             if feedback.get("at"):
                 events.append({"at":feedback["at"], "summary":"Feedback received for " + sl["title"]})
     latest_event = max(events, key=lambda event:event["at"]) if events else None
-    doing = (running or {}).get("label") or (now_lines[0] if now_lines else "Idle")
+    who, phase, work_started, tests_line, finish = who_is_working(campaign_dir, st, jobs, look if live_skill else None)
+    elapsed_line = ""
+    if work_started:
+        mins = int(max(0, time.time() - work_started) // 60)
+        elapsed_line = "%s · %d min since %s" % (phase, mins, time.strftime("%H:%M", time.localtime(work_started)))
+    else:
+        elapsed_line = phase
+    next3 = next_bullets(next_text)[:3] or ["Finish the current work, then wait for you."]
+    if live_skill and look.get("eta"):
+        finish = estimate_eta(slice_, look, started) + " (its own estimate)"   # the skill's own last ETA
+    eta = finish                                          # always a clock time (or "nothing running"), never "Unavailable"
+    eta_source = dict(eta_source or {}, value=finish, calculated=("estimate" in finish or "provisional" in finish))
+    doing = who
     summary = (slice_["name"] + (" — " + slice_["summary"] if slice_.get("summary") else "")) if slice_ else (m.get("goal_brief") or m.get("name") or "")
-    status_line = "%s · %s/%s done · %s" % (
-        plan_step or "no active step", plan["steps_done"], plan["steps_total"],
-        plan["attention"] or "quiet")
-    todo = (next_bullets(next_text)[:1] or [""])[0]
+    # the current-task line carries no campaign step counts (John: "why are there 84 steps?")
+    status_line = elapsed_line + ((" · " + tests_line) if tests_line else "")
+    todo = next3[0]
     seats = []
     for item in swarm:
         if isinstance(item, dict):
@@ -1884,7 +2031,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         summary=summary,
         doing=doing,
         status=status_line,
-        tests=(look.get("tests") if live_skill and look else None) or local_evidence["tests"],
+        tests=tests_line or "no check run",
         blocker=("waiting on you: " + waiting) if waiting else ("blocked: " + halt["reason"] if halt else ""),
         procs=" · ".join(seats) if seats else (
             ((running or {}).get("skill") + " (commissioned)") if (running or {}).get("kind") == "skill" else ""),
@@ -1893,7 +2040,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         todo=todo,
     )
     compact = {"activity": doing,
-               "latest_event": latest_event, "next": next_bullets(next_text)[:1],
+               "latest_event": latest_event, "next": next3[:1],
                "question": (engine_state or {}).get("open_question") or plan.get("waiting_on_you") or "",
                "facts": facts}
     out = {"at": time.strftime("%Y-%m-%d %H:%M"),
@@ -1910,7 +2057,8 @@ def compose_status(campaign_dir: str, engine_state=None):
                         "journal": local_evidence["journal_source"],
                         "eta": eta_source},
            "focus_warning": focus_warning,
-           "next_bullets": next_bullets(next_text),
+           "who": who, "phase": phase, "finish": finish, "next3": next3, "restart_pause_stale": pause_stale,
+           "next_bullets": next3,
            "project": project_line(m),
            "lookthrough": ({"source": look["source"], "age": look["age"],
                             "final": look["final"]} if look else None),
@@ -2584,7 +2732,11 @@ def current_review_items(map_, items):
     # when the steward DID designate what is current on the focused step (START HERE / CURRENT / FOR REVIEW, or a
     # featured path), that designation is the record - the newest-per-family fallback is only for a step where
     # nothing was designated (the MBA Version 3 case)
-    designated = focus is not None and any(resolve_step(steps, it.get("step")) is focus for it in current)
+    # a designation is explicit: a legacy row the steward labelled or featured, or a managed product AWAITING John's
+    # review - managed work merely in progress is not a designation (ChatGPT, items 1+2 re-review)
+    designated = focus is not None and any(
+        resolve_step(steps, it.get("step")) is focus
+        and (not it.get("managed") or it.get("phase") in ("awaiting_review", "blocked")) for it in current)
     if designated:
         # the other formats of a designated product (same owner, folder and file stem) are that product too
         chosen = {(_owner_id(it, steps),) + _split_path(it) for it in current if not it.get("managed")}

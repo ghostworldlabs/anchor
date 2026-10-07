@@ -29,11 +29,12 @@ def test_the_early_receipt_speaks_once_only_while_nothing_was_said():
     assert out2 == [] and out3 == []
 
 
-def test_the_cap_binds_in_effort_mode_and_names_the_right_worker():
+def test_the_cap_is_a_progress_line_in_every_mode_and_never_a_hand_off():
+    # 2026-10-07 (execution minimum item 4): the cap no longer ends a turn or names a worker to hand it to; it says
+    # one progress line, in small mode and in an effort alike
     src = open(se.__file__, encoding="utf-8").read()
-    assert 'self._turn_tools > STEP_CAP:\n' in src and "self._turn_tools > STEP_CAP and not self.effort_on()" not in src
-    for w in ("researchPrime", "Crucible", "Gandalf", "Foreman", "a code job"):
-        assert w in src
+    assert "self._turn_tools == STEP_CAP" in src and "self._turn_tools > STEP_CAP and not self.effort_on()" not in src
+    assert "Commission it now" not in src and "Do not finish the work inline" not in src
     assert se.RECEIPT_AFTER_S == float(os.environ.get("STEWARD_RECEIPT_AFTER_S", "20"))
 
 

@@ -158,13 +158,13 @@ class LookThroughTest(unittest.TestCase):
         self.assertEqual(st["now"][0], "steward mid-turn")
         self.assertEqual(st["tests"], "Unavailable \u2014 no check receipt for the current work and session")
         self.assertEqual(st["evidence"]["checks"], [])
-        self.assertEqual(st["eta"], "Unavailable \u2014 no current estimate")
+        self.assertNotIn("Unavailable", st["eta"]); self.assertNotIn("no current estimate", st["eta"])   # 2026-10-07: a finish time always (item 6)
         self.assertEqual(st["evidence"]["eta"]["state"], "unavailable")
         # Elapsed roadmap time alone is not evidence of a running build.
         td3 = tempfile.mkdtemp(prefix="stw-over-")
         _campaign(td3, active_started_min_ago=70, with_log=False)
         st3 = campaign.compose_status(td3, {"busy": True})
-        self.assertEqual(st3["eta"], "Unavailable \u2014 no current estimate")
+        self.assertNotIn("Unavailable", st3["eta"])   # 2026-10-07: a finish time always (item 6)
         self.assertEqual(st3["evidence"]["eta"]["state"], "unavailable")
         # a stale log is not a running skill
         td2 = tempfile.mkdtemp(prefix="stw-stale-")
@@ -186,7 +186,7 @@ class LookThroughTest(unittest.TestCase):
         self.assertIn("Foreman build finished", st["now"][0])
         self.assertEqual(st["tests"], "Unavailable \u2014 no check receipt for the current work and session")
         self.assertEqual(st["evidence"]["checks"], [])
-        self.assertEqual(st["eta"], "Unavailable \u2014 no current estimate")
+        self.assertNotIn("Unavailable", st["eta"]); self.assertNotIn("no current estimate", st["eta"])   # 2026-10-07: a finish time always (item 6)
         self.assertEqual(st["evidence"]["eta"]["state"], "unavailable")
 
     def test_the_pane_and_the_top_bar_read_the_new_shape(self):

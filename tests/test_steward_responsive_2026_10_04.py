@@ -22,13 +22,17 @@ def eng(monkeypatch, tmp_path):
 # ---------- R2: the contract ----------
 def test_small_duty_comes_first_and_the_effort_rules_ride_only_with_an_effort(eng, tmp_path, monkeypatch):
     c = eng._contract()
-    assert c.startswith("SIZE THE REQUEST FIRST.") and "tools/steward_code_job.py start" in c
-    assert "(13) SLICE LOOP" not in c and "(15) THE DELIVERABLES REGISTER" not in c, "no effort here: the heavy rules stay off"
+    assert c.startswith("SIZE THE REQUEST FIRST") and "tools/steward_code_job.py start" in c
+    assert "(13) SLICE LOOP" not in c, "no effort here: the heavy rules stay off"
+    # 2026-10-07 (execution minimum item 4): the register/link rule is in the BASE contract; small work finishes in
+    # the turn; code goes to a reviewed code job; no forced hand-off, no Foreman, no invented validator
+    assert "THE DELIVERABLES REGISTER" in c and "Do not invent a validator" in c and "Foreman and Crucible are on hold" in c
+    assert "Commission it now" not in c and "Do not finish the work inline" not in c
     d = tmp_path / "mid-effort"; d.mkdir()
     (d / "roadmap.json").write_text(json.dumps({"roadmap_projection": [{"id": "a", "status": "active"}]}), encoding="utf-8")
     e2 = steward_engine.Engine(str(d), fake=True)
     c2 = e2._contract()
-    assert e2.effort_on() and c2.startswith("THIS IS AN EFFORT") and "(13) SLICE LOOP" in c2 and "NO DELIVERABLES row" not in c2,         "a cockpit mid-effort keeps its rules, and the small-change prohibitions do not ride with them (Grok code F5)"
+    assert e2.effort_on() and c2.startswith("THIS IS AN EFFORT") and "(13) SLICE LOOP" in c2 and "SIZE THE REQUEST FIRST" not in c2,         "a cockpit mid-effort keeps its rules, and the small-change prohibitions do not ride with them (Grok code F5)"
     steward_engine._update_state(e2.skey(), {"effort_mode": False})
     assert not e2.effort_on(), "his word wins"
     d3 = tmp_path / "proposed"; d3.mkdir()
@@ -50,30 +54,34 @@ def test_his_words_switch_the_mode():
     assert steward_engine._STOP_CODER.match("Stop the coder") and not steward_engine._STOP_CODER.match("stop")
 
 
-def test_the_step_cap_ends_a_small_turn_and_hands_it_off(eng, monkeypatch):
+def test_the_fifteenth_step_says_progress_and_the_turn_goes_on(eng, monkeypatch):
+    """2026-10-07 (execution minimum item 4, Grok ruling): at the 15th tool call of a turn John started, ONE progress
+    line - the turn is never ended and no job is started because of the count (in small mode or an effort)."""
     eng.fake = False
     eng.busy = True
     eng._turn_origin = "human"
-    eng._turn_tools = steward_engine.STEP_CAP + 1
-    calls = []
+    calls, said = [], []
     monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda reason: calls.append(reason) or {"ok": True})
-    monkeypatch.setattr(eng, "_wake_locked", lambda fresh, seed: calls.append("wake") or (True, "awake"))
-    monkeypatch.setattr(eng, "_persist_queue", lambda: True)
-    assert eng._guard_turn({"name": "exec_command", "input": {}}) is True
-    assert "larger than a conversation turn" in calls[0] and calls[1] == "wake"   # two-lane step 1 wording (2026-10-05)
-    assert eng.queue[0].startswith("(interface - not John) Your last turn was ended after") and "steward_code_job.py start" in eng.queue[0]
-
-
-def test_the_step_cap_binds_an_effort_too(eng, monkeypatch, tmp_path):
-    # two-lane step 1 (2026-10-05, Grok + Opus): the cap was off in effort mode - the slowest stewards were mid-effort
-    eng.fake = False
-    eng.busy = True
-    eng._turn_tools = steward_engine.STEP_CAP + 5
+    monkeypatch.setattr(eng, "_wake_locked", lambda *a, **k: calls.append("wake") or (True, ""))
+    monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
+    for n in range(1, steward_engine.STEP_CAP + 8):
+        eng._turn_tools = n
+        assert eng._guard_turn({"name": "exec_command", "input": {}}) is False
+    assert calls == [] and not eng.queue, "never ended, never handed off"
+    progress = [ev for ev in said if ev.get("t") == "sys" and ev.get("text", "").startswith("still working")]
+    assert len(progress) == 1 and ("%d steps" % steward_engine.STEP_CAP) in progress[0]["text"]
     steward_engine._update_state(eng.skey(), {"effort_mode": True})
-    calls = []
-    monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda reason: calls.append(reason) or {"ok": True})
-    monkeypatch.setattr(eng, "_wake_locked", lambda **k: calls.append("wake") or (True, ""))
-    assert eng._guard_turn({"name": "exec_command", "input": {}}) is True and eng._stopped_mid_turn is True
+    eng._progress_said, said[:] = False, []
+    eng._turn_tools = steward_engine.STEP_CAP
+    assert eng._guard_turn({"name": "exec_command", "input": {}}) is False and calls == []
+
+
+def test_a_skill_job_report_queued_is_never_delivered_as_johns(eng, monkeypatch):
+    eng.busy = True
+    monkeypatch.setattr(eng, "_persist_queue", lambda: True)
+    eng.say("Here is a plain report with no marker", human=False)
+    assert steward_engine._is_machine_text(eng.queue[-1]), "the machine flag rides in the persisted entry"
+    assert steward_engine._is_machine_text("(skill job 7 finished - not John) gandalf: done (exit 0).")
 
 
 # ---------- R1: the receipt ----------

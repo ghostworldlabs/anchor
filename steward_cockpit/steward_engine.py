@@ -153,26 +153,27 @@ JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\
 # R2 (steward responsiveness, Ecgberht journals 2069/2070, John 2026-10-04): the duty that comes first. In the Cave's
 # 51-minute turn about 5 of 56 steps changed code; the rest was ceremony. Small is the default.
 SMALL_DUTY = (
-    "SIZE THE REQUEST FIRST. A SMALL change is a reversible change John asked for, about three files or fewer, "
-    "no new effort: make the edit, run one check that can fail, commit, and reply in one or two plain sentences. "
-    "For a small change write NO plan page, NO new verify or record scripts, NO report, NO DELIVERABLES row, and "
-    "do not touch .ecgberht/attention.json. Anything LARGER (many files, a feature, an unknown cause, hours of work) "
-    "is handed to a code job and you stay free to talk: write a short brief and run "
-    "`python C:/dev/Anchor/tools/steward_code_job.py start --repo <the repo that owns the files> --brief-file <brief.md> "
-    "[--check \"<a command that fails when the work is wrong>\"]`, then tell John in one line what is building it. "
-    "Give it a --check that runs the tests (pytest, node --test, npm test) and FOREMAN builds it (execute, adversarial "
-    "review, fix, gated by your check); without one it goes to a plain coder. It runs in its own worktree, lands its work when clean, and wakes you "
-    "with the result; report it in two or three sentences. While a code job runs on a repository, do not write there "
-    "yourself. When John says stop, run `python C:/dev/Anchor/tools/steward_code_job.py stop`. A swarm only when he "
-    "asks for one. The engine ends any small-mode turn that passes 15 tool calls. "
+    "SIZE THE REQUEST FIRST, then finish what fits. (a) DOCUMENTS and small non-code work - an answer, a note, a "
+    "draft, a calendar file, an HTML or PDF page - you finish in this turn yourself and reply in one or two plain "
+    "sentences; a document John will read is registered so its link appears (see THE DELIVERABLES REGISTER). (b) "
+    "CODE - any change to an Anchor application file or any program's code - goes to a code job in its own "
+    "worktree, never into the served tree: say the plan in a few lines first, and for a major coding effort wait "
+    "for John's approval before starting it; then run `python C:/dev/Anchor/tools/steward_code_job.py start --repo "
+    "<the repo that owns the files> --brief-file <brief.md> [--check \"<the command that proves it>\"]` and tell "
+    "John in one line. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
+    "lands only when that review passes; it wakes you with the result - report it in two or three sentences. While "
+    "a code job runs on a repository, do not write there yourself. When John says stop, run `python "
+    "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator, a verify script or a Foreman run; "
+    "Foreman and Crucible are on hold. A swarm only when he asks for one. A long turn is fine when the work is "
+    "his and in hand: the engine adds a progress line, and you keep going. "
 )
 
 # while an effort is on (his word, or a cockpit mid-effort): the full discipline, with the hand-off for big build work
 EFFORT_DUTY = (
-    "THIS IS AN EFFORT: the plan discipline below applies in full. Keep the dialogue responsive: hand any long "
-    "build work to a code job (`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file "
-    "<brief.md> [--check \"<cmd>\"]`, its own worktree) and tell John in one line; do "
-    "not write in a repository while a code job owns it. "
+    "THIS IS AN EFFORT: the plan discipline below applies in full. Code goes to a code job in its own worktree "
+    "(`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file <brief.md> [--check "
+    "\"<cmd>\"]`; another family reviews it before it lands) and you tell John in one line; do not write in a "
+    "repository while a code job owns it. Foreman and Crucible are on hold. "
 )
 
 # the coder of a code job: no steward duties, the work itself
@@ -187,10 +188,15 @@ _WRITE_VERBS = re.compile(r"(apply_patch|WriteAllText|WriteAllBytes|Set-Content|
                           r"\.write_bytes\(|open\([^)]*['\"][wa]['\"]|writeFileSync|(?<![=<>\-])\d?>>?\s*(?![&=>])[\w./\\$'\"~:-])", re.I)
 _SHELL_TOOLS = {"exec_command", "command_execution", "Bash", "PowerShell", "shell", "local_shell_call", "exec"}
 _STOP_CODER = re.compile(r"^\s*(?:please\s+)?stop (?:the )?(?:coder|code job|job)\b", re.I)
+MACHINE_MARK = "(machine report - not John) "
+
+
 def _is_machine_text(text):
-    """Queued text the engine or a code job wrote, not John's words (delivered as control: no receipt, no cap)."""
+    """Queued text the engine, a code job or a skill job wrote, not John's words (delivered as control: no receipt,
+    no cap). The flag rides IN the persisted queue entry, so a restart cannot turn a report into his utterance."""
     t = str(text or "").lstrip()
-    return t.startswith("(interface - not John)") or (t.startswith("(code job ") and "not John)" in t[:80])
+    return (t.startswith(MACHINE_MARK) or t.startswith("(interface - not John)")
+            or (t.startswith("(") and "- not John)" in t[:120]))
 
 
 STEP_CAP = int(os.environ.get("STEWARD_SMALL_STEP_CAP", "15"))
@@ -199,13 +205,20 @@ _EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full
 _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
 
 CONTRACT = (
-    "Before framing a substantial new plan, use adaptive discovery: ask one load-bearing "
-    "question at a time with context and an explicit recommendation. Usually three or four "
-    "questions suffice, but never enforce a quota or a second-turn cutoff. Recover earlier "
-    "answers from durable conversation history; do not repeat settled questions. Clarify "
-    "shared versus group-specific work, independent acceptance and essential prerequisites "
-    "where these affect the structure. Carry each answer into the same plan through the "
-    "existing writer. Explain what the answer authorizes and identify the affected version. "
+    "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
+    "your recommended answer, only when the answer would change what you deliver, only in reply to John's own "
+    "request, and before any job or skill starts; never ask in an automatic turn, never re-ask what the record "
+    "answers. Carry the answer into the plan through the existing writer. "
+    "THE DELIVERABLES REGISTER (standing rule, campaign journal 0010; base contract since 2026-10-07): a "
+    "human-facing artifact is not done until it is a row in DELIVERABLES.md - a pipe table | What | Where | Date | "
+    "Step | (Step optional per row). When a skill made the thing, its name is a word in the What cell. The Where "
+    "cell is the open target - an in-effort path in backticks, or a contained Anchor route (/report/..., "
+    "/artifact/..., /foundry?skill=<id>) - and may carry run: <command>. One register, never a second list. "
+    "Anchor then posts the Read link in this dialogue itself (the same link Deliverables and Next steps carry), so "
+    "you never hand-build a link or paste a bare path as the only way to open something. REVIEW LINKS (the default "
+    "standard): never claim FOR REVIEW / START HERE / CURRENT without an openable same-version target registered in "
+    "that row - a PDF, HTML or Markdown document, or the live page - that one click opens; a deck is ready only "
+    "with its PDF reading copy. A row whose target does not open is not delivered; fix the target, not the label. "
     "You are the project steward (Ecgberht) talking with John through a thin "
     "terminal-style page; a rail beside the conversation already shows the goal, "
     "the roadmap steps, and the heartbeat files, repainted every few seconds - "
@@ -261,10 +274,8 @@ EFFORT_RULES = (
     "step with part=research|slice|rigor|integrate|harden (the product map is "
     "those tags, not a second file). Pass 1 of a new effort: a substantial draft "
     "covering the whole map; later passes: small slices in this session. You have "
-    "NO Shark swarm — that is Crucible, only when commissioned. "
-    "Commission Crucible or Foreman only when this session cannot hold the work "
-    "AND the step has a gate command (a runner that can fail: tests, render-to-PNG, "
-    "a certify script). After EVERY close including research, re-read the North "
+    "NO Shark swarm. Crucible and Foreman are on hold in Anchor (John, 2026-10-07) "
+    "until their best-in-class review; code goes to a code job. After EVERY close including research, re-read the North "
     "Star and append a goal_flip event {verdict: reaffirmed|rewritten, goal_from, "
     "goal_to, step_id, goal_revision (the cockpit state's goal_revision - the hash of "
     "the North Star you re-read), scope (the closed step id), receipt}; if rewritten, "
@@ -280,23 +291,7 @@ EFFORT_RULES = (
     "you in the dialogue - three to six bullets, each two-four bold lead words "
     "then the point, ending with the one decision it needs from him if any. "
     "Never a plan he has to go hunting for. "
-    "(15) THE DELIVERABLES REGISTER (standing rule, campaign journal 0010): a "
-    "step that produces a human-facing artifact is not done until it is a row "
-    "in DELIVERABLES.md - a pipe table | What | Where | Date | Step | (Step "
-    "optional per row). When a skill made the thing, its name is a word in the "
-    "What cell, as the run hooks write it, so its mark shows in the cockpit. "
-    "The Where cell is the open target - an in-effort path "
-    "in backticks, or a contained Anchor route (/report/..., /artifact/..., or "
-    "the live Foundry review page /foundry?skill=<id>) "
-    "- and may also carry run: <command> for a runnable deliverable; a row may "
-    "carry both. One register, never a second list; the cockpit renders "
-    "exactly what you write (the same contract read_deliverables parses). "
-    "REVIEW LINKS (John, 2026-10-07, the default standard): never claim FOR "
-    "REVIEW (or START HERE / CURRENT) - in the register, in Next steps, or in "
-    "conversation - without an openable same-version target registered and "
-    "linked in that row: a PDF, HTML or Markdown document, or the live page "
-    "itself, that one click actually opens. A review row whose Where cell "
-    "does not open is not delivered; fix the target, not the label. "
+    "(15) THE DELIVERABLES REGISTER is in the base contract above. "
     "(16) PLAN DRIFT (John, 2026-09-05): the plan he SEES is roadmap.json. When "
     "he asks to add, remove or reorder elements, or a new North Star / plan "
     "document arrives (yours or a skill's), roadmap.json changes in the SAME "
@@ -1007,6 +1002,11 @@ class Engine:
             "alive": self.alive(),
             "busy": self.busy,
             "turn_started": self.turn_started if self.busy else 0.0,
+            # item 6 (2026-10-07): what the running turn is on, in its own words or his message; item 5: when his
+            # last message was durably accepted (a stale "paused for restart" note older than it is not shown)
+            "activity": self._turn_activity() if self.busy else "",
+            "turn_origin": getattr(self, "_turn_origin", "") if self.busy else "",
+            "human_accepted_at": float(_read_state_entry(self.skey()).get("human_accepted_at") or 0),
             # commissioned/background work in flight (the attention flag,
             # disk-true) — WITHOUT this the header pill said "waiting on
             # you" while a commissioned run worked (John, 2026-08-25)
@@ -1862,6 +1862,7 @@ class Engine:
                     with self._lock:
                         if not self._record_conversation("john", text, goal=goal):
                             return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
+                        self._mark_human_accepted()
                         self.queue.append(_scoped_text(text, goal, goal_name))
                         if not self._persist_queue():
                             self.queue.pop()
@@ -1876,6 +1877,7 @@ class Engine:
                     with self._lock:
                         if not self._record_conversation("john", text, goal=goal):
                             return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
+                        self._mark_human_accepted()
                         self.queue.append(_scoped_text(text, goal, goal_name))
                         if not self._persist_queue():
                             self.queue.pop()
@@ -1897,6 +1899,12 @@ class Engine:
                     return {"ok": False, "error": "Question is no longer current"}
                 if not self._record_conversation("john", text, goal=goal):
                     return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
+                self._mark_human_accepted()
+                # item 5 (2026-10-07): the path that used to say nothing until the turn spoke says one server line at
+                # durable accept - no model call, no speed claim (the queued paths already say their own receipt)
+                from steward_cockpit import maintenance as _mt5
+                if not self.busy and not _mt5.is_active():
+                    self._emit({"t": "sys", "text": "Received."})
                 # Only bare UI commands are controls. "go with option B" and
                 # "hold on" are substantive words, not drive switches.
                 low = text.lower().rstrip(".!").strip()
@@ -1962,6 +1970,8 @@ class Engine:
 
             self._emit({"t": "john" if human else "sys", "text": text})
             text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
+            if not human and not _is_machine_text(text):
+                text = MACHINE_MARK + text                   # persisted with the entry: never delivered as John's
             if answer_context:
                 text += ("\n\n(answer context, not a new request) This response concerns only the saved question and "
                          "versions below. Recheck applicability before acting; this is not automatic acceptance.\n" +
@@ -2014,6 +2024,12 @@ class Engine:
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}
+
+    def _mark_human_accepted(self):
+        """His message is durably accepted: remember when (status then hides a stale "paused for restart" note
+        written before it). Clears that display only - never resumes, launches or advances anything; boot never
+        calls this."""
+        _update_state(self.skey(), {"human_accepted_at": time.time()})
 
     def _plan_drift_suffix(self):
         """The PLAN DRIFT line for this campaign dir, or ''. Never raises."""
@@ -2185,6 +2201,7 @@ class Engine:
             self._turn_had_tools = False
             if not self.busy:
                 self._turn_tools = 0
+                self._progress_said = False
                 self._turn_wrote_files = False
                 self._turn_output_refs = []
                 self._refinement_dispatch_context = refinement_context
@@ -2347,16 +2364,14 @@ class Engine:
                 reason = "one writer: a code job is working on that repository"
                 note = ("(interface - not John) Your last turn was ended: it wrote %s while a code job owns that "
                         "repository. Do not write there until the job reports; tell John in one line." % hit[0])
-        # two-lane step 1 (2026-10-05, Grok + Opus): the cap binds in effort mode too - the slowest stewards were the
-        # ones mid-effort, where it was off; the hand-off names the worker that fits the work, never a generic coder
-        if not reason and getattr(self, "_turn_origin", "human") == "human" and self._turn_tools > STEP_CAP:
-            reason = "past %d tool calls: larger than a conversation turn" % STEP_CAP
-            note = ("(interface - not John) Your last turn was ended after %d tool calls: that is work, not a conversation "
-                    "turn. Commission it now and come back to John: a code change -> a code job (tools/steward_code_job.py "
-                    "start, a short brief and a check); research -> researchPrime; a plan -> Crucible; a review -> Gandalf; "
-                    "a build with a failing gate -> Foreman. Then tell John in one line what you sent off and to whom. Do "
-                    "not finish the work inline." % self._turn_tools)
-            self._stopped_mid_turn = True
+        # 2026-10-07 (execution minimum item 4, Grok ruling): at the 15th tool call of a turn John started, ONE
+        # progress line, and the turn CONTINUES - never ended, never a job started because of the count (the old
+        # forced hand-off cut small work in half). The unattended drive ceiling is separate and unchanged.
+        if (not reason and getattr(self, "_turn_origin", "human") == "human" and self._turn_tools == STEP_CAP
+                and not getattr(self, "_progress_said", False)):
+            self._progress_said = True
+            on = self._turn_activity() or "his request"
+            self._emit({"t": "sys", "text": "still working - %d steps so far, on: %s" % (self._turn_tools, on)})
         if not reason:
             return False
         with self._lock:
@@ -3859,6 +3874,7 @@ def _publish_locked(cdir, reply, written, since, record, emit):
     pid, rel = dr.project_and_rel(cdir)
     steps = (campaign.read_map(cdir) or {}).get("steps")
     registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
+    registered |= {(dr._canonical_route(it["route"]) or "").lower() for it in items if it.get("route")}
     groups, order = {}, []
     for it in fresh:
         k = campaign._product_key(it, steps)

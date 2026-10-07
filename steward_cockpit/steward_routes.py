@@ -996,6 +996,8 @@ def handle_get(cdir, verb, qs):
             pid_q, dir_q = str(qs.get("pid", "")), str(qs.get("dir", ""))
             reg = {str(i.get("path") or "").replace(chr(92), "/").lower() for i in (data.get("items") or [])
                    if isinstance(i, dict)}
+            reg |= {(_dr._canonical_route(i["route"]) or "").lower() for i in (data.get("items") or [])
+                    if isinstance(i, dict) and i.get("route")}
             for coll in (data.get("items") or [], data.get("approved") or []):
                 for it in coll:
                     if isinstance(it, dict):

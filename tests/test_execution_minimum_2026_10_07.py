@@ -690,3 +690,101 @@ def test_office_routes_read_in_the_preview_and_download_apart():
 def test_a_deck_whose_pdf_arrives_later_is_announced_again_as_ready():
     deck = {"path": "deliverables/D/a.pptx", "hash": "h", "date": "2026-10-07", "what": "Deck", "managed": True}
     assert steward_engine._deliv_key(deck) != steward_engine._deliv_key({**deck, "visual_companion": {"path": "a.pdf"}})
+
+
+# ---------- items 1+2 re-review ----------
+
+def test_managed_work_in_progress_is_not_a_designation():
+    step = {"id": "s1", "name": "Step", "status": "active", "navigation": {"current": True, "role": "primary"}}
+    items = [{"what": "Guide v3", "path": "g/Guide-v3.pdf", "step": "s1", "date": "2026-10-07"},
+             {"what": "Plan-PDF", "product_id": "Plan-PDF", "managed": True, "phase": "revising",
+              "path": "deliverables/Plan-PDF/a.pdf", "step": "s1", "date": "2026-10-07"}]
+    assert "g/Guide-v3.pdf" in [it["path"] for it in sc.current_review_items({"steps": [step]}, items)]
+
+
+def test_a_route_deck_reads_through_its_registered_pdf_route():
+    reg = {dr._canonical_route("/artifact/p?path=slides/Talk.pdf").lower()}
+    r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="", registered=reg)
+    assert r["read"] == "/artifact/p?path=slides%2FTalk.pdf" and not r["preparing"]
+
+
+# ---------- items 5 and 6: the two runtime fixes; status says who, what next, and when ----------
+
+def _campaign(tmp_path, steps=84):
+    import json as _j
+    c = tmp_path / "camp"
+    (c / ".ecgberht").mkdir(parents=True)
+    (c / "ECGBERHT.md").write_text("# Camp\n\n## North star\nShip it.\n", encoding="utf-8")
+    proj = [{"id": "s%d" % i, "name": "Step %d" % i, "status": "planned"} for i in range(steps)]
+    proj[0].update(status="active", navigation={"current": True})
+    (c / "roadmap.json").write_text(_j.dumps({"roadmap_events": [], "roadmap_projection": proj}), encoding="utf-8")
+    return c
+
+
+def test_status_names_the_coder_its_phase_elapsed_and_a_clock_time_never_a_step_count(tmp_path):
+    import json as _j, re as _re, time as _t
+    c = _campaign(tmp_path)
+    started = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(_t.time() - 600))
+    (c / ".ecgberht" / "code-jobs.json").write_text(_j.dumps({"j1": {
+        "id": "j1", "status": "running", "started": started, "brief": "Fix the tile", "worker": "coder",
+        "coder_family": "chatgpt", "steward_dir": str(c)}}), encoding="utf-8")
+    st = sc.compose_status(str(c), {})
+    assert "coder" in st["who"] and "Fix the tile" in st["who"] and "Foreman" not in st["who"]
+    assert _re.search(r"\b\d{2}:\d{2}\b", st["finish"]) and "Unavailable" not in st["finish"]
+    facts = {f["label"]: f["value"] for f in st["compact"]["facts"]}
+    assert "84" not in facts["Doing"] and "84" not in facts["Status"] and "min since" in facts["Status"]
+    assert facts["Tests"] == "tests not run yet"
+
+
+def test_a_job_kind_with_history_finishes_at_its_median(tmp_path):
+    import json as _j, time as _t
+    c = _campaign(tmp_path, steps=3)
+    fmt = lambda t: _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(t))
+    now = _t.time()
+    jobs = {"old%d" % k: {"id": "old%d" % k, "status": "done", "worker": "coder", "steward_dir": str(c),
+                          "started": fmt(now - 86400 - m * 60), "finished": fmt(now - 86400)} for k, m in enumerate((20, 30, 40))}
+    jobs["j1"] = {"id": "j1", "status": "running", "started": fmt(now - 300), "brief": "x", "worker": "coder", "steward_dir": str(c)}
+    (c / ".ecgberht" / "code-jobs.json").write_text(_j.dumps(jobs), encoding="utf-8")
+    assert sc.typical_duration_s(str(c), "code_job", "coder") == 1800
+    st = sc.compose_status(str(c), {})
+    assert "estimate: a typical code job here takes 30 min" in st["finish"]
+
+
+def test_an_idle_steward_and_a_long_turn_both_say_something_true(tmp_path):
+    import time as _t
+    c = _campaign(tmp_path, steps=3)
+    idle = sc.compose_status(str(c), {})
+    assert idle["who"].startswith("Nobody is working") and idle["next3"]
+    busy = sc.compose_status(str(c), {"busy": True, "turn_started": _t.time() - 120, "activity": "Rewriting the calendar",
+                                      "turn_origin": "human"})
+    assert busy["who"] == "The steward is doing this — Rewriting the calendar"
+    assert "provisional" in busy["finish"] or "estimate" in busy["finish"]
+
+
+def test_a_restart_pause_older_than_his_message_is_history(tmp_path):
+    import json as _j, time as _t
+    c = _campaign(tmp_path, steps=3)
+    stamp = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.gmtime(_t.time() - 3600)) + "+00:00"
+    (c / "strip.json").write_text(_j.dumps({"active_effort": "Teaching calendar - paused for restart", "as_of": stamp,
+                                            "next_recommended": "Resume only after John confirms the restart is done"}),
+                                  encoding="utf-8")
+    assert sc.restart_pause_is_stale(str(c), {"human_accepted_at": _t.time()})
+    assert not sc.restart_pause_is_stale(str(c), {"human_accepted_at": _t.time() - 7200})   # his message came first
+    assert not sc.restart_pause_is_stale(str(c), {})                                         # boot clears nothing
+
+
+def test_the_silent_path_says_received_at_durable_accept(tmp_path, monkeypatch):
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    said = []
+    monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
+    monkeypatch.setattr(eng, "alive", lambda: True)
+    monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": True)
+    eng.busy = False
+    assert eng.say("please fix the calendar")["ok"]
+    assert {"t": "sys", "text": "Received."} in said
+    said.clear()
+    eng.busy = True
+    monkeypatch.setattr(eng, "_persist_queue", lambda: True)
+    eng.say("and the quiz")
+    assert {"t": "sys", "text": "Received."} not in said      # the queued path has its own receipt
