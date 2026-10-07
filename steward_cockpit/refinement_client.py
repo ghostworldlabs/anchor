@@ -382,4 +382,11 @@ def update(campaign_dir: str | os.PathLike[str], operation: dict[str, Any], **kw
     """Submit one logical operation, recovering known document lag at most once."""
     if not isinstance(operation, dict) or operation.get("action") in _NON_EVENT_ACTIONS:
         return _failure("invalid-request", "update requires a mutating refinement operation.")
-    return invoke(campaign_dir, operation, **kwargs)
+    result = invoke(campaign_dir, operation, **kwargs)
+    if isinstance(result, dict) and result.get("ok"):
+        try:   # the managed writer: a new version is announced in the steward's dialogue (execution minimum item 2)
+            import deliverables_register
+            deliverables_register.notify_receipt(campaign_dir)
+        except Exception:
+            pass
+    return result

@@ -998,6 +998,9 @@ def handle_get(cdir, verb, qs):
                 for it in coll:
                     if isinstance(it, dict):
                         it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                        for old in it.get("history") or []:          # earlier versions read the same way
+                            if isinstance(old, dict):
+                                old["reading"] = _dr.reading_target(old, pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
             for a in data.get("acts") or []:
                 if isinstance(a.get("item"), dict):
                     a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir)

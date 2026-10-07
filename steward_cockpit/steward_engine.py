@@ -903,6 +903,11 @@ class Engine:
         yet is 'preparing a reading copy', never 'ready'. Never raises; never a model call."""
         if self.general:
             return
+        lock = self.__dict__.setdefault("_deliv_lock", threading.Lock())   # turn end, wake and writers: one at a time
+        with lock:
+            self._publish_delivery_receipt_locked(turn_id, reply, written)
+
+    def _publish_delivery_receipt_locked(self, turn_id, reply, written):
         try:
             from steward_cockpit import steward_campaign as campaign
             import deliverables_register as dr
@@ -910,14 +915,12 @@ class Engine:
             items = [it for it in (data.get("items") or [])
                      if not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
             keys = {self._deliv_key(it) for it in items}
-            if self._deliv_seen is None:                 # first read: the baseline, nothing announced
+            if self._deliv_seen is None:                 # no baseline yet (an old record): this read IS the baseline
                 self._deliv_seen = keys
                 _update_state(self.skey(), {"receipted_deliverables": sorted(keys)})
                 return
             fresh = [it for it in items if self._deliv_key(it) not in self._deliv_seen]
-            self._deliv_seen |= keys
             fresh += self._named_unregistered(items, reply, written)
-            _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)})
             if not fresh:
                 return
             if not hasattr(self, "_deliv_project"):
@@ -931,12 +934,20 @@ class Engine:
                     groups[k] = []
                     order.append(k)
                 groups[k].append(it)
-            for n, k in enumerate(order):
-                line = self._receipt_line(sorted(groups[k], key=campaign._format_rank), pid, rel, campaign)
-                if not line:
+            import hashlib
+            for k in order:
+                group = sorted(groups[k], key=campaign._format_rank)
+                line = self._receipt_line(group, pid, rel, campaign)
+                gkeys = [self._deliv_key(it) for it in group if not it.get("written_this_turn")]
+                # the line is saved FIRST, under an id made from what it announces (a retry never doubles it); only
+                # a saved line marks its products announced, so a crash or a failed save retries, never loses it
+                rid = "receipt:" + hashlib.sha1("\n".join(sorted(gkeys) or [line]).encode("utf-8")).hexdigest()[:20]
+                if not line or not self._record_conversation("steward", line, turn_id=rid):
                     continue
-                self._record_conversation("steward", line, turn_id="receipt:%s:%d" % (turn_id, n))
                 self._emit({"t": "receipt", "text": line})
+                self._deliv_seen |= set(gkeys)
+            if not _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)}):
+                self._emit({"t": "sys", "text": "delivery receipts were said, but their checkpoint was not saved"})
         except Exception as exc:   # a receipt never breaks a turn; the miss is said, not swallowed
             self._emit({"t": "sys", "text": "delivery receipt unavailable: %s" % (str(exc)[:160],)})
 
@@ -944,12 +955,40 @@ class Engine:
     _RECORD_FILE = re.compile(r"(?:^|/)(?:[.]ecgberht|journal|[.]git)(?:/|$)|(?:^|/)(?:DELIVERABLES|ECGBERHT|STATUS[^/]*|"
                               r"MEMORY|CLAUDE|AGENTS|README)[.]md$", re.I)
 
+    def _deliv_baseline(self):
+        """What the register holds before the first turn: announced as nothing (it is the starting point)."""
+        try:
+            from steward_cockpit import steward_campaign as campaign
+            items = campaign.read_deliverables(self.dir).get("items") or []
+            self._deliv_seen = {self._deliv_key(it) for it in items}
+            _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)})
+        except Exception:
+            pass
+
+    # a path named in a reply: an absolute drive path (spaces allowed, up to its first document extension), a
+    # backticked path, or a plain token without spaces
+    _PATH_IN_TEXT = re.compile(r"[A-Za-z]:[\\/][^\r\n`\"<>|*?]*?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b"
+                               r"|(?<=`)[^`\r\n]+?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)(?=`)"
+                               r"|[^\s`'\"<>|*?]+[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b", re.I)
+
     def _named_unregistered(self, items, reply, written):
         """A document this turn WROTE inside the effort and NAMED in its reply, but never registered: it still gets
         its Read link (John: a reply that only says C:/.../file.md showed no link). Record files never count."""
-        if not reply or not written:
+        if not reply:
             return []
         root = Path(self.dir).resolve()
+        written = list(written or [])
+        since = float(getattr(self, "turn_started", 0) or 0)
+        for m in self._PATH_IN_TEXT.finditer(reply):   # a document made by a shell command and named in the reply
+            cand = m.group(0).strip(".,;:()[]")
+            try:
+                fp = Path(cand) if Path(cand).is_absolute() else root / cand
+                if fp.is_file() and since and fp.stat().st_mtime >= since - 1:
+                    written.append(str(fp))
+            except (OSError, ValueError):
+                continue
+        if not written:
+            return []
         registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
         out = []
         for raw in written:
@@ -1708,6 +1747,9 @@ class Engine:
             # now (with the resume brief riding along) — no turn boundary is
             # coming to do it, because no resume turn was spent.
             self._deliver_next_queued_locked()
+        if not self.general:   # products registered while the steward was parked get their receipt now
+            threading.Thread(target=self._publish_delivery_receipt, args=("wake",), daemon=True,
+                             name="delivery-receipt-wake").start()
         return True, "awake"
 
     def _emit_resume_pickup(self, entry, open_only=False):
@@ -2279,6 +2321,8 @@ class Engine:
                 self._refinement_producer_id = refinement_producer_id
             self.busy = True
             self.turn_started = time.time()
+            if getattr(self, "_deliv_seen", 0) is None and not self.general:
+                self._deliv_baseline()          # before the first turn, so what it registers is announced
             self.turn_text = ""
             self._turn_origin = "control" if is_control else "human"
             arrivals = getattr(self, "_human_arrivals", None) or []

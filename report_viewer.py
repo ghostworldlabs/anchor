@@ -96,6 +96,16 @@ def _links(text: str) -> str:
             out.append(text[i:j + 1]); i = j + 1
             continue
         depth, m = 1, k + 2
+        lt = text.find("&lt;", k + 2)           # the <...> form, taken whole (text arrives HTML-escaped)
+        if text[k + 2:].lstrip().startswith("&lt;"):
+            gt = text.find("&gt;", lt)
+            if gt >= 0 and text[gt + 4:gt + 5] == ")":
+                label, target = text[j + 1:k], text[lt + 4:gt]
+                href = _href(target)
+                out.append(text[i:j])
+                out.append(f'<a href="{href}" rel="noopener noreferrer">{label}</a>' if href else label)
+                i = gt + 5
+                continue
         while m < len(text) and depth:
             if text[m] == "(":
                 depth += 1
@@ -187,12 +197,12 @@ def markdown_to_html(md_text: str) -> str:
 
         # GitHub tables: a header row, a |---| separator row, then body rows (2026-10-07: they rendered as
         # paragraphs of pipes).
-        if stripped.startswith("|") and i + 1 < len(lines) and _TABLE_SEP.match(lines[i + 1].strip()):
+        if "|" in stripped and i + 1 < len(lines) and "|" in lines[i + 1] and _TABLE_SEP.match(lines[i + 1].strip()):
             close_list()
             head = _table_cells(stripped)
             rows = []
             i += 2
-            while i < len(lines) and lines[i].strip().startswith("|"):
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
                 rows.append(_table_cells(lines[i]))
                 i += 1
             cell = lambda tag, c: f"<{tag}>{_inline(html.escape(c))}</{tag}>"

@@ -30,6 +30,7 @@ the existing ``deliverable-pinned`` event, so a silent no-op is auditable).
 Stdlib only.
 """
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -216,6 +217,7 @@ def register(effort_dir, what, where, *, date=None, step=None,
                 except OSError:
                     pass
                 raise
+        notify_receipt(effort_dir)
         return {"written": True, "reason": "written"}
     except Exception as exc:
         return {"written": False,
@@ -263,25 +265,64 @@ def _file_url(pid, effort_rel, rel_path, file_hash=None, **extra):
         "%s=%s" % (k, quote(str(v or ""), safe="")) for k, v in q)
 
 
+def _contained(effort_dir, rel):
+    """The resolved file when ``rel`` is a file inside ``effort_dir`` and not a private host credential; else None -
+    the same rule the serving route applies, so a target is never offered that would 404 or 403."""
+    try:
+        root = Path(effort_dir).resolve()
+        fp = (root / rel).resolve()
+        if fp != root and root not in fp.parents:
+            return None
+        try:
+            from provider_native import private_account_path
+            if private_account_path(str(fp)):
+                return None
+        except ImportError:
+            pass
+        return fp if fp.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _canonical_route(route):
+    """A contained Anchor route rebuilt with every query value encoded (a ')' or '[' in a path can never end the
+    link or start another); a markdown /artifact target gains render=1 like every other markdown reading link."""
+    from urllib.parse import urlsplit, parse_qsl, quote as _q
+    parts = urlsplit(str(route))
+    if parts.scheme or parts.netloc or not parts.path.startswith(("/artifact/", "/report/", "/api/steward/deliverable-file")):
+        return None
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if parts.path.startswith("/artifact/") and any(k == "path" and re.search(r"[.](md|markdown)$", v, re.I) for k, v in query) \
+            and not any(k == "render" for k, _v in query):
+        query.append(("render", "1"))
+    path = "/".join(_q(seg, safe="") for seg in parts.path.split("/"))
+    return path + ("?" + "&".join("%s=%s" % (_q(k, safe=""), _q(v, safe="")) for k, v in query) if query else "")
+
+
 def reading_target(product, *, pid, effort_rel, effort_dir=None):
     """How John reads one product version: ``{"read": url|None, "download": url|None, "preparing": bool}``.
 
     ``product`` is a register item (``path`` relative to the effort, or a classified ``route``; managed items carry
-    ``open_path`` / ``hash``). Markdown opens formatted (``render=1``); PDF/HTML/images open as they are; Word and
-    Excel open in the text preview with a download; a PowerPoint deck is readable only through its PDF companion (a
-    sibling PDF of the same name, or the ledger's visual companion) - without one it is ``preparing``. Every value in
-    the URL is encoded, so a path with spaces or parentheses survives."""
+    ``open_path`` / ``hash`` / ``visual_companion``). Markdown opens formatted (``render=1``); PDF/HTML/images open as
+    they are; Word and Excel open in the text preview with a download; a PowerPoint deck is readable only through a
+    PDF bound to THAT deck (the ledger's verified visual companion, or a same-name PDF written after the deck) -
+    otherwise it is ``preparing``. A file outside the effort, missing, or a private credential gets no target. Every
+    value in the URL is encoded, so a path with spaces or parentheses survives."""
     out = {"read": None, "download": None, "preparing": False}
-    route = (product or {}).get("route")
+    product = product or {}
+    route = product.get("route")
     if route:
-        out["read"] = str(route)
+        out["read"] = _canonical_route(route)
         return out
-    rel = str((product or {}).get("open_path") or (product or {}).get("path") or "").replace(chr(92), "/").strip()
+    if product.get("openable") is False:
+        return out
+    rel = str(product.get("open_path") or product.get("path") or "").replace(chr(92), "/").strip()
     if not rel or not pid:
         return out
-    if effort_dir is not None and not (Path(effort_dir) / rel).is_file():
+    fp = _contained(effort_dir, rel) if effort_dir is not None else None
+    if effort_dir is not None and fp is None:
         return out
-    file_hash = (product or {}).get("hash") if (product or {}).get("managed") else None
+    file_hash = product.get("hash") if product.get("managed") else None
     ext = os.path.splitext(rel)[1].lower()
     if ext in _DOWNLOAD:
         out["download"] = _file_url(pid, effort_rel, rel, file_hash, download="1")
@@ -293,10 +334,34 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None):
         out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
     elif ext == ".pptx":
         sibling = rel[: -len(ext)] + ".pdf"
-        if (product or {}).get("visual_companion"):
-            out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
-        elif effort_dir is not None and (Path(effort_dir) / sibling).is_file():
-            out["read"] = _file_url(pid, effort_rel, sibling)
+        pdf = _contained(effort_dir, sibling) if effort_dir is not None else None
+        if product.get("managed"):
+            # a managed deck reads ONLY through its ledger-bound companion (the route verifies both hashes)
+            if product.get("visual_companion"):
+                out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
+            else:
+                out["preparing"] = True
+        elif pdf is not None and fp is not None and pdf.stat().st_mtime >= fp.stat().st_mtime:
+            out["read"] = _file_url(pid, effort_rel, sibling)          # a PDF made from this deck, not an older one
         else:
             out["preparing"] = True
     return out
+
+
+def notify_receipt(effort_dir):
+    """Every writer of a product version calls this after a successful write: the live steward of that effort (if
+    one is loaded in this process) announces the new version in its dialogue now - not only at its next turn's end
+    or wake. In the background; never raises; a parked or absent steward catches up on wake."""
+    try:
+        import threading
+        from steward_cockpit import steward_routes as _sr
+        want = os.path.normcase(str(Path(effort_dir).resolve()))
+        with _sr.ENGINES_LOCK:
+            engines = [e for e in _sr.ENGINES.values()
+                       if not getattr(e, "general", False) and os.path.normcase(str(Path(e.dir).resolve())) == want]
+        for eng in engines:
+            if getattr(eng, "_deliv_seen", None) is not None:
+                threading.Thread(target=eng._publish_delivery_receipt, args=("writer",), daemon=True,
+                                 name="delivery-receipt-writer").start()
+    except Exception:
+        pass

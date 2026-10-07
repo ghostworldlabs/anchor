@@ -1500,11 +1500,22 @@ const Proto = (() => {
       // deliverable-file + render=1) - the same link the dialogue's receipt and Next steps carry
       const isMarkdown = /\.(md|markdown|txt)$/i.test(openPath);
       const reading = it.reading && it.reading.read && /^\/api\/steward\/deliverable-file\?/.test(it.reading.read) ? it.reading.read : "";
+      const tok = window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "";
       if (reading) {
         // the server's reading target (deliverables_register.reading_target) - the receipt's URL, token added
-        a.href = reading + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+        a.href = reading + tok;
         a.target = "_blank";
         a.rel = "noopener";
+      } else if (it.reading && it.reading.preparing) {
+        // nothing renders yet (a deck without its PDF): say so - never a link to an "unavailable" page
+        const label = el("span", "preparing", "• " + it.what + " · preparing a reading copy");
+        row.appendChild(label);
+        if (it.reading.download) {
+          const d = el("a", "ddl", "Download");
+          d.href = it.reading.download + tok; d.target = "_blank"; d.rel = "noopener";
+          row.appendChild(document.createTextNode(" ")); row.appendChild(d);
+        }
+        return row;
       } else if (isText) {
         a.href = "#";
         a.onclick = (ev) => { ev.preventDefault();
@@ -1525,7 +1536,8 @@ const Proto = (() => {
       row.appendChild(a);
       if(/\.pptx$/i.test(it.path)) {
         const download=el('a','sdmeta',' Download PowerPoint');
-        download.href=a.href.replace(/&view=1\b/,'')+'&download=1';download.target='_blank';download.rel='noopener';row.appendChild(download);
+        // the deck's own download (the reading link may be its PDF companion - never download that as the deck)
+        download.href=(it.reading&&it.reading.download)?it.reading.download+(window.STEWARD_TOKEN?'&token='+encodeURIComponent(window.STEWARD_TOKEN):''):a.href.replace(/&view=1\b/,'')+'&download=1';download.target='_blank';download.rel='noopener';row.appendChild(download);
       }
       if (/\.docx$/i.test(it.path) && it.dir === undefined && _lastMap && _lastMap.dir) {
         // (Wave D0) one click opens the manuscript in desktop Word, track changes and all

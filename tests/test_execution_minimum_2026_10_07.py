@@ -323,3 +323,66 @@ def test_a_changed_row_never_moves_the_focused_row_beside_it(cockpit):
     _refresh(page)
     expect(tile.locator('.navact a', has_text='Alpha revised')).to_be_visible()
     assert surface.locator('body').evaluate("() => document.activeElement && document.activeElement.__mark") == "same"
+
+
+# ---------- item 2, review round 1 fixes ----------
+
+def test_reading_target_refuses_what_the_route_would_refuse_and_binds_decks_to_their_pdf(tmp_path):
+    import os as _os
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (tmp_path / "outside.pdf").write_text("x", encoding="utf-8")
+    t = lambda it: dr.reading_target(it, pid="p", effort_rel="eff", effort_dir=eff)
+    assert t({"path": "../outside.pdf"})["read"] is None                     # outside the effort: no link
+    assert t({"path": "x.md", "openable": False})["read"] is None
+    (eff / "Talk.pdf").write_text("old slides", encoding="utf-8")
+    (eff / "Talk.pptx").write_text("new deck", encoding="utf-8")
+    _os.utime(eff / "Talk.pdf", (1_000_000, 1_000_000))                     # yesterday's PDF, today's deck
+    assert t({"path": "Talk.pptx"})["preparing"] is True
+    _os.utime(eff / "Talk.pdf", None)                                       # a PDF made after the deck
+    assert t({"path": "Talk.pptx"})["read"].endswith("path=Talk.pdf")
+    managed = {"path": "Talk.pptx", "managed": True, "hash": "h"}
+    assert t(managed)["preparing"] is True                                  # a managed deck: only its ledger PDF
+    assert "view=1" in t({**managed, "visual_companion": {"path": "c.pdf"}})["read"]
+
+
+def test_route_targets_are_rebuilt_encoded():
+    hostile = "/artifact/p1?path=notes)[Other](/report/p/lane)"
+    url = dr.reading_target({"route": hostile}, pid="p1", effort_rel="")["read"]
+    assert ")" not in url and "[" not in url and url.startswith("/artifact/p1?path=")
+    md = dr.reading_target({"route": "/artifact/p1?path=reports/Plan.md"}, pid="p1", effort_rel="")["read"]
+    assert md == "/artifact/p1?path=reports%2FPlan.md&render=1"
+    assert dr.reading_target({"route": "https://evil.example/x"}, pid="p1", effort_rel="")["read"] is None
+
+
+def test_reader_takes_angle_targets_whole_and_tables_without_outer_pipes():
+    out = report_viewer.markdown_to_html("[Read](<https://example.com/a)b>)\n\nA | B\n--- | ---\n1 | 2\n")
+    assert 'href="https://example.com/a)b"' in out
+    assert "<th>A</th>" in out and "<td>2</td>" in out
+
+
+def test_a_receipt_that_could_not_be_saved_is_retried_not_lost(tmp_path, monkeypatch):
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    (eff / "R.pdf").write_text("x", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| R | `R.pdf` | 2026-10-07 | 1 |\n")
+    eng._record_conversation = lambda role, text, turn_id=None, goal=None: False      # the save fails
+    eng._publish_delivery_receipt("t1")
+    assert emitted == []
+    eng._record_conversation = lambda role, text, turn_id=None, goal=None: said.append((role, text, turn_id)) or True
+    eng._publish_delivery_receipt("t2")                                               # retried, once
+    eng._publish_delivery_receipt("t3")
+    assert len(said) == 1 and "ready to read: [R]" in said[0][1]
+
+
+def test_a_shell_made_document_named_by_its_full_path_gets_a_link(tmp_path, monkeypatch):
+    import time as _t
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    eng.turn_started = _t.time() - 5
+    (eff / "out dir").mkdir()
+    doc = eff / "out dir" / "Week 3 Plan (draft).pdf"
+    doc.write_text("x", encoding="utf-8")
+    eng._publish_delivery_receipt("t1", reply="I rendered it to " + str(doc) + " for you.", written=[])
+    assert len(said) == 1 and "path=out%20dir%2FWeek%203%20Plan%20%28draft%29.pdf" in said[0][1]

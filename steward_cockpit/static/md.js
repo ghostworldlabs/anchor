@@ -41,6 +41,11 @@ function mdRender(container, text) {
       if (k < 0) break;
       if (s.slice(j + 1, k).includes("[") || s.slice(j + 1, k).includes("]")) { out.push(s.slice(i, j + 1)); i = j + 1; continue; }
       let depth = 1, m = k + 2;
+      const rest = s.slice(k + 2), lead = rest.length - rest.trimStart().length;
+      if (rest.trimStart().startsWith("<")) {                 // the <...> form, taken whole
+        const gt = s.indexOf(">", k + 2 + lead);
+        if (gt >= 0 && s[gt + 1] === ")") { depth = 0; m = gt + 2; }
+      }
       while (m < s.length && depth) { if (s[m] === "(") depth++; else if (s[m] === ")") depth--; m++; }
       let target = s.slice(k + 2, m - 1).trim();
       if (target.startsWith("<") && target.endsWith(">")) target = target.slice(1, -1).trim();

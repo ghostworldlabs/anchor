@@ -312,6 +312,7 @@ def refinement_items(campaign_dir, state):
                     "route": None, "run": None, "openable": True, "managed": True,
                     "revision_id": revision_id, "product_id": product_id, "hash": rev["hash"], "round": displayed_round,
                     "provisional": rev.get("provisional"),
+                    "visual_companion": rev.get("visual_companion"),   # the ledger-bound PDF of a deck (item 2)
                     "phase": s["phase"], "history": []}
             for p in s.get("presentations", []):
                 for member in p["members"]:
