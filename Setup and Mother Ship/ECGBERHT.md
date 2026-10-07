@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Repairing the missing Setup gear in the actual Anchor client; provider assurance and fresh-browser proof already landed.
+Upper-left Anchor Setup gear repair landed; awaiting safe activation and verification in the existing window.
 
 ## Why next
 
-John cannot see the upper-left gear; verify and repair his actual window before claiming laptop delivery.
+The gear is now in the actual Anchor top bar; the existing window still needs activation before delivery can be confirmed.
 
 ## Human wait
 

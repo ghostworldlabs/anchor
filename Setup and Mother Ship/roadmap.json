@@ -1400,6 +1400,15 @@
       },
       "seq": 82,
       "at": "2026-10-07"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "name": "Verify the landed upper-left Setup gear in Anchor"
+      },
+      "at": "2026-10-07",
+      "seq": 83
     }
   ],
   "roadmap_projection": [
@@ -1535,7 +1544,7 @@
     },
     {
       "id": "gwl-cave-settings",
-      "name": "Repair the missing upper-left Setup gear in Anchor",
+      "name": "Verify the landed upper-left Setup gear in Anchor",
       "status": "active",
       "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
       "waiting_on": null,

@@ -2,6 +2,7 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
+| Foreman Anchor top-bar Setup gear repair evidence - landed; existing-window activation unverified | `assurance-2026-10-05/evidence/anchor-shell-gear-2026-10-06.md` | 2026-10-06 | gwl-cave-settings |
 | START HERE - ecgberht approved provider implementation plan v2 PDF - assurance landed and activated; existing-client confirmation pending | `IMPLEMENTATION-PLAN-v2.pdf` | 2026-10-05 | gwl-provider-status |
 | Foreman live Setup screenshot - fresh browser on the laptop service; existing window unverified | `assurance-2026-10-05/evidence/live-setup-1440.png` | 2026-10-06 | gwl-laptop-provider-test |
 | Foreman live Cave gear dialog screenshot - retained Setup and composer draft | `assurance-2026-10-05/evidence/live-cave-dialog-1440.png` | 2026-10-06 | gwl-laptop-provider-test |
