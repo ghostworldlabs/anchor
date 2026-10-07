@@ -38,7 +38,28 @@
       var raw = li._raw !== undefined ? li._raw : x.textContent; if (!String(raw).trim()) return;
       try { x.textContent = ''; window.mdRender(x, raw); } catch (e) { x.textContent = raw; }
     }
-    function settle(list) { list.scrollTop = list.scrollHeight; var sc = list.closest('.scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }
+    // 2026-10-07: the dialogue opens at the newest line and follows what arrives (rendering, late layout) until John
+    // scrolls up - then it stays where he put it. Only a real scroll changes `_follow`; content growth fires none.
+    function follow(el) {
+      if (!el || el._followWired) return el;
+      el._followWired = true; el._follow = true;
+      var stick = function () { if (el._follow) el.scrollTop = el.scrollHeight; };
+      el.addEventListener('scroll', function () { el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 120; }, { passive: true });
+      el.addEventListener('wheel', function (e) { if (e.deltaY < 0) el._follow = false; }, { passive: true });
+      if (window.ResizeObserver) {
+        var ro = new ResizeObserver(stick); ro.observe(el);
+        Array.prototype.forEach.call(el.children, function (c) { ro.observe(c); });
+        if (window.MutationObserver) new MutationObserver(function (muts) {
+          muts.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1 && n.parentElement === el) ro.observe(n); }); });
+          stick();
+        }).observe(el, { childList: true, subtree: true, characterData: true });
+      }
+      return el;
+    }
+    function settle(list) {
+      follow(list); if (list._follow) list.scrollTop = list.scrollHeight;
+      var sc = list.closest('.scroll'); if (sc) { follow(sc); if (sc._follow) sc.scrollTop = sc.scrollHeight; }
+    }
     function put(list, li) { if (!list) return null; var fade = list.querySelector('.exfade'); if (fade) fade.remove(); list.appendChild(li); settle(list); return li; }
     // one log, two views: a line lands in the list that sent the turn and, when that is a goal's thread, in the
     // page's dialogue as well, with the goal's chip

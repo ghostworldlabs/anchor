@@ -352,6 +352,28 @@ const Proto = (() => {
   function pin(s, force) {
     if (s && (force || atBottom(s))) s.scrollTop = s.scrollHeight;
   }
+  // 2026-10-07 (John, evidence E6: a cockpit opened somewhere in the middle): the dialogue opens at the newest
+  // message and stays there while content arrives or renders (markdown, images, a late layout) - until John scrolls
+  // up. Only a real scroll changes `follow`; growth of the content fires no scroll event, so it never breaks it.
+  function wireFollow(s) {
+    if (!s || s._followWired) return;
+    s._followWired = true;
+    s._follow = true;
+    const stick = () => { if (s._follow) s.scrollTop = s.scrollHeight; };
+    s.addEventListener("scroll", () => { s._follow = atBottom(s); }, { passive: true });
+    s.addEventListener("wheel", (e) => { if (e.deltaY < 0) s._follow = false; }, { passive: true });
+    s.addEventListener("load", stick, true);                     // an image or frame inside finished loading
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(stick);
+      ro.observe(s);
+      Array.from(s.children).forEach(c => ro.observe(c));
+      if (window.MutationObserver) new MutationObserver((muts) => {
+        muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1 && n.parentElement === s) ro.observe(n); }));
+        stick();
+      }).observe(s, { childList: true, subtree: true, characterData: true });
+    }
+    stick();
+  }
   function targetFor(ev) {
     if (opts.statusPane && ev && ev.tick && paneEl()) return paneEl();
     return scrollEl();
@@ -402,6 +424,30 @@ const Proto = (() => {
      main-dashboard tile. */
   // Do now under the lead: the open decision, then the acts the deliverables read serves (Review, Open, Next)
   function paintNextSteps(host) {
+    // 2026-10-07: a repaint keeps John's place - the focused link and the scroll position survive it
+    const focusKey = host.contains(document.activeElement) && document.activeElement.dataset.navFocus;
+    const scroller = host.closest(".body") || host;
+    const priorScroll = scroller.scrollTop;
+    try { return _paintNextSteps(host); }
+    finally { scroller.scrollTop = priorScroll; restoreNavFocus(focusKey); }
+  }
+  function companionLinks(a) {
+    // the other formats of the same product: one decision, the extra formats as small links on its row
+    const box = el("div", "navcompanions");
+    box.appendChild(el("span", "sdmeta", "also "));
+    a.companions.forEach((c, i) => {
+      const ext = String(c.path || c.route || "").split("?")[0].split(".").pop().toUpperCase();
+      const row = delivRow({...(c.item || {}), what: ext || "other format", path: c.path, route: c.route, openable: true, step: a.step});
+      const link = row.querySelector("a");
+      if (!link) return;
+      link.textContent = ext || "other format";
+      link.dataset.navFocus = "next:companion:" + (c.path || c.route);
+      if (i) box.appendChild(document.createTextNode(" · "));
+      box.appendChild(link);
+    });
+    return box;
+  }
+  function _paintNextSteps(host) {
     host.textContent = "";
     const q = currentQuestion();
     const ask = el("div", "action-needed");
@@ -416,6 +462,7 @@ const Proto = (() => {
       if (a.item) row.appendChild(navFile(a.item, "next:act"));
       else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
       else row.appendChild(el("span", "navactlabel", a.label));
+      if (a.companions && a.companions.length) row.appendChild(companionLinks(a));
       host.appendChild(row);
     });
     const waits = (q && q.question ? 1 : 0) + acts.length;
@@ -2351,6 +2398,7 @@ const Proto = (() => {
     if (TALK) { const a = document.querySelector(".app"); if (a) { a.classList.add("talkview", "railhide", "nocompose"); a.classList.remove("statusopen"); } }
     if (opts.stewardLabel) opts._labelSet = true;
     applyTheme();
+    try { wireFollow(scrollEl()); } catch (e) {}   // before history loads, so the replay lands at the newest
     try { await loadMap(); } catch (e) {
       const p = $("[data-progress]");
       if (p) p.textContent = "map failed: " + ((e && e.message) || "could not load");

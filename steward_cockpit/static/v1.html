@@ -137,6 +137,7 @@ try {
 document.querySelectorAll("[data-statustoggle],[data-statustoggle2]").forEach(b =>
   b.onclick = () => {
     app.classList.toggle("statusopen");
+    if (app.dataset.narrow) return;   // a narrow window's open/close is for now, never his remembered choice
     try {
       localStorage.setItem("steward_status_pane",
         app.classList.contains("statusopen") ? "open" : "shut");
@@ -171,13 +172,22 @@ if (grip) grip.addEventListener("pointerdown", (e) => {
   grip.addEventListener("pointermove", move);
   grip.addEventListener("pointerup", up);
 });
+const NARROW=1100;
 function fitConversation(){
   if(app.classList.contains('tileview')){app.classList.add('railhide');app.classList.remove('statusopen');return;}
-  // narrow screens collapse the plan rail only — the status pane (deliverables
-  // + next steps) keeps its default-open/remembered state; the 849px media
-  // query renders it as a fixed overlay, and his toggle still closes it.
-  if(innerWidth<850){app.classList.add('railhide');}
+  // 2026-10-07 (John, evidence E6: a narrow cockpit squeezed the dialogue to a sliver): below 1100 px the plan rail
+  // AND the status pane close - in memory only, never written to his preferences - and both come back as they were
+  // above it. Reopened while narrow, the status pane overlays the dialogue (the 1099px media query).
+  if(innerWidth<NARROW){
+    if(!app.dataset.narrow){app.dataset.narrow='1';
+      app.dataset.wideRail=app.classList.contains('railhide')?'hide':'show';
+      app.dataset.wideStatus=app.classList.contains('statusopen')?'open':'shut';
+      app.classList.add('railhide');app.classList.remove('statusopen');}
+  }
   else {
+    if(app.dataset.narrow){delete app.dataset.narrow;
+      app.classList.toggle('railhide',app.dataset.wideRail==='hide');
+      app.classList.toggle('statusopen',app.dataset.wideStatus==='open');}
     const left=app.classList.contains('railhide')?0:document.querySelector('.leftcol').offsetWidth;
     const maximum=Math.max(280,innerWidth-left-320);
     const right=Math.min(document.querySelector('.rightcol').offsetWidth||380,maximum);

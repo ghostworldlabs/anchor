@@ -549,11 +549,27 @@
   // the stream carries - the same signal the cockpit page repaints on), the open tile re-reads itself in place: the brief
   // (the ask, the To review line), the open act's detail, and every card's own lines and light from ONE fresh render of
   // the page. Never a page reload: the conversation and the open tile stay as they are.
+  // 2026-10-07 (John, evidence E5: the open card's box moved while he dictated): while he is typing or dictating -
+  // a key in this page, words in a box, a card whose cockpit view reports typing, or focus inside a card's frame
+  // (Win+H types into the frame, whose keys never reach this page) - nothing in the card is replaced. The repaint
+  // waits until input has been idle, then runs once.
+  function typingInCard() {
+    var a = document.activeElement;
+    return typingNow() || !!(a && a.tagName === 'IFRAME' && a.closest && a.closest('.tile'));
+  }
+  var deferred = {};
+  function whenIdle(key, fn) {
+    if (!typingInCard()) return false;
+    if (!deferred[key]) deferred[key] = setTimeout(function () { deferred[key] = 0; fn(); }, 3000);
+    return true;
+  }
   function refreshTile(card, pid, dir) {
     if (!card.classList.contains('open')) return;
+    if (whenIdle('tile:' + card.id, function () { refreshTile(card, pid, dir); })) return;
     var body0 = $('.cb-body', card), wasOpen = !!(body0 && !body0.hidden);
     fetchPart(pid, 'brief', dir, false, false).then(function (html) {
       if (!card.classList.contains('open')) return;
+      if (whenIdle('tile:' + card.id, function () { refreshTile(card, pid, dir); })) return;   // he started typing mid-fetch
       var b = $('.cbrief', card), m = $('.cmat', card); if (m) m.remove();
       if (b) { if (/^\s*<div class="cbrief/.test(html)) b.outerHTML = html; else b.innerHTML = html; }
       if (wasOpen) { var a = $('.cb-ask', card), bd = $('.cb-body', card); if (a && bd) { bd.hidden = false; a.setAttribute('aria-expanded', 'true'); a.classList.add('open'); } }
@@ -579,11 +595,13 @@
   var facesBusy = false, facesAgain = false;
   function refreshFaces() {
     if (facesBusy) { facesAgain = true; return; }   // a stamp that lands mid-fetch runs one more fetch after (Grok W2e-8)
+    if (whenIdle('faces', refreshFaces)) return;
     facesBusy = true;
     fetch('/high-seat', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (html) {
         if (!html) return;
+        if (typingInCard()) { facesAgain = false; setTimeout(refreshFaces, 3000); return; }   // he started typing mid-fetch
         var doc = new DOMParser().parseFromString(html, 'text/html');
         $$('.tile[data-tile]').forEach(function (card) {
           var fresh = doc.getElementById(card.id); if (!fresh) return;

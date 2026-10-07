@@ -2663,7 +2663,7 @@ def review_acts(map_, current_items):
             label = label.replace("-", " ")
         act = {"act": key[0], "label": label, "path": row.get("path"), "step": row.get("step"), "item": row}
         if len(group) > 1:
-            act["companions"] = [{"path": g.get("path"), "route": g.get("route")} for g in group[1:]]
+            act["companions"] = [{"path": g.get("path"), "route": g.get("route"), "item": g} for g in group[1:]]
         acts.append(act)
     nxt = ((map_ or {}).get("heartbeat") or {}).get("next_recommended") or ""
     if str(nxt).strip():
