@@ -324,6 +324,7 @@ def refinement_items(campaign_dir, state):
                              "product_id": product_id, "revision_id": member["revision_id"],
                              "presentation_id": p["id"], "round": p["round"], "date": p.get("at", ""),
                              "accepted": p["id"] == s.get("accepted_presentation"),
+                             "visual_companion": (s["revisions"].get(member["revision_id"]) or {}).get("visual_companion"),
                              "managed": True, "openable": True}
                     item["history"].append(entry)
                     if member["revision_id"] == revision_id:

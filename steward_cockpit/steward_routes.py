@@ -994,19 +994,21 @@ def handle_get(cdir, verb, qs):
         try:
             import deliverables_register as _dr
             pid_q, dir_q = str(qs.get("pid", "")), str(qs.get("dir", ""))
+            reg = {str(i.get("path") or "").replace(chr(92), "/").lower() for i in (data.get("items") or [])
+                   if isinstance(i, dict)}
             for coll in (data.get("items") or [], data.get("approved") or []):
                 for it in coll:
                     if isinstance(it, dict):
-                        it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                        it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
                         for old in it.get("history") or []:          # earlier versions read the same way
                             if isinstance(old, dict):
-                                old["reading"] = _dr.reading_target(old, pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                                old["reading"] = _dr.reading_target(old, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
             for a in data.get("acts") or []:
                 if isinstance(a.get("item"), dict):
-                    a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                    a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
                 for c in a.get("companions") or []:
                     if isinstance(c.get("item"), dict):
-                        c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir)
+                        c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
         except Exception:
             pass   # the tile still builds its own link from the path
         return data, 200

@@ -883,152 +883,21 @@ class Engine:
         # with an empty list, so a restart blanked the pane while the record
         # still held them.
         self.files = list(stored_entry.get("files") or [])
-        # the delivery receipt (execution minimum item 2): products already announced in the dialogue, durable across
-        # restarts; None until the first read (which announces nothing - it is the baseline)
-        _seen = stored_entry.get("receipted_deliverables")
-        self._deliv_seen = set(_seen) if isinstance(_seen, list) else None
         self._lock = threading.Lock()
         self._status_lock = threading.Lock()
 
     # ---------- the delivery receipt (execution minimum item 2, 2026-10-07) ----------
-    @staticmethod
-    def _deliv_key(it):
-        return "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
-
+    # The work is module-level (publish_delivery_receipts) so a writer can announce a product with no engine loaded;
+    # the engine adds only the live line on John's open page.
     def _publish_delivery_receipt(self, turn_id="", reply="", written=()):
-        """When a turn ends, every product version registered since the last receipt gets ONE application line in
-        the dialogue with its Read link (and Download for Office files) - the same URL Deliverables and Next steps
-        use (deliverables_register.reading_target). Mechanical: whatever wrote the register (the legacy registrar,
-        the managed update, the steward's own edit) and whatever the reply said. A product with nothing that renders
-        yet is 'preparing a reading copy', never 'ready'. Never raises; never a model call."""
         if self.general:
             return
-        lock = self.__dict__.setdefault("_deliv_lock", threading.Lock())   # turn end, wake and writers: one at a time
-        with lock:
-            self._publish_delivery_receipt_locked(turn_id, reply, written)
-
-    def _publish_delivery_receipt_locked(self, turn_id, reply, written):
-        try:
-            from steward_cockpit import steward_campaign as campaign
-            import deliverables_register as dr
-            data = campaign.read_deliverables(self.dir)
-            items = [it for it in (data.get("items") or [])
-                     if not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
-            keys = {self._deliv_key(it) for it in items}
-            if self._deliv_seen is None:                 # no baseline yet (an old record): this read IS the baseline
-                self._deliv_seen = keys
-                _update_state(self.skey(), {"receipted_deliverables": sorted(keys)})
-                return
-            fresh = [it for it in items if self._deliv_key(it) not in self._deliv_seen]
-            fresh += self._named_unregistered(items, reply, written)
-            if not fresh:
-                return
-            if not hasattr(self, "_deliv_project"):
-                self._deliv_project = dr.project_and_rel(self.dir)
-            pid, rel = self._deliv_project
-            steps = (campaign.read_map(self.dir) or {}).get("steps")
-            groups, order = {}, []
-            for it in fresh:
-                k = campaign._product_key(it, steps)
-                if k not in groups:
-                    groups[k] = []
-                    order.append(k)
-                groups[k].append(it)
-            import hashlib
-            for k in order:
-                group = sorted(groups[k], key=campaign._format_rank)
-                line = self._receipt_line(group, pid, rel, campaign)
-                gkeys = [self._deliv_key(it) for it in group if not it.get("written_this_turn")]
-                # the line is saved FIRST, under an id made from what it announces (a retry never doubles it); only
-                # a saved line marks its products announced, so a crash or a failed save retries, never loses it
-                rid = "receipt:" + hashlib.sha1("\n".join(sorted(gkeys) or [line]).encode("utf-8")).hexdigest()[:20]
-                if not line or not self._record_conversation("steward", line, turn_id=rid):
-                    continue
-                self._emit({"t": "receipt", "text": line})
-                self._deliv_seen |= set(gkeys)
-            if not _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)}):
-                self._emit({"t": "sys", "text": "delivery receipts were said, but their checkpoint was not saved"})
-        except Exception as exc:   # a receipt never breaks a turn; the miss is said, not swallowed
-            self._emit({"t": "sys", "text": "delivery receipt unavailable: %s" % (str(exc)[:160],)})
-
-    _READABLE_DOC = re.compile(r"[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)$", re.I)
-    _RECORD_FILE = re.compile(r"(?:^|/)(?:[.]ecgberht|journal|[.]git)(?:/|$)|(?:^|/)(?:DELIVERABLES|ECGBERHT|STATUS[^/]*|"
-                              r"MEMORY|CLAUDE|AGENTS|README)[.]md$", re.I)
+        publish_delivery_receipts(
+            self.dir, reply=reply, written=written, since=float(getattr(self, "turn_started", 0) or 0),
+            record=lambda line, rid: self._record_conversation("steward", line, turn_id=rid), emit=self._emit)
 
     def _deliv_baseline(self):
-        """What the register holds before the first turn: announced as nothing (it is the starting point)."""
-        try:
-            from steward_cockpit import steward_campaign as campaign
-            items = campaign.read_deliverables(self.dir).get("items") or []
-            self._deliv_seen = {self._deliv_key(it) for it in items}
-            _update_state(self.skey(), {"receipted_deliverables": sorted(self._deliv_seen)})
-        except Exception:
-            pass
-
-    # a path named in a reply: an absolute drive path (spaces allowed, up to its first document extension), a
-    # backticked path, or a plain token without spaces
-    _PATH_IN_TEXT = re.compile(r"[A-Za-z]:[\\/][^\r\n`\"<>|*?]*?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b"
-                               r"|(?<=`)[^`\r\n]+?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)(?=`)"
-                               r"|[^\s`'\"<>|*?]+[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b", re.I)
-
-    def _named_unregistered(self, items, reply, written):
-        """A document this turn WROTE inside the effort and NAMED in its reply, but never registered: it still gets
-        its Read link (John: a reply that only says C:/.../file.md showed no link). Record files never count."""
-        if not reply:
-            return []
-        root = Path(self.dir).resolve()
-        written = list(written or [])
-        since = float(getattr(self, "turn_started", 0) or 0)
-        for m in self._PATH_IN_TEXT.finditer(reply):   # a document made by a shell command and named in the reply
-            cand = m.group(0).strip(".,;:()[]")
-            try:
-                fp = Path(cand) if Path(cand).is_absolute() else root / cand
-                if fp.is_file() and since and fp.stat().st_mtime >= since - 1:
-                    written.append(str(fp))
-            except (OSError, ValueError):
-                continue
-        if not written:
-            return []
-        registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
-        out = []
-        for raw in written:
-            try:
-                fp = Path(raw)
-                fp = (fp if fp.is_absolute() else root / fp).resolve()
-                rel = fp.relative_to(root).as_posix()
-            except (OSError, ValueError):
-                continue
-            if (not fp.is_file() or not self._READABLE_DOC.search(rel) or self._RECORD_FILE.search(rel)
-                    or rel.lower() in registered or fp.name.lower() not in reply.replace(chr(92), "/").lower()):
-                continue
-            out.append({"what": fp.stem, "path": rel, "date": time.strftime("%Y-%m-%d"), "written_this_turn": True})
-        return out
-
-    def _receipt_line(self, group, pid, rel, campaign):
-        import deliverables_register as dr
-        head = group[0]
-        title = campaign._strip_format_tag(head.get("what") or head.get("product_id") or head.get("path") or "",
-                                           keep_note=True).replace("[", "(").replace("]", ")")
-        if head.get("managed"):
-            title = title.replace("-", " ")
-        if not pid:
-            return "**Anchor** · new: %s (this folder is not in a registered project, so no link)" % title
-        targets = [(it, dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=self.dir)) for it in group]
-        readable = [(it, t) for it, t in targets if t["read"]]
-        bits = []
-        if readable:
-            bits.append("ready to read: [%s](%s)" % (title, readable[0][1]["read"]))
-            for it, t in readable[1:]:
-                ext = os.path.splitext(str(it.get("open_path") or it.get("path") or ""))[1].lstrip(".").upper() or "other"
-                bits.append("[%s](%s)" % (ext, t["read"]))
-        elif any(t["preparing"] for _it, t in targets):
-            bits.append("preparing a reading copy: %s" % title)
-        else:
-            bits.append("new: %s" % title)
-        dl = next((t["download"] for _it, t in targets if t["download"]), None)
-        if dl:
-            bits.append("[Download](%s)" % dl)
-        return "**Anchor** · " + " · ".join(bits)
+        receipt_baseline(self.dir)
 
     # ---------- events ----------
     def _emit(self, ev):
@@ -2321,8 +2190,8 @@ class Engine:
                 self._refinement_producer_id = refinement_producer_id
             self.busy = True
             self.turn_started = time.time()
-            if getattr(self, "_deliv_seen", 0) is None and not self.general:
-                self._deliv_baseline()          # before the first turn, so what it registers is announced
+            if not self.general:
+                self._deliv_baseline()          # before the first turn (once per effort), so what it registers is announced
             self.turn_text = ""
             self._turn_origin = "control" if is_control else "human"
             arrivals = getattr(self, "_human_arrivals", None) or []
@@ -3875,3 +3744,202 @@ def _tool_detail(block):
         text = ", ".join(str(p) for p in inp["paths"][:6])
         return text[:90] + ("..." if len(text) > 90 else "")
     return ""
+
+
+# ── The delivery receipt (execution minimum item 2, 2026-10-07) ──────────────────────────────────────────────────
+# When a product version is registered - by the legacy registrar, the managed update, or the steward's own edit - the
+# effort's dialogue gets ONE line with its Read link (and Download for Office files): the same URL Deliverables and
+# Next steps use (deliverables_register.reading_target). Mechanical and durable: it needs no engine; whatever was
+# announced is recorded in the effort (.ecgberht/receipted-deliverables.json) only AFTER its line is saved, under an
+# id made from what it announces AND its words, so a retry is idempotent and a changed announcement never collides.
+RECEIPTS_FILE = ".ecgberht/receipted-deliverables.json"
+_RECEIPT_LOCKS = {}
+_RECEIPT_GUARD = threading.Lock()
+_HISTORICAL = re.compile(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", re.I)
+_READABLE_DOC = re.compile(r"[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)$", re.I)
+_RECORD_FILE = re.compile(r"(?:^|/)(?:[.]ecgberht|journal|[.]git)(?:/|$)|(?:^|/)(?:DELIVERABLES|ECGBERHT|STATUS[^/]*|"
+                          r"MEMORY|CLAUDE|AGENTS|README)[.]md$", re.I)
+# a path named in a reply: an absolute drive path (spaces allowed, up to its first document extension), a backticked
+# path, or a plain token without spaces
+_PATH_IN_TEXT = re.compile(r"[A-Za-z]:[\\/][^\r\n`\"<>|*?]*?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b"
+                           r"|(?<=`)[^`\r\n]+?[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)(?=`)"
+                           r"|[^\s`'\"<>|*?]+[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b", re.I)
+
+
+def _receipt_lock(cdir):
+    key = os.path.normcase(str(Path(cdir).resolve()))
+    with _RECEIPT_GUARD:
+        return _RECEIPT_LOCKS.setdefault(key, threading.Lock())
+
+
+def _deliv_key(it):
+    return "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
+
+
+def _read_seen(cdir):
+    try:
+        d = json.loads((Path(cdir) / RECEIPTS_FILE).read_text(encoding="utf-8"))
+        return set(d.get("seen") or []) if isinstance(d, dict) else None
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_seen(cdir, seen):
+    try:
+        p = Path(cdir) / RECEIPTS_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".%s.tmp" % uuid.uuid4().hex[:8])
+        tmp.write_text(json.dumps({"seen": sorted(seen)}, ensure_ascii=False), encoding="utf-8")
+        os.replace(str(tmp), str(p))
+        return True
+    except OSError:
+        return False
+
+
+def _register_items(cdir):
+    from steward_cockpit import steward_campaign as campaign
+    data = campaign.read_deliverables(cdir)
+    return [it for it in (data.get("items") or []) if not _HISTORICAL.match(str(it.get("what") or ""))]
+
+
+def receipt_baseline(cdir):
+    """The first time an effort is seen, what its register already holds is the starting point - announced as
+    nothing. A no-op once the effort has a baseline. Never raises."""
+    try:
+        with _receipt_lock(cdir):
+            if _read_seen(cdir) is None:
+                _write_seen(cdir, {_deliv_key(it) for it in _register_items(cdir)})
+    except Exception:
+        pass
+
+
+def _default_record(cdir):
+    def record(line, rid):
+        if os.environ.get("STEWARD_COCKPIT_FAKE"):
+            return True
+        try:
+            from steward_cockpit.conversation_history import append_turns
+            append_turns(str(cdir), [{"role": "steward", "text": line, "turn_id": rid}])
+            return True
+        except (OSError, ValueError):
+            return False
+    return record
+
+
+def publish_delivery_receipts(cdir, *, reply="", written=(), since=0.0, record=None, emit=None):
+    """Announce every product version new to the register (and every document the turn wrote or made and NAMED in
+    its reply without registering it) - one line per product, its formats together. Never raises."""
+    record = record or _default_record(cdir)
+    try:
+        with _receipt_lock(cdir):
+            _publish_locked(cdir, reply, written, since, record, emit)
+    except Exception as exc:   # a receipt never breaks a turn; the miss is said, not swallowed
+        if emit:
+            emit({"t": "sys", "text": "delivery receipt unavailable: %s" % (str(exc)[:160],)})
+
+
+def _publish_locked(cdir, reply, written, since, record, emit):
+    import hashlib
+    from steward_cockpit import steward_campaign as campaign
+    import deliverables_register as dr
+    items = _register_items(cdir)
+    seen = _read_seen(cdir)
+    if seen is None:                                     # no baseline yet: this read IS the baseline
+        _write_seen(cdir, {_deliv_key(it) for it in items})
+        return
+    fresh = [it for it in items if _deliv_key(it) not in seen]
+    fresh += _named_unregistered(cdir, items, reply, written, since)
+    if not fresh:
+        return
+    pid, rel = dr.project_and_rel(cdir)
+    steps = (campaign.read_map(cdir) or {}).get("steps")
+    registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
+    groups, order = {}, []
+    for it in fresh:
+        k = campaign._product_key(it, steps)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(it)
+    changed = False
+    for k in order:
+        group = sorted(groups[k], key=campaign._format_rank)
+        line = _receipt_line(cdir, group, pid, rel, registered)
+        gkeys = [_deliv_key(it) for it in group if not it.get("written_this_turn")]
+        rid = "receipt:" + hashlib.sha1(("\n".join(sorted(gkeys)) + "\n" + line).encode("utf-8")).hexdigest()[:20]
+        if not line or not record(line, rid):
+            continue                                     # not saved: not announced - the next pass tries again
+        if emit:
+            emit({"t": "receipt", "text": line})
+        seen |= set(gkeys)
+        changed = True
+    if changed and not _write_seen(cdir, seen) and emit:
+        emit({"t": "sys", "text": "delivery receipts were said, but their checkpoint was not saved"})
+
+
+def _named_unregistered(cdir, items, reply, written, since):
+    """A document the turn WROTE (or a shell made, this turn) inside the effort and NAMED in its reply, but never
+    registered: it still gets its Read link (John: a reply that only says C:/.../file.md showed no link)."""
+    if not reply:
+        return []
+    root = Path(cdir).resolve()
+    written = list(written or [])
+    for m in _PATH_IN_TEXT.finditer(reply):
+        cand = m.group(0).rstrip(".,;:")
+        if cand.startswith(("(", "[")) and not any(c in cand for c in ")]"):
+            cand = cand[1:]                               # an opening bracket of the prose, not of the name
+        try:
+            fp = Path(cand) if Path(cand).is_absolute() else root / cand
+            if fp.is_file() and since and fp.stat().st_mtime >= since - 1:
+                written.append(str(fp))
+        except (OSError, ValueError):
+            continue
+    if not written:
+        return []
+    registered = {str(it.get("path") or "").replace(chr(92), "/").lower() for it in items}
+    flat = reply.replace(chr(92), "/").lower()
+    out, taken = [], set()
+    for raw in written:
+        try:
+            fp = Path(raw)
+            fp = (fp if fp.is_absolute() else root / fp).resolve()
+            rel = fp.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            continue
+        if (rel.lower() in taken or not fp.is_file() or not _READABLE_DOC.search(rel) or _RECORD_FILE.search(rel)
+                or rel.lower() in registered or fp.name.lower() not in flat):
+            continue
+        taken.add(rel.lower())
+        out.append({"what": fp.stem, "path": rel, "date": time.strftime("%Y-%m-%d"), "written_this_turn": True})
+    return out
+
+
+def _receipt_line(cdir, group, pid, rel, registered):
+    from steward_cockpit import steward_campaign as campaign
+    import deliverables_register as dr
+    head = group[0]
+    title = campaign._strip_format_tag(head.get("what") or head.get("product_id") or head.get("path") or "",
+                                       keep_note=True).replace("[", "(").replace("]", ")")
+    if head.get("managed"):
+        title = title.replace("-", " ")
+    if not pid:
+        return "**Anchor** · new: %s (this folder is not in a registered project, so no link)" % title
+    targets = [(it, dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=cdir, registered=registered))
+               for it in group]
+    readable = [(it, t) for it, t in targets if t["read"]]
+    bits = []
+    if readable:
+        bits.append("ready to read: [%s](%s)" % (title, readable[0][1]["read"]))
+        for it, t in readable[1:]:
+            ext = os.path.splitext(str(it.get("open_path") or it.get("path") or ""))[1].lstrip(".").upper() or "other"
+            bits.append("[%s](%s)" % (ext, t["read"]))
+    elif any(t["preparing"] for _it, t in targets):
+        bits.append("preparing a reading copy: %s" % title)
+    else:
+        bits.append("new: %s" % title)
+    dl = next((t["download"] for _it, t in targets if t["download"]), None)
+    if dl:
+        bits.append("[Download](%s)" % dl)
+    return "**Anchor** · " + " · ".join(bits)

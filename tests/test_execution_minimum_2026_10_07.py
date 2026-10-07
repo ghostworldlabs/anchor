@@ -161,7 +161,8 @@ def test_reading_target_is_one_encoded_url_per_kind(tmp_path):
     (eff / "q").mkdir(parents=True)
     for name in ("Guide (v1).md", "Guide (v1).pdf", "Deck.pptx", "Talk.pptx", "Talk.pdf", "Cal (accepted).ics"):
         (eff / "q" / name).write_text("x", encoding="utf-8")
-    t = lambda p: dr.reading_target({"path": p}, pid="p 1", effort_rel="MBA Teaching AI", effort_dir=eff)
+    t = lambda p: dr.reading_target({"path": p}, pid="p 1", effort_rel="MBA Teaching AI", effort_dir=eff,
+                                    registered={"q/talk.pptx", "q/talk.pdf"})
     md = t("q/Guide (v1).md")
     assert md["read"] == ("/api/steward/deliverable-file?pid=p%201&dir=MBA%20Teaching%20AI"
                           "&path=q%2FGuide%20%28v1%29.md&render=1")
@@ -179,7 +180,7 @@ def _receipt_engine(tmp_path, monkeypatch, rows):
     (eff / "DELIVERABLES.md").write_text(
         "| What | Where | Date | Step |\n|---|---|---|---|\n" + "".join(rows), encoding="utf-8")
     eng = steward_engine.Engine.__new__(steward_engine.Engine)
-    eng.dir, eng.general, eng._deliv_seen = str(eff), False, None
+    eng.dir, eng.general, eng.turn_started = str(eff), False, 0.0
     said, emitted = [], []
     eng.skey = lambda: "test"
     eng._record_conversation = lambda role, text, turn_id=None, goal=None: said.append((role, text, turn_id)) or True
@@ -332,7 +333,7 @@ def test_reading_target_refuses_what_the_route_would_refuse_and_binds_decks_to_t
     eff = tmp_path / "eff"
     eff.mkdir()
     (tmp_path / "outside.pdf").write_text("x", encoding="utf-8")
-    t = lambda it: dr.reading_target(it, pid="p", effort_rel="eff", effort_dir=eff)
+    t = lambda it: dr.reading_target(it, pid="p", effort_rel="eff", effort_dir=eff, registered={"talk.pptx", "talk.pdf"})
     assert t({"path": "../outside.pdf"})["read"] is None                     # outside the effort: no link
     assert t({"path": "x.md", "openable": False})["read"] is None
     (eff / "Talk.pdf").write_text("old slides", encoding="utf-8")
@@ -406,3 +407,84 @@ def test_a_designated_product_brings_its_other_formats_and_nothing_else():
     ]
     paths = sorted(it["path"] for it in sc.current_review_items({"steps": [step]}, items))
     assert paths == ["g/Guide.html", "g/Guide.pdf"]
+
+
+# ---------- item 2, review round 2 ----------
+
+def test_a_changed_announcement_never_collides_with_a_saved_one(tmp_path, monkeypatch):
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    ids = {}
+    def record(role, text, turn_id=None, goal=None):
+        if turn_id in ids and ids[turn_id] != text:
+            raise AssertionError("turn_id_conflict")
+        ids[turn_id] = text
+        said.append((role, text, turn_id))
+        return True
+    eng._record_conversation = record
+    eng._publish_delivery_receipt("t0")
+    (eff / "Talk.pptx").write_text("deck", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Talk | `Talk.pptx` | 2026-10-07 | 1 |\n")
+    real_write = steward_engine._write_seen
+    monkeypatch.setattr(steward_engine, "_write_seen", lambda cdir, seen: False)    # crash before the checkpoint
+    eng._publish_delivery_receipt("t1")
+    monkeypatch.setattr(steward_engine, "_write_seen", real_write)
+    (eff / "Talk.pdf").write_text("slides", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Talk (PDF) | `Talk.pdf` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t2")                                       # the retry now says "ready"
+    texts = [t for _r, t, _i in said]
+    assert "preparing a reading copy: Talk" in texts[0] and "ready to read: [Talk]" in texts[-1]
+    assert len(set(i for _r, _t, i in said)) == len(said)
+
+
+def test_a_writer_announces_with_no_steward_loaded(tmp_path, monkeypatch):
+    from steward_cockpit.conversation_history import read_history_document
+    monkeypatch.delenv("STEWARD_COCKPIT_FAKE", raising=False)
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "eff"))
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (eff / "DELIVERABLES.md").write_text("| What | Where | Date | Step |\n|---|---|---|---|\n", encoding="utf-8")
+    steward_engine.receipt_baseline(str(eff))
+    (eff / "Notes.md").write_text("# n", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Notes | `Notes.md` | 2026-10-07 | 1 |\n")
+    steward_engine.publish_delivery_receipts(str(eff))                        # what notify_receipt runs, no engine
+    turns = read_history_document(str(eff))["turns"]
+    assert any("ready to read: [Notes](/api/steward/deliverable-file?pid=p1&dir=eff&path=Notes.md&render=1)" in t["text"]
+               for t in turns)
+    steward_engine.publish_delivery_receipts(str(eff))
+    assert len(read_history_document(str(eff))["turns"]) == len(turns)       # announced once
+
+
+def test_an_unregistered_pdf_is_never_taken_for_a_deck_and_route_decks_wait(tmp_path):
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (eff / "Talk.pptx").write_text("deck", encoding="utf-8")
+    (eff / "Talk.pdf").write_text("slides", encoding="utf-8")
+    t = lambda reg: dr.reading_target({"path": "Talk.pptx"}, pid="p", effort_rel="eff", effort_dir=eff, registered=reg)
+    assert t({"talk.pptx"})["preparing"] is True                              # the PDF is not declared
+    assert t({"talk.pptx", "talk.pdf"})["read"].endswith("path=Talk.pdf")
+    r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="")
+    assert r["read"] is None and r["preparing"] and r["download"]
+
+
+def test_a_history_entry_carries_its_own_revisions_companion():
+    state = {"slices": {"s1": {
+        "candidate": {"Deck": "r2"}, "round": 1, "phase": "awaiting_review",
+        "revisions": {"r1": {"product_id": "Deck", "path": "a.pptx", "hash": "h1", "visual_companion": {"path": "a.pdf"}},
+                      "r2": {"product_id": "Deck", "path": "b.pptx", "hash": "h2"}},
+        "presentations": [{"id": "p0", "round": 0, "members": [{"product_id": "Deck", "revision_id": "r1", "path": "a.pptx", "hash": "h1"}]},
+                          {"id": "p1", "round": 1, "members": [{"product_id": "Deck", "revision_id": "r2", "path": "b.pptx", "hash": "h2"}]}]}}}
+    item = sc.refinement_items("x", state)[0]
+    assert item["history"][0]["visual_companion"] == {"path": "a.pdf"} and not item["history"][1]["visual_companion"]
+
+
+def test_a_backticked_name_with_brackets_keeps_them(tmp_path, monkeypatch):
+    import time as _t
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    eng.turn_started = _t.time() - 5
+    (eff / "(accepted).ics").write_text("BEGIN:VCALENDAR", encoding="utf-8")
+    eng._publish_delivery_receipt("t1", reply="Made `(accepted).ics` for you.", written=[])
+    assert len(said) == 1 and "%28accepted%29.ics" in said[0][1]

@@ -1491,7 +1491,23 @@ const Proto = (() => {
       // labelled by the document it opens, never the whole route (2026-09-05)
       a.textContent = "• " + (it.what || routeName(it.route));
       try { const im = window.SkillIcons && window.SkillIcons.img(itemMark(it) || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
-      a.href = routeHref(it.route);
+      const tokr = window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "";
+      if (it.reading && it.reading.preparing && !it.reading.read) {
+        // the server's reading target says nothing renders yet (a deck behind a route): say so, keep its download
+        const label = el("span", "preparing", "• " + (it.what || routeName(it.route)) + " · preparing a reading copy");
+        row.appendChild(label);
+        if (it.reading.download) {
+          const d = el("a", "ddl", "Download");
+          d.href = it.reading.download + (it.reading.download.indexOf("?") >= 0 ? tokr : tokr.replace("&", "?"));
+          d.target = "_blank"; d.rel = "noopener";
+          row.appendChild(document.createTextNode(" ")); row.appendChild(d);
+        }
+        return row;
+      }
+      // the server's canonical reading URL when it gave one (the receipt's), else the old route rule
+      a.href = (it.reading && it.reading.read)
+        ? it.reading.read + (it.reading.read.indexOf("?") >= 0 ? tokr : tokr.replace("&", "?"))
+        : routeHref(it.route);
       a.target = "_blank";
       a.rel = "noopener";
       row.appendChild(a);

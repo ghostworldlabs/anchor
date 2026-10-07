@@ -299,20 +299,30 @@ def _canonical_route(route):
     return path + ("?" + "&".join("%s=%s" % (_q(k, safe=""), _q(v, safe="")) for k, v in query) if query else "")
 
 
-def reading_target(product, *, pid, effort_rel, effort_dir=None):
+def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None):
     """How John reads one product version: ``{"read": url|None, "download": url|None, "preparing": bool}``.
 
     ``product`` is a register item (``path`` relative to the effort, or a classified ``route``; managed items carry
     ``open_path`` / ``hash`` / ``visual_companion``). Markdown opens formatted (``render=1``); PDF/HTML/images open as
     they are; Word and Excel open in the text preview with a download; a PowerPoint deck is readable only through a
-    PDF bound to THAT deck (the ledger's verified visual companion, or a same-name PDF written after the deck) -
+    PDF bound to THAT deck (the ledger's verified visual companion, or a same-name PDF the register declares and
+    that is no older than the deck) -
     otherwise it is ``preparing``. A file outside the effort, missing, or a private credential gets no target. Every
     value in the URL is encoded, so a path with spaces or parentheses survives."""
     out = {"read": None, "download": None, "preparing": False}
     product = product or {}
     route = product.get("route")
     if route:
-        out["read"] = _canonical_route(route)
+        url = _canonical_route(route)
+        target = re.search(r"[?&]path=([^&]*)", url or "")
+        from urllib.parse import unquote as _uq
+        rext = os.path.splitext(_uq(target.group(1)))[1].lower() if target else ""
+        if rext in _DOWNLOAD:
+            out["download"] = url
+        if rext == ".pptx":
+            out["preparing"] = True                     # a deck behind a route has no bound reading copy
+        else:
+            out["read"] = url
         return out
     if product.get("openable") is False:
         return out
@@ -341,27 +351,43 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None):
                 out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
             else:
                 out["preparing"] = True
-        elif pdf is not None and fp is not None and pdf.stat().st_mtime >= fp.stat().st_mtime:
-            out["read"] = _file_url(pid, effort_rel, sibling)          # a PDF made from this deck, not an older one
+        elif (pdf is not None and fp is not None and registered is not None
+              and sibling.lower() in registered and pdf.stat().st_mtime >= fp.stat().st_mtime):
+            # the steward REGISTERED this PDF as the same product (same folder and name), and it is no older than the
+            # deck: the declared reading copy. An unregistered or older PDF is never taken for the deck's slides.
+            out["read"] = _file_url(pid, effort_rel, sibling)
         else:
             out["preparing"] = True
     return out
 
 
 def notify_receipt(effort_dir):
-    """Every writer of a product version calls this after a successful write: the live steward of that effort (if
-    one is loaded in this process) announces the new version in its dialogue now - not only at its next turn's end
-    or wake. In the background; never raises; a parked or absent steward catches up on wake."""
+    """Every writer of a product version calls this after a successful write: the new version is announced in the
+    effort's dialogue now - persisted through the conversation writer whether or not a steward is loaded, and shown
+    live on an open page when one is. In the background; never raises."""
+    def run():
+        try:
+            from steward_cockpit import steward_engine as _se
+            emit = None
+            try:
+                from steward_cockpit import steward_routes as _sr
+                want = os.path.normcase(str(Path(effort_dir).resolve()))
+                with _sr.ENGINES_LOCK:
+                    live = [e for e in _sr.ENGINES.values() if not getattr(e, "general", False)
+                            and os.path.normcase(str(Path(e.dir).resolve())) == want]
+                if live:
+                    eng = live[0]
+                    emit = eng._emit
+                    record = lambda line, rid: eng._record_conversation("steward", line, turn_id=rid)
+                else:
+                    record = None
+            except Exception:
+                record = None
+            _se.publish_delivery_receipts(str(effort_dir), record=record, emit=emit)
+        except Exception:
+            pass
     try:
         import threading
-        from steward_cockpit import steward_routes as _sr
-        want = os.path.normcase(str(Path(effort_dir).resolve()))
-        with _sr.ENGINES_LOCK:
-            engines = [e for e in _sr.ENGINES.values()
-                       if not getattr(e, "general", False) and os.path.normcase(str(Path(e.dir).resolve())) == want]
-        for eng in engines:
-            if getattr(eng, "_deliv_seen", None) is not None:
-                threading.Thread(target=eng._publish_delivery_receipt, args=("writer",), daemon=True,
-                                 name="delivery-receipt-writer").start()
+        threading.Thread(target=run, daemon=True, name="delivery-receipt-writer").start()
     except Exception:
         pass
