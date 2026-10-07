@@ -436,6 +436,12 @@ def _combined_display(skill, resources):
                                       'sourceLink': links.get(e.get('anchor_id'))}
                                      for e in flow.get('edges', []) if isinstance(e, dict)],
             'exits': flow.get('terminals', []),
+            # Per-anchor-id links (Refinement 2): the ported display page keys
+            # its source buttons on the declared anchor ids; same hash-checked
+            # /foundry/source links the steps/disagreements already embed.
+            'anchorLinks': {str(aid): {'href': link.get('href'), 'label': link.get('label'),
+                                       'problem': link.get('problem')}
+                            for aid, link in links.items() if isinstance(link, dict)},
             'disagreements': disagreements, 'nodes': nodes, 'issues': issues,
             'observedExamples': [{**e, 'sourceLinks': [links[a] for a in e.get('anchors', []) if a in links]}
                                  for e in data.get('observed_examples', []) if isinstance(e, dict)],
@@ -685,3 +691,207 @@ def icon_file(skill_id):
     row = find_skill(skill_id)
     path = Path(row['iconPath']) if row and row.get('iconPath') else None
     return path if path and path.is_file() and _allowed(path) else None
+
+
+# ── researchPrime Refinement 2 — the ported foundry-skill-display page ────────
+# The verified handoff (the researchprime/ + shared/ bundle in the "Foundry page
+# and knowledge maps" effort) ships canonical, pure display components. Anchor
+# vendors them byte-identical under static/foundry-display/ and serves its own
+# page shell: raw maps.json for the adapter, resource/anchor hrefs resolved
+# through the EXISTING /artifact + /foundry/source routes (never an arbitrary
+# filesystem path), the CURRENT primary settings (an existing invalid primary
+# refuses — it never falls back), and Anchor-owned walkthrough-rail identity.
+# A maps.json without the declared diagram layout (every pre-Refinement-2
+# bundle, every other skill) keeps the existing React walkthrough untouched.
+
+DISPLAY_ASSET_ROUTE = '/static/foundry-display/'
+# Foundry-owned walkthrough ids -> Anchor skill ids (the existing pages).
+_WALKTHROUGH_SKILLS = {'researchprime': 'researchprime', 'gandalf': 'gandalf',
+                       'steward-lamp': 'steward-project',
+                       'steward-cave': 'steward-portfolio',
+                       'steward-star-chart': 'steward-starchart'}
+
+
+def _display_data(skill):
+    """The skill's Refinement-2 handoff data, or None (old display serves).
+
+    Qualifies only a foundry-skill-display/v1 maps.json for THIS skill that
+    carries the DECLARED diagram layout covering every step — the Refinement 2
+    marker. Shape problems mean "not this display", never a server error.
+    """
+    data, _path_, _err = _load_artifact(skill, ('maps.json',))
+    if (not isinstance(data, dict) or data.get('schema') != 'foundry-skill-display/v1'
+            or data.get('skill_id') != skill['id']):
+        return None
+    process = data.get('process')
+    knowledge = data.get('knowledge')
+    if not isinstance(process, dict) or not isinstance(knowledge, dict):
+        return None
+    diagram, steps = process.get('diagram'), process.get('steps')
+    if (not isinstance(diagram, dict) or not isinstance(diagram.get('nodes'), dict)
+            or not isinstance(steps, list) or not steps
+            or not isinstance(process.get('edges'), list)
+            or not isinstance(knowledge.get('nodes'), list)
+            or not all(isinstance(data.get(k), list) for k in ('sources', 'anchors', 'resources'))):
+        return None
+    ids = {str(s.get('id')) for s in steps if isinstance(s, dict)}
+    cells = diagram['nodes']
+    if len(ids) != len(steps) or not all(
+            isinstance(cells.get(i), dict) and isinstance(cells[i].get('col'), int)
+            and isinstance(cells[i].get('row'), int) for i in ids):
+        return None
+    return data
+
+
+def _display_settings(mirror):
+    """Map the CURRENT primary settings onto the adapter's primary/mirror seam.
+
+    An existing primary always presents itself — invalid means the adapter's
+    refusal, never a fallback. Only an absent primary offers a mirror: Anchor's
+    live mirror values when they validate, else the bundle's qualified snapshot.
+    """
+    state = anchor_settings.read_settings_state()
+    keys = ('coding_family', 'review_family', 'default_cli', 'steward_type',
+            'model_policy', 'settings_revision')
+    value = {k: state['settings'].get(k) for k in keys} if state.get('valid') else None
+    if anchor_settings.settings_path().is_file():
+        return {'primary': {'exists': True, 'value': value}, 'mirror': mirror,
+                'error': state.get('error')}
+    if value is not None:
+        return {'primary': {'exists': False}, 'mirror': value, 'error': None}
+    return {'primary': {'exists': False}, 'mirror': mirror, 'error': state.get('error')}
+
+
+def _display_rail(skill):
+    """Anchor-owned rail identity: persona presentation + per-entry href/icon."""
+    profile = anchor_settings.steward_profile()
+    persona = {
+        'lamp': {'title': 'Steward · the ' + profile['seal_name'],
+                 'icon': '/vendor/brand/' + profile['seal']},
+        'cave': {'title': 'Steward · the ' + profile['high_seat_name'],
+                 'icon': '/vendor/brand/' + profile['high_seat']},
+        'star': {'title': 'Steward · ' + profile['campaign_name'],
+                 'icon': '/vendor/brand/' + profile['campaign_icon']},
+    }
+    by_id = {r['id']: r for r in catalog()['skills']}
+    rail = {}
+    for wid, aid in _WALKTHROUGH_SKILLS.items():
+        row = by_id.get(aid)
+        if row:
+            rail[wid] = {'href': '/foundry?' + urlencode({'skill': aid}),
+                         'icon': row.get('icon'), 'current': aid == skill['id']}
+    rail['remaining-skills'] = {'href': '/foundry', 'icon': None, 'current': False}
+    return persona, rail
+
+
+def display_payload(skill_id):
+    """Everything the ported Refinement-2 page mounts, or None.
+
+    Raw foundry-skill-display/v1 data for the canonical adapter (which enforces
+    seeded-not-learned geometry and unknown-until-receipts frequency), plus the
+    Anchor-side resolutions the isolated bundle could not make: resource hrefs
+    (the /artifact-contained rendered documents, source-viewer fallback), the
+    hash-checked per-anchor /foundry/source links, the current primary
+    settings, and the walkthrough-rail identity.
+    """
+    skill = find_skill(skill_id)
+    if not skill:
+        return None
+    data = _display_data(skill)
+    if data is None:
+        return None
+    detail = skill_detail(skill_id)
+    process_map = detail.get('processMap') or {}
+    resource_hrefs = {str(r.get('id')): {'href': r.get('href'), 'sourceHref': r.get('sourceHref'),
+                                         'problem': r.get('problem')}
+                      for r in detail.get('resources', []) if r.get('library')}
+    persona, rail = _display_rail(skill)
+    return {'skill': {'id': skill['id'], 'name': skill['name'],
+                      'purpose': skill.get('purpose'), 'icon': skill.get('icon')},
+            'data': data,
+            'hrefs': {'resources': resource_hrefs,
+                      'anchors': process_map.get('anchorLinks') or {}},
+            'settings': _display_settings(data.get('settings')),
+            'persona': persona, 'rail': rail,
+            'issues': list(process_map.get('issues') or [])}
+
+
+def display_page(skill_id):
+    """The served Refinement-2 walkthrough page for /foundry?skill=<id>, or None."""
+    payload = display_payload(skill_id)
+    if payload is None:
+        return None
+    esc = html.escape
+    skill, data = payload['skill'], payload['data']
+    life = data.get('lifecycle') if isinstance(data.get('lifecycle'), dict) else {}
+    rows = {str(r.get('id')): r for r in data.get('resources', []) if isinstance(r, dict)}
+    hrefs = payload['hrefs']['resources']
+
+    def action(rid, label, cls='button'):
+        link = hrefs.get(rid) or {}
+        target = link.get('href') or link.get('sourceHref')
+        if rid not in rows or not target:
+            return ''
+        return '<a class="%s" data-resource="%s" href="%s">%s</a>' % (cls, esc(rid), esc(target), esc(label))
+
+    actions = action('human-guide', 'Human guide') + action('purpose', 'Original North Star', 'button secondary')
+    icon = ('<img class="big" src="%s" alt="%s icon" width="112" height="112">'
+            % (esc(skill['icon']), esc(skill['name']))) if skill.get('icon') else ''
+    badge = esc(str(life.get('state') or 'for-review')) + ('' if life.get('accepted') is True else ' · not accepted')
+    lifecycle_note = 'Lifecycle: %s · accepted: %s · closed: %s' % (
+        esc(str(life.get('state') or 'unknown')),
+        'true' if life.get('accepted') is True else 'false',
+        'true' if life.get('closed') is True else 'false')
+    issues = payload['issues']
+    issues_note = ('<p class="review-note">%d source check%s failed — %s</p>'
+                   % (len(issues), '' if len(issues) == 1 else 's',
+                      esc('; '.join(str(i) for i in issues[:3])))) if issues else ''
+    # '</' is defused so handoff text can never close the inline script tag.
+    json_payload = json.dumps(payload).replace('</', '<\\/')
+    return '''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%(title)s — Skill Foundry walkthrough</title>
+<link rel="stylesheet" href="%(assets)sdisplay.css">
+<script>window.FOUNDRY_SKILL_DISPLAY = %(payload)s;</script>
+<script defer src="%(assets)sadapter.js"></script>
+<script defer src="%(assets)sflow-diagram.js"></script>
+<script defer src="%(assets)slayer-library.js"></script>
+<script defer src="%(assets)sskill-display.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to skill</a>
+<header class="masthead"><a href="/foundry"><img src="/vendor/brand/skill-foundry-icon.jpg" alt="Skill Foundry" width="30" height="30"></a><strong>Skill Foundry</strong>
+  <span class="brand"><img src="/vendor/brand/gwl-m-icon.svg" alt="" width="24" height="24">Ghost World Labs</span>
+  <span class="badge">%(badge)s</span></header>
+<div class="shell">
+  <aside class="rail" aria-label="Approved walkthrough order"><h2>Skill walkthroughs</h2><p class="note">Approved order</p><div id="walkthrough"></div></aside>
+  <main id="content" tabindex="-1">
+    <div class="head">%(icon)s
+      <div><p class="eyebrow">Skill walkthrough</p><h1>%(name)s</h1>
+        <p class="intro">%(purpose)s</p>
+        <div class="actions">%(actions)s</div></div></div>
+    <p class="review-note">%(refinement)s · %(lifecycle)s</p>
+    %(issues)s
+    <nav class="tabs" aria-label="%(name)s sections">
+      <a href="#knowledge" data-tab="knowledge">Knowledge map</a><a href="#library" data-tab="library">Library</a>
+      <a href="#process" data-tab="process">Process map</a><a href="#differences" data-tab="differences">Instructions &#8596; code</a>
+      <a href="#review" data-tab="review">Review record</a>
+    </nav>
+    <div id="panel"><p class="empty">Loading the walkthrough&#8230;</p></div>
+    <noscript><p>This walkthrough needs JavaScript. The declared documents stay reachable through the Library data (maps.json) and the read-only source viewer.</p></noscript>
+  </main>
+</div>
+<dialog id="resource-dialog" aria-label="Library resource">
+  <div class="drawer-head"><strong id="resource-title">Library resource</strong><a id="resource-new-tab" target="_blank" rel="noopener">Open separately &#8599;</a><button id="close-resource" aria-label="Close resource">Close &#215;</button></div>
+  <iframe id="resource-frame" title="Actual library resource"></iframe>
+</dialog>
+</body>
+</html>''' % {'title': esc(skill['name']), 'assets': DISPLAY_ASSET_ROUTE,
+              'payload': json_payload, 'badge': badge, 'icon': icon,
+              'name': esc(skill['name']), 'purpose': esc(skill.get('purpose') or ''),
+              'actions': actions,
+              'refinement': esc(str(data.get('refinement') or 'Walkthrough awaiting human review.')),
+              'lifecycle': lifecycle_note, 'issues': issues_note}

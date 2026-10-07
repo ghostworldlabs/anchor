@@ -23044,6 +23044,19 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_bytes(icon.read_bytes(), mimetypes.guess_type(str(icon))[0] or "image/png",
                                      cache="no-cache")
             elif _path_only == "/foundry" or _path_only == "/foundry/":
+                # researchPrime Refinement 2: a skill whose maps.json carries
+                # the verified foundry-skill-display/v1 handoff WITH the
+                # declared diagram layout gets the ported display page
+                # (canonical components vendored under static/foundry-display/,
+                # data + current-primary settings + /artifact + /foundry/source
+                # hrefs injected by foundry_page.display_page). Every other
+                # skill — and every pre-Refinement-2 bundle — keeps the
+                # existing React walkthrough below, unchanged.
+                _skill_q = (parse_qs(urlparse(self.path).query).get("skill") or [""])[0]
+                _display = _fpage.display_page(_skill_q) if _skill_q else None
+                if _display is not None:
+                    self._send_html(_display)
+                    return
                 # Foundry GUI (folded-in React app): serve the built SPA
                 # (foundry-gui/dist/index.html). Its absolute /assets, /brand
                 # and /api/* calls are answered by the routes below + the

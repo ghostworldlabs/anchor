@@ -494,3 +494,368 @@ def test_exact_inventory_and_resource_target_rejections(rig, opening):
     assert page.source_page('steward-project', str(write(rig['root'] / 'Anchor/model_policy.py', 'PRIVATE'))) is None
     for target in ('../sources/undeclared.md', 'resources/../../outside.html', str(unknown), '.anchor/private.html'):
         assert page._library_target(target, base, 'fixture-foundry') is None
+
+
+# ── researchPrime Refinement 2 — the ported foundry-skill-display page ────────
+# These tests FAIL on the old display: the level-dial Library, the typed flow
+# diagram with a declared layout, per-step reconciliation records, cumulative
+# review data and primary-settings resolution did not exist on the React page.
+
+
+def rendered_doc(title, extra=''):
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<style>body{font:15px system-ui}</style></head><body><div class="md">'
+            '<h1>%s</h1><h2>When to use it</h2><p>A readable rendered document, not raw markup.</p>%s'
+            '</div></body></html>' % (title, extra))
+
+
+def refinement2(rig):
+    """The Refinement-2-shaped foundry-skill-display/v1 handoff fixture:
+    declared diagram layout + typed steps, instruction/code reconciliation
+    records with both anchors and a follows verdict, layered knowledge catalog
+    (four kinds, explicit zeros), cumulative grade-B review, an explicitly open
+    lifecycle, a qualified settings mirror snapshot — and the prerendered
+    Markdown documents the Library opens."""
+    base = rig['content'] / 'researchprime'
+    ins, prog = rig['instruction'], rig['program']
+
+    def source(path, sid, kind):
+        return dict(id=sid, kind=kind, origin=str(path),
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+
+    def anchor(path, aid, sid, line):
+        quote = path.read_text(encoding='utf-8').splitlines()[line - 1]
+        return dict(id=aid, source_id=sid, start=line, end=line, quote=quote,
+                    sha256=hashlib.sha256(quote.encode()).hexdigest())
+
+    def resource(rid, title, target, anchor_id, category='Reusable material'):
+        return dict(id=rid, title=title, category=category, summary='Summary of ' + title + '.',
+                    anchor_id=anchor_id, target=target, render='markdown',
+                    usage={'status': 'unknown', 'count': None, 'run_ids': [], 'method': None})
+
+    def catalog(material, total):
+        return {'Reusable material': material, 'References': 0, 'Tools': 0, 'Other skills': 0}, total
+
+    write(base / 'resources/human-guide.html', rendered_doc('researchPrime — human guide'))
+    write(base / 'resources/purpose.html', rendered_doc(
+        'Original North Star',
+        '<p class="locus"><strong>LOCKED</strong> — this North Star lives at '
+        '<code>researchPrime/SKILL.md · ## North Star</code> and is changed only by John.</p>'))
+    write(base / 'resources/plan.html', rendered_doc('Reusable research plan'))
+
+    def node(nid, title, parent, ring, rid, process_ids, material, total):
+        cat, tot = catalog(material, total)
+        return dict(id=nid, title=title, parent_id=parent, ring=ring, resource_id=rid,
+                    facets=['instructions'], process_ids=process_ids, catalog=cat, catalog_total=tot)
+
+    def step(sid, title, display_type, kind, anchors, resource_ids, code_status, instruction_status, summary):
+        return dict(id=sid, title=title, kind=kind, display_type=display_type, summary=summary,
+                    anchors=anchors, code_status=code_status, instruction_status=instruction_status,
+                    resource_ids=resource_ids)
+
+    doc = dict(
+        schema='foundry-skill-display/v1', skill_id='researchprime',
+        refinement='researchPrime Library and maps — Refinement 2, after the grade-B review (2026-10-06)',
+        lifecycle={'state': 'for-review', 'accepted': False, 'closed': False},
+        review={'cumulative': [dict(
+            refinement=1, reviewed='2026-10-06', reviewer='John', grade='B',
+            verdict='The material is there, but it is not quick and intuitive.',
+            points=['Group the Library by the knowledge-map layers.',
+                    'Draw the process as a tight typed flow diagram.'],
+            response='Refinement 2 descends the Library with a level dial and draws the typed flow diagram.')]},
+        settings={'coding_family': 'chatgpt', 'review_family': 'grok', 'default_cli': 'chatgpt',
+                  'steward_type': 'aladdin',
+                  'model_policy': {'mode': 'latest_supported', 'effort': 'highest_supported'},
+                  'settings_revision': 23},
+        sources=[source(ins, 'skill', 'instructions'), source(prog, 'runner', 'code')],
+        anchors=[anchor(ins, 'a_ins', 'skill', 7), anchor(ins, 'a_ins2', 'skill', 6),
+                 anchor(prog, 'a_code', 'runner', 1), anchor(prog, 'a_code2', 'runner', 2)],
+        resources=[resource('purpose', 'Original North Star', 'resources/purpose.html', 'a_ins2'),
+                   resource('human-guide', 'Human guide', 'resources/human-guide.html', 'a_ins'),
+                   resource('plan', 'Reusable research plan', 'resources/plan.html', 'a_code')],
+        knowledge={'geometry': 'seeded-declared-tree', 'learned': False, 'layout_source': 'parent_id',
+                   'run_evidence': [],
+                   'frequency_policy': 'Unknown until unique recorded runs explicitly name resource ids.',
+                   'nodes': [node('answer', 'Supported answer', None, 0, 'purpose', ['entry'], 3, 3),
+                             node('method', 'Method and guide', 'answer', 1, 'human-guide', [], 2, 2),
+                             node('plan-leaf', 'Research plan', 'method', 2, 'plan', ['entry'], 1, 1)]},
+        process={'entry': 'entry', 'terminals': ['done'],
+                 'steps': [step('entry', 'Entry program', 'program', 'program', ['a_code'], ['plan'],
+                                'anchored', 'anchored', 'Build the plan.'),
+                           step('approve', 'Human approval', 'human-gate', 'gate', ['a_ins'], ['human-guide'],
+                                'instructions-only', 'anchored', 'John approves the plan.'),
+                           step('review', 'Adversarial review', 'adversarial-review', 'review',
+                                ['a_ins2', 'a_code2'], [], 'anchored', 'anchored',
+                                'Fresh reviewers check the claims.'),
+                           step('modelcall', 'Model synthesis', 'model-call', 'model', ['a_code2'], [],
+                                'anchored', 'anchored', 'Synthesize the surviving findings.'),
+                           step('done', 'Deliver and stop', 'program', 'terminal', ['a_code'], ['purpose'],
+                                'anchored', 'anchored', 'Hand back the answer.')],
+                 'edges': [dict(source='entry', target='approve', label='Plan ready', anchor_id='a_code'),
+                           dict(source='approve', target='review', label='APPROVE', anchor_id='a_ins'),
+                           dict(source='review', target='modelcall', label='Findings in', anchor_id='a_ins2'),
+                           dict(source='modelcall', target='done', label='Converged', anchor_id='a_code2')],
+                 'disagreements': [dict(
+                     id='d1', title='Reports are session work',
+                     fact='Program and instructions differ on who writes the reports.',
+                     instruction_says='The skill text says the engine writes the final report.',
+                     code_does='The engine stops at validated findings; the session writes reports.',
+                     follows='The code path — reports are session work.',
+                     instruction_anchor='a_ins', code_anchor='a_code',
+                     anchors=['a_ins', 'a_code'], step_ids=['review'], state='documented')],
+                 'diagram': {'col_width': 196, 'row_height': 78, 'node_width': 150, 'node_height': 46,
+                             'nodes': {'entry': {'col': 0, 'row': 0}, 'approve': {'col': 0, 'row': 1},
+                                       'review': {'col': 0, 'row': 2}, 'modelcall': {'col': 1, 'row': 2},
+                                       'done': {'col': 0, 'row': 3}},
+                             'bands': [{'title': '1 · Plan and approve', 'from_row': 0, 'to_row': 1},
+                                       {'title': '2 · Validate and deliver', 'from_row': 2, 'to_row': 3}]}},
+        walkthrough=['researchprime', 'gandalf', 'steward-lamp', 'steward-cave',
+                     'steward-star-chart', 'remaining-skills'],
+        integration={'owner': 'Anchor code job', 'installed': False, 'gaps': []})
+    write(base / 'maps.json', doc)
+    return base
+
+
+def primary_settings(rig, **overrides):
+    values = dict(default_cli='claude', coding_family='claude', review_family='gemini',
+                  steward_type='aladdin',
+                  model_policy={'mode': 'latest_supported', 'effort': 'highest_supported'},
+                  settings_revision=5, updated_at='2026-10-07T00:00:00+00:00')
+    values.update(overrides)
+    return write(page.anchor_settings.settings_path(), values)
+
+
+@pytest.fixture
+def display_project(rig, monkeypatch):
+    import anchor_gui
+    pid = 'fixture-foundry'
+    monkeypatch.setattr(anchor_gui._rnd, 'get_project',
+                        lambda p: {'id': pid, 'folder_path': str(rig['content'].parent)} if p == pid else None)
+    monkeypatch.setattr(page, '_review_project_id', lambda: pid)
+    return pid
+
+
+def test_refinement2_payload_primary_settings_hrefs_and_preserved_review(rig, display_project):
+    refinement2(rig)
+    primary_settings(rig)
+    payload = page.display_payload('researchprime')
+    assert payload is not None
+    # The CURRENT primary settings resolve — the bundle's mirror snapshot stays
+    # a mirror and never overrides an existing primary.
+    assert payload['settings']['primary'] == {'exists': True, 'value': {
+        'coding_family': 'claude', 'review_family': 'gemini', 'default_cli': 'claude',
+        'steward_type': 'aladdin',
+        'model_policy': {'mode': 'latest_supported', 'effort': 'highest_supported'},
+        'settings_revision': 5}}
+    assert payload['settings']['mirror']['coding_family'] == 'chatgpt'
+    assert payload['settings']['error'] is None
+    # Every declared resource opens CONTAINED: the rendered document through
+    # /artifact, with the hash-checked source viewer kept as sourceHref.
+    hrefs = payload['hrefs']['resources']
+    assert set(hrefs) == {'purpose', 'human-guide', 'plan'}
+    assert hrefs['human-guide']['href'].startswith('/artifact/fixture-foundry/')
+    assert hrefs['human-guide']['href'].endswith('/resources/human-guide.html')
+    assert hrefs['human-guide']['sourceHref'].startswith('/foundry/source?')
+    anchors = payload['hrefs']['anchors']
+    assert set(anchors) == {'a_ins', 'a_ins2', 'a_code', 'a_code2'}
+    assert all(link['href'].startswith('/foundry/source?') for link in anchors.values())
+    assert payload['issues'] == []
+    # Grade-B feedback and the open lifecycle ride through unchanged.
+    review = payload['data']['review']['cumulative'][0]
+    assert review['grade'] == 'B' and review['reviewer'] == 'John'
+    assert payload['data']['lifecycle'] == {'state': 'for-review', 'accepted': False, 'closed': False}
+    # Frequency and geometry stay explicitly seeded/unknown in the shipped data.
+    assert payload['data']['knowledge']['geometry'] == 'seeded-declared-tree'
+    assert payload['data']['knowledge']['learned'] is False
+    assert all(r['usage'] == {'status': 'unknown', 'count': None, 'run_ids': [], 'method': None}
+               for r in payload['data']['resources'])
+    # The walkthrough rail links the other skills' EXISTING pages.
+    assert payload['rail']['gandalf'] == {'href': '/foundry?skill=gandalf',
+                                          'icon': page.find_skill('gandalf')['icon'], 'current': False}
+    assert payload['rail']['researchprime']['current'] is True
+    assert payload['persona']['lamp']['title'] == 'Steward · the Lamp'
+
+
+def test_refinement2_existing_invalid_primary_refuses_never_falls_back(rig, display_project):
+    refinement2(rig)
+    write(page.anchor_settings.settings_path(), 'not a settings object {')
+    payload = page.display_payload('researchprime')
+    assert payload['settings']['primary'] == {'exists': True, 'value': None}
+    assert 'invalid' in payload['settings']['error'].lower()
+    # The mirror snapshot is NOT promoted into the primary slot; the canonical
+    # adapter refuses an existing invalid primary client-side.
+    assert payload['settings']['mirror']['coding_family'] == 'chatgpt'
+    assert page.display_page('researchprime') is not None
+
+
+def test_refinement2_marker_required_old_display_keeps_serving(rig):
+    combined(rig)   # the pre-Refinement-2 handoff carries no declared diagram
+    assert page.display_payload('researchprime') is None
+    assert page.display_page('researchprime') is None
+    base = refinement2(rig)
+    doc = json.loads((base / 'maps.json').read_text(encoding='utf-8'))
+    del doc['process']['diagram']['nodes']['done']   # layout no longer covers every step
+    write(base / 'maps.json', doc)
+    assert page.display_page('researchprime') is None   # honest fallback, never a 500
+
+
+def test_foundry_route_serves_refinement2_and_keeps_other_skills(rig, server, display_project):
+    import re
+    refinement2(rig)
+    primary_settings(rig)
+    with urlopen(server + '/foundry?skill=researchprime') as response:
+        markup = response.read().decode('utf-8')
+    assert 'FOUNDRY_SKILL_DISPLAY' in markup
+    for asset in ('display.css', 'adapter.js', 'flow-diagram.js', 'layer-library.js', 'skill-display.js'):
+        assert '/static/foundry-display/' + asset in markup
+        with urlopen(server + '/static/foundry-display/' + asset) as served:
+            assert served.status == 200 and served.read()
+    assert 'accepted: false' in markup and 'closed: false' in markup
+    # The canonical adapter ships byte-identical, carrying the designed seams
+    # this integration mounts (settings resolution + allowlisted target routing).
+    with urlopen(server + '/static/foundry-display/adapter.js') as served:
+        adapter = served.read().decode('utf-8')
+    assert 'resolveDisplaySettings' in adapter and 'resolveTarget' in adapter
+    assert 'renderFlowDiagram' in urlopen(server + '/static/foundry-display/flow-diagram.js').read().decode('utf-8')
+    assert 'renderLayerLibrary' in urlopen(server + '/static/foundry-display/layer-library.js').read().decode('utf-8')
+    # Other skills keep the existing React walkthrough, unchanged.
+    with urlopen(server + '/foundry?skill=gandalf') as response:
+        other = response.read().decode('utf-8')
+    assert re.search(r'src="(/assets/[^"]+\.js)"', other) and 'FOUNDRY_SKILL_DISPLAY' not in other
+
+
+def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, server, display_project):
+    playwright = pytest.importorskip('playwright.sync_api')
+    refinement2(rig)
+    primary_settings(rig)
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            for width, height in [(1440, 1000), (390, 844)]:
+                context = browser.new_context(viewport={'width': width, 'height': height})
+                tab = context.new_page()
+                errors, failed, writes = [], [], []
+                tab.on('pageerror', lambda e: errors.append(str(e)))
+                tab.on('response', lambda r: failed.append(r.url) if r.status >= 400 else None)
+                tab.on('request', lambda r: writes.append(r.url) if r.method != 'GET' else None)
+                tab.goto(server + '/foundry?skill=researchprime')
+                tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
+
+                # Process: typed flow diagram, accurate legend, declared entry,
+                # ≠ badges; node selection + explicit record expansion keep the
+                # drawing visible on this viewport.
+                tab.get_by_role('link', name='Process map', exact=True).click()
+                tab.locator('.flow-diagram').wait_for()
+                assert tab.locator('.flow-diagram a.fd-node').count() == 5
+                assert tab.locator('.fd-legend .fd-key.human-gate').is_visible()
+                assert 'gate' in tab.locator('.fd-gate-note').inner_text()
+                assert tab.locator('.flow-diagram .fd-flag').count() == 1
+                assert 'declared entry' in tab.locator('#panel > .note').first.inner_text()
+                tab.locator('.flow-diagram a.fd-node[data-step="review"]').click()
+                detail = tab.locator('#step-detail[data-step-id="review"]')
+                detail.wait_for()
+                box = tab.locator('.diagram-scroll').bounding_box()
+                assert box and box['y'] < height and box['y'] + box['height'] > 80
+                node_box = tab.locator('.flow-diagram a.fd-node.selected').bounding_box()
+                assert node_box and 0 <= node_box['x'] + node_box['width'] / 2 <= width
+                assert detail.get_attribute('open') is None     # expansion is explicit
+                detail.locator('> summary').click()
+                assert 'Instructions ≠ code on this node' in detail.inner_text()
+                box = tab.locator('.diagram-scroll').bounding_box()
+                assert box and box['y'] + box['height'] > 0     # expansion kept the drawing reachable
+                assert tab.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+                # The embedded reconciliation record carries both anchors and
+                # what implementation a run follows.
+                assert detail.locator('.reconcile-node .anchor-list a[data-source]').count() == 2
+                detail.locator('.reconcile-node details.difference > summary').click()
+                assert 'The code path — reports are session work.' in detail.inner_text()
+
+                # Source anchors open through the EXISTING hash-checked viewer.
+                detail.locator('.anchor-list a[data-source]').first.click()
+                tab.frame_locator('#resource-frame').locator('.hit').wait_for()
+                assert '/foundry/source?' in tab.locator('#resource-frame').get_attribute('src')
+                tab.locator('#close-resource').click()
+
+                # Differences tab: both anchors and what implementation follows.
+                tab.get_by_role('link', name='Instructions ↔ code', exact=True).click()
+                diff = tab.locator('details.difference[data-difference="d1"]')
+                diff.locator('> summary').click()
+                assert diff.locator('.reconcile-grid a.anchor-link').count() == 2
+                assert 'Which one a run follows' in diff.inner_text()
+
+                # Library: level dial, all four kinds with explicit zeros,
+                # tiles only at the chosen leaf, leaf opens the ACTUAL document.
+                tab.get_by_role('link', name='Library', exact=True).click()
+                tab.locator('#level-dial').wait_for()
+                assert 'Level 0 of 2' in tab.locator('.ll-dial output').inner_text()
+                summary = tab.locator('.ll-summary').inner_text()
+                assert 'References 0' in summary and 'Tools 0' in summary and 'Skills 0' in summary
+                tab.locator('.ll-branch').click()
+                tab.locator('.ll-branch').click()
+                assert 'Level 2 of 2' in tab.locator('.ll-dial output').inner_text()
+                assert 'Leaf reached' in tab.locator('#panel').inner_text()
+                tab.get_by_role('link', name='Open resource →', exact=True).click()
+                plan = tab.frame_locator('#resource-frame')
+                plan.get_by_role('heading', name='Reusable research plan', exact=True).wait_for()
+                tab.locator('#close-resource').click()
+                tab.locator('#level-dial').evaluate(
+                    "el => { el.value = '0'; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+                assert 'Level 0 of 2' in tab.locator('.ll-dial output').inner_text()
+
+                # Human Guide and North Star render as READABLE documents; the
+                # canonical LOCKED North Star location and authority is stated.
+                tab.locator('.head .actions').get_by_role('link', name='Human guide', exact=True).click()
+                guide = tab.frame_locator('#resource-frame')
+                guide.get_by_role('heading', name='researchPrime — human guide', exact=True).wait_for()
+                assert guide.get_by_role('heading', name='When to use it', exact=True).is_visible()
+                tab.locator('#close-resource').click()
+                tab.locator('.head .actions').get_by_role('link', name='Original North Star', exact=True).click()
+                star = tab.frame_locator('#resource-frame')
+                star.get_by_role('heading', name='Original North Star', exact=True).wait_for()
+                star_text = star.locator('body').inner_text()
+                assert 'LOCKED' in star_text and 'changed only by John' in star_text
+                tab.locator('#close-resource').click()
+
+                # Review record: cumulative grade-B feedback + open lifecycle.
+                tab.get_by_role('link', name='Review record', exact=True).click()
+                review_text = tab.locator('#panel').inner_text()
+                assert 'Grade: B' in review_text
+                assert 'not quick and intuitive' in review_text
+                assert 'accepted: false' in review_text and 'closed: false' in review_text
+
+                assert not errors and not failed and not writes
+                if width >= 780:
+                    # The rail keeps the other skills' EXISTING pages reachable.
+                    tab.locator('#walkthrough a.walk', has_text='Gandalf').click()
+                    tab.get_by_role('heading', name='Gandalf', exact=True).wait_for()
+                context.close()
+        finally:
+            browser.close()
+
+
+def test_refinement2_live_primary_persona_and_invalid_primary_refusal(rig, server, display_project, monkeypatch):
+    playwright = pytest.importorskip('playwright.sync_api')
+    refinement2(rig)
+    primary_settings(rig, steward_type='jarvis')
+    monkeypatch.setattr(page.anchor_settings, 'steward_profile',
+                        lambda: rig['profile'](page.anchor_settings.load_settings()))
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            context = browser.new_context(viewport={'width': 1440, 'height': 1000})
+            tab = context.new_page()
+            tab.goto(server + '/foundry?skill=researchprime')
+            tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
+            rail = tab.locator('#walkthrough')
+            rail.locator('.walk').first.wait_for()
+            # Jarvis names came from the CURRENT primary — not the bundle's
+            # qualified aladdin mirror snapshot.
+            assert 'Steward · the Server' in rail.inner_text()
+            # An EXISTING invalid primary refuses; it never falls back.
+            write(page.anchor_settings.settings_path(), 'not valid settings {')
+            tab.reload()
+            tab.get_by_role('heading', name='Walkthrough refused', exact=True).wait_for()
+            assert 'never falls back' in tab.locator('#panel').inner_text()
+            context.close()
+        finally:
+            browser.close()
