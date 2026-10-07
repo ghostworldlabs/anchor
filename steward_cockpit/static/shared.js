@@ -2270,17 +2270,11 @@ const Proto = (() => {
     // and enabled only once its handler exists: a click in the load window
     // used to produce neither a POST nor a record.
     if (send) send.disabled = false;
-    let _dictatedAt = 0;      // a dictated phrase: a composition, or one insert longer than a typed character
-    ta.addEventListener("input", (e) => {
-      if (e.isComposing || /omposition/.test(e.inputType || "") ||
-          (e.inputType === "insertText" && typeof e.data === "string" && e.data.trim().length > 1)) _dictatedAt = Date.now();
-    });
     ta.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" || e.isComposing) return;
-      // Enter sends (John, 2026-09-04); Shift+Enter keeps a newline; for two seconds after a dictated phrase
-      // Enter is the new line Win+H and Siri press for "new line" (John, 2026-09-29: dictation broke into pieces)
-      if (e.shiftKey) return;
-      if (Date.now() - _dictatedAt < 2000) return;
+      // 2026-10-07 (John, evidence E5: a late dictated "new line" sent a fragment): Enter is ALWAYS a new line;
+      // Ctrl+Enter (Cmd+Enter on a Mac) or the Send button sends. Never from a key during an active composition.
+      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault(); submit();
     });
     // Dictation is Win+H (2026-08-25, jrnl 0088): the in-page Web Speech mic

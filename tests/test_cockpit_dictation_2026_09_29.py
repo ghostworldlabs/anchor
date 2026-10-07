@@ -1,5 +1,5 @@
-"""Dictation into the say box (John, 2026-09-29): Win+H and Siri write phrases and press Enter for "new line";
-for two seconds after a phrase, Enter is that new line, never Send. Typed text still sends on Enter."""
+"""Dictation into the say box. 2026-10-07 key contract (John, evidence E5: a late dictated "new line" sent a
+fragment): Enter is ALWAYS a new line; Ctrl+Enter or Send sends; nothing sends during a composition."""
 import json
 import time
 
@@ -18,7 +18,7 @@ def _dictate(surface, phrase):
     }""", phrase)
 
 
-def test_enter_right_after_a_dictated_phrase_is_a_new_line_not_send(cockpit):
+def test_enter_after_a_dictated_phrase_is_a_new_line_even_late(cockpit):
     page, server = cockpit
     surface = open_surface(page)
     posted = []
@@ -36,8 +36,11 @@ def test_enter_right_after_a_dictated_phrase_is_a_new_line_not_send(cockpit):
     expect(box).to_have_value('Move the sample size slide before the confidence interval one\noatmeal \n')
     assert posted == []
     _dictate(surface, 'and keep the example')
-    time.sleep(2.2)                                                      # the two-second window closes
-    box.press('Enter')                                                   # John's own Enter sends
+    time.sleep(2.2)                                                      # a LATE "new line" (the old window closed)
+    box.press('Enter')
+    expect(box).to_have_value('Move the sample size slide before the confidence interval one\noatmeal \nand keep the example\n')
+    assert posted == []
+    box.press('Control+Enter')                                           # John's own Ctrl+Enter sends
     expect(box).to_have_value('', timeout=5000)
     assert len(posted) == 1 and posted[0]['text'].startswith('Move the sample size slide')
     assert 'keep the example' in posted[0]['text']
@@ -59,7 +62,7 @@ def test_a_composition_in_flight_also_holds_enter(cockpit):
     assert posted == []
 
 
-def test_typed_text_still_sends_on_enter(cockpit):
+def test_typed_text_sends_on_ctrl_enter_not_enter(cockpit):
     page, server = cockpit
     surface = open_surface(page)
     posted = []
@@ -71,5 +74,8 @@ def test_typed_text_still_sends_on_enter(cockpit):
     box.click()
     box.type('ok go ahead')                                              # one character at a time: typing
     box.press('Enter')
+    expect(box).to_have_value('ok go ahead\n')
+    assert posted == []
+    box.press('Control+Enter')
     expect(box).to_have_value('', timeout=5000)
     assert len(posted) == 1 and posted[0]['text'] == 'ok go ahead'

@@ -99,7 +99,8 @@ def cockpit(campaign_server):
                 lambda response: response.url == f"{campaign_server.origin}/api/auth/login"
                 and response.request.method == "POST"
             ) as login:
-                page.goto(f"{campaign_server.origin}/?token={quote(campaign_server.token, safe='')}")
+                # `/` serves the High Seat now; the classic dashboard still carries the launcher token hand-off
+                page.goto(f"{campaign_server.origin}/?classic=1&token={quote(campaign_server.token, safe='')}")
             assert login.value.ok, "Normal launcher login failed"
             page.wait_for_function("!new URL(location.href).searchParams.has('token')")
             cookies = context.cookies(campaign_server.origin)
