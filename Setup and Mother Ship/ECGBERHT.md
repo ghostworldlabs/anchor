@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.
+Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.
 
 ## Why next
 
-Foreman stopped before tests; the existing native handoff has no per-job coder override, so changing Coder affects other new jobs.
+John accepted the temporary Coder recovery; original account, sidebar and first-launch requirements remain intact.
 
 ## Human wait
 

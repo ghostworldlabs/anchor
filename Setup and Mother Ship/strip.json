@@ -3,11 +3,11 @@
   "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-07",
-  "phase": "blocked",
-  "active_effort": "Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.",
+  "phase": "building",
+  "active_effort": "Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
-  "human_wait": "Choose temporary Coder recovery or restore Claude usage.",
+  "human_wait": "",
   "capacity": "unknown",
   "negative_heartbeat": {
     "no_attention_needed": false,
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Choose temporary ChatGPT coding with Grok review, then retry the unchanged provider build.",
-  "why_next": "The selected Claude model is limited; a shared Coder change needs an explicit scoped choice.",
+  "next_recommended": "Build the agreed provider accounts and usage-only Cave summary through the unchanged tests.",
+  "why_next": "Accepted recovery uses temporary ChatGPT coding and Grok review; restore prior seats after this build.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -882,6 +882,50 @@
       "active_effort": "Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.",
       "human_wait": "Choose temporary Coder recovery or restore Claude usage.",
       "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-07",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "The selected Claude model is limited; a shared Coder change needs an explicit scoped choice.",
+      "horizon_source_seq": 94,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-07",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "step set Show usage-only summaries for each saved account in Cave",
+      "horizon_source_seq": 94,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-07",
+      "source": "verb_update",
+      "wait_ref": "none",
+      "phase": "building",
+      "next_recommended": "Build the agreed provider accounts and usage-only Cave summary through the unchanged tests.",
+      "why_next": "Accepted recovery uses temporary ChatGPT coding and Grok review; restore prior seats after this build.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Retrying the authorized provider account build with temporary ChatGPT coding and Grok review.",
+      "current_step_id": "gwl-access"
     }
   ],
   "receipts": [
@@ -1175,10 +1219,36 @@
       "kind": "journal_update",
       "entry_id": "engine-20261007T145644-turn_error",
       "summary": "turn_error: Codex turn had no meaningful native progress for its 900s inactivity limit (elapsed 1515.9s; idle 900.0s)."
+    },
+    {
+      "at": "2026-10-07T16:57:00Z",
+      "source": "engine",
+      "step_id": "gwl-access",
+      "session_id": "01a11287-5787-7532-af96-84f668e596cb",
+      "kind": "journal_update",
+      "path": "journal/0023-provider-build-usage-limit.md",
+      "entry_id": "0023-provider-build-usage-limit",
+      "summary": "Provider refinement launch stopped at the selected model usage limit - October 7, 2026"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-07",
+      "at": "2026-10-07T17:51:28Z",
+      "current_step_id": "gwl-access",
+      "last_event_seq": 94,
+      "last_event_at": "2026-10-07",
+      "last_event_kind": "step_set",
+      "last_event_step_id": "gwl-cave-settings",
+      "presentation_id": null,
+      "active_effort": "Provider account refinement stopped before edits at the selected Claude usage limit; recovery choice is pending.",
+      "wait_ref": "step:gwl-access",
+      "human_wait": "",
+      "_kind": "receipt"
     }
   ],
   "horizon_source_seq": null,
   "horizon_focus": null,
   "current_step_id": "gwl-access",
-  "wait_ref": "step:gwl-access"
+  "wait_ref": "none"
 }

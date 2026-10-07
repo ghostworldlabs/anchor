@@ -1531,6 +1531,19 @@
       },
       "at": "2026-10-07",
       "seq": 94
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-access",
+      "to": "active",
+      "receipt": {
+        "who": "John",
+        "when": "2026-10-07",
+        "why": "Turn 2a2dcca8-d972-4db4-968d-abb9c1b96fab accepts temporary ChatGPT coding, Grok review and retry through the same gate."
+      },
+      "at": "2026-10-07",
+      "seq": 95,
+      "from": "waiting"
     }
   ],
   "roadmap_projection": [
@@ -1563,7 +1576,7 @@
     {
       "id": "gwl-access",
       "name": "Connect named provider accounts; Google Ultra uses agy",
-      "status": "waiting",
+      "status": "active",
       "done_when": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok. John confirms Google Ultra already authenticates agy CLI; retain it without IDE setup or a new Gemini CLI. Keep optional API connections distinct. Prove supported enrollment and routing; return precise unsupported prerequisites. Follow plan v2 Refinement 2.",
       "waiting_on": null,
       "commissioned_as": null,
