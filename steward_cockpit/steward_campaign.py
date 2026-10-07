@@ -2581,15 +2581,16 @@ def current_review_items(map_, items):
                if not it.get("managed") and not (it.get("accepted") or it.get("accepted_current"))
                and resolve_step(steps, it.get("step")) is focus
                and not re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)]
-        # per PRODUCT, not per step (ChatGPT review): the newest version of each product family is current, so a new
-        # unrelated product never hides an older one still waiting; Draft 1 -> Draft 3 of one product keeps only Draft 3
-        newest = {}
+        # per PRODUCT FAMILY, not per step (ChatGPT review): the newest version of each family is current, so a new
+        # unrelated product never hides an older one still waiting; within a family the newest (date, version
+        # number) wins - Draft 1 and Draft 2 registered the same day keep only Draft 2; the formats of that one
+        # version (same date, same number) all stay
+        best = {}
         for it in own:
             fam = _family_key(it)
-            newest[fam] = max(newest.get(fam, ""), str(it.get("date") or ""))
+            best[fam] = max(best.get(fam, ("", -1)), _version_rank(it))
         seen = {id(it) for it in current}
-        current.extend(it for it in own
-                       if str(it.get("date") or "") == newest[_family_key(it)] and id(it) not in seen)
+        current.extend(it for it in own if _version_rank(it) == best[_family_key(it)] and id(it) not in seen)
     current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
     return current
 
@@ -2615,36 +2616,60 @@ def _strip_format_tag(text, keep_note=False):
     return _FORMAT_TAG.sub("", text).strip()
 
 
-_VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)\s*\d+(?:\.\d+)*\b.*$",
+_VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)\s*(\d+(?:\.\d+)*)\b.*$",
                           re.I)
 
 
-def _family_key(it):
-    """A product across its versions: the title without its format tag and without 'Draft 3' / 'Refinement 1' /
-    'v2' (and anything after it)."""
-    title = _strip_format_tag(it.get("what") or it.get("product_id") or "")
-    return _VERSION_TAG.sub("", title).strip().lower() or str(it.get("path") or "").lower()
-
-
-def _product_key(it, steps=None):
-    """One product version, whatever formats it was published in. Unmanaged: the resolved owner step, the folder,
-    and the title without its format tag (' MD', '-PDF', '(PDF)', '(browser)'). Managed: the owner, the product id
-    without its format suffix, and the round - formats pair only at the same round (ChatGPT review: never pair two
-    different versions, never merge two files that merely share a title in different folders)."""
+def _owner_id(it, steps=None):
     owner = str(it.get("step") or "")
     if steps is not None:
         from .navigation_compat import resolve_step
         st = resolve_step(steps, it.get("step"))
         if st is not None:
             owner = str(st.get("id") or owner)
-    path = str(it.get("path") or "").replace(chr(92), "/").lower()
+    return owner
+
+
+def _split_path(it):
+    path = str(it.get("open_path") or it.get("path") or it.get("route") or "").replace(chr(92), "/")
+    folder, _, name = path.rpartition("/")
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    return folder, stem
+
+
+def _version_rank(it):
+    """(date, version number) - the order of one family's versions; -1 when the name carries no number."""
+    m = _VERSION_TAG.search(_split_path(it)[1]) or _VERSION_TAG.search(_strip_format_tag(it.get("what") or ""))
+    try:
+        num = float(m.group(1).split(".")[0]) + (float("0." + m.group(1).split(".", 1)[1]) if "." in m.group(1) else 0)
+    except (AttributeError, ValueError, IndexError):
+        num = -1
+    return (str(it.get("date") or ""), num)
+
+
+def _family_key(it, steps=None):
+    """A product across its versions: owner, folder and file stem with every version tag removed ('Quiz 1 - Draft
+    3/Bank - Draft 3' and 'Quiz 1 - Draft 1/Bank - Draft 1' are one family; 'a/Summary' and 'b/Summary' are two)."""
+    folder, stem = _split_path(it)
+    clean = lambda t: _VERSION_TAG.sub("", t).strip().lower()
+    folder = "/".join(clean(seg) for seg in folder.split("/"))
+    return (_owner_id(it, steps), folder, clean(_strip_format_tag(stem)) or clean(_strip_format_tag(it.get("what"))))
+
+
+def _product_key(it, steps=None):
+    """One product VERSION, whatever formats it was published in - formats pair only on affirmative evidence
+    (ChatGPT review: never pair two versions, never merge two products that share a title). Unmanaged: the same
+    owner, folder and file stem (Guide - Refinement 1.md / .pdf / .html). Managed: the same owner, product id
+    without its format suffix, and the same presentation - the products presented together as one version; without
+    a presentation id a managed product never pairs."""
+    owner = _owner_id(it, steps)
     if it.get("managed"):
-        return (owner, _strip_format_tag(it.get("product_id") or it.get("what")).lower(), str(it.get("round")))
-    title = _strip_format_tag(it.get("what")).lower()
-    if not title:
-        title = path.rsplit(".", 1)[0] if "." in path.rsplit("/", 1)[-1] else path
-    folder = path.rsplit("/", 1)[0] if "/" in path else ""
-    return (owner, folder, title)
+        together = it.get("presentation_id") or ("revision:" + str(it.get("revision_id") or it.get("hash") or id(it)))
+        return (owner, _strip_format_tag(it.get("product_id") or it.get("what")).lower(), str(together))
+    folder, stem = _split_path(it)
+    if not stem:
+        return (owner, "", _strip_format_tag(it.get("what")).lower())
+    return (owner, folder.lower(), stem.lower())
 
 
 def _format_rank(it):

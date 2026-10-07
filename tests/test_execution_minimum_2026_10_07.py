@@ -29,9 +29,9 @@ def test_review_acts_one_row_per_product_with_companions():
         {"what": "Guide - Refinement 1 PDF", "path": "q/Guide - Refinement 1.pdf", "step": "s1", "date": "2026-10-07"},
         {"what": "Guide - Refinement 1 HTML", "path": "q/Guide - Refinement 1.html", "step": "s1", "date": "2026-10-07"},
         {"what": "Calendar (accepted).ics", "path": "q/Calendar (accepted).ics", "step": "s1", "date": "2026-10-07"},
-        {"what": "Viva-Guide-PDF", "product_id": "Viva-Guide-PDF", "managed": True, "phase": "awaiting_review",
+        {"what": "Viva-Guide-PDF", "product_id": "Viva-Guide-PDF", "managed": True, "phase": "awaiting_review", "presentation_id": "viva-1",
          "path": "deliverables/Viva-Guide-PDF/a.pdf", "step": "s2"},
-        {"what": "Viva-Guide-HTML", "product_id": "Viva-Guide-HTML", "managed": True, "phase": "awaiting_review",
+        {"what": "Viva-Guide-HTML", "product_id": "Viva-Guide-HTML", "managed": True, "phase": "awaiting_review", "presentation_id": "viva-1",
          "path": "deliverables/Viva-Guide-HTML/b.html", "step": "s2"},
         {"what": "Bank (PDF)", "managed": True, "phase": "awaiting_review", "path": "deliverables/Bank/c.pdf", "step": "s3"},
     ]
@@ -250,3 +250,76 @@ def test_a_document_only_named_in_the_reply_still_gets_its_read_link(tmp_path, m
     eng._publish_delivery_receipt("t1", reply=reply, written=[str(doc), str(eff / "ECGBERHT.md"), str(eff / "x" / "other.md")])
     assert len(said) == 1, said
     assert "ready to read: [Teaching Plan (v2)](/api/steward/deliverable-file?pid=p1&dir=eff&path=x%2FTeaching%20Plan%20%28v2%29.md&render=1)" in said[0][1]
+
+
+# ---------- item 1, review round 2: one identity rule ----------
+
+def test_formats_pair_only_on_affirmative_evidence():
+    items = [
+        {"what": "Guide (PDF)", "path": "q/guide-v1.pdf", "step": "s1"},
+        {"what": "Guide (HTML)", "path": "q/guide-v2.html", "step": "s1"},                     # another version
+        {"what": "Plan-PDF", "product_id": "Plan-PDF", "managed": True, "phase": "awaiting_review",
+         "presentation_id": "p-2", "path": "deliverables/Plan-PDF/a.pdf", "step": "s1"},
+        {"what": "Plan-HTML", "product_id": "Plan-HTML", "managed": True, "phase": "awaiting_review",
+         "presentation_id": "p-1", "path": "deliverables/Plan-HTML/b.html", "step": "s1"},      # an older presentation
+        {"what": "Talk-PDF", "product_id": "Talk-PDF", "managed": True, "phase": "awaiting_review",
+         "presentation_id": "p-9", "path": "deliverables/Talk-PDF/c.pdf", "step": "s1"},
+        {"what": "Talk-HTML", "product_id": "Talk-HTML", "managed": True, "phase": "awaiting_review",
+         "presentation_id": "p-9", "path": "deliverables/Talk-HTML/d.html", "step": "s1"},      # presented together
+    ]
+    acts = [a for a in sc.review_acts({}, items) if a["act"] != "Next"]
+    assert len(acts) == 5
+    talk = next(a for a in acts if a["label"] == "Talk")
+    assert [c["item"]["product_id"] for c in talk["companions"]] == ["Talk-HTML"]
+
+
+def test_one_family_keeps_only_its_newest_version_even_on_one_day():
+    step = {"id": "s1", "name": "Step", "status": "active", "navigation": {"current": True, "role": "primary"}}
+    items = [
+        {"what": "Guide - Draft 1", "path": "g/Guide - Draft 1.pdf", "step": "s1", "date": "2026-10-07"},
+        {"what": "Guide - Draft 2", "path": "g/Guide - Draft 2.pdf", "step": "s1", "date": "2026-10-07"},
+        {"what": "Guide - Draft 2", "path": "g/Guide - Draft 2.html", "step": "s1", "date": "2026-10-07"},
+        {"what": "Summary", "path": "a/Summary.pdf", "step": "s1", "date": "2026-10-06"},
+        {"what": "Summary", "path": "b/Summary.pdf", "step": "s1", "date": "2026-10-07"},       # another folder
+        {"what": "Bank - Draft 1", "path": "Quiz - Draft 1/Bank - Draft 1.pdf", "step": "s1", "date": "2026-10-01"},
+        {"what": "Bank - Draft 3", "path": "Quiz - Draft 3/Bank - Draft 3.pdf", "step": "s1", "date": "2026-10-04"},
+    ]
+    paths = sorted(it["path"] for it in sc.current_review_items({"steps": [step]}, items))
+    assert paths == ["Quiz - Draft 3/Bank - Draft 3.pdf", "a/Summary.pdf", "b/Summary.pdf",
+                     "g/Guide - Draft 2.html", "g/Guide - Draft 2.pdf"]
+
+
+def _add_rows(campaign, rows):
+    reg = campaign / "DELIVERABLES.md"
+    text = reg.read_text(encoding="utf-8")
+    anchor = "| Earlier note | `legacy.txt` | 2026-09-01 | foundation |\n"
+    assert anchor in text
+    reg.write_text(text.replace(anchor, anchor + "".join(rows)), encoding="utf-8")
+
+
+def _refresh(page):
+    with page.expect_response(lambda r: "/deliverables?" in r.url and r.request.method == "GET"):
+        page.frame_locator('[data-fsframe]').locator('body').evaluate(
+            "() => window.dispatchEvent(new Event('anchor-notebooks-changed'))")
+
+
+def test_a_changed_row_never_moves_the_focused_row_beside_it(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    for name in ("alpha.md", "beta.md"):
+        (server.campaign / name).write_text("# " + name, encoding="utf-8")
+    _add_rows(server.campaign, ["| FOR REVIEW: Alpha | `alpha.md` | 2026-10-07 | foundation |\n",
+                                "| FOR REVIEW: Beta | `beta.md` | 2026-10-07 | foundation |\n"])
+    _refresh(page)
+    tile = surface.locator('[data-delivmount] .blk.next')
+    if 'folded' in (tile.get_attribute('class') or ''):
+        tile.locator('> .who').click()
+    beta = tile.locator('.navact a', has_text='Beta').first
+    expect(beta).to_be_visible()
+    beta.evaluate("a => { a.__mark = 'same'; a.focus(); }")
+    reg = server.campaign / "DELIVERABLES.md"
+    reg.write_text(reg.read_text(encoding="utf-8").replace("FOR REVIEW: Alpha |", "FOR REVIEW: Alpha revised |"),
+                   encoding="utf-8")
+    _refresh(page)
+    expect(tile.locator('.navact a', has_text='Alpha revised')).to_be_visible()
+    assert surface.locator('body').evaluate("() => document.activeElement && document.activeElement.__mark") == "same"

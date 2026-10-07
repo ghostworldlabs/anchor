@@ -233,10 +233,18 @@ const Proto = (() => {
       });
       host.appendChild(d);
     }
-    pending().filter(item => item.id !== q.id).forEach(item => {
+    const others = el("div", "question-others");
+    fillOtherQuestions(others, q);
+    host.appendChild(others);
+  }
+  function fillOtherQuestions(box, q) {
+    // the other pending questions: refreshed on their own when one arrives or resolves, so the open question's
+    // expanded context, loaded exchange and focused button stay as they are (ChatGPT review, item 1 round 2)
+    box.textContent = "";
+    ((lastState && lastState.pending_questions) || []).filter(item => item.id !== q.id).forEach(item => {
       const b = el("button", "question-other", item.question);
-      b.onclick = (ev) => { ev.stopPropagation(); paintActionNeeded(host.closest("[data-openq],[data-status-action]"), item.id); };
-      host.appendChild(b);
+      b.onclick = (ev) => { ev.stopPropagation(); paintActionNeeded(box.closest("[data-openq],[data-status-action]"), item.id); };
+      box.appendChild(b);
     });
   }
   function paintActionNeeded(host, questionId=null) {
@@ -462,18 +470,26 @@ const Proto = (() => {
     return JSON.stringify([st.pending_questions || [], st.question_context || null, st.open_question || "",
                            (st.decision_history || []).length]);
   }
+  function openQuestionSig() {
+    // the open question itself - a change here repaints the row; the OTHER questions refresh on their own
+    const st = lastState || {};
+    return JSON.stringify([currentQuestion(), st.question_context || null, st.open_question || "",
+                           (st.decision_history || []).length]);
+  }
   function _paintNextSteps(host) {
     // 2026-10-07 (ChatGPT review of item 1): KEYED rows. A row is rebuilt only when its own content changed; every
     // other row keeps its node - so its focus, an expanded disclosure, and a click that spans a poll all survive.
     const rows = host._rows || (host._rows = new Map());
-    const want = [], used = new Set();
+    const want = [], used = new Set(), replaced = [];
     const keep = (key, sig, build, after) => {
       let k = key, n = 1;
       while (used.has(k)) k = key + "#" + (++n);   // two rows with one key stay two rows
       used.add(k); key = k;
       let r = rows.get(key);
       if (!r || r.sig !== sig) {
+        const old = r ? r.node : null;
         const node = r && r.reuse ? r.node : build();
+        if (old && old !== node) replaced.push([old, node]);
         r = {sig, node, reuse: r ? r.reuse : false};
         rows.set(key, r);
         if (after) after(node);
@@ -483,16 +499,26 @@ const Proto = (() => {
     };
     const q = currentQuestion();
     // the question row keeps its node and its open state; a changed question set repaints inside it
-    keep("ask", questionSig(), () => { const ask = el("div", "action-needed"); ask.dataset.statusAction = "1"; return ask; },
-         (ask) => { delete ask.dataset.questionId; paintActionNeeded(ask); });
+    const ask = keep("ask", openQuestionSig(), () => { const n = el("div", "action-needed"); n.dataset.statusAction = "1"; return n; },
+         (n) => { delete n.dataset.questionId; paintActionNeeded(n); n._othersSig = questionSig(); });
     rows.get("ask").reuse = true;
+    if (ask._othersSig !== questionSig()) {            // another question arrived or resolved: only the list moves
+      ask._othersSig = questionSig();
+      const box = ask.querySelector(".question-others");
+      const shown = ((lastState && lastState.pending_questions) || []).find(x => (x.id || x.question) === ask.dataset.questionId)
+        || currentQuestion();
+      if (box && shown) fillOtherQuestions(box, shown);
+      else { delete ask.dataset.questionId; paintActionNeeded(ask); }
+    }
     const acts = _deliv.acts || [];
     if (_deliv.warning) keep("warning", _deliv.warning, () => el("div", "navempty", _deliv.warning));   // the current item, honestly
     acts.forEach(a => {
       keep("act:" + a.act + ":" + (a.path || a.label || ""), JSON.stringify(a), () => {
         const row = el("div", "navact navact-" + a.act.toLowerCase());
         row.appendChild(el("span", "navactkind", a.act));
-        if (a.item) row.appendChild(navFile(a.item, "next:act"));
+        if (a.item) row.appendChild(navFile(a.item.managed && a.companions && a.companions.length
+        ? {...a.item, _alsoAccept: a.companions.map(c => c.item).filter(c => c && c.managed && c.presentation_id === a.item.presentation_id)}
+        : a.item, "next:act"));
         else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
         else row.appendChild(el("span", "navactlabel", a.label));
         if (a.companions && a.companions.length) row.appendChild(companionLinks(a));
@@ -512,9 +538,12 @@ const Proto = (() => {
         keep("plan:" + i, text, () => el("div", "navactlabel", text));
       });
     }
-    // place the wanted nodes in order, moving only what is out of place (a moved node would lose its focus)
+    // a changed row takes its old row's place; rows that are gone leave first; then only out-of-order rows move (a
+    // moved node loses its focus, so an unchanged row is never moved because a neighbour changed)
+    replaced.forEach(([old, node]) => { if (old.parentNode === host) host.replaceChild(node, old); });
+    const wanted = new Set(want);
+    Array.from(host.children).forEach(c => { if (!wanted.has(c)) host.removeChild(c); });
     want.forEach((node, i) => { if (host.children[i] !== node) host.insertBefore(node, host.children[i] || null); });
-    while (host.children.length > want.length) host.removeChild(host.lastChild);
     const live = new Set(want);
     Array.from(rows.keys()).forEach(k => { if (!live.has(rows.get(k).node)) rows.delete(k); });
     return waits;
@@ -944,9 +973,12 @@ const Proto = (() => {
         accept.onclick=async()=>{
           accept.disabled=true;
           try {
-            const response=await post('/api/refinement-accept',{step_id:it.step,presentation_id:it.presentation_id,
-              product_id:it.product_id,revision_id:it.revision_id,hash:it.hash});
-            const result=await response.json();if(!response.ok||!result.ok)throw Error(result.error||'Approval failed');
+            // one decision for a format pair: the product and each verified companion revision of the same presentation
+            for(const x of [it,...(it._alsoAccept||[])]) {
+              const response=await post('/api/refinement-accept',{step_id:x.step,presentation_id:x.presentation_id,
+                product_id:x.product_id,revision_id:x.revision_id,hash:x.hash});
+              const result=await response.json();if(!response.ok||!result.ok)throw Error(result.error||'Approval failed');
+            }
             await loadMap();await renderDeliverablesTile();
           } catch(error) {box.appendChild(el('div','sdmeta',error.message));accept.disabled=false;}
         };
