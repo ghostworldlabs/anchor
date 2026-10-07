@@ -1480,6 +1480,35 @@
       },
       "seq": 89,
       "at": "2026-10-07"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-host-client",
+      "fields": {
+        "done_when": "First Anchor.exe launch chooses this personal mother ship or guided Tailscale secure pairing. Clients reuse host accounts; new hosts use the established trusted Anchor/Foundry installation, automated where supported or one subscription before essential agent help. Prove real bootstrap and interrupted-install recovery."
+      },
+      "at": "2026-10-07",
+      "seq": 90
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "name": "Show usage-only summaries for each saved account in Cave",
+        "done_when": "Lower-left Cave shows only separate named-account usage/allowance/status and account/model selection; no signup or credential/install controls. Show both Claude subscriptions. Gear reopens editable saved accounts in Setup. Disable unavailable models; preserve ongoing sessions. Follow plan v2 Refinement 2 and John turn afe0cbd3-1451-49c5-ac17-894eea2bf9e5"
+      },
+      "at": "2026-10-07",
+      "seq": 91
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "name": "Connect named provider accounts; Google Ultra uses agy",
+        "done_when": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok. John confirms Google Ultra already authenticates agy CLI; retain it without IDE setup or a new Gemini CLI. Keep optional API connections distinct. Prove supported enrollment and routing; return precise unsupported prerequisites. Follow plan v2 Refinement 2."
+      },
+      "at": "2026-10-07",
+      "seq": 92
     }
   ],
   "roadmap_projection": [
@@ -1487,7 +1516,7 @@
       "id": "gwl-host-client",
       "name": "First: choose or connect to the mother ship",
       "status": "proposed",
-      "done_when": "On first launch choose this computer as the personal mother ship or connect to an existing personal host through a guided Tailscale and secure pairing-token flow. Install Anchor and Foundry skills only on a new mother ship; client devices use that host.",
+      "done_when": "First Anchor.exe launch chooses this personal mother ship or guided Tailscale secure pairing. Clients reuse host accounts; new hosts use the established trusted Anchor/Foundry installation, automated where supported or one subscription before essential agent help. Prove real bootstrap and interrupted-install recovery.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "slice",
@@ -1511,9 +1540,9 @@
     },
     {
       "id": "gwl-access",
-      "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+      "name": "Connect named provider accounts; Google Ultra uses agy",
       "status": "active",
-      "done_when": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an explicit supported billing route. Preserve existing sign-ins and sessions. Gemini/Google AI versus Antigravity subscription identity remains the adapter prerequisite. Follow plan v2 Refinement 1.",
+      "done_when": "Use provider-owned sign-in and isolated named accounts on the mother ship for Claude, ChatGPT, Gemini and Grok. John confirms Google Ultra already authenticates agy CLI; retain it without IDE setup or a new Gemini CLI. Keep optional API connections distinct. Prove supported enrollment and routing; return precise unsupported prerequisites. Follow plan v2 Refinement 2.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
@@ -1615,9 +1644,9 @@
     },
     {
       "id": "gwl-cave-settings",
-      "name": "Show named account summaries and switching in Cave",
+      "name": "Show usage-only summaries for each saved account in Cave",
       "status": "active",
-      "done_when": "John confirms Cave gear opens Providers and accepts that placement in turn 113e63ee-c4dd-4a35-9668-7b6b027de92a. Preserve the gear opening existing Setup. In the lower-left sidebar show provider, nickname, account and model/version; switch accounts for new work using the same saved preferences, preserving existing conversations, drafts and full-strength policy.",
+      "done_when": "Lower-left Cave shows only separate named-account usage/allowance/status and account/model selection; no signup or credential/install controls. Show both Claude subscriptions. Gear reopens editable saved accounts in Setup. Disable unavailable models; preserve ongoing sessions. Follow plan v2 Refinement 2 and John turn afe0cbd3-1451-49c5-ac17-894eea2bf9e5",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",

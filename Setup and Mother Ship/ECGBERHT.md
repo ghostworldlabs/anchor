@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.
+Building four-provider named accounts and Cave summaries; Google Ultra stays on the existing agy CLI.
 
 ## Why next
 
-Cave gear is confirmed; distinguish the requested Google subscription from existing Antigravity access before choosing its adapter.
+Sign-in and Google transport are settled; implement the existing account refinement through isolated Foreman execution and review.
 
 ## Human wait
 
