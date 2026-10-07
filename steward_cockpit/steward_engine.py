@@ -1437,7 +1437,10 @@ class Engine:
                        "picked that persona; answer to it. ")
             if not self.general and _is_campaign_dir(self.dir) and not _is_cave_dir(self.dir):
                 persona += campaign_mode_remit(self.steward)      # the Star Chart's remit (2026-10-03, Grok R1 F8)
-            fenced = STEWARD_FENCE and not self.general and self.cli in ("claude", "chatgpt")
+            # 2026-10-06 evening: ChatGPT stewards left the fence - inside the Anchor service the Codex sandbox cannot
+            # start PowerShell or git (0xC0000142), so fenced ChatGPT stewards could not read or work. Back in once
+            # the sandbox is proven under the service.
+            fenced = STEWARD_FENCE and not self.general and self.cli == "claude"
             self.fenced = fenced
             if fenced:
                 persona += FENCE_NOTE

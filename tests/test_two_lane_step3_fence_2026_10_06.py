@@ -19,7 +19,7 @@ def test_the_claude_fence_allows_reads_folder_edits_and_the_hand_off_tools_only(
     assert "Bash(python C:/dev/Anchor/tools/steward_skill.py *)" in tools
     src = open(se.__file__, encoding="utf-8").read()
     assert '["--setting-sources", "project", "--permission-mode", "default",' in src, "the user's allow-all settings never load"
-    assert 'fenced = STEWARD_FENCE and not self.general and self.cli in ("claude", "chatgpt")' in src, "terminals and code jobs keep full access"
+    assert 'fenced = STEWARD_FENCE and not self.general and self.cli == "claude"' in src,         "terminals, code jobs and (since 2026-10-06 evening: the Codex sandbox fails under the service) ChatGPT stewards keep full access"
     assert "persona += FENCE_NOTE" in src and "steward_skill.py start" in se.FENCE_NOTE
 
 
