@@ -16,6 +16,12 @@ body.hosted { border: 1px solid #2f3a4d; box-sizing: border-box; }
 #bar { display: flex; align-items: flex-start; gap: 6px; min-width: 0; min-height: 44px; padding-left: 8px;
        padding-top: env(safe-area-inset-top, 0px); background: var(--bar); border-bottom: 1px solid var(--line);
        -webkit-app-region: drag; app-region: drag; user-select: none; -webkit-user-select: none; }
+/* His rule: the Setup gear sits at the very upper left of Anchor itself, the mark to its right. */
+#bar .setup-gear { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin-top: 8px;
+                   padding: 0; border: 1px solid var(--line); border-radius: 7px; background: none;
+                   color: var(--amber); font-size: 17px; line-height: 1; cursor: pointer; }
+#bar .setup-gear:hover { color: var(--text); background: var(--tile); }
+#bar .setup-gear:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 #bar .mark { flex: none; display: grid; place-items: center; width: 34px; height: 34px; margin-top: 5px; }
 #bar .mark img { width: 24px; height: 24px; border-radius: 6px; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
 #strip { display: flex; flex: 1; flex-wrap: wrap; align-content: flex-start; align-items: center; gap: 6px;

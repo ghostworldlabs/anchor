@@ -191,6 +191,7 @@
   // file, a notebook) is a deliverable and opens in the other pane.
   function isPage(path) {
     return path === "/" || path === "/dashboard" || path === "/high-seat" || path === "/doctor" ||
+           path === "/setup" || path === "/setup/install" ||
            /^\/foundry\/?$/.test(path) || /^\/project\//.test(path) || /^\/steward\/v[13]\b/.test(path);
   }
 
@@ -548,6 +549,25 @@
   });
   document.getElementById("one").addEventListener("click", function () { setTwo(false); });
   document.getElementById("two").addEventListener("click", function () { setTwo(true); });
+
+  // ---------- the Setup gear ----------
+  // His rule: the gear sits at the very upper left of ANCHOR - this bar, left of the mark - not only inside
+  // a framed page's own header. It opens the saved Setup page; one tile per page makes a repeat click reuse it.
+  document.getElementById("setup-gear").addEventListener("click", function () {
+    api.open("/setup", "", window);
+  });
+  // The Setup page's "Return to Cave" posts anchor-setup-close to its parent; shown as a tile, that parent is
+  // this shell - bring the Cave back to that pane. The Setup tile stays a tile; nothing is launched or closed.
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== location.origin || !ev.data || ev.data.type !== "anchor-setup-close") return;
+    for (var i = 0; i < tiles.length; i++) {
+      if (tiles[i].frame && tiles[i].frame.contentWindow === ev.source) {
+        var k = shownIn(tiles[i].id);
+        if (k >= 0) show("cave", k);
+        return;
+      }
+    }
+  });
 
   (function () {                                               // drag the line between the panes
     var g = document.getElementById("gutter");
