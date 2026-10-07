@@ -18,8 +18,16 @@ if os.environ.get("FAKE_REVIEW_LOG"):
     with open(os.environ["FAKE_REVIEW_LOG"], "a", encoding="utf-8") as fh:
         fh.write(json.dumps(sys.argv[1:]) + "\n")
 if os.environ.get("FAKE_REVIEW_MODE") == "crash":
-    print(json.dumps({"ok": False, "error": "the reviewer crashed"}))
+    print(json.dumps({"ok": False, "family": os.environ.get("FAKE_REVIEW_FAMILY") or None,
+                      "error": os.environ.get("FAKE_REVIEW_ERROR", "the reviewer crashed")}))
     sys.exit(2)
+if os.environ.get("FAKE_REVIEW_MODE") == "pass-with-major":
+    tree = subprocess.run(["git", "-C", arg("repo"), "rev-parse", arg("head") + "^{tree}"],
+                          capture_output=True, text=True).stdout.strip()
+    print(json.dumps({"ok": True, "family": os.environ.get("FAKE_REVIEW_FAMILY", "chatgpt"), "model": "fake",
+                      "tree_hash": tree, "verdict": "PASS", "elegance": "",
+                      "findings": [{"severity": "MAJOR", "issue": "contradicts its own pass"}]}))
+    sys.exit(0)
 tree = subprocess.run(["git", "-C", arg("repo"), "rev-parse", arg("head") + "^{tree}"],
                       capture_output=True, text=True).stdout.strip()
 verdict = os.environ.get("FAKE_REVIEW_VERDICT", "PASS")

@@ -2208,6 +2208,8 @@ class Engine:
                 self._refinement_producer_id = refinement_producer_id
             self.busy = True
             self.turn_started = time.time()
+            if self.code_job is not None:     # the families that actually wrote (a fallback changes self.cli)
+                self.__dict__.setdefault("families_used", set()).add(str(self.cli or ""))
             if not self.general:
                 self._deliv_baseline()          # before the first turn (once per effort), so what it registers is announced
             self.turn_text = ""
@@ -2332,11 +2334,54 @@ class Engine:
     def _guard_turn(self, block):
         """R2/R3: end a small-mode turn that has grown past the step cap (it is handed to a code job), and a turn
         that writes into a repository a running code job owns (one writer). True when the turn was ended."""
-        if self.general or self.code_job or self.fake or not self.busy:
+        if self.fake or not self.busy:
             return False
         reason, note = "", ""
         inp = block.get("input") or {}
         paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
+        name0 = block.get("name") or ""
+        absolute0 = [p if os.path.isabs(p) else os.path.join(self.dir, p) for p in paths]
+        if self.code_job is not None:
+            # execution minimum item 3: a code job's coder writes ONLY inside its own worktree - never the repository
+            # it was cut from (for Anchor, the served tree) or anywhere else
+            from steward_cockpit import code_jobs as _cj0
+            outside = [p for p in absolute0 if name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch")
+                       and not _cj0.inside(p, self.dir)]
+            repo0 = str(self.code_job.get("repo") or "")
+            if not outside and name0 in _SHELL_TOOLS and repo0:
+                flat0 = json.dumps(inp, ensure_ascii=False)[:6000].replace("\\\\", "/").replace("\\", "/").lower()
+                rr0 = repo0.replace("\\", "/").lower().rstrip("/")
+                if re.search(re.escape(rr0) + r"(?:/|[\"' ]|$)", flat0) and _WRITE_VERBS.search(flat0):
+                    outside = [repo0]
+            if not outside:
+                return False
+            reason = "a code job writes only in its own worktree"
+            note = ("(interface - not John) Your last turn was ended: it wrote outside your worktree (%s). Work only in "
+                    "%s; the job places your files after review." % (outside[0], self.dir))
+        elif not self.general and name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
+            # a steward never edits the served Anchor tree's code - that is a code job (worktree + review gate)
+            served = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            from steward_cockpit import code_jobs as _cj1
+            statics = [os.path.join(served, "static"), os.path.join(served, "steward_cockpit", "static")]
+            code = [p for p in absolute0 if _cj1.inside(p, served) and (
+                os.path.splitext(p)[1].lower() in (".py", ".js", ".mjs", ".css", ".ps1")
+                or (os.path.splitext(p)[1].lower() in (".html", ".htm") and any(_cj1.inside(p, d) for d in statics)))]
+            if code:
+                reason = "production code goes to a code job"
+                note = ("(interface - not John) Your last turn was ended: it edited Anchor's served code (%s). Anchor's "
+                        "application files change only through a code job (its own worktree, another family's review). "
+                        "Start one with tools/steward_code_job.py and tell John in one line." % code[0])
+        if reason:
+            with self._lock:
+                self._emit({"t": "sys", "text": "%s ended its turn (%s)" % (self.steward or "The steward", reason)})
+                out = self._interrupt_turn_locked(reason)
+                if isinstance(out, dict) and out.get("ok"):
+                    self.queue.insert(0, note)
+                    self._persist_queue()
+                    self._wake_locked(fresh=False, seed=None)
+            return True
+        if self.general or self.code_job:
+            return False
         try:
             from steward_cockpit import code_jobs as _cj
             owned = _cj.active_repos()
@@ -2919,6 +2964,14 @@ class Engine:
                         if isinstance(inp.get("paths"), list) else []
                     if isinstance(fp, str) and fp.strip():
                         touched.insert(0, fp)
+                    # a code job's manifest holds only COMPLETED writes (ChatGPT review, item 3): a Claude edit counts
+                    # when its tool_result comes back without an error; a Codex file_change when it says completed
+                    if self.code_job is not None and touched:
+                        if block.get("name") in ("Write", "Edit", "NotebookEdit"):
+                            self.__dict__.setdefault("_pending_writes", {})[str(block.get("id") or "")] = list(touched)
+                        elif block.get("name") == "file_change" and str(inp.get("status") or "").lower() == "completed":
+                            ok = self.__dict__.setdefault("written_ok", [])
+                            ok.extend(p for p in touched if p not in ok)
                     if block.get("name") in ("Write", "Edit", "NotebookEdit", "file_change"):
                         self._turn_wrote_files = True
                         refs = getattr(self, "_turn_output_refs", [])
@@ -2936,6 +2989,15 @@ class Engine:
                                 "name": block.get("name", "?"),
                                 "detail": _tool_detail(block),
                                 "tick": self.in_tick})
+        elif t == "user":
+            # a tool's result: a code job's pending write is confirmed only when it did not fail
+            pending = self.__dict__.get("_pending_writes") or {}
+            for block in (ev.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    paths = pending.pop(str(block.get("tool_use_id") or ""), None)
+                    if paths and not block.get("is_error"):
+                        ok = self.__dict__.setdefault("written_ok", [])
+                        ok.extend(p for p in paths if p not in ok)
         elif t == "result":
             if not self._usage_result_allowed(ev):
                 return

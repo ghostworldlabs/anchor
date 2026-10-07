@@ -289,6 +289,11 @@ def run_check(job, tree):
 NEVER_LAND = {"foreman.config.json"}
 
 
+def never_lands(path):
+    """foreman.config.json never lands - in any letter case, at any depth (Windows opens FOREMAN.CONFIG.JSON too)."""
+    return str(path).replace(chr(92), "/").rsplit("/", 1)[-1].casefold() in NEVER_LAND
+
+
 def _rel_in(tree, raw):
     try:
         root = Path(tree).resolve()
@@ -300,19 +305,26 @@ def _rel_in(tree, raw):
 
 
 def manifest_of(engine, tree):
-    """The coder's own written paths (its Write/Edit/file_change tool calls), relative to its worktree."""
+    """The coder's own COMPLETED writes - a Write/Edit whose tool result came back without an error, a Codex
+    file_change that completed - relative to its worktree. An attempted write that failed is not in it."""
     out = []
-    for raw in list(getattr(engine, "files", None) or []):
+    for raw in list(getattr(engine, "written_ok", None) or []):
         rel = _rel_in(tree, raw)
         if rel and rel not in out:
             out.append(rel)
     return out
 
 
+def authors_of(engine):
+    """Every model family that actually served this coder (its provider can fall back mid-job), as family names."""
+    used = set(getattr(engine, "families_used", None) or ()) | {str(getattr(engine, "cli", "") or "")}
+    return sorted({CLI_FAMILY.get(c.lower(), c.lower()) for c in used if c})
+
+
 def changed_paths(tree, base):
     """Every path that differs from ``base`` in the worktree: committed, staged, unstaged and untracked (ignored
     files excepted). None when git cannot say."""
-    code, out, _ = _git(tree, "-c", "core.quotepath=false", "diff", "--name-only", "-z", base, timeout=600)
+    code, out, _ = _git(tree, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", base, timeout=600)
     code2, untracked, _ = _git(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
                                timeout=600)
     if code != 0 or code2 != 0:
@@ -323,6 +335,14 @@ def changed_paths(tree, base):
 
 # ── The review gate ────────────────────────────────────────────────────────────────────────────────────────────────
 REVIEW_TIMEOUT_S = int(os.environ.get("ANCHOR_CODE_REVIEW_TIMEOUT_S", "2400"))
+DOCUMENT_EXTS = {".md", ".markdown", ".pdf", ".ics", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg"}
+# instruction files steer agents - they are never "just documents"
+INSTRUCTION_FILES = {"claude.md", "agents.md", "skill.md", "gemini.md", "copilot-instructions.md"}
+
+
+def is_document(path):
+    name = str(path).replace(chr(92), "/").rsplit("/", 1)[-1].casefold()
+    return os.path.splitext(name)[1] in DOCUMENT_EXTS and name not in INSTRUCTION_FILES
 REVIEW_TOOL = Path(__file__).resolve().parents[1] / "tools" / "steward_review.mjs"
 
 
@@ -341,7 +361,7 @@ def run_review(job, tree, head, delta_from=""):
     except ValueError:
         return {"ok": False, "error": "ANCHOR_REVIEW_CMD is not a JSON argument list"}
     argv = cmd + ["--repo", str(tree), "--base", job["base"], "--head", head,
-                  "--author-family", job.get("coder_family") or "", "--brief-file", str(brief),
+                  "--author-family", ",".join(job.get("authors") or [job.get("coder_family") or ""]), "--brief-file", str(brief),
                   "--exhausted", ",".join(sorted(exhausted_families()))]
     if delta_from:
         argv += ["--delta-from", delta_from]
@@ -362,6 +382,8 @@ def run_review(job, tree, head, delta_from=""):
         return {"ok": False, "error": "the review gave no record (exit %s): %s" % (r.returncode, (r.stderr or "")[-300:])}
     rec["at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     rec["delta_from"] = delta_from or None
+    if not rec.get("ok") and rec.get("family") and _LIMIT_WORDS.search(str(rec.get("error") or "")):
+        mark_exhausted(str(rec["family"]).lower())        # the reviewer's family is not asked again for a while
     return rec
 
 
@@ -372,8 +394,14 @@ def review_blocks(job, rec, tree, head):
     fam = str(rec.get("family") or "").lower()
     if not fam:
         return "the review record names no family"
-    if fam == str(job.get("coder_family") or "").lower():
+    authors = [a for a in (job.get("authors") or []) if a]
+    if not authors:
+        return "the job has no record of which model family wrote it"
+    if fam in authors or fam == str(job.get("coder_family") or "").lower():
         return "the review was done by the author's own family (%s)" % fam
+    blocking = [f for f in (rec.get("findings") or []) if isinstance(f, dict) and f.get("severity") in ("BLOCKER", "MAJOR")]
+    if rec.get("verdict") == "PASS" and blocking:
+        return "the review says PASS but lists a %s finding: %s" % (blocking[0].get("severity"), str(blocking[0].get("issue"))[:160])
     code, tree_hash, _ = _git(tree, "rev-parse", head + "^{tree}")
     if code != 0 or not tree_hash or rec.get("tree_hash") != tree_hash:
         return "the reviewed tree is not the candidate (reviewed %s, candidate %s)" % (rec.get("tree_hash"), tree_hash)
@@ -447,7 +475,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         except Exception:
             pass
         eng.on_turn_done = lambda result: threading.Thread(
-            target=finish, args=(cdir, job_id, dict(result or {}, manifest=manifest_of(eng, wt))),
+            target=finish, args=(cdir, job_id, dict(result or {}, manifest=manifest_of(eng, wt), authors=authors_of(eng),
+                                                    failed_over=list((getattr(eng, "policy_override", None) or {}).get("failed_families") or []))),
             name="code-job-" + job_id, daemon=True).start()
         ok, why = eng.wake(fresh=True, seed=coder_brief(job))
         if not ok:
@@ -511,17 +540,21 @@ def _finish(cdir, job_id, job, result):
     err = str((result or {}).get("error") or "")
     if err and _LIMIT_WORDS.search(err):
         mark_exhausted(job.get("coder_family"))          # not called again for a while; the other family may run
+    for fam in (result or {}).get("failed_over") or []:  # a family the engine failed over from mid-job
+        mark_exhausted(CLI_FAMILY.get(str(fam).lower(), str(fam).lower()))
+    job["authors"] = [a for a in ((result or {}).get("authors") or []) if a in FAMILIES]
     manifest = [p for p in ((result or {}).get("manifest") or []) if isinstance(p, str)]
     changed = changed_paths(wt, job["base"])
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
-              "unexpected": [], "landed": False, "landed_commit": "", "review": None}
+              "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
         note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
     elif not changed:
-        note, status, error, keep = "nothing changed", ("failed" if err else "done"), err, False
+        note, status, error = "nothing changed", ("failed" if err else "done"), err
+        keep = bool(_unlanded(wt, manifest))           # an ignored output the coder wrote is still work: keep it
     else:
-        allowed = {p for p in manifest if p not in NEVER_LAND}
+        allowed = {p for p in manifest if not never_lands(p)}
         unexpected = [p for p in changed if p not in allowed]
         files = [p for p in changed if p in allowed]
         fields.update(unexpected=unexpected, files=files)
@@ -545,7 +578,10 @@ def _finish(cdir, job_id, job, result):
                     landed, note, extra = land(job, files)
                     fields.update(extra)
                     fields["landed"] = landed
-                    keep = not (landed and extra.get("verified"))
+                    left = _unlanded(wt, manifest) if landed else ["not landed"]
+                    keep = not (landed and extra.get("verified")) or bool(left)
+                    if landed and left and left != ["not landed"]:
+                        note += "; work the landing did not carry is kept at %s (%s)" % (wt, ", ".join(left[:6]))
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), **fields)
     if done is None:
@@ -553,6 +589,21 @@ def _finish(cdir, job_id, job, result):
     if not keep:
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
+
+
+def _unlanded(wt, manifest):
+    """What in the worktree would be LOST if it were removed now: any uncommitted or untracked change (a check that
+    wrote a file, an edit nobody committed), and any file the coder wrote that git ignores. [] when nothing."""
+    left = []
+    code, out, _ = _git(wt, "-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all", "--no-renames",
+                        timeout=600)
+    if code != 0:
+        return ["git status failed"]
+    left += [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
+    for p in manifest or []:
+        if (Path(wt) / p).exists() and _git(wt, "check-ignore", "-q", "--", p)[0] == 0:
+            left.append(p + " (ignored by git)")
+    return left
 
 
 def _commit_manifest(wt, job, files):
@@ -589,9 +640,13 @@ def land(job, files):
     code, cand, _ = _git(wt, "rev-parse", "HEAD")
     if code != 0:
         return False, "not landed: could not read the candidate; the work is kept at %s" % wt, fields
-    rec = run_review(job, wt, cand)
+    docs_only = all(is_document(f) for f in files)
+    if docs_only:
+        rec = {"ok": True, "skipped": "documents only - no code to review", "verdict": "SKIPPED"}
+    else:
+        rec = run_review(job, wt, cand)
     fields["review"] = rec
-    why = review_blocks(job, rec, wt, cand)
+    why = "" if docs_only else review_blocks(job, rec, wt, cand)
     if why:
         return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
     code, head, err = _git(repo, "rev-parse", "HEAD")
@@ -607,13 +662,13 @@ def land(job, files):
         ok, out = run_check(job, wt)
         if ok is False:
             return False, "not landed: the check failed after bringing in newer changes; the work is kept at %s" % wt, fields
-        delta = run_review(job, wt, merged, delta_from=cand)
+        delta = {"ok": True, "verdict": "SKIPPED"} if docs_only else run_review(job, wt, merged, delta_from=cand)
         fields["delta_review"] = delta
-        why = review_blocks(job, delta, wt, merged)
+        why = "" if docs_only else review_blocks(job, delta, wt, merged)
         if why:
             return False, "not landed (after integration): %s; the work is kept at %s" % (why, wt), fields
         cand = merged
-    code2, names, _ = _git(wt, "-c", "core.quotepath=false", "diff", "--name-only", "-z", head, cand)
+    code2, names, _ = _git(wt, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", head, cand)
     land_files = [n for n in names.split("\0") if n.strip()]
     if code2 != 0 or not land_files:
         return False, "not landed: nothing changed beyond what %s already has" % repo, fields
@@ -624,6 +679,10 @@ def land(job, files):
     with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
         if not held:
             return False, "not landed: the repository's commit lock is busy; the work is kept at %s" % wt, fields
+        current = read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}
+        if current.get("status") != "finishing":       # a stop released it while it was being reviewed: no landing
+            return False, "not landed: the job was stopped (%s) before placement; the work is kept at %s" % (
+                current.get("stopped_by") or current.get("status") or "unknown", wt), fields
         code, now, _ = _git(repo, "rev-parse", "HEAD")
         if code != 0 or now != head:
             return False, "not landed: %s moved during the review; the work is kept at %s - start the landing again" % (
@@ -634,12 +693,10 @@ def land(job, files):
         return False, note + "; the work is kept at %s" % wt, fields
     c, out, _ = _git(repo, "rev-parse", "HEAD")
     fields["landed_commit"] = out.strip() if c == 0 else ""
-    bad = []
-    for n in land_files:                                   # every placed file is the candidate's, byte for byte
-        a1 = _git(repo, "rev-parse", "HEAD:" + n)
-        a2 = _git(wt, "rev-parse", cand + ":" + n)
-        if (a1[0] == 0) != (a2[0] == 0) or (a1[0] == 0 and a1[1] != a2[1]):
-            bad.append(n)
+    # the placed tree is the reviewed one for every path the job touched - additions, edits AND deletions
+    code, diff, _ = _git(repo, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z",
+                         fields["landed_commit"] or "HEAD", cand, "--", *land_files)
+    bad = [n for n in diff.split("\0") if n.strip()] if code == 0 else ["(could not compare)"]
     if bad:
         return True, "landed, but %d placed file(s) differ from the candidate (%s); the worktree is kept at %s" % (
             len(bad), ", ".join(bad[:8]), wt), fields
@@ -697,6 +754,9 @@ def _report(cdir, job):
     if job.get("check"):
         lines.append("Check `%s`: %s." % (job["check"], "passed" if job.get("check_ok") else "FAILED") + ((" Output tail: " + job["check_output"][-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
+    if job.get("kept_worktree") and job.get("files"):
+        lines.append("Kept (not landed), to open or register for John: " + ", ".join(
+            str(Path(job["kept_worktree"]) / f) for f in job["files"][:10]))
     live = live_note(job)
     if live:
         lines.append(live)
@@ -730,7 +790,7 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
     job = sorted(jobs, key=lambda j: j["started"])[-1]
     who = str(actor or "unknown")
     if job.get("status") == "finishing":
-        if time.time() - float(job.get("finishing_at") or 0) < CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S + 900:
+        if time.time() - float(job.get("finishing_at") or 0) < 2 * (CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S) + 900:
             return {"ok": False, "error": "the code job is already finishing; its result is on the way"}
         _transition(cdir, job["id"], ("finishing",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                     error="the job's finish never completed", stopped_by=who, kept_worktree=job["worktree"],

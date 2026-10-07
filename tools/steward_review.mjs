@@ -26,8 +26,9 @@ function out(obj, code = 0) {
   process.exit(code);
 }
 
+let attempted = null;     // the reviewer family asked, so a quota failure can be remembered against it
 function fail(error) {
-  out({ ok: false, error: String(error && error.message ? error.message : error).slice(0, 600) }, 2);
+  out({ ok: false, family: attempted, error: String(error && error.message ? error.message : error).slice(0, 600) }, 2);
 }
 
 function git(repo, ...args) {
@@ -56,10 +57,10 @@ const SCHEMA = {
 
 async function main() {
   const repo = arg('repo'), base = arg('base'), head = arg('head');
-  const author = arg('author-family').toLowerCase();
+  const authors = arg('author-family').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
   const exhausted = new Set(arg('exhausted').toLowerCase().split(',').map(s => s.trim()).filter(Boolean));
   if (!repo || !base || !head) throw new Error('usage: --repo --base --head --author-family are required');
-  if (!FAMILIES.includes(author)) throw new Error(`unknown author family "${author}"`);
+  if (!authors.length || !authors.every(a => FAMILIES.includes(a))) throw new Error(`unknown author families "${authors}"`);
   const trioRoot = process.env.ANCHOR_TRIO_ROOT || 'C:/dev/trio';
   const drivers = await import(pathToFileURL(path.join(trioRoot, 'drivers', 'index.mjs')).href);
 
@@ -68,8 +69,9 @@ async function main() {
   const prefs = drivers.loadModelFamilies(process.env);
   const reviewer = [arg('reviewer-family').toLowerCase(), prefs.review, prefs.coding, prefs.terminal]
     .map(f => String(f || '').toLowerCase())
-    .find(f => FAMILIES.includes(f) && f !== author && !exhausted.has(f));
-  if (!reviewer) throw new Error(`no reviewer family other than the author's (${author}) is configured and available`);
+    .find(f => FAMILIES.includes(f) && !authors.includes(f) && !exhausted.has(f));
+  if (!reviewer) throw new Error(`no reviewer family other than the authors' (${authors}) is configured and available`);
+  attempted = reviewer;
 
   const treeHash = git(repo, 'rev-parse', head + '^{tree}');
   const from = arg('delta-from') || base;
@@ -97,8 +99,12 @@ async function main() {
   const served = (receipt && receipt.served) || {};
   const family = String(served.family || '').toLowerCase();
   if (!family) throw new Error('the review seat did not report which family served it');
-  if (family === author) throw new Error(`the review was served by the author's own family (${family})`);
+  if (authors.includes(family)) throw new Error(`the review was served by an author's own family (${family})`);
   if (!result || !['PASS', 'FAIL'].includes(result.verdict)) throw new Error('the review answer had no verdict');
+  const findings = Array.isArray(result.findings) ? result.findings : [];
+  if (result.verdict === 'PASS' && findings.some(f => f && ['BLOCKER', 'MAJOR'].includes(f.severity))) {
+    result.verdict = 'FAIL';                 // a PASS that lists a blocking finding is not a pass
+  }
   out({ ok: true, family, model: served.model || null, model_attested: !!served.model_attested, tree_hash: treeHash,
         verdict: result.verdict, findings: Array.isArray(result.findings) ? result.findings : [],
         elegance: String(result.elegance || '').slice(0, 600) });

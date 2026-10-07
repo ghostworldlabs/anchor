@@ -754,11 +754,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # command that reaches into either engine is refused the same way. (This patch claims no machine-wide ban.)
     from steward_cockpit import code_jobs as _cj_hold
     if _cj_hold.foreman_crucible_held():
-        if not command and str(lane or "").lower() in ("plan", "planning", "build"):
+        if str(lane or "").lower() in ("plan", "planning", "build"):
             raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
-        if command and any(seg.lower() in ("foreman", "crucible")
-                           for arg in command for seg in str(arg).replace("\\", "/").split("/")):
-            raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+        if command:
+            base = Path(str(cwd)) if cwd else Path.cwd()
+            places = [str(base)] + [str(a) for a in command] + [str((base / str(a)).resolve()) for a in command[1:]
+                                                                  if str(a) and not str(a).startswith("-")]
+            if any(seg.lower() in ("foreman", "crucible") for p_ in places for seg in p_.replace("\\", "/").split("/")):
+                raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
     import anchor_settings as _aset
     import model_policy as _mp
     settings_snapshot = None if command else _aset.get_launch_settings()

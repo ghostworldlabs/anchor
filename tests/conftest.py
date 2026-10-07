@@ -23,6 +23,7 @@ Both are strictly teardown/infra hardening: no test assertion and no product
 behavior is changed. Everything is best-effort and guarded — the harness never
 fails a test in teardown.
 """
+import re
 import sys
 import threading
 from pathlib import Path
@@ -64,10 +65,10 @@ if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
     # (terminal_session._resolve_engine_cmd), so ANCHOR_PTY_BACKEND is no longer
     # a single point of failure for every terminal test.
     os.environ["ANCHOR_ENGINE_CMD"] = f"{sys.executable} -c pass"
-    # Foreman/Crucible are held in production (2026-10-07, execution minimum item 3). Hermetic tests drive the plan/
-    # build lane MACHINERY through the fake runner above, never a real Foreman or Crucible, so the hold is lifted for
-    # them here; the hold's own tests set it back on per test.
-    os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "0"
+    # Foreman/Crucible are held in production (2026-10-07, execution minimum item 3) and in every test by default.
+    # Only test modules that drive the plan/build lane MACHINERY through the fake runner above lift it, per test
+    # (the autouse fixture below) - never a suite-wide exemption.
+    os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "1"
     # gh reachable a real `gh repo create` from two healthcheck/cli tests.
     if _STUB_GH.exists():
         os.environ["ANCHOR_GH_CMD"] = f"python {_STUB_GH}"
@@ -187,6 +188,24 @@ def _thread_excepthook(args):
         _PREV_THREAD_EXCEPTHOOK(args)
     else:  # pragma: no cover - threading always installs a default hook
         threading.__excepthook__(args)
+
+
+_LANE_MACHINERY = re.compile(r"""launch(?:_guarded)?\(\s*['"](?:build|plan|planning)['"]|lane\s*=\s*['"](?:build|plan|planning)['"]|"""
+                             r"""['"]lane['"]\s*:\s*['"](?:build|plan|planning)['"]""")
+
+
+@pytest.fixture(autouse=True)
+def _foreman_crucible_hold_for_lane_machinery(request, monkeypatch):
+    """The hold stays ON unless this test module drives plan/build lanes through the fake runner (no real Foreman or
+    Crucible can run there: ANCHOR_RUNNER_CMD is the fake, and live runs need ANCHOR_TESTS_ALLOW_LIVE=1)."""
+    if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() == "1":
+        return
+    try:
+        source = Path(str(request.node.fspath)).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if _LANE_MACHINERY.search(source) and "fake_claude" in os.environ.get("ANCHOR_RUNNER_CMD", ""):
+        monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
 
 
 def pytest_configure(config):

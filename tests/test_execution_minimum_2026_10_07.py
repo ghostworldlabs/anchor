@@ -530,12 +530,13 @@ class _Coder:
     """A fake coder engine: writes with its 'file tool' (recorded in .files) and optionally behind its back."""
     def __init__(self, wt, tool_writes=None, stray=None, error=""):
         self.wt, self.tool_writes, self.stray, self.error = wt, tool_writes or {"a.txt": "two\n"}, stray or {}, error
-        self.files, self.on_turn_done, self.code_job, self.policy_override = [], None, None, None
+        self.written_ok, self.on_turn_done, self.code_job, self.policy_override = [], None, None, None
+        self.cli = "claude"
 
     def wake(self, fresh=False, seed=None):
         for name, text in self.tool_writes.items():
             _P(self.wt, name).write_text(text, encoding="utf-8")
-            self.files.append(str(_P(self.wt, name)))
+            self.written_ok.append(str(_P(self.wt, name)))
         for name, text in self.stray.items():                     # e.g. a script it ran rewrote strip.json
             _P(self.wt, name).parent.mkdir(parents=True, exist_ok=True)
             _P(self.wt, name).write_text(text, encoding="utf-8")
@@ -788,3 +789,158 @@ def test_the_silent_path_says_received_at_durable_accept(tmp_path, monkeypatch):
     monkeypatch.setattr(eng, "_persist_queue", lambda: True)
     eng.say("and the quiz")
     assert {"t": "sys", "text": "Received."} not in said      # the queued path has its own receipt
+
+
+# ---------- item 3, review round 1 ----------
+
+def test_a_reviewer_of_any_family_that_actually_wrote_is_refused(tmp_path, monkeypatch):
+    class FellBack(_Coder):
+        def wake(self, fresh=False, seed=None):
+            self.families_used = {"claude", "grok"}            # the engine fell back from Claude to Grok mid-job
+            return super().wake(fresh, seed)
+    monkeypatch.setenv("FAKE_REVIEW_FAMILY", "grok")
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: FellBack(wt))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir))[out["job"]]
+        if job["status"] in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert job["authors"] == ["claude", "grok"] and job["landed"] is False and "author's own family (grok)" in job["land_note"]
+
+
+def test_a_rename_lands_the_deletion_too(tmp_path, monkeypatch):
+    class Renamer(_Coder):
+        def wake(self, fresh=False, seed=None):
+            _P(self.wt, "new.txt").write_text("one\n", encoding="utf-8")
+            _P(self.wt, "a.txt").unlink()
+            self.written_ok += [str(_P(self.wt, "new.txt")), str(_P(self.wt, "a.txt"))]   # a completed file_change
+            self.on_turn_done({"text": "renamed", "error": ""})
+            return True, "awake"
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "rename", "", engine_factory=lambda wt: Renamer(wt))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir))[out["job"]]
+        if job["status"] in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert job["landed"] is True, job["land_note"]
+    assert (repo / "new.txt").is_file() and not (repo / "a.txt").exists()
+
+
+def test_work_a_check_leaves_behind_keeps_the_worktree(tmp_path, monkeypatch):
+    repo, job = _job(tmp_path, monkeypatch, check='python -c "open(' + "'report.txt','w'" + ').write(' + "'x'" + ')"')
+    assert job["landed"] is True and job["kept_worktree"] and "report.txt" in job["land_note"]
+    assert (_P(job["kept_worktree"]) / "report.txt").is_file()
+
+
+def test_a_stop_during_review_means_no_landing(tmp_path, monkeypatch):
+    real = code_jobs.run_review
+
+    def review_then_stopped(job, tree, head, delta_from=""):
+        code_jobs._transition(job["steward_dir"], job["id"], ("finishing",), finishing_at=0)
+        assert code_jobs.stop(job["steward_dir"], actor="John")["ok"]                 # released while reviewing
+        return real(job, tree, head, delta_from)
+    monkeypatch.setattr(code_jobs, "run_review", review_then_stopped)
+    repo, job = _job(tmp_path, monkeypatch)
+    _time.sleep(1.0)                                          # the finishing thread has had its chance to land
+    job = code_jobs.read_jobs(job["steward_dir"])[job["id"]]
+    assert job.get("landed") is not True and job["stopped_by"] == "John"
+    assert (repo / "a.txt").read_text(encoding="utf-8") == "one\n" and _P(job["kept_worktree"]).is_dir()
+
+
+def test_a_failed_edit_never_enters_the_manifest():
+    eng = steward_engine.Engine.__new__(steward_engine.Engine)
+    eng.code_job, eng.proc, eng._submitted = {"repo": "r"}, object(), None
+    eng.general, eng.fake, eng.busy, eng.in_tick = True, True, False, False
+    eng.dir, eng.files, eng.cli = "C:/wt", [], "claude"
+    eng.__dict__["_lock"] = __import__("threading").Lock()
+    eng._emit = lambda ev: None
+    eng._guard_turn = lambda block: False
+    eng.last_output = 0
+    edit = lambda i, path: {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": i, "name": "Edit", "input": {"file_path": path}}]}}
+    result = lambda i, err: {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": i, "is_error": err}]}}
+    for ev in (edit("t1", "C:/wt/bad.py"), result("t1", True), edit("t2", "C:/wt/good.py"), result("t2", False)):
+        try:
+            eng._handle(ev, eng.proc)
+        except Exception:
+            pass
+    assert eng.__dict__.get("written_ok") == ["C:/wt/good.py"]
+
+
+def test_the_hold_refuses_a_relative_foreman_command_and_any_held_lane(monkeypatch, tmp_path):
+    import job_runner
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
+    fdir = tmp_path / "trio" / "foreman"
+    (fdir / "bin").mkdir(parents=True)
+    for lane, cmd, cwd in (("general", ["node", "bin/run-live.mjs", "x"], fdir), ("build", ["node", "x.mjs"], tmp_path)):
+        try:
+            job_runner.launch(lane, cwd=str(cwd), command=cmd)
+            raise AssertionError("not refused: %s" % lane)
+        except ValueError as e:
+            assert "foreman-crucible-hold" in str(e)
+
+
+def test_foreman_config_never_lands_in_any_case_or_folder():
+    for p in ("FOREMAN.CONFIG.JSON", "sub/dir/foreman.config.json", "Foreman.Config.Json"):
+        assert code_jobs.never_lands(p)
+    assert not code_jobs.never_lands("foreman.config.json.bak")
+
+
+def test_a_reviewer_out_of_quota_is_remembered_and_a_contradictory_pass_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REVIEW_MODE", "crash")
+    monkeypatch.setenv("FAKE_REVIEW_FAMILY", "gemini")
+    monkeypatch.setenv("FAKE_REVIEW_ERROR", "usage limit reached for this account")
+    repo, job = _job(tmp_path, monkeypatch)
+    assert job["landed"] is False and "gemini" in code_jobs.exhausted_families()
+    monkeypatch.setenv("FAKE_REVIEW_MODE", "pass-with-major")
+    monkeypatch.setenv("FAKE_REVIEW_FAMILY", "chatgpt")
+    repo, job = _job(tmp_path / "two", monkeypatch)
+    assert job["landed"] is False and "says PASS but lists a MAJOR" in job["land_note"]
+
+
+def test_documents_only_never_enter_the_gate(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REVIEW_MODE", "crash")                       # the reviewer would fail - it is not asked
+    repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"notes.md": "# notes"}})
+    assert job["landed"] is True and job["review"]["verdict"] == "SKIPPED" and (repo / "notes.md").is_file()
+
+
+def _guard_engine(tmp_path, monkeypatch, directory, code_job=None):
+    eng = steward_engine.Engine(str(directory), fake=True)
+    eng.fake, eng.busy, eng.code_job = False, True, code_job
+    ended = []
+    monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda reason: ended.append(reason) or {"ok": True})
+    monkeypatch.setattr(eng, "_wake_locked", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(eng, "_persist_queue", lambda: True)
+    return eng, ended
+
+
+def test_a_coder_writes_only_inside_its_worktree(tmp_path, monkeypatch):
+    repo, wt = tmp_path / "repo", tmp_path / "wt"
+    repo.mkdir(); wt.mkdir()
+    eng, ended = _guard_engine(tmp_path, monkeypatch, wt, {"repo": str(repo), "id": "j", "cdir": "c"})
+    assert eng._guard_turn({"name": "Write", "input": {"file_path": str(wt / "ok.py")}}) is False
+    assert eng._guard_turn({"name": "Edit", "input": {"file_path": str(repo / "live.py")}}) is True
+    assert ended and "its own worktree" in ended[0]
+    assert eng._guard_turn({"name": "Bash", "input": {"command": "echo x > %s/live.py" % str(repo).replace(chr(92), "/")}}) is True
+
+
+def test_a_steward_never_edits_the_served_trees_code(tmp_path, monkeypatch):
+    import os as _os
+    served = _P(steward_engine.__file__).resolve().parents[1]
+    eng, ended = _guard_engine(tmp_path, monkeypatch, tmp_path)
+    assert eng._guard_turn({"name": "Edit", "input": {"file_path": str(served / "job_runner.py")}}) is True
+    assert "code job" in ended[0]
+    eng2, ended2 = _guard_engine(tmp_path, monkeypatch, tmp_path)
+    assert eng2._guard_turn({"name": "Write", "input": {"file_path": str(served / "planning" / "x" / "NOTES.md")}}) is False

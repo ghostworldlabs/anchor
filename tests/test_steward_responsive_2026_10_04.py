@@ -138,12 +138,12 @@ class FakeCoder:
     file is in its manifest) and ends its turn."""
     def __init__(self, wt, content="two\n"):
         self.wt, self.content, self.on_turn_done, self.code_job, self.seed = wt, content, None, None, None
-        self.files = []
+        self.files, self.written_ok, self.cli = [], [], "claude"   # completed writes + the family that served it
 
     def wake(self, fresh=False, seed=None):
         self.seed = seed
         Path(self.wt, "a.txt").write_text(self.content, encoding="utf-8")
-        self.files.append(str(Path(self.wt, "a.txt")))
+        self.written_ok.append(str(Path(self.wt, "a.txt")))
         self.on_turn_done({"text": "Changed a.txt to two; checked it.", "error": ""})
         return True, "awake"
 
@@ -237,7 +237,7 @@ def test_a_coder_that_commits_its_own_work_is_kept_and_landed(tmp_path, monkeypa
     class Committer(FakeCoder):
         def wake(self, fresh=False, seed=None):
             Path(self.wt, "a.txt").write_text("committed by the coder\n", encoding="utf-8")
-            self.files.append(str(Path(self.wt, "a.txt")))
+            self.written_ok.append(str(Path(self.wt, "a.txt")))
             subprocess.run(["git", "-C", self.wt, "commit", "-qam", "coder"], check=True)
             self.on_turn_done({"text": "done", "error": ""})
             return True, "awake"
