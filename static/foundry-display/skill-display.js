@@ -228,6 +228,12 @@
         .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
         .then(text => {frame.srcdoc = containDocument(text, target);})
         .catch(() => {frame.src = target;});   // sandbox still blocks any escape
+    } else if (/^\/foundry\/source\?/.test(String(target))) {
+      // THIS frame is sandboxed with no scripts, so ask the viewer for its
+      // script-free embed variant (no blocked-inline-script console error);
+      // the host load handler below scrolls the cited line. The new-tab link
+      // keeps the plain URL, whose own scroll script runs top-level.
+      frame.src = target + '&embed=1';
     } else {
       frame.src = target;
     }

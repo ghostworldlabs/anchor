@@ -654,8 +654,15 @@ def _knowledge_map(skill, resources, combined=None):
             'nodes': projected, 'issues': issues}
 
 
-def source_page(skill_id, requested, anchor=''):
-    """Exact allowlist of this skill's discovered Library/anchor resources."""
+def source_page(skill_id, requested, anchor='', embedded=False):
+    """Exact allowlist of this skill's discovered Library/anchor resources.
+
+    ``embedded`` serves the script-free variant for a sandboxed frame (the
+    dialog sandbox blocks inline scripts and the HOST scrolls the ``.hit``
+    line); the markup is otherwise byte-identical — same ``#L<n>`` anchors,
+    same highlight. A top-level document keeps its own scroll script so
+    line/heading/symbol navigation still lands without a host.
+    """
     detail = skill_detail(skill_id)
     if not detail:
         return None
@@ -708,14 +715,19 @@ def source_page(skill_id, requested, anchor=''):
     rendered = '\n'.join('<span id="L%d" class="%s"><a href="#L%d">%d</a> %s</span>' %
                          (i, 'hit' if i == hit else '', i, i, esc(line))
                          for i, line in enumerate(lines, 1))
+    # Long lines WRAP (pre-wrap + overflow-wrap, with a hanging indent past the
+    # line-number gutter) so a deep cited sentence stays fully readable on a
+    # phone-width view. Each source line is ONE block span carrying its #L<n>
+    # id and the .hit highlight, so anchors and highlighting survive wrapping.
     return '''<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — Foundry source</title>
-<style>body{margin:0;background:#0f1117;color:#e2e4e9;font:15px/1.5 system-ui}header{padding:18px;border-bottom:1px solid #2e3340}a{color:#9ec0ff}pre{padding:18px;overflow:auto}pre span{display:block;min-height:1.5em}pre a{display:inline-block;width:4em;color:#8b8f9a}.hit{background:#3a2e17;outline:1px solid #e0a84a}h1{font-size:20px;margin:8px 0}.path{overflow-wrap:anywhere;color:#8b8f9a}</style>
+<style>body{margin:0;background:#0f1117;color:#e2e4e9;font:15px/1.5 system-ui}header{padding:18px;border-bottom:1px solid #2e3340}a{color:#9ec0ff}pre{padding:18px;overflow:auto}pre span{display:block;min-height:1.5em;white-space:pre-wrap;overflow-wrap:anywhere;padding-left:4.5em;text-indent:-4.5em}pre a{display:inline-block;width:4em;color:#8b8f9a;text-indent:0}.hit{background:#3a2e17;outline:1px solid #e0a84a}h1{font-size:20px;margin:8px 0}.path{overflow-wrap:anywhere;color:#8b8f9a}</style>
 <header><a href="/foundry?skill=%s">← %s</a><h1>%s</h1><div class="path">%s</div><p>Read-only source%s</p></header>
 %s<pre>%s</pre>%s</html>''' % (esc(requested_path.name), esc(skill_id), esc(detail['skill']['name']),
                            esc(requested_path.name), esc(str(requested_path)),
                            ' · anchor not found' if anchor and not hit else '', provenance_html, rendered,
-                           '<script>document.getElementById("L%d")?.scrollIntoView({block:"center"})</script>' % hit if hit else '')
+                           '<script>document.getElementById("L%d")?.scrollIntoView({block:"center"})</script>' % hit
+                           if hit and not embedded else '')
 
 
 def icon_file(skill_id):

@@ -23027,9 +23027,20 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 self._send_json(detail or {"error": "unknown skill"}, 200 if detail else 404)
             elif _path_only == "/foundry/source":
                 q = parse_qs(urlparse(self.path).query)
+                # embed=1 (sent by the SANDBOXED display dialog, which blocks
+                # inline scripts and scrolls the cited .hit line itself via
+                # skill-display.js) serves the script-free variant. The seam
+                # is this explicit flag, NOT the Sec-Fetch-Dest request
+                # destination: destination "iframe" cannot distinguish the
+                # sandboxed dialog from an un-sandboxed app-shell pane (where
+                # the scroll script legitimately runs), and the header is
+                # absent on non-trustworthy plain-HTTP transports. Top-level
+                # documents keep the viewer's own scroll script, so
+                # line/heading/symbol navigation still lands standalone.
                 page = _fpage.source_page((q.get("skill") or [""])[0],
                                          (q.get("path") or [""])[0],
-                                         (q.get("anchor") or [""])[0])
+                                         (q.get("anchor") or [""])[0],
+                                         embedded=(q.get("embed") or [""])[0] in ("1", "true"))
                 if page is None:
                     self._send_json({"error": "source not declared for this skill"}, 404)
                 else:

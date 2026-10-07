@@ -1309,3 +1309,335 @@ def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_se
         finally:
             browser.close()
     write(PROOF_DIR / 'proof.json', json.dumps(proof, indent=2))
+
+
+# ── Source viewing corrected after live verification ─────────────────────────
+# The durable live packet (19 passes / 3 failures at 1440x1000 and
+# touch-enabled 390x844) plus the bounded Gandalf inspection diagnosed two
+# PRODUCT defects in the source viewer: (1) the source pre did not wrap, so
+# the cited sentence was horizontally clipped on the phone-width view (a108 /
+# skill.md line 208 ended around "Judg" — highlighting a line does not prove
+# the text is readable); (2) the viewer appended an inline scroll script even
+# when embedded in the sandboxed (script-less) dialog frame — a real
+# blocked-inline-script console error on every embedded source open. The
+# fix: per-line spans wrap (anchors/highlight preserved), and the sandboxed
+# dialog requests an explicit script-free `embed=1` variant while plain
+# top-level URLs keep the viewer's own scroll script. These tests pin both
+# fixes and demonstrably FAIL on the old behavior.
+
+
+def embed_href(href):
+    """The script-free variant the SANDBOXED dialog requests — exactly what
+    skill-display.js appends for its no-scripts frame."""
+    return href + '&embed=1'
+
+
+def classify_console_record(record):
+    """Attribute ONE captured console message honestly, by frame URL plus the
+    harness action active when it fired.
+
+    'product' — fails the walkthrough: any blocked-script message outside the
+    demonstrated harness shape (the OLD defect: the viewer's own inline scroll
+    script blocked at /foundry/source load time), or any other console error.
+    'harness' — the qualified Chromium/Playwright probe observation: a
+    blocked-script message in a script-free sandboxed about:srcdoc document
+    that fired while the automation itself was acting INSIDE that frame.
+    Retained as evidence, never silently dropped — and never excused outside
+    a demonstrated in-frame automation window (no blind filtering).
+    """
+    where = record['frame_url'] + ' ' + record['text']
+    if 'Blocked script execution' in record['text']:
+        if 'about:srcdoc' in where and record['action'].startswith('in-frame:'):
+            return 'harness'
+        return 'product'
+    if record['type'] == 'error':
+        return 'product'
+    return 'benign'
+
+
+def test_console_classifier_rejects_the_old_defect_and_keeps_probe_evidence():
+    # The OLD defect's exact shape — the viewer's inline script blocked inside
+    # the sandboxed frame at load time — is a PRODUCT error, not harness noise.
+    old_defect = dict(
+        type='error',
+        text="Blocked script execution in 'http://127.0.0.1:43210/foundry/source?"
+             "skill=researchprime&path=skill.md&anchor=208' because the document's frame "
+             "is sandboxed and the 'allow-scripts' permission is not set.",
+        frame_url='http://127.0.0.1:43210/foundry/source?skill=researchprime&path=skill.md&anchor=208',
+        action='host:open-citation-embedded')
+    assert classify_console_record(old_defect) == 'product'
+    # The demonstrated harness shape — about:srcdoc while the automation acts
+    # inside that frame — is retained evidence…
+    probe = dict(type='error',
+                 text="Blocked script execution in 'about:srcdoc' because the document's "
+                      "frame is sandboxed and the 'allow-scripts' permission is not set.",
+                 frame_url='about:srcdoc', action='in-frame:probe-tap-inside-srcdoc')
+    assert classify_console_record(probe) == 'harness'
+    # …but the SAME message outside a demonstrated in-frame automation window
+    # is NOT excused, and ordinary page errors always count.
+    assert classify_console_record(dict(probe, action='host:open-human-guide')) == 'product'
+    assert classify_console_record(dict(type='error', text='TypeError: boom',
+                                        frame_url='', action='host:initial')) == 'product'
+    assert classify_console_record(dict(type='log', text='chatter',
+                                        frame_url='', action='host:initial')) == 'benign'
+
+
+def test_source_page_embedded_variant_drops_only_the_scroll_script(rig):
+    import re
+    legacy(rig)
+    top = page.source_page('researchprime', str(rig['instruction']), '## Entry')
+    embedded = page.source_page('researchprime', str(rig['instruction']), '## Entry',
+                                embedded=True)
+    # Top-level keeps its own scroll script (a real document may run it)…
+    script = re.search(r'<script>.*?</script>', top, re.S).group(0)
+    assert 'scrollIntoView' in script and top.count('<script>') == 1
+    # …the embedded variant ships NO script at all (the old blocked-script
+    # console error came from exactly this script inside the sandboxed
+    # frame), and is otherwise BYTE-IDENTICAL: same #L<n> line anchors, same
+    # .hit highlight, same literal escaped source.
+    assert '<script' not in embedded
+    assert embedded == top.replace(script, '')
+    assert 'class="hit"' in embedded and 'id="L1"' in embedded
+    assert '&lt;unsafe&gt;' in embedded and '<unsafe>' not in embedded
+    # The phone-clipping fix rides in both variants: per-line spans wrap, so
+    # a long cited sentence is never horizontally cut (geometry is proven in
+    # the real-browser regression below).
+    assert 'white-space:pre-wrap' in embedded and 'overflow-wrap:anywhere' in embedded
+    # No hit → no script in either variant: the flag changes nothing else.
+    assert (page.source_page('researchprime', str(rig['instruction']), embedded=True)
+            == page.source_page('researchprime', str(rig['instruction'])))
+
+
+def test_source_route_embed_flag_serves_script_free_markup(rig, server):
+    import re
+    combined(rig)
+    with urlopen(server + '/api/foundry/skill?skill=researchprime') as response:
+        href = json.load(response)['knowledgeMap']['nodes'][0]['href']
+    with urlopen(server + href) as response:
+        top = response.read().decode('utf-8')
+    # A plain top-level request — and any client that sends no flag — keeps
+    # the viewer's own scroll script (real top-level navigation still lands).
+    assert 'class="hit"' in top and 'scrollIntoView' in top
+    # The sandboxed dialog's embed=1 request gets the script-free variant,
+    # byte-identical but for the omitted script. On the old route this very
+    # request returned the script — the blocked-script console error.
+    with urlopen(server + embed_href(href)) as response:
+        embedded = response.read().decode('utf-8')
+    assert '<script' not in embedded and 'class="hit"' in embedded
+    script = re.search(r'<script>.*?</script>', top, re.S).group(0)
+    assert embedded == top.replace(script, '')
+
+
+def test_real_handoff_source_wraps_and_embeds_clean_desktop_and_touch(real_handoff, real_server):
+    """Live-packet regressions over the REGISTERED handoff at 1440x1000 and
+    touch-enabled 390x844 (Chromium touch EMULATION — not a hardware phone):
+
+    * the FULL cited sentence is readable — the source view wraps, so nothing
+      is horizontally clipped (the live failure: a108 / skill.md line 208
+      rendered only up to about "Judg");
+    * embedded citation navigation lands on the cited text with NO product
+      console or page errors (the old viewer shipped an inline scroll script
+      the sandboxed frame blocked);
+    * top-level navigation still lands on the cited line, a real heading and
+      a real code symbol — the plain URL keeps its own scroll script;
+    * each check demonstrably REJECTS the old defect (re-applying the old
+      non-wrapping rendering overflows the phone-width frame again; the
+      classifier flags the old blocked-script shape);
+    * console messages are attributed with frame URL + the active harness
+      action, and bounded about:srcdoc probe evidence is retained in
+      .proof/foundry-refinement2/console-attribution.json — demonstrated
+      harness noise is distinguished from product errors, never filtered
+      blindly. Only what this run observed is claimed.
+    """
+    playwright = pytest.importorskip('playwright.sync_api')
+    server = real_server
+    data = real_handoff['data']
+    primary_settings(steward_type='ecgberht')
+    disagreement = data['process']['disagreements'][0]
+    target_step = str(disagreement['step_ids'][0])
+    instruction_anchor = next(a for a in data['anchors']
+                              if a['id'] == disagreement['instruction_anchor'])
+    payload = page.display_payload('researchprime')
+    cited_href = payload['hrefs']['anchors'][str(instruction_anchor['id'])]['href']
+    skill_snapshot = source_viewer_path(cited_href)
+    skill_lines = skill_snapshot.read_text(encoding='utf-8').splitlines()
+    cited_quote = instruction_anchor['quote'].splitlines()[0].strip()
+
+    # Deterministic product guarantee before any browser runs: the dialog's
+    # embed variant carries NO script (a script that does not exist cannot be
+    # blocked), while the plain top-level URL keeps the scroll script.
+    with urlopen(server + embed_href(cited_href)) as response:
+        assert '<script' not in response.read().decode('utf-8')
+    with urlopen(server + cited_href) as response:
+        assert 'scrollIntoView' in response.read().decode('utf-8')
+
+    # Real top-level navigation targets, data-driven from the registered
+    # snapshots: the cited LINE, a deep HEADING (fallback: the cited sentence
+    # text itself), and a code SYMBOL when the handoff declares a code
+    # snapshot — "as applicable", nothing fabricated.
+    targets = [(str(instruction_anchor['start']), int(instruction_anchor['start']),
+                skill_snapshot)]
+    heading = None
+    for i in range(len(skill_lines), 0, -1):
+        text = skill_lines[i - 1]
+        if text.startswith('## ') and len(text.strip()) > 3:
+            first = next(j for j, l in enumerate(skill_lines, 1) if text in l)
+            if first > 40:
+                heading = (text, first, skill_snapshot)
+                break
+    targets.append(heading or (cited_quote,
+                               next(j for j, l in enumerate(skill_lines, 1)
+                                    if cited_quote in l),
+                               skill_snapshot))
+    for a in data['anchors']:
+        src = next((s for s in data['sources'] if str(s['id']) == str(a['source_id'])), None)
+        if src and str(src.get('snapshot', '')).endswith(('.py', '.mjs', '.js')):
+            code_path = source_viewer_path(payload['hrefs']['anchors'][str(a['id'])]['href'])
+            code_lines = code_path.read_text(encoding='utf-8').splitlines()
+            symbol = next((l.strip() for n, l in enumerate(code_lines, 1) if n > 3
+                           and l.strip().startswith(('def ', 'class ', 'function ',
+                                                     'const ', 'export '))), None)
+            if symbol:
+                targets.append((symbol,
+                                next(j for j, l in enumerate(code_lines, 1) if symbol in l),
+                                code_path))
+                break
+
+    evidence = {
+        'qualification': 'Touch viewport is Chromium emulation at 390x844 — not a hardware '
+                         'phone. about:srcdoc attribution is a probe observation on THIS '
+                         'harness run, recorded with frame URL + active automation action; '
+                         'nothing beyond what this run observed is claimed.',
+        'chromium': None, 'playwright': None, 'viewports': []}
+    try:
+        from importlib.metadata import version as dist_version
+        evidence['playwright'] = dist_version('playwright')
+    except Exception:
+        evidence['playwright'] = 'unknown'
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        evidence['chromium'] = browser.version
+        try:
+            for width, height in [(1440, 1000), (390, 844)]:
+                touch = width < 780
+                context = browser.new_context(viewport={'width': width, 'height': height},
+                                              has_touch=touch)
+                tab = context.new_page()
+                action = ['host:initial']
+                records, page_errors = [], []
+                tab.on('pageerror', lambda e, _p=page_errors: _p.append(str(e)))
+                tab.on('console', lambda m, _r=records, _a=action: _r.append(
+                    {'type': m.type, 'text': m.text[:240],
+                     'frame_url': (m.location or {}).get('url', ''),
+                     'action': _a[0]}) if len(_r) < 400 else None)
+
+                def act(label, locator, _touch=touch, _action=action):
+                    _action[0] = label
+                    (locator.tap if _touch else locator.click)()
+
+                tab.goto(server + '/foundry?skill=researchprime')
+                tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
+                act('host:open-process', tab.get_by_role('link', name='Process map', exact=True))
+                tab.locator('.flow-diagram').wait_for()
+                act('host:select-step',
+                    tab.locator('.flow-diagram a.fd-node[data-step="%s"]' % target_step))
+                detail = tab.locator('#step-detail[data-step-id="%s"]' % target_step)
+                detail.wait_for()
+                act('host:expand-record', detail.locator('> summary'))
+
+                # EMBEDDED navigation lands on the cited text: the frame is
+                # script-free (embed=1) and the HOST scrolls the .hit line.
+                act('host:open-citation-embedded',
+                    detail.locator('.reconcile-node .anchor-list a[data-source]').first)
+                cited_line_in_view(tab, height)
+                frame = tab.frame_locator('#resource-frame')
+                hit = frame.locator('.hit')
+                assert hit.get_attribute('id') == 'L%d' % instruction_anchor['start']
+                assert cited_quote in hit.inner_text()
+                viewer_src = tab.locator('#resource-frame').get_attribute('src')
+                assert '/foundry/source?' in viewer_src and 'embed=1' in viewer_src
+                # The open-in-new-tab link keeps the PLAIN top-level URL whose
+                # own scroll script may legitimately run.
+                assert 'embed=' not in tab.locator('#resource-new-tab').get_attribute('href')
+
+                # The FULL cited sentence is readable: no horizontal clipping
+                # of the pre, the cited line, or its right edge — combined
+                # with cited_line_in_view's whole-box visibility this proves
+                # the sentence END (the live packet lost "…DECIDES") is on
+                # screen, not merely attached off-viewport.
+                assert frame.locator('pre').evaluate('el => el.scrollWidth <= el.clientWidth + 1')
+                assert hit.evaluate('el => el.scrollWidth <= el.clientWidth + 1')
+                assert hit.evaluate('el => el.getBoundingClientRect().right'
+                                    ' <= document.documentElement.clientWidth + 1')
+                if touch:
+                    # Demonstrate the SAME check rejects the old defect:
+                    # re-applying the old non-wrapping rendering makes the
+                    # registered source physically overflow the 390px frame…
+                    action[0] = 'in-frame:old-defect-css-probe'
+                    assert frame.locator('pre').evaluate(
+                        "el => {const s = document.createElement('style');"
+                        " s.id = 'old-defect';"
+                        " s.textContent = 'pre span{white-space:pre !important}';"
+                        " document.head.appendChild(s);"
+                        " return el.scrollWidth > el.clientWidth; }")
+                    # …and the shipped wrap restores readability.
+                    assert frame.locator('pre').evaluate(
+                        "el => {document.getElementById('old-defect').remove();"
+                        " return el.scrollWidth <= el.clientWidth + 1; }")
+                act('host:close-citation', tab.locator('#close-resource'))
+
+                # about:srcdoc PROBE (the qualified harness observation):
+                # open a rendered srcdoc document, then deliberately automate
+                # a click INSIDE it and record what the harness itself
+                # induces in a script-free sandboxed document.
+                act('host:open-human-guide',
+                    tab.locator('.head .actions').get_by_role('link', name='Human guide',
+                                                              exact=True))
+                guide_heading = frame.get_by_role('heading', name='Human guide', exact=True)
+                guide_heading.wait_for()
+                srcdoc_blocked = lambda: sum(
+                    1 for r in records if 'Blocked script execution' in r['text']
+                    and 'about:srcdoc' in (r['frame_url'] + ' ' + r['text']))
+                before = srcdoc_blocked()
+                act('in-frame:probe-tap-inside-srcdoc', guide_heading)
+                action[0] = 'in-frame:probe-settle'
+                tab.wait_for_timeout(400)
+                after = srcdoc_blocked()
+                act('host:close-guide', tab.locator('#close-resource'))
+
+                # TOP-LEVEL navigation still lands: line, heading and symbol
+                # targets scroll via the viewer's own retained script.
+                for anchor_text, expected_line, path_ in targets:
+                    action[0] = 'host:goto-source-top-level'
+                    tab.goto(server + page.source_url('researchprime', path_, anchor_text))
+                    tab.wait_for_function(
+                        "() => {const h = document.querySelector('.hit');"
+                        " if (!h) return false; const r = h.getBoundingClientRect();"
+                        " return r.top >= -1 && r.bottom <= window.innerHeight + 1"
+                        " && r.right <= document.documentElement.clientWidth + 1;}")
+                    assert tab.locator('.hit').get_attribute('id') == 'L%d' % expected_line
+                    assert tab.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+                    if expected_line > 60:
+                        assert tab.evaluate('window.scrollY') > 0   # it actually travelled
+
+                product = [r for r in records if classify_console_record(r) == 'product']
+                harness = [r for r in records if classify_console_record(r) == 'harness']
+                evidence['viewports'].append({
+                    'viewport': '%dx%d' % (width, height), 'touch_emulation': touch,
+                    'console_messages_total': len(records),
+                    'srcdoc_blocked_before_probe': before,
+                    'srcdoc_blocked_after_probe': after,
+                    'probe_reproduced_harness_messages': after > before,
+                    'harness_attributed': harness[:24],
+                    'product_attributed': product[:24]})
+                assert not page_errors, page_errors
+                # NO product console errors anywhere in the walkthrough — in
+                # particular no blocked-script attributed to /foundry/source
+                # (the old defect's exact signature).
+                assert not product, product
+                context.close()
+        finally:
+            browser.close()
+            # Retain the bounded attribution evidence even on a red run.
+            PROOF_DIR.mkdir(parents=True, exist_ok=True)
+            write(PROOF_DIR / 'console-attribution.json', json.dumps(evidence, indent=2))
