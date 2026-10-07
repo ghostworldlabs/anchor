@@ -485,8 +485,8 @@ def test_doctor_engine_gemini_only_drives_on_gemini(denv, monkeypatch):
     assert sess["backend"] == "gemini"
     # Read-only posture on the gemini CLI too.
     child = denv["pty"]._LIVE[sess["session_id"]]
-    assert "--approval-mode" in child.cmd
-    assert child.cmd[child.cmd.index("--approval-mode") + 1] == "plan"
+    assert "--mode" in child.cmd          # agy 1.3 read-only mode (2026-10-07)
+    assert child.cmd[child.cmd.index("--mode") + 1] == "plan"
 
 
 def test_doctor_diagnose_on_grok_uses_plan_permission_mode(denv, monkeypatch):

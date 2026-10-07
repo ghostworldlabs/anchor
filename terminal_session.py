@@ -1085,11 +1085,11 @@ DOCTOR_POSTURE_WRITE_ENABLED = "write-enabled"
 #: in READ-ONLY plan permission mode — diagnostics inspect the live folder but
 #: can never mutate it). claude: ``--permission-mode plan`` (verified-real
 #: interactive flag; same mode the read-only Gandalf/orientation jobs use).
-#: gemini: ``--approval-mode plan`` (the gemini CLI's read-only approval
-#: posture). Module-level so a test/deploy can inspect or tune it.
+#: gemini: ``--mode plan`` (agy 1.3's read-only mode; agy refuses the old gemini CLI's
+#: ``--approval-mode``, 2026-10-07). Module-level so a test/deploy can inspect or tune it.
 DOCTOR_READONLY_CLI_ARGS = {
     _reg.BACKEND_CLAUDE: ("--permission-mode", "plan"),
-    _reg.BACKEND_GEMINI: ("--approval-mode", "plan"),
+    _reg.BACKEND_GEMINI: ("--mode", "plan"),
     # (2026-09-05) codex: the sandbox flag overrides the user's global config
     # (John's sets danger-full-access), so a Doctor on ChatGPT can never mutate.
     _reg.BACKEND_CHATGPT: ("-s", "read-only"),
