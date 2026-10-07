@@ -16,3 +16,5 @@
 {"at": "2026-10-07T06:55:49", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 1.5, "first_word_s": 15.3, "turn_s": 63.4, "tools": 4}
 {"at": "2026-10-07T07:26:07", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 18.4, "turn_s": 69.8, "tools": 3}
 {"at": "2026-10-07T07:26:26", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 42.2, "first_word_s": 18.4, "turn_s": 19.1, "tools": 0}
+{"at": "2026-10-07T08:06:12", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.4, "first_word_s": 7.2, "turn_s": 218.4, "tools": 11}
+{"at": "2026-10-07T08:23:54", "origin": "human", "cli": "chatgpt", "effort": "high", "queued_s": 0.1, "first_word_s": 29.7, "turn_s": 599.4, "tools": 12}

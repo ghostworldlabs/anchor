@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-07 07:26",
-  "status_id": "01791379586462562700",
+  "at": "2026-10-07 08:51",
+  "status_id": "01791384694690538800",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "nothing running - quiet",
+    "activity": "steward mid-turn since 08:31 (20 min) \u00b7 last status 08:41",
     "latest_event": null,
     "next": [
-      "Verify the landed upper-left Setup"
+      "Connect named accounts for Claude,"
     ],
     "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Verify the landed upper-left Setup gear in Anchor \u2014 In the authorized provider integration, wire the\u2026"
+        "value": "Connect named accounts for Claude, ChatGPT, Gemini and Grok \u2014 Provider-owned sign-in launched from Anchor\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "nothing running - quiet"
+        "value": "steward mid-turn since 08:31 (20 min) \u00b7 last status 08:41"
       },
       {
         "label": "Status",
-        "value": "integrate: Verify the landed upper-left Setup gear in Anchor \u00b7 0/11 done \u00b7 quiet"
+        "value": "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok \u00b7 0/11 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0020-anchor-shell-gear-landed: Anchor top-bar gear landed - October 6, 2026"
+        "value": "0021-provider-sign-in-answer-and-account-refinement: Provider sign-in settled; account refinement - October\u2026"
       },
       {
         "label": "ETA",
@@ -49,46 +49,46 @@
       },
       {
         "label": "To do",
-        "value": "Verify the landed upper-left Setup"
+        "value": "Connect named accounts for Claude,"
       }
     ]
   },
-  "lead_line": "Next: Verify the landed upper-left Setup; then Third: organize goals and initiatives on the Star Chart \u2014 Production-shell tests passed; existing-window activation remains unverified.",
+  "lead_line": "Next: Connect named accounts for Claude,; then Show authentication and allowance for each named provider account \u2014 Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
   "now": [
-    "nothing running - quiet"
+    "steward mid-turn since 08:31 (20 min) \u00b7 last status 08:41"
   ],
   "running": {
-    "kind": "none",
-    "label": "nothing running - quiet",
+    "kind": "steward",
+    "label": "steward mid-turn since 08:31 (20 min) \u00b7 last status 08:41",
     "skill": "",
-    "source": "",
+    "source": "engine",
     "age": ""
   },
   "slice": {
-    "n": 8,
+    "n": 2,
     "total": 11,
-    "id": "gwl-cave-settings",
-    "name": "Verify the landed upper-left Setup gear in Anchor",
+    "id": "gwl-access",
+    "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
     "part": "integrate",
-    "summary": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning\u2026",
+    "summary": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0020-anchor-shell-gear-landed: Anchor top-bar gear landed - October 6, 2026",
+  "journal": "0021-provider-sign-in-answer-and-account-refinement: Provider sign-in settled; account refinement - October 7, 2026",
   "evidence": {
     "source": {
       "path": "strip.json",
-      "step_id": "gwl-cave-settings",
+      "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb"
     },
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0020-anchor-shell-gear-landed.md",
-      "entry_id": "0020-anchor-shell-gear-landed",
-      "at": "2026-10-07T02:41:30Z",
-      "step_id": "gwl-cave-settings",
+      "path": "journal/0021-provider-sign-in-answer-and-account-refinement.md",
+      "entry_id": "0021-provider-sign-in-answer-and-account-refinement",
+      "at": "2026-10-07T14:23:53Z",
+      "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
     },
@@ -98,8 +98,8 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Verify the landed upper-left Setup",
-    "then Third: organize goals and initiatives on the Star Chart"
+    "Connect named accounts for Claude,",
+    "then Show authentication and allowance for each named provider account"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
@@ -110,32 +110,32 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Upper-left Anchor Setup gear repair landed; awaiting safe activation and verification in the existing window.",
-    "as_of": "2026-10-06",
+    "text": "Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.",
+    "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
     "stale": false
   },
   "plan": {
-    "step": "integrate: Verify the landed upper-left Setup gear in Anchor",
+    "step": "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok",
     "steps_done": 0,
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Verify the landed upper-left Setup; then Third: organize goals and initiatives on the Star Chart",
-    "why": "Production-shell tests passed; existing-window activation remains unverified.",
+    "next": "Connect named accounts for Claude,; then Show authentication and allowance for each named provider account",
+    "why": "Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
     "attention": "quiet",
     "goal_reread": true
   },
   "map": [
     "research: Third: organize goals and initiatives on the Star Chart (proposed)",
     "slice: First: choose or connect to the mother ship (proposed) \u00b7 no gate",
-    "slice: Provider integration: verify live Setup and laptop (active) \u00b7 gate",
+    "slice: Show authentication and allowance for each named provider account (active) \u00b7 gate",
     "slice: Try and refine the working provider surface (proposed) \u00b7 no gate",
     "rigor: Independent adversarial review of provider integration (parked) \u00b7 gate",
     "rigor: Test providers in the running laptop Anchor (proposed) \u00b7 no gate",
-    "integrate: Second: connect subscriptions and optional API keys (proposed) \u00b7 no gate",
-    "integrate: Verify the landed upper-left Setup gear in Anchor (active) \u00b7 no gate",
+    "integrate: Connect named accounts for Claude, ChatGPT, Gemini and Grok (active) \u00b7 no gate",
+    "integrate: Show named account summaries and switching in Cave (active) \u00b7 no gate",
     "integrate: Optional: connect calendars and email (proposed) \u00b7 no gate",
     "harden: Harden provider failures, concurrency and credential boundaries (parked) \u00b7 gate",
     "harden: Backups and restore (proposed) \u00b7 no gate"
@@ -214,9 +214,9 @@
         },
         {
           "id": "gwl-provider-status",
-          "name": "Provider integration: verify live Setup and laptop",
+          "name": "Show authentication and allowance for each named provider account",
           "status": "active",
-          "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
+          "done_when": "For all four providers, show each account nickname, authentication, verification, allowance/reset and usage with source/freshness. Keep subscription allowance, observed consumption and API billing distinct; explicitly show unavailable/unsupported facts. Complete account refinement before readiness or explicit human close.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -332,33 +332,9 @@
       "steps": [
         {
           "id": "gwl-access",
-          "name": "Second: connect subscriptions and optional API keys",
-          "status": "proposed",
-          "done_when": "Reuse existing host-side native sign-ins; provide normal native login from Setup without keeping terminals open. Preserve existing default accounts/sessions, isolate additional subscriptions where supported, and support explicit API connections without silent billing substitution.",
-          "if_then": "",
-          "waiting_on": null,
-          "due": null,
-          "ref": null,
-          "tier": null,
-          "area": null,
-          "seat": null,
-          "seat_order": null,
-          "commissioned_as": null,
-          "part": "integrate",
-          "gate": "",
-          "component_ids": [],
-          "navigation": {
-            "path": [
-              "gwl-setup"
-            ],
-            "current": false
-          }
-        },
-        {
-          "id": "gwl-cave-settings",
-          "name": "Verify the landed upper-left Setup gear in Anchor",
+          "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
           "status": "active",
-          "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
+          "done_when": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an explicit supported billing route. Preserve existing sign-ins and sessions. Gemini/Google AI versus Antigravity subscription identity remains the adapter prerequisite. Follow plan v2 Refinement 1.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
@@ -376,6 +352,30 @@
               "gwl-setup"
             ],
             "current": true
+          }
+        },
+        {
+          "id": "gwl-cave-settings",
+          "name": "Show named account summaries and switching in Cave",
+          "status": "active",
+          "done_when": "John confirms Cave gear opens Providers and accepts that placement in turn 113e63ee-c4dd-4a35-9668-7b6b027de92a. Preserve the gear opening existing Setup. In the lower-left sidebar show provider, nickname, account and model/version; switch accounts for new work using the same saved preferences, preserving existing conversations, drafts and full-strength policy.",
+          "if_then": "",
+          "waiting_on": null,
+          "due": null,
+          "ref": null,
+          "tier": null,
+          "area": null,
+          "seat": null,
+          "seat_order": null,
+          "commissioned_as": null,
+          "part": "integrate",
+          "gate": "",
+          "component_ids": [],
+          "navigation": {
+            "path": [
+              "gwl-setup"
+            ],
+            "current": false
           }
         },
         {
@@ -463,5 +463,5 @@
     }
   ],
   "swarm": [],
-  "deliverables_count": 22
+  "deliverables_count": 24
 }

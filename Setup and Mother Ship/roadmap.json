@@ -1409,6 +1409,77 @@
       },
       "at": "2026-10-07",
       "seq": 83
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+        "done_when": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an explicit supported billing route. Preserve existing sign-ins and sessions. Gemini/Google AI versus Antigravity subscription identity remains the adapter prerequisite. Follow plan v2 Refinement 1."
+      },
+      "at": "2026-10-07",
+      "seq": 84
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-access",
+      "to": "active",
+      "receipt": {
+        "who": "John turn 2a3f9c71-b01b-4037-a3f0-6413483f93dc",
+        "when": "2026-10-07",
+        "why": "Provider-owned sign-in accepted for plan v2 Refinement 1; connection requirements and Google prerequisite are being refined."
+      },
+      "at": "2026-10-07",
+      "seq": 85,
+      "from": "proposed"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "name": "Show authentication and allowance for each named provider account",
+        "done_when": "For all four providers, show each account nickname, authentication, verification, allowance/reset and usage with source/freshness. Keep subscription allowance, observed consumption and API billing distinct; explicitly show unavailable/unsupported facts. Complete account refinement before readiness or explicit human close."
+      },
+      "at": "2026-10-07",
+      "seq": 86
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "name": "Show named account summaries and switching in Cave",
+        "done_when": "John confirms Cave gear opens Providers and accepts that placement in turn 113e63ee-c4dd-4a35-9668-7b6b027de92a. Preserve the gear opening existing Setup. In the lower-left sidebar show provider, nickname, account and model/version; switch accounts for new work using the same saved preferences, preserving existing conversations, drafts and full-strength policy."
+      },
+      "at": "2026-10-07",
+      "seq": 87
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true
+        }
+      },
+      "seq": 88,
+      "at": "2026-10-07"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": false
+        }
+      },
+      "seq": 89,
+      "at": "2026-10-07"
     }
   ],
   "roadmap_projection": [
@@ -1440,9 +1511,9 @@
     },
     {
       "id": "gwl-access",
-      "name": "Second: connect subscriptions and optional API keys",
-      "status": "proposed",
-      "done_when": "Reuse existing host-side native sign-ins; provide normal native login from Setup without keeping terminals open. Preserve existing default accounts/sessions, isolate additional subscriptions where supported, and support explicit API connections without silent billing substitution.",
+      "name": "Connect named accounts for Claude, ChatGPT, Gemini and Grok",
+      "status": "active",
+      "done_when": "Provider-owned sign-in launched from Anchor retains isolated named accounts on the mother ship; separate optional API keys have an explicit supported billing route. Preserve existing sign-ins and sessions. Gemini/Google AI versus Antigravity subscription identity remains the adapter prerequisite. Follow plan v2 Refinement 1.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
@@ -1451,14 +1522,14 @@
         "path": [
           "gwl-setup"
         ],
-        "current": false
+        "current": true
       }
     },
     {
       "id": "gwl-provider-status",
-      "name": "Provider integration: verify live Setup and laptop",
+      "name": "Show authentication and allowance for each named provider account",
       "status": "active",
-      "done_when": "Build and integrate the accepted Refinement 2 provider surface: reuse existing mother-ship sign-ins, native terminal-independent login, separately named subscription/API connections and account-qualified usage/allowance where supported. Preserve warning/full-strength policy. Integrate Cave gear/sidebar and verify usable live behavior before human review; no slice close inferred.",
+      "done_when": "For all four providers, show each account nickname, authentication, verification, allowance/reset and usage with source/freshness. Keep subscription allowance, observed consumption and API billing distinct; explicitly show unavailable/unsupported facts. Complete account refinement before readiness or explicit human close.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "slice",
@@ -1544,9 +1615,9 @@
     },
     {
       "id": "gwl-cave-settings",
-      "name": "Verify the landed upper-left Setup gear in Anchor",
+      "name": "Show named account summaries and switching in Cave",
       "status": "active",
-      "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
+      "done_when": "John confirms Cave gear opens Providers and accepts that placement in turn 113e63ee-c4dd-4a35-9668-7b6b027de92a. Preserve the gear opening existing Setup. In the lower-left sidebar show provider, nickname, account and model/version; switch accounts for new work using the same saved preferences, preserving existing conversations, drafts and full-strength policy.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
@@ -1555,7 +1626,7 @@
         "path": [
           "gwl-setup"
         ],
-        "current": true
+        "current": false
       }
     },
     {

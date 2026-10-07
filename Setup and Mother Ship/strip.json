@@ -3,8 +3,8 @@
  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
  "face_path": "ECGBERHT.md",
  "as_of": "2026-10-07",
- "phase": "verifying",
- "active_effort": "Upper-left Anchor Setup gear repair landed; awaiting safe activation and verification in the existing window.",
+ "phase": "refining",
+ "active_effort": "Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.",
  "effort_status": "RUNNING",
  "tool_depth_cell": "LITE",
  "human_wait": "",
@@ -23,8 +23,8 @@
    "status": "caught"
   }
  ],
- "next_recommended": "Verify the landed upper-left Setup; then Third: organize goals and initiatives on the Star Chart",
- "why_next": "Production-shell tests passed; existing-window activation remains unverified.",
+ "next_recommended": "Connect named accounts for Claude,; then Show authentication and allowance for each named provider account",
+ "why_next": "Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
  "uncertainty_flags": [],
  "instruments": [
   {
@@ -796,6 +796,49 @@
     "gwl-cave-settings",
     "gwl-mapping"
    ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-07",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Verify the landed upper-left Setup; then Third: organize goals and initiatives on the Star Chart",
+   "why_next": "step set Verify the landed upper-left Setup gear in Anchor",
+   "horizon_source_seq": 83,
+   "horizon_focus": "gwl-cave-settings",
+   "horizon_steps": [
+    "gwl-cave-settings",
+    "gwl-mapping"
+   ]
+  },
+  {
+   "_kind": "instrument",
+   "kind": "update",
+   "as_of": "2026-10-07",
+   "source": "verb_update",
+   "phase": "refining",
+   "next_recommended": "Confirm Google subscription identity, then refine its connection in the same provider plan.",
+   "why_next": "Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
+   "horizon_source_seq": null,
+   "horizon_focus": null,
+   "active_effort": "Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.",
+   "current_step_id": "gwl-access"
+  },
+  {
+   "_kind": "instrument",
+   "kind": "horizon",
+   "as_of": "2026-10-07",
+   "source": "verb_update:horizon",
+   "derived": true,
+   "next_recommended": "Connect named accounts for Claude,; then Show authentication and allowance for each named provider account",
+   "why_next": "Sign-in policy is settled; Google AI and existing Antigravity have different account connections.",
+   "horizon_source_seq": 89,
+   "horizon_focus": "gwl-access",
+   "horizon_steps": [
+    "gwl-access",
+    "gwl-provider-status"
+   ]
   }
  ],
  "receipts": [
@@ -1070,10 +1113,20 @@
    "path": "journal/0020-anchor-shell-gear-landed.md",
    "entry_id": "0020-anchor-shell-gear-landed",
    "summary": "Anchor top-bar gear landed - October 6, 2026"
+  },
+  {
+   "at": "2026-10-07T14:23:53Z",
+   "source": "engine",
+   "step_id": "gwl-access",
+   "session_id": "01a11287-5787-7532-af96-84f668e596cb",
+   "kind": "journal_update",
+   "path": "journal/0021-provider-sign-in-answer-and-account-refinement.md",
+   "entry_id": "0021-provider-sign-in-answer-and-account-refinement",
+   "summary": "Provider sign-in settled; account refinement - October 7, 2026"
   }
  ],
- "horizon_source_seq": 83,
- "horizon_focus": "gwl-cave-settings",
- "current_step_id": "gwl-cave-settings",
+ "horizon_source_seq": 89,
+ "horizon_focus": "gwl-access",
+ "current_step_id": "gwl-access",
  "wait_ref": "none"
 }

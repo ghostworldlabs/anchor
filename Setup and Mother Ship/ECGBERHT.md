@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Upper-left Anchor Setup gear repair landed; awaiting safe activation and verification in the existing window.
+Refining plan v2 for four providers, named accounts and Cave summaries; provider-owned sign-in is accepted.
 
 ## Why next
 
-The gear is now in the actual Anchor top bar; the existing window still needs activation before delivery can be confirmed.
+Cave gear is confirmed; distinguish the requested Google subscription from existing Antigravity access before choosing its adapter.
 
 ## Human wait
 
