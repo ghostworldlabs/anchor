@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-06",
+  "as_of": "2026-10-07",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -1344,6 +1344,62 @@
       "at": "2026-10-06",
       "seq": 78,
       "from": "parked"
+    },
+    {
+      "kind": "status_flip",
+      "step_id": "gwl-cave-settings",
+      "to": "active",
+      "receipt": {
+        "who": "Aladdin acting on John",
+        "when": "2026-10-07",
+        "why": "John reports the required upper-left gear missing in his actual Anchor client; repair and verify that surface under approved v2."
+      },
+      "at": "2026-10-07",
+      "seq": 79,
+      "from": "proposed"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "name": "Repair the missing upper-left Setup gear in Anchor"
+      },
+      "at": "2026-10-07",
+      "seq": 80
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-provider-status",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": false,
+          "featured_paths": [
+            "IMPLEMENTATION-PLAN-v2.pdf",
+            "IMPLEMENTATION-PLAN-v1.md",
+            "SCOPE-v6.md",
+            "mockups/SETUP-refinement-2.html"
+          ]
+        }
+      },
+      "seq": 81,
+      "at": "2026-10-07"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-cave-settings",
+      "fields": {
+        "navigation": {
+          "path": [
+            "gwl-setup"
+          ],
+          "current": true
+        }
+      },
+      "seq": 82,
+      "at": "2026-10-07"
     }
   ],
   "roadmap_projection": [
@@ -1402,7 +1458,7 @@
         "path": [
           "gwl-setup"
         ],
-        "current": true,
+        "current": false,
         "featured_paths": [
           "IMPLEMENTATION-PLAN-v2.pdf",
           "IMPLEMENTATION-PLAN-v1.md",
@@ -1479,8 +1535,8 @@
     },
     {
       "id": "gwl-cave-settings",
-      "name": "Wire Cave controls and reopen Setup",
-      "status": "proposed",
+      "name": "Repair the missing upper-left Setup gear in Anchor",
+      "status": "active",
       "done_when": "In the authorized provider integration, wire the approved far upper-left Setup gear and bottom-left provider/account/model/reasoning controls to the same saved host settings. Keep capacity separately right, preserve Cave dialogue/drafts/navigation, and verify on the actual laptop after safe activation.",
       "waiting_on": null,
       "commissioned_as": null,
@@ -1489,7 +1545,8 @@
       "navigation": {
         "path": [
           "gwl-setup"
-        ]
+        ],
+        "current": true
       }
     },
     {

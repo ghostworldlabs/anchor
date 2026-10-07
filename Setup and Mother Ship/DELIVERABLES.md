@@ -2,7 +2,10 @@
 
 | What | Where | Date | Step |
 | --- | --- | --- | --- |
-| START HERE - ecgberht approved provider implementation plan v2 PDF - independent review and hardening; execution paused for restart | `IMPLEMENTATION-PLAN-v2.pdf` | 2026-10-05 | gwl-provider-status |
+| START HERE - ecgberht approved provider implementation plan v2 PDF - assurance landed and activated; existing-client confirmation pending | `IMPLEMENTATION-PLAN-v2.pdf` | 2026-10-05 | gwl-provider-status |
+| Foreman live Setup screenshot - fresh browser on the laptop service; existing window unverified | `assurance-2026-10-05/evidence/live-setup-1440.png` | 2026-10-06 | gwl-laptop-provider-test |
+| Foreman live Cave gear dialog screenshot - retained Setup and composer draft | `assurance-2026-10-05/evidence/live-cave-dialog-1440.png` | 2026-10-06 | gwl-laptop-provider-test |
+| Foreman live Cave screenshot - lower-left controls and separate capacity | `assurance-2026-10-05/evidence/live-cave-1440.png` | 2026-10-06 | gwl-laptop-provider-test |
 | ecgberht approved provider implementation plan v2 source - cumulative v1 baseline and bounded Foreman heavy contract | `IMPLEMENTATION-PLAN-v2.md` | 2026-10-05 | gwl-provider-status |
 | Approved baseline — ecgberht Provider integration implementation plan v1 — authorized build from accepted Refinement 2 | `IMPLEMENTATION-PLAN-v1.md` | 2026-10-04 | gwl-provider-status |
 | Current ecgberht Setup scope v6 — accepted layout, existing host sign-ins, direct login and real account usage | `SCOPE-v6.md` | 2026-10-04 | gwl-provider-status |

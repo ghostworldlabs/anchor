@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Recovering the approved provider assurance landing after the subscription limit; work is preserved on its branch.
+Repairing the missing Setup gear in the actual Anchor client; provider assurance and fresh-browser proof already landed.
 
 ## Why next
 
-Land the preserved reviewed work through its integration gate before John reboots and laptop verification resumes.
+John cannot see the upper-left gear; verify and repair his actual window before claiming laptop delivery.
 
 ## Human wait
 
