@@ -139,7 +139,10 @@
     const s = steps.get(id), outgoing = D.process.edges.filter(e => e.source === id), incoming = D.process.edges.filter(e => e.target === id);
     const swarm = s.swarm && s.swarm.enabled ? `<p><strong>Swarm:</strong> ${s.swarm.bounded ? `${s.swarm.count} roster seats; at most ${s.swarm.concurrency_cap} simultaneous logical roster jobs. ${esc(s.swarm.limitation)}` : esc(s.swarm.limitation)} ${esc(s.swarm.knob || '')}</p>` : '';
     const reconcileItems = (D.process.disagreements || []).filter(d => (d.step_ids || []).includes(id));
-    const reconcile = reconcileItems.length ? `<div class="reconcile-node"><h3>Instructions ≠ code on this node</h3>${reconcileItems.map(d => `<details class="difference"><summary>${esc(d.title)}</summary><p><strong>Instruction says:</strong> ${esc(d.instruction_says)}</p><p><strong>Code does:</strong> ${esc(d.code_does)}</p><p><strong>A run follows:</strong> ${esc(d.follows)}</p><div class="anchor-list">${anchorLink(d.instruction_anchor)}${anchorLink(d.code_anchor)}</div><p class="note"><a href="#differences">Open the full reconciliation record →</a></p></details>`).join('')}</div>` : '';
+    // Each disagreement's anchor pair sits OUTSIDE its collapsed record: the
+    // anchors are clickable as soon as the step record is expanded, without
+    // first opening the difference prose.
+    const reconcile = reconcileItems.length ? `<div class="reconcile-node"><h3>Instructions ≠ code on this node</h3>${reconcileItems.map(d => `<div class="anchor-list">${anchorLink(d.instruction_anchor)}${anchorLink(d.code_anchor)}</div><details class="difference"><summary>${esc(d.title)}</summary><p><strong>Instruction says:</strong> ${esc(d.instruction_says)}</p><p><strong>Code does:</strong> ${esc(d.code_does)}</p><p><strong>A run follows:</strong> ${esc(d.follows)}</p><p class="note"><a href="#differences">Open the full reconciliation record →</a></p></details>`).join('')}</div>` : '';
     const graphic = state.processView === 'diagram'
       ? flow.style + `<div class="diagram-scroll">${flow.renderFlowDiagram(D.process, {selected: id})}</div>`
       : groups.map(([title, ids]) => `<section class="process-group"><h3>${esc(title)}</h3><div class="flow">${ids.map(sid => {const n = steps.get(sid), next = D.process.edges.filter(e => e.source === sid); return `<a class="step ${n.kind}" href="#process/${sid}" data-step="${sid}" ${sid === id ? 'aria-current="step"' : ''}><span class="type">${esc(flow.TYPES[n.display_type] || n.display_type)}</span><strong>${esc(n.title)}</strong><span class="next">${next.length ? '→ ' + next.map(e => esc(steps.get(e.target).title)).join(' / ') : 'End with recorded reason'}</span></a>`;}).join('')}</div></section>`).join('');
@@ -199,12 +202,58 @@
     const current = route();
     if (current.view === 'process') revealSelected(current.id);
   }
+  // Contained documents (2026-10-07): the dialog iframe is SANDBOXED with no
+  // scripts (an opened document's own scripts never run) and no top
+  // navigation (it can never replace this live page with the standalone
+  // bundle preview). allow-same-origin exists solely so THIS page can reach
+  // into the frame: on every frame load, serveTopNav is attached to the
+  // framed document, and the registered documents' real `target="_top"`
+  // returns (`../index.html#library`, deep links like
+  // `../index.html#process/entry`) are served HERE — close the dialog and
+  // route the live page to the same hash. Any other top-navigation attempt
+  // stays contained; source controls are unchanged.
+  function containDocument(text, target) {
+    const doc = String(text);
+    const base = '<base href="' + esc(new URL(target, location.href).href) + '">';
+    const head = doc.match(/<head[^>]*>/i);
+    return head ? doc.replace(head[0], head[0] + base) : base + doc;
+  }
   function openSource(target, title) {
+    const frame = $('#resource-frame');
     $('#resource-title').textContent = title;
-    $('#resource-frame').src = target;
+    frame.removeAttribute('srcdoc');
+    frame.removeAttribute('src');
+    if (/^\/artifact\//.test(String(target))) {
+      fetch(target, {credentials: 'same-origin'})
+        .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(text => {frame.srcdoc = containDocument(text, target);})
+        .catch(() => {frame.src = target;});   // sandbox still blocks any escape
+    } else {
+      frame.src = target;
+    }
     $('#resource-new-tab').href = target;
     $('#resource-dialog').showModal();
   }
+  function serveTopNav(event) {
+    const a = event.target && event.target.closest ? event.target.closest('a[target="_top"]') : null;
+    if (!a) return;
+    event.preventDefault();
+    event.stopPropagation();
+    let url;
+    try {url = new URL(String(a.href || ''), location.href);} catch (err) {return;}
+    if (url.origin !== location.origin || !/\/index\.html$/.test(url.pathname)) return;
+    $('#resource-dialog').close();
+    const hash = url.hash || '#library';
+    if (location.hash !== hash) location.hash = hash;
+    render();
+    afterRender();
+  }
+  $('#resource-frame').addEventListener('load', () => {
+    // Same-origin srcdoc/src loads expose their document; an opaque (CSP-
+    // sandboxed) load yields null and simply stays contained.
+    const doc = $('#resource-frame').contentDocument;
+    if (doc) doc.addEventListener('click', serveTopNav, true);
+  });
   function dialTo(level) {
     let path = [...state.libPath];
     let currentLevel = layers.byId.get(path[path.length - 1]).ring;
@@ -270,7 +319,10 @@
   });
   document.addEventListener('change', event => {if (event.target.id === 'lens') {state.lens = event.target.value; render();}});
   $('#close-resource').addEventListener('click', () => $('#resource-dialog').close());
-  $('#resource-dialog').addEventListener('close', () => $('#resource-frame').removeAttribute('src'));
+  $('#resource-dialog').addEventListener('close', () => {
+    $('#resource-frame').removeAttribute('src');
+    $('#resource-frame').removeAttribute('srcdoc');
+  });
   window.addEventListener('hashchange', () => {render(); afterRender();});
   render();
   afterRender();

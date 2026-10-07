@@ -1,12 +1,18 @@
-/* Pure Foundry display seam. No filesystem, network, model, or campaign writes. */
+/* Pure Foundry display seam. No filesystem, network, model, or campaign writes.
+   Anchor amendment (2026-10-07): the persona contract matches Anchor's actual
+   steward set (anchor_settings.VALID_STEWARDS = ecgberht/aladdin/jarvis) — the
+   verified bundle hardcoded aladdin/jarvis and refused Anchor's own default,
+   Ecgberht. Everything else is unchanged; invalid settings still refuse and an
+   existing invalid primary never falls back. */
 (function (root) {
   'use strict';
   const families = new Set(['claude', 'gemini', 'grok', 'chatgpt']);
+  const stewards = ['aladdin', 'ecgberht', 'jarvis'];
   const safePath = path => typeof path === 'string' && /^[a-zA-Z0-9_./-]+$/.test(path)
     && !path.startsWith('/') && !path.split('/').includes('..');
   function settings(value) {
     if (!value || !families.has(value.coding_family) || !families.has(value.review_family)
-        || !families.has(value.default_cli) || !['aladdin', 'jarvis'].includes(value.steward_type)
+        || !families.has(value.default_cli) || !stewards.includes(value.steward_type)
         || value.model_policy?.mode !== 'latest_supported' || value.model_policy?.effort !== 'highest_supported'
         || !Number.isInteger(value.settings_revision) || value.settings_revision < 0) {
       throw new Error('Selected display settings are invalid; an invalid primary cannot fall back.');

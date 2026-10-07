@@ -169,3 +169,6 @@ test_tmp*/
 /rnd_registry.json.bak-*
 /settings.json.bak-*
 /steward-cockpit-state.json.bak-*
+
+# Walkthrough-gate screenshot/byte proof (tests/test_foundry_page_walkthrough.py)
+/.proof/

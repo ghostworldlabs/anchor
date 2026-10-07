@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 import foundry_page as page
@@ -383,6 +383,83 @@ def test_declared_symlink_to_outside_is_rejected(rig):
     assert page.skill_detail('steward-project')['libraryIssues']
 
 
+def captured_bundle(rig):
+    """A REAL-handoff-shaped source inventory: origin + contained snapshot +
+    SNAPSHOT-bound sha256 and NO freshness metadata — exactly the registered
+    researchPrime records (nothing manufactures frozen-example fields)."""
+    base = rig['content'] / 'researchprime'
+    snapshot = write(base / 'sources/skill.md', rig['instruction'].read_text(encoding='utf-8'))
+    _, doc = combined(rig)
+    doc['sources'][0] = dict(id='instructions', kind='instructions', origin=str(rig['instruction']),
+                             snapshot='sources/skill.md',
+                             sha256=hashlib.sha256(snapshot.read_bytes()).hexdigest())
+    write(base / 'maps.json', doc)
+    return base, doc, snapshot
+
+
+def source_viewer_path(href):
+    return Path(parse_qs(urlsplit(href).query)['path'][0]).resolve()
+
+
+def test_captured_snapshot_binding_survives_real_origin_drift(rig):
+    base, doc, snapshot = captured_bundle(rig)
+    detail = page.skill_detail('researchprime')
+    assert not detail['libraryIssues'] and not detail['processMap']['issues']
+    # The anchor binds to the CONTAINED declared snapshot — never the origin.
+    assert source_viewer_path(detail['processMap']['anchorLinks']['a1']['href']) == snapshot.resolve()
+    # A REAL origin drift: the live origin moves on; the captured file is valid.
+    rig['instruction'].write_text('---\nname: researchPrime\n---\n## Entry\nRewritten after capture.\n',
+                                  encoding='utf-8')
+    detail = page.skill_detail('researchprime')
+    assert not any('Source changed' in i for i in detail['processMap']['issues'])
+    assert not any('Invalid source range' in i for i in detail['processMap']['issues'])
+    # The served page shows the captured bytes, with accurate captured-source
+    # provenance and the origin listed SEPARATELY — never the drifted content.
+    markup = page.source_page('researchprime', str(snapshot), '7')
+    assert markup and 'captured-snapshot' in markup
+    assert str(rig['instruction']) in markup and doc['sources'][0]['sha256'] in markup
+    assert 'Rewritten after capture' not in markup
+
+
+def test_captured_snapshot_rejects_mismatch_traversal_and_undeclared(rig):
+    base, doc, snapshot = captured_bundle(rig)
+    # Corrupted snapshot: honest issue, never served.
+    snapshot.write_text('tampered\n', encoding='utf-8')
+    issues = page.skill_detail('researchprime')['processMap']['issues']
+    assert any('Captured snapshot hash mismatch' in i for i in issues)
+    assert page.source_page('researchprime', str(snapshot)) is None
+    # Traversal / absolute / dot-dir snapshot declarations fail closed.
+    outside = write(rig['root'] / 'outside.md', 'Captured example\n')
+    for bad in ('../outside.md', str(outside), 'sources/../../outside.md', '.hidden/snap.md'):
+        doc['sources'][0]['snapshot'] = bad
+        doc['sources'][0]['sha256'] = hashlib.sha256(outside.read_bytes()).hexdigest()
+        write(base / 'maps.json', doc)
+        issues = page.skill_detail('researchprime')['processMap']['issues']
+        assert any('Captured snapshot' in i for i in issues)
+        assert page.source_page('researchprime', str(outside)) is None
+    # A file under sources/ that NO inventory entry declares stays unreachable.
+    undeclared = write(base / 'sources/undeclared.md', 'PRIVATE')
+    assert page.source_page('researchprime', str(undeclared)) is None
+
+
+def test_captured_snapshot_resolves_when_origin_is_outside_all_roots(rig):
+    """The registered anchor-api shape: origin outside every discovery root,
+    snapshot contained — the declared capture resolves without broadening roots."""
+    base, doc, snapshot = captured_bundle(rig)
+    outside_origin = write(rig['root'] / 'Anchor-origin/foundry_api.py',
+                           snapshot.read_text(encoding='utf-8'))
+    doc['sources'][0]['origin'] = str(outside_origin)
+    write(base / 'maps.json', doc)
+    assert not page._allowed(outside_origin)
+    detail = page.skill_detail('researchprime')
+    assert not detail['libraryIssues'] and not detail['processMap']['issues']
+    assert source_viewer_path(detail['processMap']['anchorLinks']['a1']['href']) == snapshot.resolve()
+    markup = page.source_page('researchprime', str(snapshot), '1')
+    assert markup and str(outside_origin) in markup
+    # The out-of-roots origin itself is still never served.
+    assert page.source_page('researchprime', str(outside_origin)) is None
+
+
 @pytest.fixture
 def opening(rig, monkeypatch):
     import anchor_gui
@@ -503,8 +580,12 @@ def test_exact_inventory_and_resource_target_rejections(rig, opening):
 
 
 def rendered_doc(title, extra=''):
+    # The Back link is the REAL registered documents' markup (human-guide.html /
+    # purpose.html line 5): a `target="_top"` return to the standalone bundle
+    # index that must be served INSIDE the live page, never by replacing it.
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<style>body{font:15px system-ui}</style></head><body><div class="md">'
+            '<a target="_top" href="../index.html#library">← researchPrime Library</a>'
             '<h1>%s</h1><h2>When to use it</h2><p>A readable rendered document, not raw markup.</p>%s'
             '</div></body></html>' % (title, extra))
 
@@ -540,7 +621,9 @@ def refinement2(rig):
     write(base / 'resources/purpose.html', rendered_doc(
         'Original North Star',
         '<p class="locus"><strong>LOCKED</strong> — this North Star lives at '
-        '<code>researchPrime/SKILL.md · ## North Star</code> and is changed only by John.</p>'))
+        '<code>researchPrime/SKILL.md · ## North Star</code> and is changed only by John.</p>'
+        # The real purpose.html also deep-links the standalone process view.
+        '<a target="_top" href="../index.html#process/entry">A question arrives</a>'))
     write(base / 'resources/plan.html', rendered_doc('Reusable research plan'))
 
     def node(nid, title, parent, ring, rid, process_ids, material, total):
@@ -616,13 +699,20 @@ def refinement2(rig):
     return base
 
 
-def primary_settings(rig, **overrides):
+def primary_settings(**overrides):
     values = dict(default_cli='claude', coding_family='claude', review_family='gemini',
                   steward_type='aladdin',
                   model_policy={'mode': 'latest_supported', 'effort': 'highest_supported'},
                   settings_revision=5, updated_at='2026-10-07T00:00:00+00:00')
     values.update(overrides)
     return write(page.anchor_settings.settings_path(), values)
+
+
+def visible_height(box, viewport_height):
+    """How many pixels of a bounding box actually intersect the viewport."""
+    if not box:
+        return 0
+    return min(box['y'] + box['height'], viewport_height) - max(box['y'], 0)
 
 
 @pytest.fixture
@@ -637,7 +727,7 @@ def display_project(rig, monkeypatch):
 
 def test_refinement2_payload_primary_settings_hrefs_and_preserved_review(rig, display_project):
     refinement2(rig)
-    primary_settings(rig)
+    primary_settings()
     payload = page.display_payload('researchprime')
     assert payload is not None
     # The CURRENT primary settings resolve — the bundle's mirror snapshot stays
@@ -702,7 +792,7 @@ def test_refinement2_marker_required_old_display_keeps_serving(rig):
 def test_foundry_route_serves_refinement2_and_keeps_other_skills(rig, server, display_project):
     import re
     refinement2(rig)
-    primary_settings(rig)
+    primary_settings()
     with urlopen(server + '/foundry?skill=researchprime') as response:
         markup = response.read().decode('utf-8')
     assert 'FOUNDRY_SKILL_DISPLAY' in markup
@@ -711,8 +801,9 @@ def test_foundry_route_serves_refinement2_and_keeps_other_skills(rig, server, di
         with urlopen(server + '/static/foundry-display/' + asset) as served:
             assert served.status == 200 and served.read()
     assert 'accepted: false' in markup and 'closed: false' in markup
-    # The canonical adapter ships byte-identical, carrying the designed seams
-    # this integration mounts (settings resolution + allowlisted target routing).
+    # The canonical adapter ships with the designed seams this integration
+    # mounts (settings resolution + allowlisted target routing); its one Anchor
+    # amendment is the persona contract (anchor_settings.VALID_STEWARDS).
     with urlopen(server + '/static/foundry-display/adapter.js') as served:
         adapter = served.read().decode('utf-8')
     assert 'resolveDisplaySettings' in adapter and 'resolveTarget' in adapter
@@ -727,7 +818,7 @@ def test_foundry_route_serves_refinement2_and_keeps_other_skills(rig, server, di
 def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, server, display_project):
     playwright = pytest.importorskip('playwright.sync_api')
     refinement2(rig)
-    primary_settings(rig)
+    primary_settings()
     with playwright.sync_playwright() as p:
         browser = p.chromium.launch()
         try:
@@ -754,15 +845,15 @@ def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, se
                 tab.locator('.flow-diagram a.fd-node[data-step="review"]').click()
                 detail = tab.locator('#step-detail[data-step-id="review"]')
                 detail.wait_for()
-                box = tab.locator('.diagram-scroll').bounding_box()
-                assert box and box['y'] < height and box['y'] + box['height'] > 80
+                assert visible_height(tab.locator('.diagram-scroll').bounding_box(), height) >= 120
                 node_box = tab.locator('.flow-diagram a.fd-node.selected').bounding_box()
                 assert node_box and 0 <= node_box['x'] + node_box['width'] / 2 <= width
                 assert detail.get_attribute('open') is None     # expansion is explicit
                 detail.locator('> summary').click()
                 assert 'Instructions ≠ code on this node' in detail.inner_text()
-                box = tab.locator('.diagram-scroll').bounding_box()
-                assert box and box['y'] + box['height'] > 0     # expansion kept the drawing reachable
+                # ACTUAL viewport intersection after the explicit expansion —
+                # a readable band of the drawing, not merely box bottom > 0.
+                assert visible_height(tab.locator('.diagram-scroll').bounding_box(), height) >= 120
                 assert tab.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
                 # The embedded reconciliation record carries both anchors and
                 # what implementation a run follows.
@@ -808,13 +899,23 @@ def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, se
                 guide = tab.frame_locator('#resource-frame')
                 guide.get_by_role('heading', name='researchPrime — human guide', exact=True).wait_for()
                 assert guide.get_by_role('heading', name='When to use it', exact=True).is_visible()
-                tab.locator('#close-resource').click()
+                # The document's real `target="_top"` Back link is served on
+                # THIS live page: dialog closed, Library tab open — the host is
+                # never replaced by the standalone bundle preview.
+                guide.get_by_role('link', name='← researchPrime Library', exact=True).click()
+                tab.locator('#level-dial').wait_for()
+                assert not tab.locator('#resource-dialog').is_visible()
+                assert '/foundry?skill=researchprime' in tab.url
                 tab.locator('.head .actions').get_by_role('link', name='Original North Star', exact=True).click()
                 star = tab.frame_locator('#resource-frame')
                 star.get_by_role('heading', name='Original North Star', exact=True).wait_for()
                 star_text = star.locator('body').inner_text()
                 assert 'LOCKED' in star_text and 'changed only by John' in star_text
-                tab.locator('#close-resource').click()
+                # Its real `_top` deep link routes the LIVE process map.
+                star.get_by_role('link', name='A question arrives', exact=True).click()
+                tab.locator('.flow-diagram').wait_for()
+                assert not tab.locator('#resource-dialog').is_visible()
+                assert '/foundry?skill=researchprime' in tab.url
 
                 # Review record: cumulative grade-B feedback + open lifecycle.
                 tab.get_by_role('link', name='Review record', exact=True).click()
@@ -833,29 +934,311 @@ def test_refinement2_desktop_phone_diagram_dial_sources_guide_and_review(rig, se
             browser.close()
 
 
-def test_refinement2_live_primary_persona_and_invalid_primary_refusal(rig, server, display_project, monkeypatch):
+@pytest.mark.parametrize('persona,lamp_title', [
+    ('aladdin', 'Steward · the Lamp'),
+    ('jarvis', 'Steward · the Server'),
+    ('ecgberht', 'Steward · the Seal'),
+])
+def test_refinement2_every_valid_persona_mounts_dial_diagram_documents(
+        rig, server, display_project, monkeypatch, persona, lamp_title):
+    """The ACTUAL Anchor persona contract: every anchor_settings.VALID_STEWARDS
+    primary — including Ecgberht, the code default the bundle adapter refused —
+    mounts the dial, the diagram and the documents with its own persona names."""
     playwright = pytest.importorskip('playwright.sync_api')
     refinement2(rig)
-    primary_settings(rig, steward_type='jarvis')
+    primary_settings(steward_type=persona)
     monkeypatch.setattr(page.anchor_settings, 'steward_profile',
                         lambda: rig['profile'](page.anchor_settings.load_settings()))
+    assert persona in page.anchor_settings.VALID_STEWARDS
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            context = browser.new_context(viewport={'width': 1440, 'height': 1000})
+            tab = context.new_page()
+            errors = []
+            tab.on('pageerror', lambda e: errors.append(str(e)))
+            tab.goto(server + '/foundry?skill=researchprime')
+            tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
+            rail = tab.locator('#walkthrough')
+            rail.locator('.walk').first.wait_for()
+            # Persona names come from the CURRENT primary — never the bundle's
+            # qualified aladdin mirror snapshot, and never a refusal.
+            assert lamp_title in rail.inner_text()
+            # The walkthrough MOUNTS: the typed diagram...
+            tab.get_by_role('link', name='Process map', exact=True).click()
+            tab.locator('.flow-diagram').wait_for()
+            assert tab.locator('.flow-diagram a.fd-node').count() == 5
+            # ...the Library level dial...
+            tab.get_by_role('link', name='Library', exact=True).click()
+            tab.locator('#level-dial').wait_for()
+            # ...and the documents.
+            tab.locator('.head .actions').get_by_role('link', name='Human guide', exact=True).click()
+            guide = tab.frame_locator('#resource-frame')
+            guide.get_by_role('heading', name='researchPrime — human guide', exact=True).wait_for()
+            assert not errors
+            context.close()
+        finally:
+            browser.close()
+
+
+def test_refinement2_existing_invalid_primary_refuses_in_browser(rig, server, display_project):
+    playwright = pytest.importorskip('playwright.sync_api')
+    refinement2(rig)
+    # An EXISTING invalid primary refuses; it never falls back to a mirror.
+    write(page.anchor_settings.settings_path(), 'not valid settings {')
     with playwright.sync_playwright() as p:
         browser = p.chromium.launch()
         try:
             context = browser.new_context(viewport={'width': 1440, 'height': 1000})
             tab = context.new_page()
             tab.goto(server + '/foundry?skill=researchprime')
-            tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
-            rail = tab.locator('#walkthrough')
-            rail.locator('.walk').first.wait_for()
-            # Jarvis names came from the CURRENT primary — not the bundle's
-            # qualified aladdin mirror snapshot.
-            assert 'Steward · the Server' in rail.inner_text()
-            # An EXISTING invalid primary refuses; it never falls back.
-            write(page.anchor_settings.settings_path(), 'not valid settings {')
-            tab.reload()
             tab.get_by_role('heading', name='Walkthrough refused', exact=True).wait_for()
             assert 'never falls back' in tab.locator('#panel').inner_text()
             context.close()
         finally:
             browser.close()
+
+
+# ── The REAL registered handoff — read-only, through existing discovery ──────
+# The surrogate fixtures above stay for hermetic shape coverage; these tests
+# resolve the ACTUAL registered researchPrime bundle (42 steps / 32 resources /
+# differently-titled documents) through the real content-discovery roots,
+# strictly read-only, and skip honestly on a host without it. The source
+# bundle commit verified by its own 55-test gate: 1e4aef8b1231d0096abfcfdf4c1bbcb9d4bebc13.
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REAL_MAPS_REL = 'Foundry page and knowledge maps/researchprime/maps.json'
+SOURCE_BUNDLE_COMMIT = '1e4aef8b1231d0096abfcfdf4c1bbcb9d4bebc13'
+PROOF_DIR = REPO_ROOT / '.proof' / 'foundry-refinement2'
+DISPLAY_ASSETS = ('adapter.js', 'flow-diagram.js', 'layer-library.js',
+                  'display.css', 'skill-display.js')
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+@pytest.fixture
+def real_handoff(tmp_path, monkeypatch):
+    for var in ('FOUNDRY_TRIO_ROOT', 'FOUNDRY_STEWARD_ROOT', 'FOUNDRY_PAGE_CONTENT_ROOT'):
+        monkeypatch.delenv(var, raising=False)
+    root = Path(page.api.FOUNDRY_ROOT)
+    maps_path = root / REAL_MAPS_REL
+    if not maps_path.is_file():
+        pytest.skip('registered researchPrime handoff bundle not present on this host')
+    monkeypatch.setenv('ANCHOR_DATA_DIR', str(tmp_path / 'anchor-data'))
+    monkeypatch.setenv('TEMP', str(tmp_path))
+    monkeypatch.setenv('TMP', str(tmp_path))
+    monkeypatch.setenv('ANCHOR_PROACTIVE_SUMMARY', '0')
+    monkeypatch.delenv('ANCHOR_TOKEN', raising=False)
+    import anchor_gui
+    pid = 'real-foundry'
+    monkeypatch.setattr(anchor_gui._rnd, 'get_project',
+                        lambda p: {'id': pid, 'folder_path': str(root)} if p == pid else None)
+    monkeypatch.setattr(page, '_review_project_id', lambda: pid)
+    if page.find_skill('researchprime') is None:
+        pytest.skip('researchPrime is not discoverable through the real roots on this host')
+    data = json.loads(maps_path.read_text(encoding='utf-8-sig'))
+    return dict(root=root, maps_path=maps_path, data=data, pid=pid)
+
+
+@pytest.fixture
+def real_server(real_handoff):
+    import anchor_gui
+    srv = anchor_gui.make_server('127.0.0.1', 0)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{srv.server_address[1]}'
+    finally:
+        srv.shutdown(); srv.server_close(); thread.join(timeout=5)
+
+
+def test_real_registered_handoff_payload_binds_declared_snapshots(real_handoff):
+    data = real_handoff['data']
+    bundle = real_handoff['maps_path'].parent
+    sources_dir = (bundle / 'sources').resolve()
+    primary_settings(steward_type='ecgberht')
+    payload = page.display_payload('researchprime')
+    assert payload is not None
+    # The ACTUAL declared inventory — the registered handoff, not a surrogate.
+    assert len(payload['data']['process']['steps']) == len(data['process']['steps']) >= 40
+    assert len(payload['data']['resources']) == len(data['resources']) >= 30
+    assert ({str(r['id']) for r in payload['data']['resources']}
+            == {str(r['id']) for r in data['resources']})
+    # Every real source declares origin + contained snapshot + SNAPSHOT-bound
+    # sha256 with NO freshness field; nothing may manufacture frozen-example
+    # metadata to force the historical branch.
+    assert all(s.get('snapshot') and s.get('origin') and s.get('freshness') is None
+               for s in data['sources'])
+    # Every anchor link binds to the declared snapshot under sources/ — never
+    # the origin — so live-origin drift cannot flag a valid captured file.
+    anchors = payload['hrefs']['anchors']
+    assert set(anchors) == {str(a['id']) for a in data['anchors']}
+    for link in anchors.values():
+        assert link['href'] and link['problem'] is None
+        assert source_viewer_path(link['href']).parent == sources_dir
+    assert payload['issues'] == []
+    # The CURRENT primary (a valid Ecgberht — Anchor's default steward) is
+    # forwarded as the primary; the bundle snapshot stays a mirror.
+    assert payload['settings']['primary']['value']['steward_type'] == 'ecgberht'
+    assert payload['settings']['error'] is None
+    # Guide and North Star resolve to the REAL registered documents, whose
+    # actual titles differ from the old surrogate fixtures.
+    hrefs = payload['hrefs']['resources']
+    assert hrefs['human-guide']['href'].endswith('/resources/human-guide.html')
+    assert hrefs['purpose']['href'].endswith('/resources/purpose.html')
+    guide_doc = (bundle / 'resources/human-guide.html').read_text(encoding='utf-8')
+    purpose_doc = (bundle / 'resources/purpose.html').read_text(encoding='utf-8')
+    assert '<h1>Human guide</h1>' in guide_doc
+    assert '<h1>What researchPrime is for</h1>' in purpose_doc
+    # The documents' REAL Back links are `target="_top"` standalone-index
+    # returns — what the live page must serve in-surface (browser test below).
+    assert '<a target="_top" href="../index.html#library">' in guide_doc
+    # The anchor-api record: origin outside every discovery root; its declared
+    # contained snapshot still resolves, with captured provenance.
+    skill = page.find_skill('researchprime')
+    api_source = next(s for s in data['sources'] if s['id'] == 'anchor-api')
+    assert not page._allowed(Path(str(api_source['origin']).replace('\\', '/')))
+    target, provenance, error = page._declared_source(api_source, skill, bundle)
+    assert error is None and target == sources_dir / 'anchor-api.py'
+    assert provenance['freshness'] == 'captured-snapshot'
+    # The cumulative grade-B review record rides through unchanged.
+    assert payload['data']['review']['cumulative'][0]['grade'] == 'B'
+    assert payload['data']['lifecycle']['accepted'] is False
+
+
+def test_real_handoff_browser_walkthrough_with_bound_proof(real_handoff, real_server, monkeypatch):
+    """Real desktop/phone clicks over the REGISTERED handoff reach the level
+    dial, the typed diagram, a real disagreement's anchors and source text, the
+    actual guide and North Star (their real `_top` returns served in-surface),
+    and the cumulative grade-B record. Screenshots and served bytes are bound
+    to the exact handoff in .proof/foundry-refinement2/proof.json."""
+    playwright = pytest.importorskip('playwright.sync_api')
+    server = real_server
+    data = real_handoff['data']
+    bundle = real_handoff['maps_path'].parent
+    sources_dir = (bundle / 'sources').resolve()
+    primary_settings(steward_type='ecgberht')
+    steps = data['process']['steps']
+    disagreement = data['process']['disagreements'][0]
+    target_step = str(disagreement['step_ids'][0])
+    instruction_anchor = next(a for a in data['anchors']
+                              if a['id'] == disagreement['instruction_anchor'])
+    PROOF_DIR.mkdir(parents=True, exist_ok=True)
+    proof = {'handoff': {'file': REAL_MAPS_REL,
+                         'sha256': _sha256(real_handoff['maps_path'].read_bytes()),
+                         'source_bundle_commit': SOURCE_BUNDLE_COMMIT,
+                         'steps': len(steps), 'resources': len(data['resources']),
+                         'disagreement': disagreement['id']},
+             'served_assets': {}, 'documents': {}, 'screenshots': {},
+             'other_request_failures': []}
+    # The served display assets are byte-identical to the shipped files.
+    for asset in DISPLAY_ASSETS:
+        with urlopen(server + '/static/foundry-display/' + asset) as response:
+            served = response.read()
+        assert served == (REPO_ROOT / 'static/foundry-display' / asset).read_bytes()
+        proof['served_assets'][asset] = _sha256(served)
+    # The served guide/North Star ARE the registered documents' exact bytes.
+    payload = page.display_payload('researchprime')
+    for rid, rel in (('human-guide', 'resources/human-guide.html'),
+                     ('purpose', 'resources/purpose.html')):
+        with urlopen(server + payload['hrefs']['resources'][rid]['href']) as response:
+            served = response.read()
+        assert served == (bundle / rel).read_bytes()
+        proof['documents'][rel] = _sha256(served)
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            for width, height in [(1440, 1000), (390, 844)]:
+                context = browser.new_context(viewport={'width': width, 'height': height})
+                tab = context.new_page()
+                errors, failed, writes = [], [], []
+                tab.on('pageerror', lambda e: errors.append(str(e)))
+                tab.on('response', lambda r: failed.append(r.url) if r.status >= 400 else None)
+                tab.on('request', lambda r: writes.append(r.url) if r.method != 'GET' else None)
+
+                def shot(name):
+                    path = PROOF_DIR / ('%dx%d-%s.png' % (width, height, name))
+                    tab.screenshot(path=str(path))
+                    proof['screenshots'][path.name] = _sha256(path.read_bytes())
+
+                tab.goto(server + '/foundry?skill=researchprime')
+                tab.get_by_role('heading', name='researchPrime', exact=True).wait_for()
+
+                # The level dial over the real layered catalog.
+                tab.get_by_role('link', name='Library', exact=True).click()
+                tab.locator('#level-dial').wait_for()
+                shot('library-dial')
+
+                # The typed diagram draws EVERY real step; a real disagreement
+                # node expands explicitly and the drawing stays readably in
+                # the viewport (actual intersection, not box bottom > 0).
+                tab.get_by_role('link', name='Process map', exact=True).click()
+                tab.locator('.flow-diagram').wait_for()
+                assert tab.locator('.flow-diagram a.fd-node').count() == len(steps)
+                tab.locator('.flow-diagram a.fd-node[data-step="%s"]' % target_step).click()
+                detail = tab.locator('#step-detail[data-step-id="%s"]' % target_step)
+                detail.wait_for()
+                assert detail.get_attribute('open') is None
+                detail.locator('> summary').click()
+                assert 'Instructions ≠ code on this node' in detail.inner_text()
+                assert visible_height(tab.locator('.diagram-scroll').bounding_box(), height) >= 120
+                shot('process-expanded')
+
+                # The real disagreement's anchors open the REAL captured
+                # source text through the hash-checked viewer. (A node carries
+                # one anchor pair per documented disagreement on it.)
+                on_node = sum(1 for d in data['process']['disagreements']
+                              if target_step in (d.get('step_ids') or []))
+                assert (detail.locator('.reconcile-node .anchor-list a[data-source]').count()
+                        == 2 * on_node)
+                detail.locator('.reconcile-node .anchor-list a[data-source]').first.click()
+                frame = tab.frame_locator('#resource-frame')
+                frame.locator('.hit').wait_for()
+                viewer_src = tab.locator('#resource-frame').get_attribute('src')
+                assert '/foundry/source?' in viewer_src
+                assert source_viewer_path(viewer_src).parent == sources_dir
+                assert (instruction_anchor['quote'].splitlines()[0].strip()
+                        in frame.locator('pre').inner_text())
+                shot('disagreement-source')
+                tab.locator('#close-resource').click()
+
+                # The ACTUAL guide document; its REAL `target="_top"` Back link
+                # is served on the live page — dialog closed, Library open, the
+                # host never replaced by the standalone bundle preview.
+                tab.locator('.head .actions').get_by_role('link', name='Human guide', exact=True).click()
+                frame.get_by_role('heading', name='Human guide', exact=True).wait_for()
+                shot('human-guide')
+                frame.get_by_role('link', name='← researchPrime Library', exact=True).click()
+                tab.locator('#level-dial').wait_for()
+                assert not tab.locator('#resource-dialog').is_visible()
+                assert '/foundry?skill=researchprime' in tab.url
+
+                # The ACTUAL North Star with its LOCKED authority text; its
+                # real `_top` deep link routes the LIVE process map.
+                tab.locator('.head .actions').get_by_role('link', name='Original North Star', exact=True).click()
+                frame.get_by_role('heading', name='What researchPrime is for', exact=True).wait_for()
+                assert 'LOCKED' in frame.locator('body').inner_text()
+                shot('north-star')
+                frame.get_by_role('link', name='A question arrives', exact=True).click()
+                tab.locator('.flow-diagram').wait_for()
+                assert not tab.locator('#resource-dialog').is_visible()
+                assert '/foundry?skill=researchprime' in tab.url
+
+                # The cumulative grade-B review record.
+                tab.get_by_role('link', name='Review record', exact=True).click()
+                review_text = tab.locator('#panel').inner_text()
+                assert 'Grade: B' in review_text
+                assert 'accepted: false' in review_text
+                shot('review-record')
+
+                assert not errors and not writes
+                blocking = [u for u in failed if any(k in u for k in (
+                    '/static/foundry-display/', '/foundry/source', '/artifact/', '/foundry?skill='))]
+                assert not blocking
+                proof['other_request_failures'].extend(sorted(set(failed)))
+                context.close()
+        finally:
+            browser.close()
+    write(PROOF_DIR / 'proof.json', json.dumps(proof, indent=2))

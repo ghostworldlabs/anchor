@@ -247,27 +247,49 @@ def _trusted_origin(raw, skill):
     return None
 
 
+def _snapshot_target(source, base):
+    """This entry's contained, hash-verified snapshot file: (path, error-suffix)."""
+    snapshot = source.get('snapshot')
+    digest = source.get('sha256')
+    if not isinstance(snapshot, str) or not re.fullmatch(r'[a-f0-9]{64}', str(digest or '')):
+        return None, 'snapshot lacks its declared path or hash'
+    raw = Path(snapshot.replace('\\', '/'))
+    target = base / raw
+    if (raw.is_absolute() or '..' in raw.parts or any(p.startswith('.') for p in raw.parts)
+            or not _inside(target, base / 'sources') or not _allowed(target)
+            or not target.is_file() or target.suffix.lower() not in TEXT_TYPES):
+        return None, 'snapshot missing or outside its bundle sources'
+    if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+        return None, 'snapshot hash mismatch'
+    return target.resolve(), None
+
+
 def _declared_source(source, skill, base):
-    """Resolve only this inventory entry, with frozen examples hash-bound."""
+    """Resolve only this inventory entry, with declared snapshots hash-bound."""
     provenance = {k: source.get(k) for k in
                   ('origin', 'freshness', 'captured_at', 'captured_from', 'applicability', 'sha256')}
     if source.get('freshness') == 'frozen-example':
-        snapshot = source.get('snapshot')
-        digest = source.get('sha256')
-        if (not isinstance(snapshot, str) or not re.fullmatch(r'[a-f0-9]{64}', str(digest or ''))
-                or not all(source.get(k) for k in ('captured_at', 'captured_from', 'applicability'))):
+        if not all(source.get(k) for k in ('captured_at', 'captured_from', 'applicability')):
             return None, provenance, 'Historical source lacks its capture identity or qualification'
-        raw = Path(snapshot.replace('\\', '/'))
-        target = base / raw
-        if (raw.is_absolute() or '..' in raw.parts or any(p.startswith('.') for p in raw.parts)
-                or not _inside(target, base / 'sources') or not _allowed(target)
-                or not target.is_file() or target.suffix.lower() not in TEXT_TYPES):
-            return None, provenance, 'Historical snapshot missing or outside its bundle sources'
-        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-            return None, provenance, 'Historical snapshot hash mismatch'
-        return target.resolve(), provenance, None
+        target, error = _snapshot_target(source, base)
+        if error:
+            return None, provenance, 'Historical ' + error
+        return target, provenance, None
     if source.get('freshness') not in (None, 'current-source'):
         return None, provenance, 'Unsupported source freshness'
+    if source.get('freshness') is None and source.get('snapshot') is not None:
+        # Real handoffs declare origin + a contained captured snapshot whose
+        # sha256 and line anchors bind to the SNAPSHOT (the bundle's own
+        # validate_maps hashes source['snapshot']). The snapshot is the served
+        # binding; the origin is provenance shown separately — origin drift
+        # never invalidates the valid captured file, and an origin outside the
+        # discovery roots (e.g. anchor-api) still resolves through its snapshot.
+        target, error = _snapshot_target(source, base)
+        if error:
+            return None, provenance, 'Captured ' + error
+        provenance = {**provenance, 'freshness': 'captured-snapshot',
+                      'captured_from': provenance.get('captured_from') or source.get('origin')}
+        return target, provenance, None
     target = (_path(source.get('origin'), Path(skill['source']), base)
               or _trusted_origin(source.get('origin'), skill))
     return target, provenance, None if target else 'Missing or outside the declared source inventory'
@@ -654,7 +676,7 @@ def source_page(skill_id, requested, anchor=''):
         text = payload.decode('utf-8-sig')
     except (OSError, UnicodeError):
         return None
-    if (provenance.get('freshness') == 'frozen-example' and
+    if (provenance.get('freshness') in ('frozen-example', 'captured-snapshot') and
             hashlib.sha256(payload).hexdigest() != provenance.get('sha256')):
         return None
     lines = text.splitlines()
@@ -662,7 +684,16 @@ def source_page(skill_id, requested, anchor=''):
            next((i for i, line in enumerate(lines, 1) if anchor and anchor in line), 0))
     esc = html.escape
     provenance_html = ''
-    if provenance.get('freshness'):
+    if provenance.get('freshness') == 'captured-snapshot':
+        # The declared, hash-verified captured file is what is shown; the live
+        # origin is accurate separate provenance, never the served binding.
+        provenance_html = ('<aside class="source-provenance" data-source-freshness="captured-snapshot">'
+                           '<strong>Captured source snapshot — the declared, hash-verified binding</strong>'
+                           '<p class="path">Origin (shown separately; may have moved on): %s</p>'
+                           '<p class="path">Capture SHA-256: %s</p></aside>') % (
+                               esc(str(provenance.get('captured_from') or provenance.get('origin') or '')),
+                               esc(str(provenance.get('sha256') or '')))
+    elif provenance.get('freshness'):
         provenance_html = ('<aside class="source-provenance" data-source-freshness="%s">'
                            '<strong>%s</strong><p>Captured: %s</p><p class="path">Captured from: %s</p>'
                            '<p>%s</p><p class="path">Capture SHA-256: %s</p></aside>') % tuple(esc(str(v or '')) for v in (
@@ -696,8 +727,11 @@ def icon_file(skill_id):
 # ── researchPrime Refinement 2 — the ported foundry-skill-display page ────────
 # The verified handoff (the researchprime/ + shared/ bundle in the "Foundry page
 # and knowledge maps" effort) ships canonical, pure display components. Anchor
-# vendors them byte-identical under static/foundry-display/ and serves its own
-# page shell: raw maps.json for the adapter, resource/anchor hrefs resolved
+# vendors them under static/foundry-display/ — flow-diagram.js, layer-library.js
+# and display.css byte-identical; adapter.js carries ONE Anchor amendment (its
+# persona contract matches anchor_settings.VALID_STEWARDS, so a valid Ecgberht
+# primary mounts instead of refusing) — and serves its own page shell:
+# raw maps.json for the adapter, resource/anchor hrefs resolved
 # through the EXISTING /artifact + /foundry/source routes (never an arbitrary
 # filesystem path), the CURRENT primary settings (an existing invalid primary
 # refuses — it never falls back), and Anchor-owned walkthrough-rail identity.
@@ -886,7 +920,12 @@ def display_page(skill_id):
 </div>
 <dialog id="resource-dialog" aria-label="Library resource">
   <div class="drawer-head"><strong id="resource-title">Library resource</strong><a id="resource-new-tab" target="_blank" rel="noopener">Open separately &#8599;</a><button id="close-resource" aria-label="Close resource">Close &#215;</button></div>
-  <iframe id="resource-frame" title="Actual library resource"></iframe>
+  <!-- Sandboxed (no scripts, no top navigation): a document's own scripts
+       never run and it can never replace the live Foundry page.
+       allow-same-origin only empowers the HOST page, which intercepts the
+       document's real target="_top" Back-to-Library returns and serves them
+       in-surface (serveTopNav in skill-display.js). -->
+  <iframe id="resource-frame" title="Actual library resource" sandbox="allow-same-origin"></iframe>
 </dialog>
 </body>
 </html>''' % {'title': esc(skill['name']), 'assets': DISPLAY_ASSET_ROUTE,
