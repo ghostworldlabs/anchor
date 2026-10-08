@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-08",
   "phase": "building",
-  "active_effort": "Focused repair landed; finishing Grok sign-in review remainder and account-binding gate discrepancy.",
+  "active_effort": "Retrying the same login/account-binding repair after correcting a launch-only checkout reference.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Resolve the saved sign-in fix and account-binding discrepancy before activation.",
-  "why_next": "The existing plan covers this remainder; provisional recovery duration is 30-60 minutes after launch.",
+  "next_recommended": "Finish the retained login finding and account-binding checks before activation.",
+  "why_next": "Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -1046,6 +1046,36 @@
       "active_effort": "Focused repair landed; finishing Grok sign-in review remainder and account-binding gate discrepancy.",
       "human_wait": "",
       "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-08",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "The existing plan covers this remainder; provisional recovery duration is 30-60 minutes after launch.",
+      "horizon_source_seq": 101,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-08",
+      "source": "verb_update",
+      "phase": "building",
+      "wait_ref": "none",
+      "next_recommended": "Finish the retained login finding and account-binding checks before activation.",
+      "why_next": "Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Retrying the same login/account-binding repair after correcting a launch-only checkout reference.",
+      "human_wait": "",
+      "current_step_id": "gwl-access"
     }
   ],
   "receipts": [
@@ -1405,6 +1435,16 @@
       "path": "journal/0030-provider-repair-proceeded-on-silence.md",
       "entry_id": "0030-provider-repair-proceeded-on-silence",
       "summary": "Provider repair proceeds under the reversible decision window"
+    },
+    {
+      "at": "2026-10-08T02:04:24Z",
+      "source": "engine",
+      "step_id": "gwl-access",
+      "session_id": "01a11287-5787-7532-af96-84f668e596cb",
+      "kind": "journal_update",
+      "path": "journal/0031-focused-repair-landing-and-gate-discrepancy.md",
+      "entry_id": "0031-focused-repair-landing-and-gate-discrepancy",
+      "summary": "Focused repair landed; sign-in remainder and root gate discrepancy"
     }
   ],
   "horizon_source_seq": null,

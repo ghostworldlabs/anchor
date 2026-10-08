@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Focused repair landed; finishing Grok sign-in review remainder and account-binding gate discrepancy.
+Retrying the same login/account-binding repair after correcting a launch-only checkout reference.
 
 ## Why next
 
-Worker tests passed; final reviewers agree on one remaining issue and root tests exposed three account-binding failures.
+Dirty-checkout guard stopped before edits or tests; preserve unrelated files and use the same worktree input.
 
 ## Human wait
 
