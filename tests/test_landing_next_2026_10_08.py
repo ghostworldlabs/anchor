@@ -329,3 +329,22 @@ def test_a_chatgpt_coder_is_not_given_the_running_anchors_code(tmp_path, monkeyp
 def test_declared_outputs_are_normalized_and_one_the_check_made_lands(tmp_path, monkeypatch):
     assert code_jobs.declared_outputs(["./out//report.pdf", "out/report.pdf"]) == (["out/report.pdf"], None)
     assert code_jobs.declared_outputs(["out/../../x"])[0] is None
+
+
+
+# ---------- ChatGPT review round 3 ----------
+
+def test_a_declared_output_is_validated_after_normalizing():
+    for bad in ("roadmap.json/.", "./strip.json", "x/../roadmap.json", ".ecgberht/./state.json"):
+        assert code_jobs.declared_outputs([bad])[0] is None, bad
+
+
+def test_every_coder_launch_on_the_running_anchors_repository_is_claudes(monkeypatch, served):
+    from steward_cockpit import steward_engine as se
+    monkeypatch.delenv("ANCHOR_UNCONFINED_CODERS", raising=False)
+    assert se._unconfined_ok({"repo": str(served)}) is False
+    assert se._unconfined_ok({"repo": ""}) is False, "unknown counts as the running Anchor's"
+    monkeypatch.setenv("ANCHOR_UNCONFINED_CODERS", "1")
+    assert se._unconfined_ok({"repo": str(served)}) is True
+    src = (ROOT / "steward_cockpit" / "steward_engine.py").read_text(encoding="utf-8")
+    assert 'if self.code_job is not None and self.cli != "claude" and not _unconfined_ok(self.code_job):' in src

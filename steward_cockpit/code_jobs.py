@@ -573,16 +573,16 @@ def declared_outputs(outputs):
             continue
         if p.startswith("/") or re.match(r"^[A-Za-z]:", p) or ".." in p.split("/") or "*" in p or "?" in p:
             return None, "a declared output is a plain path inside the repository: %s" % p
+        import posixpath
+        p = posixpath.normpath(p)          # normalized FIRST, then every exclusion applies to this exact path (ChatGPT r3)
+        if p in (".", "") or p.startswith("../"):
+            return None, "a declared output is a plain path inside the repository: %s" % raw
         try:
             import git_safety as _gs
             if _gs.is_runtime_path(p) or never_lands(p) or _RECORDS.search(p):
                 return None, "a declared output may not be a runtime record or foreman.config.json: %s" % p
         except Exception:
             return None, "the declared outputs could not be checked"
-        import posixpath
-        p = posixpath.normpath(p)
-        if p in (".", "") or p.startswith("../"):
-            return None, "a declared output is a plain path inside the repository: %s" % raw
         if p not in out:
             out.append(p)
     if len(out) > 40:

@@ -729,17 +729,27 @@ def fence_settings(shell=False, root=""):
         matchers.append("Write|Edit|MultiEdit|NotebookEdit")
         if not shell:
             matchers.append("Bash|PowerShell")        # a coder's shell never names the running Anchor or climbs out
-        env["ANCHOR_FENCE_ROOT"] = str(root)
-        try:
-            import anchor_next
-            env["ANCHOR_FENCE_SERVED"] = str(anchor_next.served_root())
-        except Exception:
-            env["ANCHOR_FENCE_SERVED"] = str(_SERVED)
+        env["ANCHOR_FENCE_ROOT"] = str(root)    # the guard finds the running Anchor itself (never handed to the coder)
     if not matchers:
         return "", {}
     command = '"%s" "%s"' % (_sys.executable.replace("\\", "/"), str(FENCE_GUARD).replace("\\", "/"))
     hooks = [{"matcher": m, "hooks": [{"type": "command", "command": command, "timeout": 30}]} for m in matchers]
     return json.dumps({"hooks": {"PreToolUse": hooks}}), env
+
+
+def _unconfined_ok(code_job):
+    """May a coder with no boundary under the service (ChatGPT, Grok, Gemini) work on this job's repository? Not on
+    the running Anchor's (unless ANCHOR_UNCONFINED_CODERS=1, John's choice); unknown counts as the running Anchor's."""
+    if os.environ.get("ANCHOR_UNCONFINED_CODERS") == "1":
+        return True
+    repo = str((code_job or {}).get("repo") or "")
+    if not repo:
+        return False
+    try:
+        import anchor_next
+        return not anchor_next.is_served_repo(repo)
+    except Exception:
+        return False
 
 
 def _in_served(folder):
@@ -1589,9 +1599,15 @@ class Engine:
             read_only = in_served and self.cli in ("chatgpt", "grok", "gemini") and SERVED_READ_ONLY
             if read_only:
                 persona += SERVED_READ_ONLY_NOTE
+            if self.code_job is not None and self.cli != "claude" and not _unconfined_ok(self.code_job):
+                # W1a (ChatGPT r3): one confinement decision at EVERY launch - a fallback or a resume may not hand the
+                # running Anchor's code to a provider with no boundary under the service
+                self._emit({"t": "sys", "text": "the %s coder cannot be confined to its worktree under the service; "
+                            "a change to Anchor's own code uses a Claude coder - not started" % self.cli})
+                return False, "%s coder refused for the running Anchor's repository" % self.cli
             if self.cli in ("chatgpt", "grok", "gemini"):
                 import sys
-                bridge = {"chatgpt": "codex_turn_bridge.py", "grok": "grok_turn_bridge.py",
+                bridge ={"chatgpt": "codex_turn_bridge.py", "grok": "grok_turn_bridge.py",
                           "gemini": "gemini_turn_bridge.py"}[self.cli]
                 cmd = [sys.executable, str(HERE / bridge),
                        "--target", self.dir, "--model", selection["model"],

@@ -86,7 +86,7 @@ def inside(path, root):
 
 
 def served_spellings():
-    served = os.environ.get("ANCHOR_FENCE_SERVED") or "C:/dev/Anchor"
+    served = os.environ.get("ANCHOR_FENCE_SERVED") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     s = served.replace("\\", "/").rstrip("/").lower()
     out = {s}
     if len(s) > 2 and s[1] == ":":
