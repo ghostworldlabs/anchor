@@ -189,3 +189,52 @@ def test_the_restart_script_checks_before_it_stops_and_activates_only_a_stopped_
              ps.index('"anchor_next.py" activate'), ps.index("& $Nssm start anchor")]
     assert order == sorted(order)
     assert "RESTART STOPPED BEFORE ANY CHANGE" in ps and "reset --hard" not in ps
+
+
+# ---------- ChatGPT review round 1 ----------
+
+def test_the_running_checkout_is_the_main_worktree_wherever_this_is_imported_from(monkeypatch):
+    monkeypatch.delenv("ANCHOR_SERVED_ROOT", raising=False)
+    main = subprocess.run(["git", "-C", str(ROOT), "worktree", "list", "--porcelain"], capture_output=True, text=True).stdout.splitlines()[0][len("worktree "):]
+    assert anchor_next._norm(anchor_next.served_root()) == anchor_next._norm(main)
+    assert not anchor_next.is_served_checkout(str(ROOT)) or anchor_next._norm(ROOT) == anchor_next._norm(main)
+
+
+def test_an_ignored_local_file_or_a_folder_in_the_way_blocks_the_activation(tmp_path, monkeypatch, served):
+    (served / ".gitignore").write_text("local.cfg\n", encoding="utf-8")
+    _g(served, "add", ".gitignore")
+    _g(served, "commit", "-qm", "ignore")
+    ip, _ = anchor_next.ensure_integration(served)
+    (Path(ip) / "local.cfg").write_text("shipped\n", encoding="utf-8")
+    (Path(ip) / "assets").write_text("a file\n", encoding="utf-8")
+    _g(ip, "add", "-f", "local.cfg", "assets")
+    _g(ip, "commit", "-qm", "adds a tracked local.cfg and a file named assets")
+    (served / "local.cfg").write_text("John's own settings\n", encoding="utf-8")       # ignored, local
+    (served / "assets").mkdir()
+    (served / "assets" / "mine.txt").write_text("untracked\n", encoding="utf-8")      # a folder where a file comes
+    pre = anchor_next.check(served)
+    assert pre["ok"] is False and set(pre["blockers"]) == {"local.cfg", "assets"}, pre
+    r = anchor_next.activate(served)
+    assert r["ok"] is False and (served / "local.cfg").read_text(encoding="utf-8") == "John's own settings\n"
+
+
+def test_a_refused_fast_forward_is_restored_and_verified(tmp_path, monkeypatch, served):
+    job = _run_job(tmp_path, monkeypatch, served, {"static/page.js": "var build = 'two';\n"})
+    assert job["landed"] is True, job.get("land_note")
+    head = _g(served, "rev-parse", "HEAD")
+    gitdir = Path(_g(served, "rev-parse", "--absolute-git-dir"))
+    lock = gitdir / "refs" / "heads" / "master.lock"
+    lock.write_text("held\n", encoding="utf-8")                  # git checks out, then cannot move the branch
+    try:
+        r = anchor_next.activate(served)
+    finally:
+        lock.unlink()
+    assert r["ok"] is False and r["unverified"] == [] and "restored and verified" in r["why"], r
+    assert _g(served, "rev-parse", "HEAD") == head
+    assert (served / "static" / "page.js").read_text(encoding="utf-8") == "var build = 'one';\n"
+    assert _g(served, "status", "--porcelain") == ""
+
+
+def test_a_kept_jobs_documents_are_one_announcement():
+    src = (ROOT / "steward_cockpit" / "code_jobs.py").read_text(encoding="utf-8")
+    assert 'notify=False)' in src and '_se.absorb_receipts(cdir, "Code job %s kept (not landed): " % job["id"])' in src
