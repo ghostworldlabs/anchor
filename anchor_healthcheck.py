@@ -6192,19 +6192,68 @@ RUN_ID = ""            # this run's identity: its start time
 SERVICE_BOOT = ""      # the running service instance this run probed (its start time) - a pass is bound to it
 
 
+_CARRIED = re.compile(r"^(?:- )?\[(HTTP endpoints|the running service: [^\]]*)\]\s*(.*)$")
+
+
+def _issue_paths_in(lines):
+    """The GET paths named by the two components that ask REAL routes - "[HTTP endpoints]" and "[the running service:
+    ...]" - never a walk's label such as "GET /summary" (Fable final review: a label is no route, and carrying it would
+    keep the banner red forever). A path ends where its sentence does ("GET /api/status." is /api/status)."""
+    out = set()
+    for ln in lines:
+        m = _CARRIED.match(str(ln).strip())
+        if not m:
+            continue
+        seg = m.group(1) + " " + m.group(2)
+        for p in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", seg):
+            p = p.rstrip(".,;:!?)")
+            if p and p != "/" * len(p) and not p.startswith("/api/rnd/term"):
+                out.add(p)
+        if re.search(r"GET /(?:[\s.,;:\]]|$)", seg):
+            out.add("/")
+    return sorted(out)
+
+
 def _previous_issue_paths():
-    """The GET paths the newest dated report's issues name (what failed last time is asked of the running service)."""
+    """What failed is asked again: the GET paths in the newest dated report's Issues, AND - while a verified fix waits
+    to be settled - the ones the candidate answered (ChatGPT final review: a newer report must never drop them)."""
+    lines = []
     try:
         rd = REPORTS_DIR
         dated = sorted((p for p in rd.glob("*.md") if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", p.name)), reverse=True)
         body = dated[0].read_text(encoding="utf-8", errors="replace") if dated else ""
+        m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)
+        lines += (m.group(1) if m else "").splitlines()
+        cand = json.loads((rd / "candidate.json").read_text(encoding="utf-8")) if (rd / "candidate.json").is_file() else {}
+        if isinstance(cand, dict) and not cand.get("settled"):
+            lines += list((cand.get("answers") or {}).get("issues") or [])
     except Exception:
-        return []
-    m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)     # the issues only, every target
-    issues = m.group(1) if m else ""
-    # a path ends where the sentence does: "GET /api/status." is /api/status (the end-to-end proof caught the full stop)
-    found = (p.rstrip(".,;:!?)") for p in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", issues))
-    return sorted(set(p for p in found if p and p != "/" * len(p) and not p.startswith("/api/rnd/term")) | ({"/"} if re.search(r"GET /(?:[\s.,;:]|$)", issues) else set()))
+        pass
+    try:     # a candidate check is handed the issues it answers (health_state.check_candidate)
+        lines += list(json.loads(os.environ.get("ANCHOR_HEALTH_AFFECTED") or "[]"))
+    except ValueError:
+        pass
+    return _issue_paths_in(lines)
+
+
+def check_affected_on_candidate(report: Report):
+    """ChatGPT final review: a candidate's pass must REPLAY the failures it claims to answer - every affected GET,
+    asked of the candidate's own private server with its own credentials, 2xx/3xx only."""
+    if TARGET != "candidate":
+        return
+    import urllib.request
+    tok = (os.environ.get("ANCHOR_TOKEN") or "").strip()
+    for path in _previous_issue_paths():
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (TEST_PORT, path),
+                                     headers=({"Authorization": "Bearer " + tok} if tok else {}))
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                code = r.getcode()
+        except urllib.error.HTTPError as e:
+            code = e.code
+        except Exception as e:
+            code = type(e).__name__
+        report.check("the candidate answers GET %s" % path, isinstance(code, int) and 200 <= code < 400, "answered %s" % code)
 
 
 def check_running_service(report: Report):
@@ -7092,6 +7141,7 @@ def main():
 
         server_proc = check_server_and_endpoints(report)
         check_running_service(report)          # W3: a running report's pass needs the RUNNING service too
+        check_affected_on_candidate(report)    # W3: a candidate's pass replays the failures it answers
         check_route_table_walk(report, server_proc)
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)

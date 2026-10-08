@@ -684,7 +684,7 @@ STEWARD_CONVERSATION_EFFORT = (os.environ.get("ANCHOR_STEWARD_EFFORT") or "high"
 STEWARD_FENCE = os.environ.get("ANCHOR_STEWARD_FENCE", "1") == "1"
 FENCE_ALLOWED_TOOLS = (
     "Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "TodoWrite", "Task", "Skill",
-    "Edit(./**)", "NotebookEdit(./**)",
+    "Edit(./**)",   # Edit rules cover every file tool (NotebookEdit(...) made Claude warn on each launch)
     "Bash(python C:/dev/Anchor/tools/steward_code_job.py *)",
     "Bash(python C:/dev/Anchor/tools/steward_skill.py *)",
     "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
@@ -694,8 +694,8 @@ FENCE_NOTE = (
     "hand-off tools and read-only git. Any change outside this folder is a code job (the tool above). A Foundry skill "
     "(Gandalf, researchPrime, Crucible, Foreman, ...) runs as a SKILL JOB the server starts outside your fence: "
     "`python C:/dev/Anchor/tools/steward_skill.py start --label \"<what it is for>\" -- node <the skill's run script> "
-    "[args]` - it wakes you with the result and its log. Say in one line what you sent off; never try to work around "
-    "the fence. "
+    "[args]` - it wakes you with the result and its log. Put a long brief, or one with quotes, $ or backslashes, in a "
+    "file in your folder and pass --brief-file. Say in one line what you sent off; never try to work around the fence. "
 )
 
 

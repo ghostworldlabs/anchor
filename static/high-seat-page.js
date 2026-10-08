@@ -348,7 +348,8 @@
     fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        var f = $('#folders'); if (!(f && j && j.html) || f.contains(document.activeElement) || $('.tile.open', f)) return;
+        var f = $('#folders'); if (!(f && j && j.html)) return;
+        if (f.contains(document.activeElement) || $('.tile.open', f)) { placeSkipped = true; return; }   // placed when he leaves it
         // the folders he opened stay open (ChatGPT W4 r4), known by their head's words
         var opened = $$('.rnd-folder:not(.rnd-collapsed)', f).map(function (d) { return d.getAttribute('data-group'); });
         f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f);

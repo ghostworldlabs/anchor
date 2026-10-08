@@ -419,7 +419,7 @@ def test_a_run_without_the_services_token_never_passes_while_issues_are_open(tmp
         monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
         monkeypatch.setattr(hc, "RUN_REVISION", "abc1234def")
         monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
-        (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [HTTP endpoints] GET /api/status: 500\n- [x] GET /a GET /b GET /c GET /d GET /e GET /f GET /g GET /h GET /i\n", encoding="utf-8")
+        (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [HTTP endpoints] GET /api/status: 500\n- [HTTP endpoints] failures: GET /a GET /b GET /c GET /d GET /e GET /f GET /g GET /h GET /i\n", encoding="utf-8")
         assert len(hc._previous_issue_paths()) == 10, "every affected target, no cap"
         monkeypatch.setattr(hc, "_TOKEN_MINTED", True)       # the daily task: the throwaway's token is never used live
         r = hc.Report()
@@ -486,8 +486,8 @@ def test_an_issue_path_ends_where_the_sentence_does(tmp_path, monkeypatch):
     """Caught by the end-to-end proof: 'GET /api/status.' was asked as /api/status. (a 404) and the banner stayed."""
     import anchor_healthcheck as hc
     monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
-    (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [svc] GET /api/status. answered 500\n"
-                                            "- [x] failures: GET /api/status: HTTP Error 500, GET /high-seat?x=1.\n", encoding="utf-8")
+    (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [the running service: GET /api/status.] answered 500\n"
+                                            "- [HTTP endpoints] failures: GET /api/status: HTTP Error 500, GET /high-seat?x=1.\n", encoding="utf-8")
     assert hc._previous_issue_paths() == ["/api/status", "/high-seat?x=1"]
 
 
@@ -508,3 +508,58 @@ def test_a_green_from_an_earlier_instance_keeps_the_banner_while_a_live_fix_is_r
     assert hs.banner() is None and hs.read_candidate().get("settled")
     monkeypatch.setenv("ANCHOR_STARTED_AT", "3000.0")                        # a later restart: settled stays settled
     assert hs.banner() is None and not hs.recheck_needed()
+
+
+
+# ---------- the final reviews (Fable, ChatGPT) ----------
+
+def test_a_walks_label_is_never_carried_as_a_route(tmp_path, monkeypatch):
+    """Fable: '[R&D v2 surface] GET /summary: timed out' names a label, not a route - asking the live service for it
+    would 404 every day and keep the banner red forever."""
+    import anchor_healthcheck as hc
+    monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
+    monkeypatch.delenv("ANCHOR_HEALTH_AFFECTED", raising=False)
+    (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [R&D v2 surface] GET /summary: timed out\n"
+                                            "- [auth walk] GET /api/routes (authed) failed\n- [HTTP endpoints] failures: GET /api/status: 500\n",
+                                            encoding="utf-8")
+    assert hc._previous_issue_paths() == ["/api/status"]
+
+
+def test_the_failures_a_candidate_answered_are_asked_again_after_a_newer_report(tmp_path, monkeypatch):
+    """ChatGPT: a newer (green) report must never drop the endpoints the verified candidate answered."""
+    import anchor_healthcheck as hc
+    monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
+    monkeypatch.delenv("ANCHOR_HEALTH_AFFECTED", raising=False)
+    (tmp_path / "2026-10-08.md").write_text("Status: OK\n", encoding="utf-8")
+    (tmp_path / "candidate.json").write_text(json.dumps({"answers": {"issues": ["[HTTP endpoints] failures: GET /api/high-seat/projects: 500"]}}), encoding="utf-8")
+    assert hc._previous_issue_paths() == ["/api/high-seat/projects"]
+    (tmp_path / "candidate.json").write_text(json.dumps({"settled": "x", "answers": {"issues": ["[HTTP endpoints] GET /api/x: 500"]}}), encoding="utf-8")
+    assert hc._previous_issue_paths() == []
+
+
+def test_a_candidate_replays_the_failures_it_answers_with_its_own_credentials(monkeypatch):
+    """ChatGPT: the candidate's own private server is asked every affected GET, authenticated; a 500 there is no pass."""
+    import anchor_healthcheck as hc
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Service)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(hc, "TARGET", "candidate")
+        monkeypatch.setattr(hc, "TEST_PORT", srv.server_address[1])
+        monkeypatch.setenv("ANCHOR_TOKEN", "candidate-token")
+        monkeypatch.setenv("ANCHOR_HEALTH_AFFECTED", json.dumps(["[HTTP endpoints] failures: GET /api/status: 500"]))
+        monkeypatch.setattr(hc, "REPORTS_DIR", pathlib_tmp())
+        r = hc.Report()
+        hc.check_affected_on_candidate(r)
+        assert r.has_issues and any(c[0] == "the candidate answers GET /api/status" and not c[1] for c in r.checks)
+        _Service.broken = "/nothing"
+        r = hc.Report()
+        hc.check_affected_on_candidate(r)
+        assert not r.has_issues, r.checks
+    finally:
+        _Service.broken = "/api/status"
+        srv.shutdown()
+
+
+def pathlib_tmp():
+    import tempfile
+    return Path(tempfile.mkdtemp())

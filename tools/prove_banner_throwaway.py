@@ -41,18 +41,45 @@ def get(port, path, timeout=30):
         return e.code, ""
 
 
-def banner(port):
-    """What a REAL browser shows (ChatGPT W3 r2): the Cave opened in Chromium; the painted banner's words, or ""."""
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        b = pw.chromium.launch()
+class Cave:
+    """ONE Cave page kept open in a real Chromium for the whole lifecycle (ChatGPT final review): the test never
+    navigates it - the page's own 30 s poll brings every banner change; a marker set once tells whether it reloaded."""
+
+    def __init__(self, port):
+        from playwright.sync_api import sync_playwright
+        self.pw = sync_playwright().start()
+        self.browser = self.pw.chromium.launch()
+        self.page = self.browser.new_page()
+        self.page.goto("http://127.0.0.1:%d/high-seat" % port, wait_until="load", timeout=180000)
+        self.page.evaluate("window.__proof = 'opened once'")
+
+    def banner(self):
         try:
-            pg = b.new_page()
-            pg.goto("http://127.0.0.1:%d/high-seat" % port, wait_until="load", timeout=180000)
-            bar = pg.query_selector(".healthbar")
+            bar = self.page.query_selector(".healthbar")
             return bar.inner_text() if bar and bar.is_visible() else ""
+        except Exception:
+            return ""
+
+    def wait_for(self, test, timeout=180):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            b = self.banner()
+            if test(b):
+                return b
+            self.page.wait_for_timeout(2000)
+        return self.banner()
+
+    def same_page(self):
+        try:
+            return self.page.evaluate("window.__proof || ''") == "opened once"
+        except Exception:
+            return False
+
+    def close(self):
+        try:
+            self.browser.close()
         finally:
-            b.close()
+            self.pw.stop()
 
 
 def start(served, port, env):
@@ -107,6 +134,7 @@ def main():
         print(json.dumps(row), flush=True)
 
     proc = start(served, port, env)
+    cave = Cave(port)                                          # opened ONCE; never navigated by this proof
     try:
         code, _ = get(port, "/api/status")
         say({"step": "the planted failure, on the running service", "api_status": code})
@@ -114,7 +142,7 @@ def main():
                            env=dict(env, ANCHOR_HEALTHCHECK_LIVE_PORT=str(port)), capture_output=True, text=True, timeout=1800)
         path, body = hs.latest()
         red = hs.status_of(body)
-        b1 = banner(port)
+        b1 = cave.wait_for(lambda b: "Health check found issues" in b)
         say({"step": "the real health check of the running revision", "exit": r.returncode, "status": red,
              "issues": hs.issues_of(body)[:4], "banner": b1[:160]})
         ok = ok and red == "red" and "Health check found issues" in b1
@@ -124,10 +152,10 @@ def main():
         (Path(ip) / "anchor_gui.py").write_text(src.replace(BROKEN, PLANT), encoding="utf-8")
         g(ip, "commit", "-qam", "W3 proof: the fix")
         rec = hs.check_candidate(timeout=1800)
-        b2 = banner(port)
+        b2 = cave.wait_for(lambda b: "fix verified" in b)
         say({"step": "the fix landed on anchor-next; the real candidate check", "status": rec["status"], "why": rec.get("why"),
-             "banner": b2[:200]})
-        ok = ok and rec["status"] in ("green", "yellow") and "fix verified" in b2 and "live after your restart" in b2
+             "banner": b2[:200], "same_open_page_no_reload": cave.same_page()})
+        ok = ok and rec["status"] in ("green", "yellow") and "fix verified" in b2 and "live after your restart" in b2 and cave.same_page()
     finally:
         stop(proc)
     act = anchor_next.activate(served)
@@ -144,13 +172,16 @@ def main():
                 break
             time.sleep(15)
         path, body = hs.latest()
-        b3 = banner(port)
+        b3 = cave.wait_for(lambda b: not b, timeout=240)
+        reloaded = not cave.same_page()
         say({"step": "the owed re-check ran by itself", "status": hs.status_of(body), "target": hs.field(body, "Target"),
-             "revision": hs.field(body, "Revision")[:12], "banner": b3[:160] or "(no banner)",
+             "revision": hs.field(body, "Revision")[:12], "banner_in_the_open_page": b3[:160] or "(no banner)",
+             "the_page_reloaded_once_for_the_new_build": reloaded,
              "running_service_checked": "the running service answers" in body})
         ok = ok and hs.status_of(body) in ("green", "yellow") and not b3 and "the running service answers" in body
     finally:
         stop(proc)
+        cave.close()
     print(json.dumps({"ok": ok}))
     return 0 if ok else 1
 

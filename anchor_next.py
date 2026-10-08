@@ -285,7 +285,8 @@ def activate(repo=None):
         return out
     with _gs.repo_lock(str(root), wait_s=300, who="the restart's activation") as held:
         if not held:
-            out["why"] = "the repository's commit lock is busy (a landing in progress); nothing changed"
+            out["why"] = ("the repository's commit lock is held (a landing in progress, or one cut off by the stop - such "
+                          "a lock clears itself after an hour); nothing changed")
             return out
         pre = check(root)
         if not pre["ok"]:

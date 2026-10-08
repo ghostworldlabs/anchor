@@ -279,6 +279,7 @@ def check_candidate(log=None, timeout=3600):
             rec["why"] = "could not make a worktree of %s" % rev[:10]
             return rec
         env = dict(os.environ, ANCHOR_HEALTHCHECK_TARGET="candidate", ANCHOR_HEALTH_REPORT_OUT=str(out),
+                   ANCHOR_HEALTH_AFFECTED=json.dumps(rec["answers"]["issues"]),
                    ANCHOR_HEALTHCHECK_PORT="0", ANCHOR_DATA_DIR=str(wt), ANCHOR_CODE_JOBS_DIR=str(scratch / "jobs"),
                    ANCHOR_WORKTREE_BASE=str(scratch / "worktrees"))
         for k in ("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE", "ANCHOR_HEALTHCHECK_LIVE_PORT"):
