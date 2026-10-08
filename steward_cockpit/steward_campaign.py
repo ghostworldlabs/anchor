@@ -1775,6 +1775,39 @@ def skill_identity(record):
     return parts[-3] if len(parts) >= 3 else (parts[-1] if parts else "")
 
 
+def canonical_skill(label):
+    """A skill's canonical id from any display label ('Gandalf review' -> 'gandalf'); '' when none is known."""
+    flat = str(label or "").lower().replace(" ", "").replace("_", "-")
+    return next((n for n in _KNOWN_SKILLS if n.replace("-", "") in flat.replace("-", "")), "")
+
+
+def look_started(campaign_dir, look):
+    """When the run behind a status log began: the log file's creation time (its first table), else None."""
+    src = str((look or {}).get("source") or "")
+    if not src:
+        return None
+    try:
+        f = Path(campaign_dir) / src
+        if not f.is_file():
+            return None
+        st = f.stat()
+        return st.st_ctime if os.name == "nt" else min(st.st_ctime, st.st_mtime)
+    except (OSError, ValueError):
+        return None
+
+
+def _step_raw(campaign_dir, step_id):
+    """The current step's own record from roadmap.json (read_map keeps only what the rail shows)."""
+    try:
+        raw = json.loads((Path(campaign_dir) / "roadmap.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    for st in raw.get("roadmap_projection") or raw.get("steps") or []:
+        if isinstance(st, dict) and str(st.get("id")) == str(step_id):
+            return st
+    return {}
+
+
 def running_skill_jobs(campaign_dir):
     try:
         raw = json.loads((Path(campaign_dir) / ".ecgberht" / "skill-jobs.json").read_text(encoding="utf-8"))
@@ -1818,16 +1851,19 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
         started = _job_epoch(k.get("started"))
         label = str(k.get("label") or "a skill")
         ident = skill_identity(k)
-        phase = str((look or {}).get("status") or (look or {}).get("doing") or "running")[:80] \
-            if look and str(look.get("skill") or "").lower().replace(" ", "") == ident.replace("-", "") else "running"
+        own_log = bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident
+        if not own_log:
+            look_tests = ""                              # another skill's log never speaks for this job
+        phase = str(look.get("status") or look.get("doing") or "running")[:80] if own_log else "running"
         return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), phase, started,
                 look_tests or real_tests or "tests not run yet",
                 finish_time(started, now, "skill_job", campaign_dir, ident))
     if look and not look.get("final"):
         skill = str(look.get("skill") or "")
+        began = look_started(campaign_dir, look)
         return ("The steward is running %s and is in charge of it" % skill, str(look.get("label") or "running")[:80],
-                None, look_tests or real_tests or "tests not run yet",
-                finish_time(None, now, "skill_job", campaign_dir, skill.lower()))
+                began, look_tests or real_tests or "tests not run yet",
+                finish_time(began, now, "skill_job", campaign_dir, canonical_skill(skill)))
     if st.get("busy"):
         started = float(st.get("turn_started") or 0) or None
         what = one_line(st.get("activity") or "") or "your request"
@@ -1991,10 +2027,11 @@ def compose_status(campaign_dir: str, engine_state=None):
             strip_raw = {}
         written = _job_epoch(strip_raw.get("as_of") or strip_raw.get("active_effort_as_of"))
         began = _slice_started_epoch(campaign_dir, active.get("id"))
-        bound = not (written and began and written < began)
+        bound = bool(written and began and written > began)
     if not bound:
         # not this step's line - use the step's own stored next actions, else the default line
-        own = (active or {}).get("next") or (active or {}).get("next_actions") or ""
+        raw_step = _step_raw(campaign_dir, (active or {}).get("id")) if active else {}
+        own = raw_step.get("next") or raw_step.get("next_actions") or (active or {}).get("next") or ""
         next_text = " · ".join(own) if isinstance(own, list) else str(own or "")
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
     if pause_stale and _RESTART_PAUSE.search(waiting):

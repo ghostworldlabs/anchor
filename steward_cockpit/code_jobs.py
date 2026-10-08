@@ -639,6 +639,8 @@ def _finish(cdir, job_id, job, result):
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late += [p + " (ignored by git)" for p in ignored_outputs(wt)]
             served = _served_tree_changes(job)
+            if late:
+                fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
             if fields["check_ok"] is False:
                 note = "not landed: the check failed in the job's tree; the work is kept at %s" % wt
             elif late:
@@ -696,7 +698,18 @@ def _served_tree_changes(job):
         return ["(no record of the repository's changes at the start)"]
     if now is None:
         return ["(git could not list the repository's changes)"]
-    return sorted(p for p, h in now.items() if before.get(p) != h)
+    changed = {p for p, h in now.items() if before.get(p) != h}
+    for p, h in before.items():                      # dirty at the start, clean or gone now: compare its content
+        if p in now:
+            continue
+        full = Path(job["repo"]) / p
+        cur = "(gone)"
+        if full.is_file():
+            c, out, _ = _git(job["repo"], "hash-object", "--", p)
+            cur = out if c == 0 else "?"
+        if cur != h:
+            changed.add(p)
+    return sorted(changed)
 
 
 def _commit_manifest(wt, job, files):
@@ -776,6 +789,10 @@ def land(job, files):
         if current.get("status") != "finishing":       # a stop released it while it was being reviewed: no landing
             return False, "not landed: the job was stopped (%s) before placement; the work is kept at %s" % (
                 current.get("stopped_by") or current.get("status") or "unknown", wt), fields
+        code_h, now_head, _ = _git(wt, "rev-parse", "HEAD")
+        if code_h != 0 or now_head != cand:           # something committed after the review: never place an older candidate
+            return False, ("not landed: the job's branch moved after review (%s, reviewed %s); everything is kept at %s"
+                           % (now_head[:12], cand[:12], wt)), fields
         left = _unlanded(wt, files)                    # a second check after integration made nothing extra
         if left:
             fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
@@ -960,4 +977,10 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
             eng.stop()
     except Exception:
         pass
-    return {"ok": True, "job": job["id"], "branch": job["branch"], "kept": job["worktree"], "stopped_by": who}
+    served = _served_tree_changes(job)              # the finish will not run: audit the source repository here
+    if served:
+        _transition(cdir, job["id"], ("stopped",), served_tree_changed=served,
+                    land_note=stopped["land_note"] + ("; ALSO: %s changed during the job outside any landing (%s) - "
+                                                      "check those files" % (job["repo"], ", ".join(served[:8]))))
+    return {"ok": True, "job": job["id"], "branch": job["branch"], "kept": job["worktree"], "stopped_by": who,
+            "served_tree_changed": served}

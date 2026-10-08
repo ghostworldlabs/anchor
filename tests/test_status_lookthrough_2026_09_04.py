@@ -91,7 +91,10 @@ def _campaign(td, active_started_min_ago=20, with_log=True, log_age_s=0):
     }
     (root / "roadmap.json").write_text(json.dumps(roadmap), encoding="utf-8")
     (root / "strip.json").write_text(json.dumps({
-        "phase": "build", "human_wait": "", "next_recommended": NEXT_LONG}),
+        "phase": "build", "human_wait": "", "next_recommended": NEXT_LONG,
+        # 2026-10-07: as the Ecgberht CLI writes it - stamped, after the step began (an unstamped, unbound line is not
+        # taken as the current step's next actions)
+        "as_of": datetime.now().isoformat(timespec="seconds")}),
         encoding="utf-8")
     if with_log:
         f = root / "planning" / "effort" / "_foreman-status.log"

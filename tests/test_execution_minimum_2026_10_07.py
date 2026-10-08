@@ -1262,3 +1262,50 @@ def test_next_actions_come_only_from_text_bound_to_the_current_step(tmp_path):
                                             "current_step_id": "s9"}), encoding="utf-8")      # bound to another step
     st = sc.compose_status(str(c), {})
     assert st["next3"] == ["Finish the current work, then wait for you."]
+
+
+# ---------- items 4-6 round 3 ----------
+
+def test_another_skills_log_never_speaks_for_this_job(tmp_path):
+    import json as _j
+    (tmp_path / ".ecgberht").mkdir()
+    (tmp_path / ".ecgberht" / "skill-jobs.json").write_text(_j.dumps({"k": {
+        "status": "running", "started": "2026-10-07 10:00:00", "label": "ideas",
+        "argv": ["node", "C:/dev/trio/jumper/bin/run.mjs"]}}), encoding="utf-8")
+    look = {"skill": "Gandalf review", "tests": "passed", "status": "synthesis", "final": False}
+    who, phase, _s, tests, _f = sc.who_is_working(str(tmp_path), {}, [], look)
+    assert "jumper" in who and phase == "running" and tests == "tests not run yet"
+    assert sc.canonical_skill("Gandalf review") == "gandalf"
+
+
+def test_unbound_next_actions_need_both_stamps_after_the_step_began(tmp_path):
+    import json as _j
+    c = _campaign(tmp_path, steps=3)
+    (c / "strip.json").write_text(_j.dumps({"next_recommended": "Publish old draft"}), encoding="utf-8")   # no stamp
+    assert sc.compose_status(str(c), {})["next3"] == ["Finish the current work, then wait for you."]
+
+
+# ---------- item 3 round 4 ----------
+
+def test_restoring_his_uncommitted_edit_is_seen(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("his uncommitted edit\n", encoding="utf-8")
+    job = {"repo": str(repo), "repo_dirt": code_jobs.dirty_snapshot(str(repo))}
+    _sp.run(["git", "-C", str(repo), "checkout", "--", "a.txt"], check=True)        # a shell restored it
+    assert code_jobs._served_tree_changes(job) == ["a.txt"]
+
+
+def test_a_stop_audits_the_source_repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+
+    class Slow(_Coder):
+        def wake(self, fresh=False, seed=None):
+            (_P(self.code_job["repo"]) / "live.py").write_text("x\n", encoding="utf-8")
+            return True, "awake"
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Slow(wt))
+    r = code_jobs.stop(str(cdir), actor="John")
+    assert r["served_tree_changed"] == ["live.py"]
+    assert code_jobs.read_jobs(str(cdir))[out["job"]]["served_tree_changed"] == ["live.py"]
