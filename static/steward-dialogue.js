@@ -230,7 +230,13 @@
     // the dialogue opens at its latest turn, never its first (his word, 2026-10-01: "you should be at the bottom of that, not the top")
     (function () { var ml = mainList(); if (!ml) return; $$('.exrow.st', ml).forEach(md); settle(ml); setTimeout(function () { settle(ml); }, 300); })();
     function stop() { live.stopped = true; }
-    return { send: send, appendLine: appendLine, mainList: mainList, stop: stop, md: md };
+    // W4 (ChatGPT r2): a login taken in place resumes the stream it refused - the same dialogue, the same cursor
+    function resume() {
+      if (!refused) return; refused = false;
+      var el = $(o.state || '#exState'); if (el) { el.textContent = '…'; el.setAttribute('data-state', ''); }
+      if (!live.polling && !live.stopped) pollLoop();
+    }
+    return { send: send, appendLine: appendLine, mainList: mainList, stop: stop, md: md, resume: resume };
   }
   function authHeaders(base) {   // the page's headers plus the standard Authorization header the GET gate reads
     var h = {}; Object.keys(base || {}).forEach(function (k) { h[k] = base[k]; });

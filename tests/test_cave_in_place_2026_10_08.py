@@ -49,6 +49,8 @@ class Cave:
         self.next_say = None           # the answer /api/ecgberht/high_seat_say gives next
         self.next_steward = None       # the answer /api/steward/say gives next
         self.loads = 0
+        self.names = {}                # step id -> a new name (a rename)
+        self.refuse = False            # the events stream answers 401 (a rotated token)
 
     def steps(self):
         out = [s for s in base._steps() if s["id"] not in ("mba-project",)]
@@ -56,6 +58,8 @@ class Cave:
         out.append({"id": "trusts-project", "name": "The trusts' cockpit", "status": "proposed", "ref": "project:" + TRUSTS, "navigation": {"path": ["trusts"]}})
         out.append({"id": "third-project", "name": "The third cockpit", "status": "proposed", "ref": "project:" + THIRD, "navigation": {"path": ["trusts"]}})
         for s in out:
+            if s["id"] in self.names:
+                s["name"] = self.names[s["id"]]
             seat = self.seats.get(s["id"])
             if seat and seat[0]:
                 s["seat"], s["seat_order"] = seat
@@ -101,7 +105,12 @@ class Cave:
                     return route.fulfill(status=200, content_type=ctype, body=fh.read())
         if path == "/api/version":
             return js({"version": "test"})
+        if path == "/api/auth/login":
+            self.refuse = False
+            return js({"ok": True})
         if path == "/api/steward/events":
+            if self.refuse:
+                return js({"error": "not logged in"}, status=401)
             return js({"events": [], "state": {"epoch": 1, "alive": True, "busy": False}, "stamp": self.stamp})
         if path == "/api/high-seat/card":
             return js({"html": '<div class="cbrief"><div class="cp-quiet">the brief</div></div>'})
@@ -319,3 +328,39 @@ def test_a_stale_page_waits_for_the_open_card_then_reloads(cave):
     page.click("#card-%s .t-name" % TRUSTS)   # closed: now the page renews once
     page.wait_for_function("() => !window.__page", timeout=10000)
     assert world.loads == 2
+
+
+def test_focus_survives_an_act_and_a_renamed_card_is_made_again(cave):
+    world, page = cave
+    ident = _open(page, MBA)
+    _type_into(page, MBA, "keep my place")
+    st = _frame_state(page, MBA)
+    world.next_campaign = ({"ok": True, "receipt": "Seated.", "undo": None}, {"third-project": ("deck", 0)})
+    world.names["trusts-project"] = "The trusts, renamed"
+    page.evaluate("document.querySelector('#camp').classList.add('open')")
+    page.click("#camp .grow[data-g='trusts'] .gh")
+    page.click("#camp [data-seat='deck'][data-step='third-project']")
+    frame = page.query_selector("#card-%s iframe.cframe" % MBA).content_frame()
+    frame.focus("#box")                       # he goes back to his box before the change lands
+    _receipt(page, "Seated.")
+    page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=8000)
+    page.wait_for_function("() => (document.querySelector('#card-%s .t-nm') || {}).textContent === 'The trusts, renamed'" % TRUSTS, timeout=8000)
+    _survived(page, MBA, ident, st, focus=True, what="an act, his focus back in the box")
+    assert world.loads == 1
+
+
+def test_a_login_taken_in_place_resumes_the_dialogue(cave):
+    world, page = cave
+    world.refuse = True
+    page.wait_for_function("() => (document.getElementById('exState') || {}).getAttribute && document.getElementById('exState').getAttribute('data-state') === 'auth'", timeout=10000)
+    ident = _open(page, MBA)
+    st = _frame_state(page, MBA)
+    page.evaluate("document.getElementById('loginBox').hidden = false")
+    page.fill("#loginTok", "a-token")
+    page.click("#loginGo")
+    _receipt(page, "Logged in")
+    world.seats["third-project"] = ("deck", 0)
+    world.stamp = "s9"                          # heard only through the resumed stream
+    page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=10000)
+    _survived(page, MBA, ident, st, focus=False, what="a login")
+    assert world.loads == 1

@@ -68,6 +68,9 @@
       });
     });
   }
+  // W4 (ChatGPT r2): each card remembers the record's markup it was made from, before the page decorates it - the one
+  // definition of what a placement compares
+  $$('.shelf.zone .grid > .tile').forEach(function (c) { c._record = c.outerHTML; });
   compactTiles(document);
   window.addEventListener('resize', function () { $$('.tile.peeking').forEach(positionPeek); });
   document.addEventListener('scroll', function () { $$('.tile.peeking').forEach(positionPeek); }, true);
@@ -286,9 +289,12 @@
     z.addEventListener('dragleave', function (e) { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
     z.addEventListener('drop', function (e) {
       e.preventDefault(); z.classList.remove('over'); if (!drag || !drag.step) return;
-      // a card the record already moved off this shelf (held while open, W4) is not counted
-      var cards = $$('.grid > .tile', z).filter(function (c) { return c.getAttribute('data-step') !== drag.step && !c._leaving; }), k = cards.length;
-      for (var j = 0; j < cards.length; j++) { var b = cards[j].getBoundingClientRect(); if (e.clientY < b.top || (e.clientY <= b.bottom && e.clientX < b.left + b.width / 2)) { k = j; break; } }
+      // the card dropped before, found on screen; the position sent is that card's place in the RECORD's order of this
+      // shelf (W4, ChatGPT r1-r2: an open card the record moved is still drawn where it was, never counted)
+      var cards = $$('.grid > .tile', z).filter(function (c) { return c.getAttribute('data-step') !== drag.step && !c._leaving; }), before = null;
+      for (var j = 0; j < cards.length; j++) { var b = cards[j].getBoundingClientRect(); if (e.clientY < b.top || (e.clientY <= b.bottom && e.clientX < b.left + b.width / 2)) { before = cards[j]; break; } }
+      var order = (z._order || cards.map(function (c) { return c.id; })).filter(function (id) { var c = document.getElementById(id); return !c || c.getAttribute('data-step') !== drag.step; });
+      var k = before ? order.indexOf(before.id) : order.length; if (k < 0) k = order.length;
       act({ act: 'seat', step: drag.step, seat: z.getAttribute('data-seat'), position: k });
     });
   });
@@ -368,6 +374,7 @@
     if (window.ANCHOR_BOOT) window.ANCHOR_BOOT.logged_in = true;
     var lb = $('#loginBox'); if (lb) lb.hidden = true;
     renewInPlace('Logged in. This browser holds the token now.'); refreshFeedback();
+    if (dlg && dlg.resume) dlg.resume();   // the Cave's dialogue hears the steward again (ChatGPT W4 r2)
   } }) : null;
   function login(t) { return loginUi ? loginUi.login(t) : Promise.resolve(null); }
   function showLogin(text) { if (loginUi) loginUi.show(text); }
@@ -688,6 +695,11 @@
     var s0 = $('#shDated > .shelf-h .c'), s1 = doc.querySelector('#shDated > .shelf-h .c'); if (s0 && s1) s0.textContent = s1.textContent;
     var o0 = $('#shDated > .shelf-foot.late'), o1 = doc.querySelector('#shDated > .shelf-foot.late'), rl = $('#ruler');   // the overdue line too
     if (o0 && !o1) o0.remove(); else if (o1 && !o0 && rl) rl.insertAdjacentElement('afterend', document.importNode(o1, true)); else if (o0 && o1) morph(o0, o1);
+    // the registry projects in no goal (draggable onto a goal): added, placed or taken out (ChatGPT W4 r2)
+    var g0 = $('#ptile .orphans'), g1 = doc.querySelector('#ptile .orphans'), pl = $('#ptile .ptile-line');
+    if (g0 && !g1) g0.remove();
+    else if (g1 && !g0 && pl) { pl.insertAdjacentElement('afterend', document.importNode(g1, true)); bindDrags($('#ptile .orphans')); }
+    else if (g0 && g1 && g0.innerHTML !== g1.innerHTML && morph(g0, g1)) bindDrags(g0);
     if (ptileLoaded) loadFolders();
   }
   // the shelves, card by card: a card that stays keeps its element (only its face is placed again); a new one is made
@@ -711,10 +723,11 @@
       $$('.grid > .tile', fresh).forEach(function (f) {
         var c = document.getElementById(f.id);
         if (c && c.parentNode !== grid && held(c)) { placeHeld = true; return; }   // a held card keeps its shelf until it closes
-        if (c && !held(c) && shapeOf(c) !== shapeOf(f)) { dropCard(c); c = null; }   // its kind changed (a quiet card got a record): made again
-        if (!c) { c = document.importNode(f, true); c._fresh = true; }
-        else if (held(c) && shapeOf(c) !== shapeOf(f)) placeHeld = true;            // made again once it closes
-        else placeFace(c, f);
+        var how = c ? recordChange(c, f) : 'new';
+        if (how === 'remake' && held(c)) placeHeld = true;                          // made again once it closes
+        else if (how === 'remake') { dropCard(c); c = null; how = 'new'; }
+        else if (how === 'face') placeFace(c, f);
+        if (how === 'new') { c = document.importNode(f, true); c._record = f.outerHTML; c._fresh = true; }
         want.push(c);
       });
       // the record's order around the held card(s): each wanted card goes before the next free one
@@ -726,6 +739,7 @@
         if (at) grid.insertBefore(c, at); else grid.appendChild(c);
       });
       want.forEach(function (c) { if (c._fresh) { c._fresh = false; wireCard(c); } });
+      live._order = $$('.grid > .tile', fresh).map(function (f) { return f.id; });   // the record's order, for a drop
       // a held card out of the record's order (moved within its shelf, or lifted to the top while open): placed on close
       var now = $$('.grid > .tile', live).filter(function (c) { return !c._leaving; });
       if (now.some(held) && now.map(function (c) { return c.id; }).join('|') !== want.map(function (c) { return c.id; }).join('|')) placeHeld = true;
@@ -735,23 +749,22 @@
       var k0 = $('.shelf-h .c', live), k1 = $('.shelf-h .c', fresh); if (k0 && k1) k0.textContent = k1.textContent;
     });
   }
-  // what a card IS (ChatGPT W4 r1): its kind (quiet, desk, a record's card), the record it reads and whether it can
-  // open - the page's own passing state (open, peeking, ready, ...) is not part of it
-  var TRANSIENT = /^(open|talking|peeking|peek-pinned|peek-dismissed|ready|dropping|dragging|flash|over)$/;
-  function shapeOf(card) {
-    var cls = (card.getAttribute('class') || '').split(/\s+/).filter(function (c) { return c && !TRANSIENT.test(c); }).sort().join(' ');
-    return [cls, card.getAttribute('data-tile') || '', card.getAttribute('data-dir') || '', card.getAttribute('data-step') || '',
-            card.querySelector('.t-body') ? 'body' : ''].join('|');
+  // what changed in a card's record (ChatGPT W4 r1-r2): compared with the markup the card was made from, the whole of
+  // it - '' nothing; 'face' only its lines (placed in the card, its preloaded view kept); 'remake' anything else (its
+  // name, kind, record, acts, resume...: the card is made again from the record, an open one once it closes)
+  function withoutFace(html) {
+    var t = document.createElement('template'); t.innerHTML = html;
+    var f = t.content.querySelector('.t-face'); if (f) f.innerHTML = '';
+    return t.innerHTML;
   }
-  function placeFace(card, fresh) {   // every line the record writes; activity and attention keep their own continuing read (below)
-    ['.t-face', '.t-goal', '.t-nm', '.t-eff'].forEach(function (s) {
-      var a = $(s, card), b = $(s, fresh); if (a && b && !busyIn(a) && a.innerHTML !== b.innerHTML) a.innerHTML = b.innerHTML;
-    });
-    if (!$('.t-face', card)) {   // a desk card: its state line
-      var l0 = $(':scope > .t-line', card), l1 = $(':scope > .t-line', fresh); if (l0 && l1 && l0.outerHTML !== l1.outerHTML) l0.outerHTML = l1.outerHTML;
-    }
-    var nm = fresh.getAttribute('data-name'); if (nm !== null && card.getAttribute('data-name') !== nm) card.setAttribute('data-name', nm);
-    card.classList.toggle('need', fresh.classList.contains('need'));
+  function recordChange(card, fresh) {
+    var was = card._record || '', now = fresh.outerHTML;
+    if (was === now) return '';
+    return withoutFace(was) === withoutFace(now) ? 'face' : 'remake';
+  }
+  function placeFace(card, fresh) {   // the record's lines; activity and attention keep their own continuing read (below)
+    var a = $('.t-face', card), b = $('.t-face', fresh);
+    if (a && b && !busyIn(a)) { a.innerHTML = b.innerHTML; card._record = fresh.outerHTML; }
   }
   function dropCard(card) {
     if (card._warmTalk) card._warmTalk.stop();
