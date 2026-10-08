@@ -31,7 +31,7 @@ function mdRender(container, text) {
   // [label](target): the target may hold spaces, balanced ( ) or the <...> form (2026-10-07: "Calendar
   // (accepted).ics" or "MBA Teaching AI/..." broke the link at the first space or ")"). Only report links and http(s)
   // become links; anything else stays text. Bare paths are never auto-linked.
-  const LINKABLE = /^(?:https?:\/\/|\/artifact\/|\/report\/|\/api\/steward\/deliverable-file\?)/;
+  const LINKABLE = /^(?:https?:\/\/|\/artifact\/|\/report\/|\/foundry\?|\/api\/steward\/deliverable-file\?)/;
   function splitLinks(s) {
     const out = []; let i = 0;
     while (i < s.length) {

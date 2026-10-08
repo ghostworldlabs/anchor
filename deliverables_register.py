@@ -290,7 +290,7 @@ def _canonical_route(route):
     link or start another); a markdown /artifact target gains render=1 like every other markdown reading link."""
     from urllib.parse import urlsplit, parse_qsl, quote as _q
     parts = urlsplit(str(route))
-    if parts.scheme or parts.netloc or not parts.path.startswith(("/artifact/", "/report/", "/api/steward/deliverable-file")):
+    if parts.scheme or parts.netloc or not parts.path.startswith(("/artifact/", "/report/", "/api/steward/deliverable-file", "/foundry")):
         return None
     query = parse_qsl(parts.query, keep_blank_values=True)
     if parts.path.startswith("/artifact/") and any(k == "path" and re.search(r"[.](md|markdown)$", v, re.I) for k, v in query) \
@@ -298,6 +298,22 @@ def _canonical_route(route):
         query.append(("render", "1"))
     path = "/".join(_q(seg, safe="") for seg in parts.path.split("/"))
     return path + ("?" + "&".join("%s=%s" % (_q(k, safe=""), _q(v, safe="")) for k, v in query) if query else "")
+
+
+def _route_pdf_is_current(path, pdf_query, deck_query):
+    """For /artifact/<pid>?path=<rel>: the PDF beside a routed deck is its reading copy only when it is no older
+    than the deck (the same rule as an in-effort deck). Unresolvable -> not current (preparing)."""
+    try:
+        import rnd_registry
+        pid = path.rstrip("/").split("/")[-1]
+        folder = Path(str((rnd_registry.get_project(pid) or {}).get("folder_path") or ""))
+        rel = lambda q: next((v for k, v in q if k == "path"), "")
+        deck, pdf = folder / rel(deck_query), folder / rel(pdf_query)
+        if not str(folder) or not deck.is_file() or not pdf.is_file():
+            return False
+        return pdf.stat().st_mtime >= deck.stat().st_mtime
+    except Exception:
+        return False
 
 
 def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None):
@@ -329,7 +345,8 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
             query = [(k, (re.sub(r"[.]pptx$", ".pdf", v, flags=re.I) if k == "path" else v))
                      for k, v in _pq(parts.query, keep_blank_values=True)]
             pdf_route = _canonical_route(parts.path + "?" + _ue(query))
-            if (pdf_route and pdf_route != url and registered is not None and pdf_route.lower() in registered):
+            if (pdf_route and pdf_route != url and registered is not None and pdf_route.lower() in registered
+                    and _route_pdf_is_current(parts.path, query, _pq(parts.query, keep_blank_values=True))):
                 out["read"] = pdf_route
             else:
                 out["preparing"] = True

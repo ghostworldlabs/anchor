@@ -894,6 +894,25 @@ class Engine:
         publish_delivery_receipts(
             self.dir, reply=reply, written=written, since=float(getattr(self, "turn_started", 0) or 0),
             record=lambda line, rid: self._record_conversation("steward", line, turn_id=rid), emit=self._emit)
+        self._replay_saved_receipts()
+
+    def _replay_saved_receipts(self):
+        """A receipt another process saved (a writer with no engine of its own) reaches the open page too: receipt
+        turns in the history that this engine has not shown live are emitted once."""
+        try:
+            from steward_cockpit.conversation_history import read_history_document
+            turns = read_history_document(self.dir)["turns"][-40:]
+        except Exception:
+            return
+        shown = self.__dict__.setdefault("_receipts_shown", None)
+        ids = [t for t in turns if str(t.get("turn_id") or "").startswith("receipt:")]
+        if shown is None:                                # first look: what is already in history was seen at load
+            self._receipts_shown = {t["turn_id"] for t in ids}
+            return
+        for t in ids:
+            if t["turn_id"] not in shown:
+                shown.add(t["turn_id"])
+                self._emit({"t": "receipt", "text": t.get("text") or ""})
 
     def _deliv_baseline(self):
         receipt_baseline(self.dir)
@@ -910,6 +929,7 @@ class Engine:
             self.cond.notify_all()
 
     def events_since(self, since, timeout=25):
+        self._maybe_replay_receipts()                    # a receipt saved by another process shows within ~15 s
         with self.cond:
             if not any(e["seq"] > since for e in self.events):
                 self.cond.wait(timeout)
@@ -985,6 +1005,16 @@ class Engine:
                 scope={"request_id":request.get("id"), "step_id":request.get("step_id"),
                        "presentation_id":request.get("presentation_id"), "members":request.get("members", [])}))
         return contexts
+
+    def _maybe_replay_receipts(self):
+        now = time.time()
+        if self.general or now - float(self.__dict__.get("_replay_at") or 0) < 15:
+            return
+        self._replay_at = now
+        try:
+            self._replay_saved_receipts()
+        except Exception:
+            pass
 
     def state(self):
         import anchor_settings
@@ -2231,6 +2261,8 @@ class Engine:
                 self.__dict__.setdefault("families_used", set()).add(str(self.cli or ""))
             if not self.general:
                 self._deliv_baseline()          # before the first turn (once per effort), so what it registers is announced
+                if self.code_job is None:
+                    self._served_snap = _served_code_snapshot()   # final review: a steward's own writes are audited
             self.turn_text = ""
             self._turn_origin = "control" if is_control else "human"
             arrivals = getattr(self, "_human_arrivals", None) or []
@@ -3100,6 +3132,12 @@ class Engine:
             if history_saved and not err_text:
                 self._publish_delivery_receipt(completed_turn_id, reply=txt,
                                                written=list(getattr(self, "_turn_output_refs", []) or []))
+            if not self.general and self.code_job is None:
+                changed = _served_code_changes(getattr(self, "_served_snap", None))
+                self._served_snap = None
+                if changed:
+                    self._emit({"t": "sys", "text": "the steward changed Anchor's served code directly this turn, "
+                                "with no code job and no review: %s - John should know" % ", ".join(changed[:8])})
 
             # The complete result boundary is one arbitration transaction.
             # Exactly one next writer wins: an already accepted human message,
@@ -3856,6 +3894,55 @@ def _tool_detail(block):
 # Next steps use (deliverables_register.reading_target). Mechanical and durable: it needs no engine; whatever was
 # announced is recorded in the effort (.ecgberht/receipted-deliverables.json) only AFTER its line is saved, under an
 # id made from what it announces AND its words, so a retry is idempotent and a changed announcement never collides.
+_SERVED = Path(__file__).resolve().parents[1]
+_CODE_EXT = (".py", ".js", ".mjs", ".css", ".ps1")
+
+
+def _served_code_snapshot():
+    """{path: (mtime_ns, size)} of the served Anchor tree's changed code files, plus its HEAD - cheap enough per
+    turn. None when git cannot say."""
+    try:
+        r = subprocess.run(["git", "-C", str(_SERVED), "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
+                            "--untracked-files=all", "--no-renames"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=20)
+        h = subprocess.run(["git", "-C", str(_SERVED), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=20)
+        if r.returncode != 0 or h.returncode != 0:
+            return None
+        snap = {}
+        for rec in r.stdout.split("\0"):
+            path = rec[3:] if len(rec) > 3 else ""
+            if path and path.lower().endswith(_CODE_EXT):
+                try:
+                    st = (_SERVED / path).stat()
+                    snap[path] = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    snap[path] = ("gone", 0)
+        return {"head": h.stdout.strip(), "files": snap}
+    except Exception:
+        return None
+
+
+def _served_code_changes(before):
+    """Code files of the served tree changed during a steward turn (new dirt, or dirt that changed or went clean),
+    when HEAD did not move (a landing moves it and is not the steward's direct write)."""
+    if not before:
+        return []
+    now = _served_code_snapshot()
+    if not now or now["head"] != before["head"]:
+        return []
+    out = [p for p, v in now["files"].items() if before["files"].get(p) != v]
+    for p, v in before["files"].items():
+        if p not in now["files"]:
+            try:
+                st = (_SERVED / p).stat()
+                cur = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                cur = ("gone", 0)
+            if cur != v:
+                out.append(p)
+    return sorted(set(out))
+
+
 RECEIPTS_FILE = ".ecgberht/receipted-deliverables.json"
 _RECEIPT_LOCKS = {}
 _RECEIPT_GUARD = threading.Lock()

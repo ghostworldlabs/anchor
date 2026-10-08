@@ -709,7 +709,7 @@ def test_managed_work_in_progress_is_not_a_designation():
 def test_a_route_deck_reads_through_its_registered_pdf_route():
     reg = {dr._canonical_route("/artifact/p?path=slides/Talk.pdf").lower()}
     r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="", registered=reg)
-    assert r["read"] == "/artifact/p?path=slides%2FTalk.pdf" and not r["preparing"]
+    assert r["read"] is None and r["preparing"]   # final review: an unverifiable routed PDF is not the deck's copy (see the freshness test)
 
 
 # ---------- items 5 and 6: the two runtime fixes; status says who, what next, and when ----------
@@ -1407,3 +1407,48 @@ def test_two_runs_of_one_skill_never_share_a_log(tmp_path):
     look = {"skill": "Gandalf review", "tests": "passed", "status": "synthesis", "source": "g.log", "final": False}
     _w, phase, _s, tests, _f = sc.who_is_working(str(tmp_path), {}, [], look)
     assert phase == "running" and tests == "tests not run yet"
+
+
+# ---------- final whole-patch review ----------
+
+def test_a_stewards_direct_write_to_served_code_is_reported(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "served")
+    monkeypatch.setattr(steward_engine, "_SERVED", repo)
+    before = steward_engine._served_code_snapshot()
+    (repo / "job_runner.py").write_text("changed directly\n", encoding="utf-8")
+    assert steward_engine._served_code_changes(before) == ["job_runner.py"]
+    assert steward_engine._served_code_changes(steward_engine._served_code_snapshot()) == []
+
+
+def test_a_receipt_saved_by_another_process_is_shown_live(tmp_path, monkeypatch):
+    from steward_cockpit.conversation_history import append_turns
+    monkeypatch.delenv("STEWARD_COCKPIT_FAKE", raising=False)
+    (tmp_path / "ECGBERHT.md").write_text("# c\n", encoding="utf-8")
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    shown = []
+    eng._emit = lambda ev: shown.append(ev)
+    eng._replay_saved_receipts()                                  # first look: the baseline
+    append_turns(str(tmp_path), [{"role": "steward", "text": "**Anchor** · ready to read: [X](/a)", "turn_id": "receipt:abc"}])
+    eng._replay_saved_receipts()
+    eng._replay_saved_receipts()
+    assert shown == [{"t": "receipt", "text": "**Anchor** · ready to read: [X](/a)"}]
+
+
+def test_foundry_review_pages_get_a_reading_target():
+    r = dr.reading_target({"route": "/foundry?skill=chekhov"}, pid="p", effort_rel="")
+    assert r["read"] == "/foundry?skill=chekhov"
+
+
+def test_a_routed_deck_never_reads_through_an_older_pdf(tmp_path, monkeypatch):
+    import os as _os, rnd_registry
+    (tmp_path / "slides").mkdir()
+    (tmp_path / "slides" / "Talk.pdf").write_text("old", encoding="utf-8")
+    (tmp_path / "slides" / "Talk.pptx").write_text("new deck", encoding="utf-8")
+    _os.utime(tmp_path / "slides" / "Talk.pdf", (1_000_000, 1_000_000))
+    monkeypatch.setattr(rnd_registry, "get_project", lambda pid: {"folder_path": str(tmp_path)})
+    reg = {dr._canonical_route("/artifact/p?path=slides/Talk.pdf").lower()}
+    r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="", registered=reg)
+    assert r["read"] is None and r["preparing"]
+    _os.utime(tmp_path / "slides" / "Talk.pdf", None)
+    r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="", registered=reg)
+    assert r["read"] == "/artifact/p?path=slides%2FTalk.pdf"
