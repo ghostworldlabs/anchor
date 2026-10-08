@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-07 21:57",
-  "status_id": "01791431851962047600",
+  "at": "2026-10-08 05:37",
+  "status_id": "01791459468624593400",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
+    "activity": "Nobody is working right now \u2014 the steward waits for you",
     "latest_event": null,
     "next": [
-      "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
+      "Connect named provider accounts"
     ],
     "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Plan v2 Refinement 3 repair landed in ed14dc1: 237\u2026"
+        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 October8 live service 94c7b04+152f9a9 contains\u2026"
       },
       {
         "label": "Effort",
@@ -21,15 +21,15 @@
       },
       {
         "label": "Doing",
-        "value": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status\u2026"
+        "value": "Nobody is working right now \u2014 the steward waits for you"
       },
       {
         "label": "Status",
-        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 quiet"
+        "value": "idle"
       },
       {
         "label": "Tests",
-        "value": "Unavailable \u2014 no check receipt for the current work and session"
+        "value": "no check run"
       },
       {
         "label": "Blocker",
@@ -41,36 +41,41 @@
       },
       {
         "label": "Journal",
-        "value": "0034-final-route-repair-landed: Final route repair landed; activation and real account proof remain"
+        "value": "0035-running-host-and-account-enrollment-boundary: Running service confirmed; usable account enrollment and\u2026"
       },
       {
         "label": "ETA",
-        "value": "Unavailable \u2014 no current estimate"
+        "value": "nothing running, so nothing to finish"
       },
       {
         "label": "To do",
-        "value": "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
+        "value": "Connect named provider accounts"
       }
     ]
   },
-  "lead_line": "Next: Arrange authorized activation, then verify Setup and Cave in the existing laptop window. \u2014 No build running. Actual enrollment, allowance, API execution and installer proof remain distinct from passing tests.",
+  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Service activation is confirmed; Gemini/Grok enrollment and API execution still require resolution.",
   "now": [
-    "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
-    "landed, waits for a restart \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement"
+    "nothing running - quiet"
   ],
-  "running": null,
+  "running": {
+    "kind": "none",
+    "label": "nothing running - quiet",
+    "skill": "",
+    "source": "",
+    "age": ""
+  },
   "slice": {
     "n": 2,
     "total": 11,
     "id": "gwl-access",
     "name": "Connect named provider accounts; Google Ultra uses agy",
     "part": "integrate",
-    "summary": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers\u2026",
+    "summary": "October8 live service 94c7b04+152f9a9 contains repair ed14dc1.",
     "commissioned_as": ""
   },
-  "eta": "Unavailable \u2014 no current estimate",
+  "eta": "nothing running, so nothing to finish",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0034-final-route-repair-landed: Final route repair landed; activation and real account proof remain",
+  "journal": "0035-running-host-and-account-enrollment-boundary: Running service confirmed; usable account enrollment and remaining product gaps",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -80,20 +85,33 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0034-final-route-repair-landed.md",
-      "entry_id": "0034-final-route-repair-landed",
-      "at": "2026-10-08T03:57:31Z",
+      "path": "journal/0035-running-host-and-account-enrollment-boundary.md",
+      "entry_id": "0035-running-host-and-account-enrollment-boundary",
+      "at": "2026-10-08T11:37:47Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
     },
     "eta": {
-      "state": "unavailable"
+      "state": "unavailable",
+      "value": "nothing running, so nothing to finish",
+      "calculated": false
     }
   },
   "focus_warning": "",
+  "who": "Nobody is working right now \u2014 the steward waits for you",
+  "phase": "idle",
+  "finish": "nothing running, so nothing to finish",
+  "next3": [
+    "Connect named provider accounts",
+    "Google",
+    "then Show authentication and allowance for each named provider account"
+  ],
+  "restart_pause_stale": false,
   "next_bullets": [
-    "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
+    "Connect named provider accounts",
+    "Google",
+    "then Show authentication and allowance for each named provider account"
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
@@ -104,9 +122,9 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Provider route repairs landed; 237 tests and clean independent review. Activation and laptop account proof remain.",
-    "as_of": "2026-10-07",
-    "newest_work": "2026-10-07",
+    "text": "Provider repairs are in the running service; Claude/ChatGPT enrollment supported. Gemini/Grok and laptop delivery remain incomplete.",
+    "as_of": "2026-10-08",
+    "newest_work": "2026-10-08",
     "behind_days": 0,
     "stale": false
   },
@@ -116,8 +134,8 @@
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Arrange authorized activation, then verify Setup and Cave in the existing laptop window.",
-    "why": "No build running. Actual enrollment, allowance, API execution and installer proof remain distinct from passing tests.",
+    "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+    "why": "Service activation is confirmed; Gemini/Grok enrollment and API execution still require resolution.",
     "attention": "quiet",
     "goal_reread": true
   },
@@ -328,7 +346,7 @@
           "id": "gwl-access",
           "name": "Connect named provider accounts; Google Ultra uses agy",
           "status": "active",
-          "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close.",
+          "done_when": "October8 live service 94c7b04+152f9a9 contains repair ed14dc1. Passive host refresh confirms Claude2.1.294 browser enrollment and Codex0.159.3 device enrollment; existing accounts signed in. Add and prove second Claude account and persistent laptop UI. Google Ultra agy1.3.1 retained, isolated enrollment/allowance unsupported; Grok1.0.41 lacks required enrollment/status/isolation interfaces. API credential storage exists but execution remains incomplete. No human acceptance or slice close.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
