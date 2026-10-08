@@ -392,7 +392,50 @@ def test_a_failed_recheck_launch_is_tried_again_and_the_obligation_is_per_candid
     assert not hs.recheck_needed(), "a later restart does not revive a consumed candidate's obligation"
 
 
-def test_the_cave_acknowledges_a_banner_fingerprint_only_once_it_is_placed():
+def test_the_cave_acknowledges_only_the_fingerprint_a_placed_request_carried():
     js = (ROOT / "static" / "high-seat-page.js").read_text(encoding="utf-8")
     assert "if (h && h !== healthSig) { healthPending = h; renewInPlace(); }" in js
-    assert "if (sig && healthPending === sig) { healthSig = sig; healthPending = ''; }" in js
+    assert "var sig = healthPending;   // the fingerprint THIS request will place" in js
+    assert "if (sig) { healthSig = sig; if (healthPending === sig) healthPending = ''; }" in js
+    assert "if (placeAgain || (healthPending && healthPending !== healthSig))" in js
+
+
+# ---------- ChatGPT review round 3 ----------
+
+def test_a_run_without_the_services_token_never_passes_while_issues_are_open(tmp_path, monkeypatch):
+    import anchor_healthcheck as hc
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Service)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
+        monkeypatch.setattr(hc, "RUN_REVISION", "abc1234def")
+        monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
+        (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [HTTP endpoints] GET /api/status: 500\n- [x] GET /a GET /b GET /c GET /d GET /e GET /f GET /g GET /h GET /i\n", encoding="utf-8")
+        assert len(hc._previous_issue_paths()) == 10, "every affected target, no cap"
+        monkeypatch.setattr(hc, "_TOKEN_MINTED", True)       # the daily task: the throwaway's token is never used live
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert r.has_issues and any("not verifiable without the service's token" in c[2] for c in r.checks)
+        monkeypatch.setattr(hc, "_TOKEN_MINTED", False)
+        monkeypatch.setenv("ANCHOR_TOKEN", "the-service-token")
+        _Service.broken = "/i"                                 # the ninth/tenth affected endpoint still fails
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert r.has_issues and any(c[0].endswith("GET /i") and not c[1] for c in r.checks)
+    finally:
+        _Service.broken = "/api/status"
+        srv.shutdown()
+
+
+def test_publication_is_one_locked_step_and_an_older_run_never_overwrites(tmp_path, monkeypatch):
+    import anchor_healthcheck as hc
+    path = tmp_path / ("%s.md" % hc.TODAY)
+    newer_id = "%.3f" % (time.time() + 100)
+    monkeypatch.setattr(hc, "RUN_ID", newer_id)
+    hc._publish(hc.Report(), path)
+    assert ("\nRun: %s\n" % newer_id) in path.read_text(encoding="utf-8")
+    monkeypatch.setattr(hc, "RUN_ID", "%.3f" % time.time())     # an OLDER run finishing later
+    hc._publish(hc.Report(), path)
+    assert ("\nRun: %s\n" % newer_id) in path.read_text(encoding="utf-8"), "the newer run's report stands"
+    assert list(tmp_path.glob("superseded-*.md")), "kept beside it, never over it"
+    assert not (tmp_path / ".publish.lock").exists()

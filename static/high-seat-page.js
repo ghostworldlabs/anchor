@@ -635,6 +635,7 @@
     if (placeBusy) { placeAgain = true; return; }   // a change that lands mid-fetch runs one more fetch after (Grok W2e-8)
     if (placeWait()) { if (!deferred.place) deferred.place = setTimeout(function () { deferred.place = 0; renewInPlace(); }, 3000); return; }
     placeBusy = true;
+    var sig = healthPending;   // the fingerprint THIS request will place (ChatGPT W3 r3: never a newer one it did not render)
     fetch('/high-seat', { cache: 'no-store', headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (html) {
@@ -642,13 +643,12 @@
         if (placeWait()) { placeAgain = true; return; }   // he started typing mid-fetch: placed once he is idle
         var doc = new DOMParser().parseFromString(html, 'text/html');
         if (doc.querySelector('.board')) {   // a locked or failed answer is never placed
-          var sig = healthPending;
           placeBoard(doc);
-          if (sig && healthPending === sig) { healthSig = sig; healthPending = ''; }
+          if (sig) { healthSig = sig; if (healthPending === sig) healthPending = ''; }
         }
       })
       .catch(function () {})
-      .then(function () { placeBusy = false; if (placeAgain) { placeAgain = false; renewInPlace(); } });
+      .then(function () { placeBusy = false; if (placeAgain || (healthPending && healthPending !== healthSig)) { placeAgain = false; renewInPlace(); } });
   }
   function busyIn(el) {   // he is IN this element: a box he types in (or a frame's) has the focus inside it - a button he just clicked does not count
     var a = document.activeElement;

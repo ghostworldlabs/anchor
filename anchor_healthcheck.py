@@ -6198,7 +6198,9 @@ def _previous_issue_paths():
         body = dated[0].read_text(encoding="utf-8", errors="replace") if dated else ""
     except Exception:
         return []
-    return sorted(set(m for m in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", body) if not m.startswith("/api/rnd/term")))[:8]
+    m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)     # the issues only, every target
+    issues = m.group(1) if m else ""
+    return sorted(set(p for p in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", issues) if not p.startswith("/api/rnd/term")))
 
 
 def check_running_service(report: Report):
@@ -6225,20 +6227,66 @@ def check_running_service(report: Report):
                      "running %s, checked %s" % (running[:12], rev[:12]))
     # ChatGPT W3 r2: the RUNNING service's own pages and reads - the core GETs and every GET path the previous
     # report's issues name - asked as John's browser asks (the token, when this run has it); 2xx/3xx only
-    tok = (os.environ.get("ANCHOR_TOKEN") or "").strip()
-    paths = ["/", "/high-seat"] + (["/api/status"] if tok else []) + _previous_issue_paths()
+    tok = "" if _TOKEN_MINTED else (os.environ.get("ANCHOR_TOKEN") or "").strip()   # the SERVICE's token, never the throwaway's
+    affected = _previous_issue_paths()
+    if not tok:
+        # ChatGPT W3 r3: without the service's token a run cannot verify the running service's protected surface - it
+        # never counts as a pass while the last report named affected endpoints (the Doctor's re-run and the owed
+        # re-check run inside the service and carry its token)
+        if affected:
+            report.check("the running service: the affected endpoints", False,
+                         "not verifiable without the service's token (%s) - the Doctor's re-run checks them" % ", ".join(affected[:6]))
+        else:
+            report.warn("the running service: authenticated reads", "no service token in this run - only its open pages were asked")
+    paths = (["/", "/high-seat", "/api/status"] if tok else ["/api/version"]) + (affected if tok else [])
     for path in dict.fromkeys(paths):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), headers=({"Authorization": "Bearer " + tok} if tok else {}))
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
-                code = r.getcode()
+                code, text = r.getcode(), r.read(4000).decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
-            code = e.code
+            code, text = e.code, ""
         except Exception as e:
-            code = type(e).__name__
-        report.check("the running service: GET %s" % path, isinstance(code, int) and 200 <= code < 400, "answered %s" % code)
-    if not tok:
-        report.warn("the running service: authenticated reads", "no token in this run's environment - /api/status was not asked")
+            code, text = type(e).__name__, ""
+        locked = "Anchor is locked" in text           # a locked page is not the page
+        report.check("the running service: GET %s" % path, isinstance(code, int) and 200 <= code < 400 and not locked,
+                     "answered %s%s" % (code, " (the locked page)" if locked else ""))
+
+
+def _publish(report, path):
+    """ChatGPT W3 r2-r3: ONE locked, atomic step - a run that STARTED later and already published today's report is
+    never overwritten by an older run (it is kept beside it as superseded); otherwise written to a temp file and
+    moved into place."""
+    import contextlib
+    lock = path.with_name(".publish.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, deadline = None, time.time() + 120
+    while fd is None:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 600:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                break
+            time.sleep(0.2)
+    try:
+        target = path
+        if _newer_run_published(path):
+            target = path.with_name(f"superseded-{TODAY}-{RUN_ID.replace('.', '')}.md")
+        tmp = target.with_name(target.name + ".tmp")
+        report.write(tmp)
+        os.replace(str(tmp), str(target))
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            with contextlib.suppress(OSError):
+                lock.unlink()
 
 
 def _newer_run_published(path):
@@ -7108,12 +7156,11 @@ def main():
                 pass
 
     report_path = Path(REPORT_OUT) if REPORT_OUT else REPORTS_DIR / f"{TODAY}.md"
-    if not REPORT_OUT and _newer_run_published(report_path):
-        # ChatGPT W3 r2: a run that STARTED later already published today's report - this older run never
-        # overwrites it; it is kept beside it as superseded
-        report_path = REPORTS_DIR / f"superseded-{TODAY}-{RUN_ID.replace('.', '')}.md"
     try:
-        report.write(report_path)
+        if REPORT_OUT:
+            report.write(report_path)
+        else:
+            _publish(report, report_path)
     except Exception as e:
         # Last-ditch fallback: write to a fixed path so we don't lose the result
         fallback = DATA_DIR / "logs" / "healthcheck-error.log"
