@@ -66,12 +66,15 @@ async function main() {
 
   // the reviewer: the asked family, else the dashboard's Reviewer seat, else its Coder seat - never the author's
   // family, never a family known to be exhausted. No second family: refuse (never review oneself).
+  // The trio routes a review call to the dashboard's Reviewer seat whatever driver is asked for (its Anchor-prefs
+  // rule), so the ONLY reviewer this adapter can honestly call is that seat. When the seat is an author's family or
+  // known exhausted, refuse before launching anything - never change the seats, never call a reviewer we did not pick.
   const prefs = drivers.loadModelFamilies(process.env);
-  const reviewer = [arg('reviewer-family').toLowerCase(), prefs.review, prefs.coding, prefs.terminal]
-    .map(f => String(f || '').toLowerCase())
-    .find(f => FAMILIES.includes(f) && !authors.includes(f) && !exhausted.has(f));
-  if (!reviewer) throw new Error(`no reviewer family other than the authors' (${authors}) is configured and available`);
-  attempted = reviewer;
+  const reviewer = String(prefs.review || '').toLowerCase();
+  attempted = FAMILIES.includes(reviewer) ? reviewer : null;
+  if (!FAMILIES.includes(reviewer)) throw new Error(`the Reviewer seat (${reviewer || 'unset'}) is not a known family`);
+  if (authors.includes(reviewer)) throw new Error(`the Reviewer seat (${reviewer}) is an author's family (${authors}); choose another Reviewer seat on the dashboard`);
+  if (exhausted.has(reviewer)) throw new Error(`the Reviewer seat (${reviewer}) hit its usage limit recently; wait or choose another Reviewer seat`);
 
   const treeHash = git(repo, 'rev-parse', head + '^{tree}');
   const from = arg('delta-from') || base;

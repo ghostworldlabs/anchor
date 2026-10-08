@@ -2357,7 +2357,6 @@ class Engine:
         """Wave 1.2/1.3: end the running turn. The exec protocol has no
         retractable item boundary, so the outcome is recorded as uncertain;
         partial writes stay on disk; the queue and the native thread are kept."""
-        self._finish_served_audit()
         proc = self.proc
         if proc is None or proc.poll() is not None or not self.busy:
             return {"ok": False, "error": "no running turn"}
@@ -2373,6 +2372,11 @@ class Engine:
             pass
         self.proc = None   # the old reader must not touch shared state
         self._kill_tree(proc)
+        try:
+            proc.wait(timeout=10)                        # the writer is reaped before its audit is closed
+        except Exception:
+            pass
+        self._finish_served_audit()
         self.busy = False
         self._hold_queue("turn interrupted")
         return {"ok": True}
@@ -3956,6 +3960,16 @@ def _served_code_changes(before):
         return []
     out = [p for p, v in now["files"].items() if before["files"].get(p) != v]
     if now["head"] != before["head"]:
+        fwd = subprocess.run(["git", "-C", str(_SERVED), "merge-base", "--is-ancestor", before["head"], now["head"]],
+                             capture_output=True, timeout=20).returncode == 0
+        if not fwd:                                      # a checkout of another line or an older commit: tree vs tree
+            from steward_cockpit import code_jobs as _cjc
+            r = subprocess.run(["git", "-C", str(_SERVED), "-c", "core.quotepath=false", "diff", "--no-renames",
+                                "--name-only", before["head"], now["head"]], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=20)
+            out += [ln.strip() for ln in r.stdout.splitlines() if _cjc.is_app_file(ln.strip())] if r.returncode == 0 \
+                else ["(could not compare the trees)"]
+            return sorted(set(out))
         # commits made during the turn: application code they touched counts, unless the commit is one a reviewed,
         # verified code-job landing recorded (exact hashes - never an author name)
         try:

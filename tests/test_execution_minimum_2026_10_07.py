@@ -1525,7 +1525,17 @@ def test_an_interrupted_turn_still_reports_a_direct_code_change(tmp_path, monkey
     eng._emit = lambda ev: said.append(ev)
     eng._served_snap = steward_engine._served_code_snapshot()
     (repo / "job_runner.py").write_text("x\n", encoding="utf-8")
+
+    class Writer:                                   # the running steward process: killed and reaped, THEN audited
+        killed = False
+        def poll(self): return None if not Writer.killed else 0
+        def wait(self, timeout=None): return 0
+    eng.proc, eng.busy, eng._last_submitted = Writer(), True, "x"
+    monkeypatch.setattr(eng, "_kill_tree", lambda p: setattr(Writer, "killed", True))
+    monkeypatch.setattr(eng, "_journal_routing", lambda **k: None)
+    monkeypatch.setattr(eng, "_hold_queue", lambda reason: None)
     eng._interrupt_turn_locked("Take this now")
+    assert Writer.killed
     assert any("served code directly" in str(ev.get("text")) for ev in said) and eng._served_snap is None
 
 
@@ -1537,3 +1547,17 @@ def test_a_skill_job_never_shows_a_steps_check_as_its_own(tmp_path):
         "status": "running", "started": st, "label": "G", "argv": ["node", "C:/dev/trio/gandalf/bin/run.mjs"]}}), encoding="utf-8")
     _w, _p, _s, tests, _f = sc.who_is_working(str(tmp_path), {}, [], None, evidence_tests="Passed - pytest (exit 0)")
     assert tests == "tests not run yet"
+
+
+# ---------- final whole-patch review, round 5 ----------
+
+def test_checking_out_an_older_commit_is_reported(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "served")
+    monkeypatch.setattr(steward_engine, "_SERVED", repo)
+    old = _sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    (repo / "app.py").write_text("v2\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "app.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "v2"], check=True)
+    before = steward_engine._served_code_snapshot()
+    _sp.run(["git", "-C", str(repo), "checkout", "-q", old], check=True)            # backwards
+    assert steward_engine._served_code_changes(before) == ["app.py"]
