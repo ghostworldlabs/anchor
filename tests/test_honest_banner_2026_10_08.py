@@ -489,3 +489,22 @@ def test_an_issue_path_ends_where_the_sentence_does(tmp_path, monkeypatch):
     (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [svc] GET /api/status. answered 500\n"
                                             "- [x] failures: GET /api/status: HTTP Error 500, GET /high-seat?x=1.\n", encoding="utf-8")
     assert hc._previous_issue_paths() == ["/api/status", "/high-seat?x=1"]
+
+
+def test_a_green_from_an_earlier_instance_keeps_the_banner_while_a_live_fix_is_rechecked(world, monkeypatch):
+    """Grok's final review: after the restart that made a verified fix live, a pass of the EARLIER instance never takes
+    the banner down; this instance's own pass settles it."""
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    _land_fix(served)
+    hs.check_candidate()
+    assert anchor_next.activate(served)["ok"]
+    monkeypatch.setenv("ANCHOR_RUNNING_HEAD", _g(served, "rev-parse", "HEAD"))
+    monkeypatch.setenv("ANCHOR_STARTED_AT", "2000.0")
+    _report(reports, "2026-10-08.md", GREEN + "Service-Boot: 1000.0\n")
+    b = hs.banner()
+    assert b is not None and "re-checking the running Anchor" in b["why"]
+    _report(reports, "2026-10-08.md", GREEN + "Service-Boot: 2000.0\n")
+    assert hs.banner() is None and hs.read_candidate().get("settled")
+    monkeypatch.setenv("ANCHOR_STARTED_AT", "3000.0")                        # a later restart: settled stays settled
+    assert hs.banner() is None and not hs.recheck_needed()

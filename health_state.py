@@ -174,7 +174,7 @@ def recheck_needed():
     path, body = latest()
     if not c or path is None or c.get("target") != "candidate" or c.get("status") not in ("green", "yellow"):
         return False
-    if c.get("rechecked_for"):                      # one obligation per verified candidate, consumed when launched
+    if c.get("rechecked_for") or c.get("settled"):  # one obligation per verified candidate; settled by this instance's pass
         return False
     if not is_live(str(c.get("revision") or "")):
         return False
@@ -201,6 +201,20 @@ def banner():
         return None
     st = status_of(body)
     if st != "red":
+        # Grok final review: a pass by an EARLIER service instance never takes the banner down while a verified fix is
+        # live and THIS instance has not passed - the banner says it is re-checking; this instance's own pass settles it
+        c = read_candidate()
+        if c and c.get("target") == "candidate" and c.get("status") in ("green", "yellow") and not c.get("settled") \
+                and is_live(str(c.get("revision") or "")):
+            started = os.environ.get("ANCHOR_STARTED_AT") or ""
+            if started and field(body, "Service-Boot") == started:
+                c["settled"] = path.name
+                write_candidate(c)
+                return None
+            if started:
+                return {"status": "red", "date": path.stem, "report": path.name, "verified": c,
+                        "text": "Health check found issues",
+                        "why": "%s — the fix on %s is live; re-checking the running Anchor" % (path.stem, str(c.get("revision") or "")[:10])}
         return None
     v = verified_candidate()
     why = "%s — Doctor can diagnose it" % path.stem

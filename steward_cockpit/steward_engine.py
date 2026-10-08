@@ -708,9 +708,9 @@ SERVED_CODE_DENY = tuple("Edit(./**/*%s)" % ext for ext in (".py", ".js", ".mjs"
 SERVED_READ_ONLY = os.environ.get("ANCHOR_SERVED_READ_ONLY", "1") == "1"
 SERVED_READ_ONLY_NOTE = (
     " YOUR FOLDER IS INSIDE THE RUNNING ANCHOR, and this provider has no proven write boundary there, so you run "
-    "read-only: you read, think and talk; any change - code or records - goes to a code job "
-    "(`python C:/dev/Anchor/tools/steward_code_job.py start ...`), which lands on anchor-next and goes live at John's "
-    "restart. "
+    "read-only: you read, think and talk. You cannot start a code job yourself here (the service's sandbox cannot run "
+    "a shell): say in one line what should change and ask John - or a Claude cockpit - to start the code job, which "
+    "lands on anchor-next and goes live at his restart. "
 )
 
 

@@ -6291,9 +6291,13 @@ def _publish(report, path):
             time.sleep(0.2)
     try:
         target = path
-        if fd is None or _newer_run_published(path):
+        if TARGET != "candidate" and SERVICE_BOOT and _live_boot() not in ("", SERVICE_BOOT):
+            fd_ok = False                       # the service restarted under this run: its observations are another's
+        else:
+            fd_ok = fd is not None
+        if not fd_ok or _newer_run_published(path):
             # without the lock - or with a newer run published - this run is kept beside, never as, the report
-            target = path.with_name(f"{'superseded' if fd is not None else 'unpublished'}-{TODAY}-{RUN_ID.replace('.', '')}.md")
+            target = path.with_name(f"{'superseded' if fd_ok else 'unpublished'}-{TODAY}-{RUN_ID.replace('.', '')}.md")
         tmp = target.with_name("%s.%d.%s.tmp" % (target.name, os.getpid(), RUN_ID.replace(".", "")))
         report.write(tmp)
         os.replace(str(tmp), str(target))
@@ -6303,6 +6307,17 @@ def _publish(report, path):
                 os.close(fd)
             with contextlib.suppress(OSError):
                 lock.unlink()
+
+
+def _live_boot():
+    """The running service's boot identity NOW ("" when it does not answer)."""
+    import urllib.request
+    try:
+        port = int(os.environ.get("ANCHOR_HEALTHCHECK_LIVE_PORT") or 8777)
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/version" % port, timeout=10) as r:
+            return str((json.loads(r.read().decode("utf-8")) or {}).get("boot") or "")
+    except Exception:
+        return ""
 
 
 def _newer_run_published(path):

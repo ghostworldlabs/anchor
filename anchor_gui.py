@@ -103,6 +103,8 @@ _BUILD_SOURCES = (
     "chamber_page.py", "chamber_efforts.py", "chamber_status_overlay.py",
     "chamber_pulse.py", "chamber_e1_hook.py", "chamber_deliverable.py",
     "chamber_refine.py",
+    # 2026-10-08 (Grok final review): the server modules tonight's work runs on
+    "high_seat_page.py", "home_attention.py", "health_state.py", "anchor_next.py", "anchor_healthcheck.py", "git_safety.py",
 )
 # 2026-08-25 (elegance S-batch): steward_cockpit/ is the DEFAULT /project/ surface since
 # the cutover, but its files were absent here — cockpit-only edits never moved the build

@@ -620,6 +620,12 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         land_to = ""
         try:
             import anchor_next
+            if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
+                # John's Decision 1 (night report, 2026-10-08): a coder's SHELL has no OS boundary - it could write the
+                # running Anchor before the audit refuses the landing. Code jobs on Anchor's own repository run only
+                # once he accepts that (ANCHOR_SERVED_CODE_JOBS=1); until then none start (Grok's final review)
+                return {"ok": False, "error": "no job started: code jobs on Anchor's own code are off until John turns them "
+                        "on (ANCHOR_SERVED_CODE_JOBS=1) - a coder's shell cannot yet be held to its worktree"}
             if anchor_next.is_served_repo(root) and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
                 # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
                 # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox

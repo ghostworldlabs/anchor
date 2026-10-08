@@ -35,6 +35,7 @@ def main():
         g(served, "commit", "-q", "-m", "start")
     os.environ["ANCHOR_SERVED_ROOT"] = str(served)
     os.environ["ANCHOR_CODE_JOBS_DIR"] = str(scratch / "jobs")
+    os.environ["ANCHOR_SERVED_CODE_JOBS"] = "1"          # the proof accepts Decision 1 for its throwaway repository
     sys.path.insert(0, str(ROOT))
     import anchor_next
     from steward_cockpit import code_jobs

@@ -43,6 +43,7 @@ def served(tmp_path, monkeypatch):
     _g(repo, "commit", "-q", "-m", "start")
     monkeypatch.setenv("ANCHOR_SERVED_ROOT", str(repo))
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_SERVED_CODE_JOBS", "1")        # John's Decision 1, accepted for these proofs
     return repo
 
 
@@ -348,3 +349,12 @@ def test_every_coder_launch_on_the_running_anchors_repository_is_claudes(monkeyp
     assert se._unconfined_ok({"repo": str(served)}) is True
     src = (ROOT / "steward_cockpit" / "steward_engine.py").read_text(encoding="utf-8")
     assert 'if self.code_job is not None and self.cli != "claude" and not _unconfined_ok(self.code_job):' in src
+
+
+
+def test_code_jobs_on_the_running_anchor_are_off_until_john_turns_them_on(tmp_path, monkeypatch, served):
+    monkeypatch.delenv("ANCHOR_SERVED_CODE_JOBS", raising=False)
+    cdir = tmp_path / "off"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(served), "x", PASS, engine_factory=lambda wt: _Coder(wt, {}))
+    assert out["ok"] is False and "ANCHOR_SERVED_CODE_JOBS=1" in out["error"]
