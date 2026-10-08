@@ -1688,6 +1688,20 @@ def restart_pause_is_stale(campaign_dir, engine_state):
     return bool(stamp) and stamp < accepted
 
 
+def restart_attention_is_stale(campaign_dir, attention, engine_state):
+    """True when the attention flag says "paused for restart" and was written BEFORE John's last durably accepted
+    message (judged by the flag's own time - a newer restart hold is never hidden)."""
+    accepted = float((engine_state or {}).get("human_accepted_at") or 0)
+    if not accepted or not _RESTART_PAUSE.search(str((attention or {}).get("reason") or "")):
+        return False
+    try:
+        raw = json.loads((Path(campaign_dir) / ".ecgberht" / "attention.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    stamp = _job_epoch(raw.get("updated_at") or raw.get("state_since"))
+    return bool(stamp) and stamp < accepted
+
+
 def _median(values):
     vals = sorted(v for v in values if isinstance(v, (int, float)) and v > 0)
     if not vals:
@@ -1790,10 +1804,18 @@ def look_started(campaign_dir, look):
         f = Path(campaign_dir) / src
         if not f.is_file():
             return None
-        st = f.stat()
-        return st.st_ctime if os.name == "nt" else min(st.st_ctime, st.st_mtime)
+        text = f.read_text(encoding="utf-8", errors="replace")
+        mtime = f.stat().st_mtime
     except (OSError, ValueError):
         return None
+    first = re.search(r"^\s*\[(\d{1,2}):(\d{2})\]", text, re.M)    # the run's first status table, [HH:MM]
+    if not first:
+        return None
+    day = time.localtime(mtime)
+    began = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, int(first.group(1)), int(first.group(2)), 0, 0, 0, -1))
+    if began > mtime + 60:                          # the run began before midnight
+        began -= 86400
+    return began
 
 
 def _step_raw(campaign_dir, step_id):
@@ -1851,10 +1873,19 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
         started = _job_epoch(k.get("started"))
         label = str(k.get("label") or "a skill")
         ident = skill_identity(k)
-        own_log = bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident
+        try:
+            log_mtime = (Path(campaign_dir) / str((look or {}).get("source") or "")).stat().st_mtime if look else 0
+        except (OSError, ValueError):
+            log_mtime = 0
+        own_log = (bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident
+                   and bool(started) and log_mtime >= started)   # this skill's log, written during THIS run
         if not own_log:
             look_tests = ""                              # another skill's log never speaks for this job
         phase = str(look.get("status") or look.get("doing") or "running")[:80] if own_log else "running"
+        if own_log and real_forecast(look.get("eta")):
+            own_finish = str(look["eta"]) + (" (its own estimate, given %s)" % look["table_at"] if look.get("table_at") else " (its own estimate)")
+            return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), phase, started,
+                    look_tests or real_tests or "tests not run yet", own_finish)
         return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), phase, started,
                 look_tests or real_tests or "tests not run yet",
                 finish_time(started, now, "skill_job", campaign_dir, ident))
@@ -1902,7 +1933,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         if not active or not source_matches:
             look = None
     local_evidence = _local_status_evidence(campaign_dir, m, st, active)
-    if restart_pause_is_stale(campaign_dir, st) and _RESTART_PAUSE.search(str(m["attention"].get("reason") or "")):
+    if restart_attention_is_stale(campaign_dir, m["attention"], st):
         m["attention"] = dict(m["attention"], state="quiet", reason="")
     now_lines = []
     running = None
@@ -2012,8 +2043,6 @@ def compose_status(campaign_dir: str, engine_state=None):
         plan_step = active["name"] if active else "(no active step)"
     next_text = (m["heartbeat"]["next_recommended"] or "").strip()
     pause_stale = restart_pause_is_stale(campaign_dir, st)
-    if pause_stale and _RESTART_PAUSE.search(str(m["attention"].get("reason") or "")):
-        m["attention"] = dict(m["attention"], state="quiet", reason="")
     if pause_stale and _RESTART_PAUSE.search(next_text):
         next_text = ""                                   # the old "resume after the restart" is history, not the next step
     # (ChatGPT, items 4-6) the next actions are the CURRENT step's: a Strip line written for another step is not
@@ -2029,10 +2058,12 @@ def compose_status(campaign_dir: str, engine_state=None):
         began = _slice_started_epoch(campaign_dir, active.get("id"))
         bound = bool(written and began and written > began)
     if not bound:
-        # not this step's line - use the step's own stored next actions, else the default line
-        raw_step = _step_raw(campaign_dir, (active or {}).get("id")) if active else {}
-        own = raw_step.get("next") or raw_step.get("next_actions") or (active or {}).get("next") or ""
-        next_text = " · ".join(own) if isinstance(own, list) else str(own or "")
+        next_text = ""                                   # not this step's line
+    if not next_text.strip() and active:
+        # no usable Strip line: the step's own stored next actions (one per line - their boundaries kept)
+        raw_step = _step_raw(campaign_dir, active.get("id"))
+        own = raw_step.get("next") or raw_step.get("next_actions") or active.get("next") or ""
+        next_text = "\n".join(str(x) for x in own) if isinstance(own, list) else str(own or "")
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
     if pause_stale and _RESTART_PAUSE.search(waiting):
         waiting = ""                                     # a stale "paused for restart" wait, after his own message
@@ -2071,7 +2102,6 @@ def compose_status(campaign_dir: str, engine_state=None):
     effort_line = effort_line_freshness(campaign_dir, m)
     if pause_stale and _RESTART_PAUSE.search(str(effort_line.get("text") or "")):
         effort_line = dict(effort_line, text=_RESTART_PAUSE.sub("", str(effort_line["text"])).strip(" -\u2014\u00b7"))
-        plan["attention"] = "quiet" if plan.get("attention") in ("needs_you", "blocked") and not waiting else plan.get("attention")
     if effort_line.get("stale"):
         now_lines.append("effort line as of " + effort_line["as_of"] + " \u2014 "
                          + str(effort_line["behind_days"]) + " day(s) older than the newest work; the steward has not restamped it")
@@ -2114,7 +2144,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     else:
         elapsed_line = phase
     next3 = next_bullets(next_text)[:3] or ["Finish the current work, then wait for you."]
-    if live_skill and real_forecast(look.get("eta")):
+    if live_skill and not running_skill_jobs(campaign_dir) and real_forecast(look.get("eta")):   # the log-only run
         given = (" given " + str(look["table_at"])) if look.get("table_at") else ""   # the table's own stamp, not mtime
         finish = estimate_eta(slice_, look, started) + " (its own estimate%s)" % given   # the skill's own last ETA
     eta = finish                                          # always a clock time (or "nothing running"), never "Unavailable"

@@ -619,7 +619,11 @@ def _finish(cdir, job_id, job, result):
         note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
     elif not changed:
         note, status, error = "nothing changed", ("failed" if err else "done"), err
-        keep = bool(_unlanded(wt, manifest))           # an ignored output the coder wrote is still work: keep it
+        left = _unlanded(wt, manifest)                 # an ignored output the coder wrote is still work: keep it
+        keep = bool(left)
+        if left:
+            fields["unexpected"] = left
+            note = "nothing landable changed; outputs git ignores are kept at %s (%s)" % (wt, ", ".join(left[:8]))
     else:
         allowed = {p for p in manifest if not never_lands(p)}
         unexpected = [p for p in changed if p not in allowed]
@@ -922,9 +926,13 @@ def announce_kept(cdir, job):
             dst = out / f
             dst.parent.mkdir(parents=True, exist_ok=True)
             _sh.copy2(str(src), str(dst))
-            t = _dr.reading_target({"path": dst.relative_to(Path(cdir)).as_posix()}, pid=pid, effort_rel=rel, effort_dir=cdir)
+            where = dst.relative_to(Path(cdir)).as_posix()
+            t = _dr.reading_target({"path": where}, pid=pid, effort_rel=rel, effort_dir=cdir)
             if t["read"] or t["download"]:
                 links.append(Path(f).name)
+                reg = _dr.register(cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(f).name), "`%s`" % where)
+                if reg.get("written") or reg.get("reason") == "dup":
+                    continue                           # registered: Deliverables, Next steps and the receipt carry it
                 line = "**Anchor** · kept from code job %s (not landed): [%s](%s)" % (job["id"], Path(f).name, t["read"] or t["download"])
                 _se._default_record(cdir)(line, "receipt:kept:%s:%s" % (job["id"], f))
                 try:
@@ -963,7 +971,13 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
                                    land_note="released by %s; the work is kept at %s" % (who, job["worktree"]))
         if released is None:
             return {"ok": False, "error": "the code job finished while the stop waited; see its result"}
-        return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True, "kept": job["worktree"]}
+        served = _served_tree_changes(job)
+        if served:
+            _transition(cdir, job["id"], ("failed",), served_tree_changed=served,
+                        land_note=released["land_note"] + ("; ALSO: %s changed during the job outside any landing (%s) "
+                                                           "- check those files" % (job["repo"], ", ".join(served[:8]))))
+        return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True, "kept": job["worktree"],
+                "served_tree_changed": served}
     stopped = _transition(cdir, job["id"], ("running",), status="stopped", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                           stopped_by=who, kept_worktree=job["worktree"],
                           land_note="stopped by %s; nothing landed; the work so far is kept at %s (branch %s)" % (

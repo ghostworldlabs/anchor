@@ -1135,8 +1135,10 @@ def test_a_kept_pdf_is_copied_and_linked_in_the_dialogue(tmp_path, monkeypatch):
     cdir = tmp_path / "steward"
     cdir.mkdir()
     assert code_jobs.announce_kept(str(cdir), job) == ["report.pdf"]
+    # registered through the existing registrar - so Deliverables, Next steps and the receipt all carry it
+    assert "code-job-outputs/j9/out/report.pdf" in (cdir / "DELIVERABLES.md").read_text(encoding="utf-8")
     turns = read_history_document(str(cdir))["turns"]
-    assert any("kept from code job j9 (not landed): [report.pdf](/api/steward/deliverable-file?" in t["text"] for t in turns)
+    assert any("report.pdf" in t["text"] and "/api/steward/deliverable-file?" in t["text"] for t in turns), turns
     assert (cdir / "code-job-outputs" / "j9" / "out" / "report.pdf").is_file()
 
 
@@ -1309,3 +1311,62 @@ def test_a_stop_audits_the_source_repository(tmp_path, monkeypatch):
     r = code_jobs.stop(str(cdir), actor="John")
     assert r["served_tree_changed"] == ["live.py"]
     assert code_jobs.read_jobs(str(cdir))[out["job"]]["served_tree_changed"] == ["live.py"]
+
+
+# ---------- item 3 round 5 ----------
+
+def test_a_stale_finishing_release_audits_the_source_repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    code_jobs._write_job(str(cdir), {"id": "j", "status": "finishing", "finishing_at": 0, "repo": str(repo),
+                                     "worktree": str(tmp_path / "wt"), "branch": "b", "started": "2026-10-07 00:00:00",
+                                     "repo_dirt": code_jobs.dirty_snapshot(str(repo))})
+    (repo / "live.py").write_text("x\n", encoding="utf-8")
+    r = code_jobs.stop(str(cdir), actor="John")
+    assert r["ok"] and r["served_tree_changed"] == ["live.py"]
+    assert code_jobs.read_jobs(str(cdir))["j"]["served_tree_changed"] == ["live.py"]
+
+
+def test_ignored_only_outputs_are_the_kept_inventory(tmp_path, monkeypatch):
+    def with_gitignore(root):
+        r = _git_repo_orig(root)
+        (r / ".gitignore").write_text("*.pdf\n", encoding="utf-8")
+        _sp.run(["git", "-C", str(r), "add", ".gitignore"], check=True)
+        _sp.run(["git", "-C", str(r), "commit", "-q", "-m", "ignore"], check=True)
+        return r
+    monkeypatch.setitem(globals(), "_git_repo_orig", _git_repo)
+    monkeypatch.setitem(globals(), "_git_repo", with_gitignore)
+    repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"report.pdf": "%PDF"}})
+    assert job["landed"] is False and job["kept_worktree"] and any("report.pdf" in u for u in job["unexpected"])
+
+
+# ---------- items 4-6 round 4 ----------
+
+def test_a_newer_restart_hold_is_never_hidden(tmp_path):
+    import time as _t
+    from steward_cockpit import steward_campaign as camp
+    camp.write_attention(str(tmp_path), "needs_you", "paused for restart")
+    att = camp.read_map(str(tmp_path))["attention"]
+    assert sc.restart_attention_is_stale(str(tmp_path), att, {"human_accepted_at": _t.time() + 5})
+    assert not sc.restart_attention_is_stale(str(tmp_path), att, {"human_accepted_at": _t.time() - 3600})
+
+
+def test_a_log_only_runs_start_is_its_first_table(tmp_path):
+    import time as _t
+    (tmp_path / "logs").mkdir()
+    log = tmp_path / "logs" / "_foreman-status.log"
+    hm = _t.strftime("%H:%M", _t.localtime(_t.time() - 1800))
+    log.write_text("[%s] Foreman build · x\nSummary  s\n" % hm, encoding="utf-8")
+    began = sc.look_started(str(tmp_path), {"source": "logs/_foreman-status.log"})
+    assert began and abs((_t.time() - 1800) - began) < 120
+
+
+def test_a_bound_but_empty_strip_uses_the_steps_own_actions(tmp_path):
+    import json as _j
+    c = _campaign(tmp_path, steps=3)
+    rm = _j.loads((c / "roadmap.json").read_text(encoding="utf-8"))
+    rm["roadmap_projection"][0]["next_actions"] = ["Review draft", "Revise figures", "Send to Joe", "Archive"]
+    (c / "roadmap.json").write_text(_j.dumps(rm), encoding="utf-8")
+    (c / "strip.json").write_text(_j.dumps({"current_step_id": "s0"}), encoding="utf-8")
+    assert sc.compose_status(str(c), {})["next3"] == ["Review draft", "Revise figures", "Send to Joe"]
