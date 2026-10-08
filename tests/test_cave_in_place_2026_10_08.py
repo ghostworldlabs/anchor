@@ -54,6 +54,7 @@ class Cave:
         self.health = "h1"             # /api/version's fingerprint of the banner's facts (W3)
         self.hold = False              # hold the next answers until release() (ChatGPT W4 r3: focus restored first)
         self.held = []
+        self.projects = []             # projects made in this run: they join the registry (the "in no goal" row)
 
     def steps(self):
         out = [s for s in base._steps() if s["id"] not in ("mba-project",)]
@@ -70,7 +71,10 @@ class Cave:
 
     def html(self):
         ctx = base._ctx()
-        ctx["entries"] = ctx["entries"] + [{"id": THIRD, "name": "Third", "folder_path": "C:/x/third", "blurb": "", "group": "Ungrouped", "state": "active"}]
+        ctx["entries"] = ctx["entries"] + [{"id": THIRD, "name": "Third", "folder_path": "C:/x/third", "blurb": "", "group": "Ungrouped", "state": "active"}] \
+            + [{"id": "made-%d" % i, "name": n, "folder_path": "C:/x/" + n, "blurb": "", "group": "Ungrouped", "state": "active"} for i, n in enumerate(self.projects)]
+        for i, n in enumerate(self.projects):
+            ctx["facts"]["made-%d" % i] = {"id": "made-%d" % i, "name": n, "href": "", "needs_you": "", "next": "", "why": "", "summary": None, "summary_age_s": None, "dated": [], "nearest_due": "", "has_record": False}
         ctx["facts"][THIRD] = {"id": THIRD, "name": "Third", "href": "/project/" + THIRD, "needs_you": "", "next": "the third's next", "why": "", "summary": None, "summary_age_s": None, "dated": [], "nearest_due": "", "has_record": True}
         resolved = dict(base._resolved())
         resolved["trusts-project"] = {"kind": "project", "pid": TRUSTS, "name": "Family <Trusts>", "what": "", "state": "", "date": "", "href": "/project/" + TRUSTS, "broken": False, "gap": ""}
@@ -89,7 +93,8 @@ class Cave:
         def js(obj, status=200):
             route.fulfill(status=status, content_type="application/json", body=json.dumps(obj))
 
-        if self.hold and path in ("/api/high-seat/campaign", "/high-seat") and req.resource_type != "document":
+        if self.hold and path in ("/api/high-seat/campaign", "/high-seat", "/api/ecgberht/high_seat_say", "/api/steward/say",
+                                  "/api/rnd/new_project") and req.resource_type != "document":
             self.held.append(route)
             return None
         if path in ("/", "/high-seat"):
@@ -141,6 +146,7 @@ class Cave:
                 self.seats.update(seats)
             return js(answer)
         if path == "/api/rnd/new_project":
+            self.projects.append("New2")
             return js({"ok": True, "message": "Project \u201cNew\u201d created."})
         return js({}, status=404)
 
@@ -205,6 +211,20 @@ def _receipt(page, text):
     page.wait_for_function("(t) => { var r = document.getElementById('receiptText'); return r && r.textContent.indexOf(t) >= 0; }", arg=text, timeout=8000)
 
 
+def _held(world, page, pid, action):
+    """ChatGPT W4 r3-r4: the answers are HELD while he goes back to his box; then released - focus must survive."""
+    world.hold = True
+    action()
+    page.wait_for_timeout(250)
+    frame = page.query_selector("#card-%s iframe.cframe" % pid).content_frame()
+    frame.focus("#box")
+    assert _frame_state(page, pid)["focus"]
+    for _ in range(12):                       # the act, then the fresh render it asks for (and any after)
+        page.wait_for_timeout(250)
+        _release(world)
+    world.hold = False
+
+
 def test_an_open_card_survives_every_change_to_the_record(cave):
     world, page = cave
     ident = _open(page, MBA)
@@ -229,60 +249,66 @@ def test_an_open_card_survives_every_change_to_the_record(cave):
 
     # 3. an act: the third card's x sends it home; the receipt and its undo stay
     world.next_campaign = ({"ok": True, "receipt": "Sent home.", "undo": {"act": "seat", "step": "third-project", "seat": "deck"}}, {"third-project": ("", None)})
-    page.click("#card-%s .t-x" % THIRD)
+    _held(world, page, MBA, lambda: page.click("#card-%s .t-x" % THIRD))
     _receipt(page, "Sent home.")
     page.wait_for_selector("#card-%s" % THIRD, state="detached", timeout=8000)
     assert page.is_visible("#undoBtn")
-    st = _survived(page, MBA, ident, st, focus=False, what="an act")
+    st = _survived(page, MBA, ident, st, what="an act")
 
     # 4. its undo
     world.next_campaign = ({"ok": True, "receipt": "Undone."}, {"third-project": ("deck", 0)})
-    page.click("#undoBtn")
+    _held(world, page, MBA, lambda: page.click("#undoBtn"))
     _receipt(page, "Undone.")
     page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=8000)
-    st = _survived(page, MBA, ident, st, focus=False, what="the undo")
+    st = _survived(page, MBA, ident, st, what="the undo")
 
     # 5. an act the writer refused in part: the refusal and its undo are his, the part that landed is placed
     world.next_campaign = ({"ok": False, "receipt": "Refused in part.", "undo": {"act": "seat", "step": "third-project", "seat": "deck"}}, {"third-project": ("", None)})
-    page.click("#card-%s .t-x" % THIRD)
+    _held(world, page, MBA, lambda: page.click("#card-%s .t-x" % THIRD))
     _receipt(page, "Refused in part.")
     page.wait_for_selector("#card-%s" % THIRD, state="detached", timeout=8000)
-    st = _survived(page, MBA, ident, st, focus=False, what="an act refused in part")
+    st = _survived(page, MBA, ident, st, what="an act refused in part")
 
     # 6. a verb from the composer (the High Seat's own route)
     world.next_say = ({"ok": True, "say": "Seated on deck.", "campaign_act": True, "undo": None}, {"third-project": ("deck", 0)})
     page.fill("#say", "put the third on deck")
-    page.click("#sendBtn")
+    _held(world, page, MBA, lambda: page.click("#sendBtn"))
     _receipt(page, "Seated on deck.")
     page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=8000)
-    st = _survived(page, MBA, ident, st, focus=False, what="a composer verb")
+    st = _survived(page, MBA, ident, st, what="a composer verb")
 
     # 7. a verb said in the Cave's dialogue (the steward's route) - whole
     world.next_steward = ({"ok": True, "say": "Moved to active.", "campaign_act": True, "undo": None}, {"third-project": ("active", 2)})
     page.fill("#say", "make the third active")
-    page.click("#sendBtn")
+    _held(world, page, MBA, lambda: page.click("#sendBtn"))
     _receipt(page, "Moved to active.")
     page.wait_for_selector("#shActive #card-%s" % THIRD, timeout=8000)
-    st = _survived(page, MBA, ident, st, focus=False, what="a dialogue verb")
+    st = _survived(page, MBA, ident, st, what="a dialogue verb")
 
     # 8. ... and in part
     world.next_steward = ({"ok": False, "say": "Part of it was refused.", "undo": {"act": "seat", "step": "third-project", "seat": "active"}}, {"third-project": ("", None)})
     page.fill("#say", "send the third home and more")
-    page.click("#sendBtn")
+    _held(world, page, MBA, lambda: page.click("#sendBtn"))
     _receipt(page, "Part of it was refused.")
     page.wait_for_selector("#card-%s" % THIRD, state="detached", timeout=8000)
-    st = _survived(page, MBA, ident, st, focus=False, what="a dialogue verb landed in part")
+    st = _survived(page, MBA, ident, st, what="a dialogue verb landed in part")
 
-    # 9. a project made in the small window (it reports back by message) and from the composer's confirm card
-    page.evaluate("window.postMessage({anchor: 'project-created', entry: {name: 'New'}}, location.origin)")
+    # 9. a project made in the small window (it reports back by message) - it joins the registry's "in no goal" row
+    world.projects.append("Newly made")
+    _held(world, page, MBA, lambda: page.evaluate("window.postMessage({anchor: 'project-created', entry: {name: 'Newly made'}}, location.origin)"))
     _receipt(page, "created")
-    st = _survived(page, MBA, ident, st, focus=False, what="a project made in the small window")
+    page.wait_for_selector("#ptile .orphans .orphan[data-name='Newly made']", state="attached", timeout=8000)
+    st = _survived(page, MBA, ident, st, what="a project made in the small window")
+
+    # 10. ... and from the composer's confirm card
     world.next_say = ({"ok": True, "say": "Create it?", "project_create": {"folder": "C:/x/new2", "name": "New2"}}, None)
     page.fill("#say", "start a new project called New2 at C:/x/new2")
     page.click("#sendBtn")
-    page.click("#pcCard .pc-go")
+    page.wait_for_selector("#pcCard .pc-go", timeout=8000)
+    _held(world, page, MBA, lambda: page.click("#pcCard .pc-go"))
     _receipt(page, "Project \u201cNew\u201d created.")
-    st = _survived(page, MBA, ident, st, focus=False, what="a project made from the confirm card")
+    page.wait_for_selector("#ptile .orphans .orphan[data-name='New2']", state="attached", timeout=8000)
+    st = _survived(page, MBA, ident, st, what="a project made from the confirm card")
     assert world.loads == 1, "the page was loaded again"
 
 

@@ -136,7 +136,7 @@
   }
   var YOU = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.you) || 'You';   // his name in a dialogue row, as the AI Cockpit says it (his word, 2026-10-01)
   // what he is doing now: a key or dictated text in the last ten seconds, or a box he is in with words in it
-  var lastKey = 0; function markKey() { lastKey = Date.now(); }
+  var lastKey = 0, lastCardKey = 0; function markKey(e) { lastKey = Date.now(); if (e && e.target && e.target.closest && e.target.closest('.tile')) lastCardKey = lastKey; }
   document.addEventListener('keydown', markKey); document.addEventListener('input', markKey, true);
   function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()) || $$('.tile.open').some(function (c) { return !!c._typing; }); }   // his words in an open tile's cockpit view count (2026-10-02)
   function tileOpen() { return !!$('.tile.open'); }   // an open terminal does not hold it: its tabs re-attach after the reload (Grok, 2026-10-02); typingNow covers his keys in it
@@ -347,7 +347,16 @@
     ptileLoaded = true;
     fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.json(); })
-      .then(function (j) { var f = $('#folders'); if (f && j && j.html && !f.contains(document.activeElement) && !$('.tile.open', f)) { f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f); } })
+      .then(function (j) {
+        var f = $('#folders'); if (!(f && j && j.html) || f.contains(document.activeElement) || $('.tile.open', f)) return;
+        // the folders he opened stay open (ChatGPT W4 r4), known by their head's words
+        var opened = $$('.rnd-folder:not(.rnd-collapsed) .rnd-folder-head', f).map(function (h) { return (h.textContent || '').trim(); });
+        f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f);
+        $$('.rnd-folder', f).forEach(function (d) {
+          var h = $('.rnd-folder-head', d); if (!h || opened.indexOf((h.textContent || '').trim()) < 0) return;
+          d.classList.remove('rnd-collapsed'); var tw = $('.rnd-tw', h); if (tw) tw.textContent = '\u25BE';
+        });
+      })
       .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
   }
   var ptileToggle = $('#ptileToggle'); if (ptileToggle) ptileToggle.addEventListener('click', function () { setPtile(!ptile.classList.contains('open')); });
@@ -375,6 +384,10 @@
     var lb = $('#loginBox'); if (lb) lb.hidden = true;
     renewInPlace('Logged in. This browser holds the token now.'); refreshFeedback();
     if (dlg && dlg.resume) dlg.resume();   // the Cave's dialogue hears the steward again (ChatGPT W4 r2)
+    $$('.tile[data-tile]').forEach(function (c) {   // and the cards' views and briefs refused before it (ChatGPT W4 r4)
+      [c._talk, c._warmTalk].forEach(function (tk) { if (tk && tk.retry) tk.retry(); });
+      if (c.classList.contains('open')) refreshTile(c, c.getAttribute('data-tile'), openDir(c));
+    });
   } }) : null;
   function login(t) { return loginUi ? loginUi.login(t) : Promise.resolve(null); }
   function showLogin(text) { if (loginUi) loginUi.show(text); }
@@ -487,7 +500,9 @@
       prefill: function (text, focus) { grow(card); post('prefill', { text: text, focus: !!focus }); },
       show: function () { shown = true; post('show'); watch(); },
       park: function () { shown = false; card._typing = false; post('park'); },
-      stop: function () { window.removeEventListener('message', onMsg); ready = false; held = []; card._typing = false; if (card._warmTalk === talk) card._warmTalk = null; try { frame.src = 'about:blank'; } catch (e) {} }
+      stop: function () { window.removeEventListener('message', onMsg); ready = false; held = []; card._typing = false; if (card._warmTalk === talk) card._warmTalk = null; try { frame.src = 'about:blank'; } catch (e) {} },
+      // a view that never answered (it was refused before a login) loads again; one that answered is never touched
+      retry: function () { if (heard) return; ready = false; try { frame.src = frame.src; } catch (e) {} }
     };
     if (warm) card._warmTalk = talk; else { card._talk = talk; watch(); }
   }
@@ -636,7 +651,7 @@
   }
   // he is typing or dictating in an open card (its view reports it, or his keys went into it in the last ten seconds):
   // nothing on the page moves under his words until he is idle (E5, 2026-10-07)
-  function placeWait() { return $$('.tile.open').some(function (c) { return !!c._typing || (busyIn(c) && Date.now() - lastKey < 10000); }); }
+  function placeWait() { return $$('.tile.open').some(function (c) { return !!c._typing || (busyIn(c) && Date.now() - lastCardKey < 10000); }); }   // keys IN a card, not the composer
   function held(card) { return card.classList.contains('open') || busyIn(card); }
   function morph(a, b) {   // the same element, carrying the fresh attributes and content; an open section stays open
     if (busyIn(a)) { placeSkipped = true; return false; }   // retried when he leaves it (below)
@@ -703,6 +718,10 @@
     var o0 = $('#shDated > .shelf-foot.late'), o1 = doc.querySelector('#shDated > .shelf-foot.late'), rl = $('#ruler');   // the overdue line too
     if (o0 && !o1) o0.remove(); else if (o1 && !o0 && rl) rl.insertAdjacentElement('afterend', document.importNode(o1, true)); else if (o0 && o1) morph(o0, o1);
     // the registry projects in no goal (draggable onto a goal): added, placed or taken out (ChatGPT W4 r2)
+    $$('#railNav button[data-rail]').forEach(function (b) {   // the rail's counts follow the record (ChatGPT W4 r4)
+      var f = doc.querySelector('#railNav button[data-rail="' + b.getAttribute('data-rail') + '"]'); if (!f) return;
+      ['.n', '.c'].forEach(function (s) { var a = $(s, b), c = $(s, f); if (a && c && a.textContent !== c.textContent) a.textContent = c.textContent; });
+    });
     var g0 = $('#ptile .orphans'), g1 = doc.querySelector('#ptile .orphans'), pl = $('#ptile .ptile-line');
     if (g0 && !g1) g0.remove();
     else if (g1 && !g0 && pl) { pl.insertAdjacentElement('afterend', document.importNode(g1, true)); bindDrags($('#ptile .orphans')); }
@@ -743,7 +762,9 @@
       want.forEach(function (c) {
         if (held(c)) return;
         if (c === at) { at = nextFree(c.nextElementSibling); return; }
+        var arriving = c.parentNode !== grid && !c._fresh;
         if (at) grid.insertBefore(c, at); else grid.appendChild(c);
+        if (arriving && z === 'shActive') setTimeout(function () { warmTile(c); }, 1500);   // moved into Active: preloaded (ChatGPT W4 r4)
       });
       want.forEach(function (c) { if (c._fresh) { c._fresh = false; wireCard(c); } });
       live._order = $$('.grid > .tile', fresh).map(function (f) { return f.id; });   // the record's order, for a drop
@@ -1220,8 +1241,7 @@
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
         // W3 (2026-10-08): the banner's facts moved (a report, a verified candidate) - placed in the page, never a reload
         var h = d && d.health;
-        if (h && healthSig && h !== healthSig) renewInPlace();
-        if (h) healthSig = h;
+        if (h && h !== healthSig) { renewInPlace(); healthSig = h; }   // the first one too: a change before it is not lost
         var v = d && d.version; if (!v || v === mine) return;
         try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; } catch (e) {}
         renewVersion = String(v); renewBuild('A new build is live \u2014 the page is renewed.');

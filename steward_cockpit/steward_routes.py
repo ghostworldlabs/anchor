@@ -253,7 +253,10 @@ window.STEWARD_MODE = %s;
     if(ae.tagName==='IFRAME'){try{var b=ae.contentWindow.__stewardBusy;return !!(b&&b());}catch(_){return false;}}
     return !!((ae.tagName==='TEXTAREA'||(ae.tagName==='INPUT'&&/^(text|search|)$/i.test(ae.type||'')))&&ae.value);}
   window.__stewardBusy=_busy;
-  if (window.STEWARD_BUILD) setInterval(function(){
+  // W4 (2026-10-08, ChatGPT r4): a cockpit view embedded as a Cave card (view=tile) never reloads itself for a new
+  // build - the Cave owns that reload and makes it only when no card is open (renewBuild)
+  var _tile=false;try{_tile=new URLSearchParams(location.search).get('view')==='tile'&&window.parent!==window;}catch(_){}
+  if (window.STEWARD_BUILD && !_tile) setInterval(function(){
     _f('/api/version', {cache:'no-store'}).then(function(r){return r.json();})
       .then(function(j){
         var v = j && j.version;
