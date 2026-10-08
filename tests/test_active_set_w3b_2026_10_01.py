@@ -41,20 +41,19 @@ def test_the_scripts_renew_only_when_no_tile_is_open_and_he_is_quiet_and_keep_th
     hs = open(os.path.join(HERE, "static", "high-seat-page.js"), encoding="utf-8").read()
     # the one gate for the record's stamp and a new build
     assert "function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()) || $$('.tile.open').some(function (c) { return !!c._typing; }); }" in hs
-    assert "function tileOpen() { return !!$('.tile.open'); }" in hs and "function renew(text, key) {\n    var k = key ? String(key) : '';" in hs and "if (tileOpen() || typingNow()) {\n      pendingRenew = text || pendingRenew" in hs
-    # once per STAMP, judged per call and only for a stamp (Grok W3b): a new build and the close-the-card renewal are never swallowed
-    assert "try { if (k && sessionStorage.getItem('highseat_renewed_for') === k) return; } catch (e) {}" in hs and "var stampKey = k || pendingKey; pendingRenew = null; pendingKey = '';" in hs and "if (stampKey) sessionStorage.setItem('highseat_renewed_for', stampKey);" in hs
-    assert "renewKey" not in hs and "renewSaid" not in hs
-    assert "function heldLine(card) {" in hs and "card._heldSaid = true; card._talk.appendLine('sys', 'the record moved \\u2014 this page renews itself when you close the card', 'dim');" in hs and "open.forEach(heldLine);" in hs
+    # W4 (2026-10-08): a change to the RECORD is placed in the page (renewInPlace) - never a reload; only a NEW BUILD
+    # reloads it, through the one gate: never under an open tile or his typing, finished when the card closes and he is quiet
+    assert "function tileOpen() { return !!$('.tile.open'); }" in hs and "function renewBuild(text) {" in hs and "if (tileOpen() || typingNow()) { pendingBuild = text || pendingBuild" in hs
+    assert "renewKey" not in hs and "renewSaid" not in hs and "pendingRenew" not in hs and "highseat_renewed_for" not in hs
+    assert "function heldLine(card) {" in hs and "card._heldSaid = true; card._talk.appendLine('sys', 'a new build is live \\u2014 this page renews itself when you close the card', 'dim');" in hs and "$$('.tile.open').forEach(heldLine);" in hs
     assert "document.addEventListener('input', markKey, true);" in hs, "dictated text counts as typing"
-    assert "you: YOU, onStamp: function (st) { renew('The steward changed the record \\u2014 the page is renewed.', st); }" in hs, "the page's own dialogue renews through the gate"
-    assert "renewVersion = String(v); renew('A new build is live \\u2014 the page is renewed.');" in hs and "function typing()" not in hs
-    assert "setInterval(function () { if (pendingRenew && !tileOpen() && !typingNow()) renew(pendingRenew); }, 5000);" in hs, "a held renewal finishes when he is quiet"
-    assert "if (!another && pendingRenew) renew(pendingRenew);   // the renewal the open tile held back" in hs and "closeTile(c, true); }" in hs
-    # in place meanwhile: the open tile's brief and detail, every card's lines and light, the brief's list and the nudge
-    assert "open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();" in hs
-    # the brief is gone (2026-10-03): the nudge slot and the interrupt lane follow the record, never while he types
-    assert "var s0 = $('#nudgeSlot'), s1 = doc.getElementById('nudgeSlot');" in hs and "if (s0 && s1 && !s0.contains(document.activeElement)" in hs
+    assert "you: YOU, onStamp: function () { renewInPlace(); }," in hs, "the steward's change is placed in the page"
+    assert "renewVersion = String(v); renewBuild('A new build is live \\u2014 the page is renewed.');" in hs and "function typing()" not in hs
+    assert "setInterval(function () { if (pendingBuild && !tileOpen() && !typingNow()) renewBuild(pendingBuild); }, 5000);" in hs, "a held reload finishes when he is quiet"
+    assert "if (pendingBuild) renewBuild(pendingBuild);\n      else if (placeHeld) renewInPlace();" in hs and "closeTile(c, true); }" in hs
+    assert hs.count("location.reload()") == 1, "the new build's reload is the page's only one"
+    # in place: the nudge slot and the interrupt lane follow the record, the lane never while he types
+    assert "['nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach" in hs
     assert "if (!typing) {" in hs and "var l0 = $('#lane'), l1 = doc.getElementById('lane')" in hs
     assert "var b = e.target.closest('[data-nudge-act]'); if (!b) return;" in hs, "a nudge re-rendered in place keeps its click (delegated)"
     assert "var b = e.target.closest('.tile[data-tile] [data-part]'); if (!b || b.classList.contains('h-open')) return;" in hs and "$$('[data-part]', card).forEach" not in hs, "a card's act buttons and its wait line's open/see survive a face re-rendered in place (Grok W3b)"

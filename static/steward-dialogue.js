@@ -193,17 +193,25 @@
         .then(asJson)
         .then(function (j) {
           btn.disabled = false; btn.textContent = 'Send';
+          // W4 (2026-10-08): a page that places the record in itself (o.onRecord) and waits to reload for a new build
+          // (o.onBuild) - the Cave - is never reloaded from here; a page without them keeps the reload with its receipt
           if (j && j.error === 'build-mismatch') {   // a stale tab: the draft is kept in this browser; the renewed page puts it back
-            keep('This page was older than the server — it is renewed; your unsent text is back in the box, send it again.', true, null);
+            var stale = 'This page was older than the server — it is renewed; your unsent text is back in the box, send it again.';
+            if (o.onBuild) { receipt(stale, true); o.onBuild(stale); return; }
+            keep(stale, true, null);
             location.reload(); return;
           }
           if (!j || j.ok === false) {
             var why = (j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.';
-            if (j && j.undo) { keep(why, true, j.undo); location.reload(); return; }   // a verb that landed in part: the refusal and its undo survive the reload
+            if (j && j.undo) {   // a verb that landed in part: the refusal and its undo are his
+              if (o.onRecord) { o.onRecord(why, j.undo, true); return; }
+              keep(why, true, j.undo); location.reload(); return;
+            }
             receipt(why, true); live.target = list; live.goal = goal || null; appendLine('sys', 'Not sent — ' + why, 'dim'); live.target = null; live.goal = null; return;
           }
           try { if (DK) localStorage.removeItem(DK); } catch (e) {}
-          if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
+          if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo are his
+            if (o.onRecord) { box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {} o.onRecord(j.say, j.undo || null, false); return; }
             keep(j.say, false, j.undo || null);
             location.reload(); return;
           }

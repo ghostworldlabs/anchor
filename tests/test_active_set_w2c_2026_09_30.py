@@ -105,7 +105,7 @@ def test_the_page_script_moves_by_one_act_with_undo_and_drops_where_the_mock_up_
     assert "act({ act: 'add', initiative: g.getAttribute('data-g'), kind: 'project', text: drag.name, project_id: drag.proj })" in block, "a registry project onto a goal"
     assert "if (seatedSource()) act({ act: 'home', step: drag.step });" in block, "a seated initiative dropped on the goals tile goes home"
     assert "else receipt('Open the goals (Expand), then drop it on one goal.', true)" in block, "an orphan dropped on the closed head gets one line (Grok W2c)"
-    assert "'/api/high-seat/campaign'" in block and "if (acting || !CAMPAIGN) return; acting = true;" in block and "highseat_receipt" in block and "location.reload()" in block
+    assert "'/api/high-seat/campaign'" in block and "if (acting || !CAMPAIGN) return; acting = true;" in block and "renewInPlace(j.receipt, j.undo || null);" in block and "location.reload()" not in block   # W4: placed, never reloaded
     assert "e.dataTransfer.setData('text/plain'" in block and "'Collapse' : 'Expand'" in block
     assert "ini-tile" not in js and "active: '#shActive'" in js and "deck: '#shDeck'" in js and "#shNeeds" not in js
     r = subprocess.run(["node", "--check", os.path.join(HERE, "static", "high-seat-page.js")], capture_output=True, text=True)

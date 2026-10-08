@@ -129,11 +129,11 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
               "function shrink(card)",
               'class="dlg-bar"', 'class="dlg-gist"',               "loginBox({ receiptKey: 'highseat_receipt' })", "if (j.kept) { b.disabled = false;", "else if ((card.getAttribute('data-open-dir') || '') !== dir) { closeTile(card); openTile(card, pid, dir); }",
               "function isFileDrag(e)", "fetch('/api/steward/upload', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: pid, dir: dir, name: f.name, data_b64: b64, mode: 'new', sub: '' }) })",
-              "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)",               "new DOMParser().parseFromString(html, 'text/html')", "function paintDot(card, light)", "if (facesBusy) { facesAgain = true; return; }",
-              "the record moved, but the brief could not be re-read", "if (f0 && f1 && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
+              "if (f.size > 30000000)", "card.classList.add('dropping')", "function refreshTile(card, pid, dir)",               "new DOMParser().parseFromString(html, 'text/html')", "function paintDot(card, light)", "if (placeBusy) { placeAgain = true; return; }",
+              "the record moved, but the brief could not be re-read", "if (f0 && f1 && !busyIn(f0) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;", "fetchPart(pid, 'brief', dir, false, false)", "if (drag || !isFileDrag(e) || !card.classList.contains('open')) return;", "if (!e.target.closest('.tile.open')) receipt('Open a card first",
               "e.target.closest('.cb-accept')", "question_id: b.getAttribute('data-qid') || null", "text: 'Accept recommendation: ' + (b.getAttribute('data-rec') || '')",
               "if (card.classList.contains('open')) closeTile(card); else openTile(card, pid, card.getAttribute('data-dir') || '');",
-                            "c.classList.add('ready')", "localStorage.setItem('hs_seen_' + card.id, tok)",
+                            "card.classList.toggle('ready', !!ready);",
               "var a = e.target.closest('.cb-ask');", "var t = e.target.closest('.cb-talk');",               "$$('.tile.open').forEach(function (c) { if (c !== card) closeTile(c, true); });", "window.StewardDialogue.authHeaders(headers())"):
         assert s in js, s
     assert "openTalk" not in js and "part === 'talk'" not in js and "tokenQ2" not in js, "one token helper, the module's (Grok W2e)"
@@ -150,7 +150,7 @@ def test_the_script_opens_the_tile_to_its_brief_and_dialogue_and_the_dialogue_gr
         r = subprocess.run(["node", "--check", os.path.join(HERE, "static", f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
     css = open(os.path.join(HERE, "static", "high-seat-page.css"), encoding="utf-8").read()
-    for s in (".tlight.green{background:#4ade80", ".tlight.orange{background:#fbbf24", ".tlight.red{background:#e05f5f", ".tlight.gray{background:#8995a7", ".tile.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
+    for s in (".tlight.green{background:#4ade80", ".tlight.orange{background:#fbbf24", ".tlight.red{background:#e05f5f", ".tlight.gray{background:#8995a7", ".tile.ready,.tile.quiet.ready{animation:readyedge", ".cbrief{", ".cbrief.ask{", ".cb-ask{", ".cb-accept{", ".cb-talk{",
               '.tile.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"top top" "face brief" "acts brief" "detail detail" "dlg dlg"', ".tile.open>.t-face{grid-area:face}", ".tile.open>.t-body{display:contents}", ".tile.open .cbrief{grid-area:brief",
               ".cdlg .dlg-bar{", ".cdlg .dlg-gist{", ".cdlg.thin .scroll,.cdlg.thin .composer{display:none}", '"dlg dlg" "mat mat" "drop drop"', ".tile.open .cmat{grid-area:mat}", ".tile.open .cdrop{grid-area:drop}", ".cdrop{", ".tile.open.dropping{outline:2px dashed",
               ".cdlg .scroll{max-height:20vh", ".cdlg.big .scroll{max-height:58vh}", ".tile.talking .cdetail{display:none}"):

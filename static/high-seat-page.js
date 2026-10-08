@@ -138,32 +138,23 @@
   function typingNow() { var a = document.activeElement; return (Date.now() - lastKey < 10000) || !!(a && a.tagName === 'TEXTAREA' && a.value && a.value.trim()) || $$('.tile.open').some(function (c) { return !!c._typing; }); }   // his words in an open tile's cockpit view count (2026-10-02)
   function tileOpen() { return !!$('.tile.open'); }   // an open terminal does not hold it: its tabs re-attach after the reload (Grok, 2026-10-02); typingNow covers his keys in it
   // W3b (his word, 2026-10-01: dictating into an open tile, "the tile collapses down and whatever I was dictating gets
-  // lost"): the page renews itself when the record moves or a new build is live - but NEVER under an open tile or his
-  // typing. Then it takes the change in place (every card's lines and light, the open tile's brief and detail, the
-  // brief's list and the nudge) and finishes the renewal when the tile closes and he is quiet.
-  var pendingRenew = null, pendingKey = '', renewVersion = '';
-  function heldLine(card) {   // said once per open card: the renewal waits for it (a card he switches to hears it too - Grok W3b)
+  // lost"); W4 (his word, 2026-10-08: "Anchor is rebuilding AI Cockpits, I thought that was not supposed to happen for
+  // the open ones"): a change to the RECORD never reloads the page - it is placed in the page as it stands (renewInPlace,
+  // below). A NEW BUILD is the one thing that reloads it, and never under an open tile or his typing: it waits, says so
+  // once in the open card, and finishes when the card closes and he is quiet.
+  var pendingBuild = null, renewVersion = '';
+  function heldLine(card) {   // said once per open card: the reload waits for it (a card he switches to hears it too - Grok W3b)
     if (!card || card._heldSaid || !card._talk || !card._talk.appendLine) return;
-    card._heldSaid = true; card._talk.appendLine('sys', 'the record moved \u2014 this page renews itself when you close the card', 'dim');
+    card._heldSaid = true; card._talk.appendLine('sys', 'a new build is live \u2014 this page renews itself when you close the card', 'dim');
   }
-  function renew(text, key) {
-    var k = key ? String(key) : '';
-    // one renewal per STAMP (Grok W3b): a page whose boot stamp can never equal the stream's (a cached page, a fixed one) is
-    // renewed once for that stamp and then left alone - no line armed, nothing held; a new build is never caught by this
-    try { if (k && sessionStorage.getItem('highseat_renewed_for') === k) return; } catch (e) {}
-    if (tileOpen() || typingNow()) {
-      pendingRenew = text || pendingRenew || 'The record moved \u2014 the page is renewed.'; if (k) pendingKey = k;
-      var open = $$('.tile.open'); open.forEach(heldLine);
-      if (open.length) open.forEach(function (c) { refreshTile(c, c.getAttribute('data-tile'), openDir(c)); }); else refreshFaces();
-      return;
-    }
-    var stampKey = k || pendingKey; pendingRenew = null; pendingKey = '';
-    try { if (stampKey) sessionStorage.setItem('highseat_renewed_for', stampKey); } catch (e) {}
+  function renewBuild(text) {
+    if (tileOpen() || typingNow()) { pendingBuild = text || pendingBuild || 'A new build is live \u2014 the page is renewed.'; $$('.tile.open').forEach(heldLine); return; }
+    var said = text || pendingBuild || 'A new build is live \u2014 the page is renewed.'; pendingBuild = null;
     try { if (renewVersion) sessionStorage.setItem('highseat_reloaded_for', renewVersion); } catch (e) {}
-    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text || 'The record moved \u2014 the page is renewed.', undo: null })); } catch (e) {}
+    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: said, undo: null })); } catch (e) {}
     location.reload();
   }
-  setInterval(function () { if (pendingRenew && !tileOpen() && !typingNow()) renew(pendingRenew); }, 5000);
+  setInterval(function () { if (pendingBuild && !tileOpen() && !typingNow()) renewBuild(pendingBuild); }, 5000);
   var lastUndo = null;
   function receipt(text, bad, undo) {
     var r = $('#receipt'), t = $('#receiptText'); if (!r || !t) return;
@@ -179,8 +170,7 @@
     fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
       .then(function (j) { undoBtn.disabled = false; if (!j || !j.ok) { receipt((j && j.receipt) || 'Nothing was undone.', true); return; }
-        try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt, undo: j.undo || null })); } catch (e) {}
-        location.reload(); })
+        renewInPlace(j.receipt, j.undo || null); })
       .catch(function () { undoBtn.disabled = false; receipt('That did not go through — nothing was undone.', true); });
   });
 
@@ -206,32 +196,30 @@
   // down inside one, or back onto the goals tile; the × sends one home; a registry project dropped on a goal becomes
   // its component. Every move is ONE act on the Campaign record with one line and undo; the page reloads to the
   // record as it stands, the receipt kept.
-  var camp = $('#camp'), campTog = $('#campTog'), campHead = $('#campHead');
-  function setCamp(open) { if (!camp) return; camp.classList.toggle('open', open); if (campTog) campTog.textContent = open ? 'Collapse' : 'Expand'; }
-  if (campTog) campTog.addEventListener('click', function (e) { e.stopPropagation(); setCamp(!camp.classList.contains('open')); });
-  if (campHead) campHead.addEventListener('click', function (e) { if (e.target.closest('a')) return; setCamp(!camp.classList.contains('open')); });
+  // the heads are delegated (W4): a section placed again in the page keeps its toggle
+  var camp = $('#camp');
+  function setCamp(open) { if (!camp) return; camp.classList.toggle('open', open); var t = $('#campTog'); if (t) t.textContent = open ? 'Collapse' : 'Expand'; }
   // the Desk's one line (2026-10-06): the same pattern - the head toggles the rows in the page, the link opens the Desk
-  var desk = $('#deskline'), deskTog = $('#deskTog'), deskHead = $('#deskHead');
-  function setDesk(open) { if (!desk || !deskTog) return; desk.classList.toggle('open', open); deskTog.textContent = open ? 'Collapse' : 'Expand'; }
-  if (deskHead && deskTog) deskHead.addEventListener('click', function (e) { if (e.target.closest('a, button')) return; setDesk(!desk.classList.contains('open')); });
-  $$('.grow .gh').forEach(function (h) { h.addEventListener('click', function (e) { if (e.target.closest('a, button')) return; h.parentNode.classList.toggle('open'); }); });
+  function setDesk(open) { var desk = $('#deskline'), t = $('#deskTog'); if (!desk || !t) return; desk.classList.toggle('open', open); t.textContent = open ? 'Collapse' : 'Expand'; }
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('#campHead') && !e.target.closest('a')) { setCamp(!camp.classList.contains('open')); return; }
+    if (e.target.closest('#deskHead') && !e.target.closest('a, button')) { setDesk(!$('#deskline').classList.contains('open')); return; }
+    var h = e.target.closest('.grow .gh'); if (h && !e.target.closest('a, button')) h.parentNode.classList.toggle('open');
+  });
   var CAMPAIGN = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.campaign_pid) || '';
   var acting = false;
-  function act(body) {   // one act in flight; the receipt and its undo survive the reload
+  function act(body) {   // one act in flight; the receipt and its undo stay on the page, the change is placed in it (W4)
     if (acting || !CAMPAIGN) return; acting = true; body.pid = CAMPAIGN;
     fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
       .then(function (r) { if (r.status === 401 || r.status === 403) { return { ok: false, receipt: NOT_LOGGED_IN }; } return r.json(); })
       .then(function (j) {
+        acting = false;
         if (!j || !j.ok) {
-          acting = false;
-          if (j && j.undo) {   // the act landed in part and the writer refused the rest: the receipt says so and its undo is his
-            try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt || 'Refused.', bad: true, undo: j.undo })); } catch (e) {}
-            location.reload(); return;
-          }
+          // the act landed in part and the writer refused the rest: the receipt says so and its undo is his
+          if (j && j.undo) { renewInPlace(j.receipt || 'Refused.', j.undo, true); return; }
           receipt((j && j.receipt) || 'Nothing was done.', true); return;
         }
-        try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt, undo: j.undo || null })); } catch (e) {}
-        location.reload();
+        renewInPlace(j.receipt, j.undo || null);
       })
       .catch(function () { acting = false; receipt('That did not go through — nothing was done.', true); });
   }
@@ -245,9 +233,10 @@
     if (c) { e.preventDefault(); e.stopPropagation(); act({ act: 'seat_new', ref: c.getAttribute('data-ref'), name: c.getAttribute('data-name'), seat: c.getAttribute('data-cand-seat') }); }
   });
   // the Candidates: a search and a sort (his word, 2026-10-02: by date created, last date worked on, the steward's relevance)
-  (function () {
+  var candApply = function () {};
+  function bindCands() {   // at load, and when the tile is placed in the page for the first time (W4)
     var q = document.getElementById('candSearch'), srt = document.getElementById('candSort'), note = document.getElementById('candNote');
-    if (!q || !srt) return;
+    if (!q || !srt || q._bound) return; q._bound = true;
     try { var ks = sessionStorage.getItem('hs_cands_sort'); if (ks) srt.value = ks; q.value = sessionStorage.getItem('hs_cands_q') || ''; } catch (e) {}
     function apply() {
       var term = q.value.trim().toLowerCase(), key = srt.value, shown = 0, all = 0;
@@ -268,24 +257,30 @@
       try { sessionStorage.setItem('hs_cands_sort', key); sessionStorage.setItem('hs_cands_q', q.value); } catch (e) {}
     }
     q.addEventListener('input', apply); srt.addEventListener('change', apply);
+    candApply = apply;
     if (q.value || srt.value !== 'score') apply();
-  })();
-  // the Candidates tile stays open across the reload an act makes (2026-10-02)
-  (function () {
+    // the Candidates tile stays open across a reload (2026-10-02)
     var t = document.getElementById('candsTile'); if (!t) return;
     try { if (sessionStorage.getItem('hs_cands_open') === '1') t.open = true; } catch (e) {}
     t.addEventListener('toggle', function () { try { sessionStorage.setItem('hs_cands_open', t.open ? '1' : '0'); } catch (e) {} });
-  })();
+  }
+  bindCands();
   // the drags: a card or a goal's initiative (data-step) onto a shelf — its place among the cards — or onto the goals
   // tile (home); a registry project (data-proj) onto a goal's row (a component of that goal)
   var drag = null;
-  $$('[draggable="true"][data-step], [draggable="true"][data-proj]').forEach(function (el) {
-    el.addEventListener('dragstart', function (e) {
-      drag = { step: el.getAttribute('data-step') || '', proj: el.getAttribute('data-proj') || '', name: (el.getAttribute('data-name') || el.textContent || '').trim() };
-      el.classList.add('dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag.step || drag.proj); } catch (_) {}
+  function bindDrags(root) {   // at load, and on what W4 places in the page (once per element)
+    var sel = '[draggable="true"][data-step], [draggable="true"][data-proj]', els = $$(sel, root);
+    if (root.matches && root.matches(sel)) els.unshift(root);
+    els.forEach(function (el) {
+      if (el._dragBound) return; el._dragBound = true;
+      el.addEventListener('dragstart', function (e) {
+        drag = { step: el.getAttribute('data-step') || '', proj: el.getAttribute('data-proj') || '', name: (el.getAttribute('data-name') || el.textContent || '').trim() };
+        el.classList.add('dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag.step || drag.proj); } catch (_) {}
+      });
+      el.addEventListener('dragend', function () { el.classList.remove('dragging'); $$('.over').forEach(function (z) { z.classList.remove('over'); }); drag = null; });
     });
-    el.addEventListener('dragend', function () { el.classList.remove('dragging'); $$('.over').forEach(function (z) { z.classList.remove('over'); }); drag = null; });
-  });
+  }
+  bindDrags(document);
   $$('.zone[data-seat]').forEach(function (z) {
     z.addEventListener('dragover', function (e) { if (!drag || !drag.step) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {} z.classList.add('over'); });
     z.addEventListener('dragleave', function (e) { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
@@ -339,13 +334,14 @@
   function setPtile(open) {
     if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all';
     // the list is built on the server when he first opens it (2026-10-02: it cost every load its 25 tiles' reads)
-    if (open && !ptileLoaded && $('#ptileLoading')) {
-      ptileLoaded = true; $('#ptileLoading').textContent = 'reading the projects…';
-      fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
-        .then(function (r) { return r.json(); })
-        .then(function (j) { var f = $('#folders'); if (f && j && j.html) { f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f); } })
-        .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
-    }
+    if (open && !ptileLoaded && $('#ptileLoading')) { $('#ptileLoading').textContent = 'reading the projects…'; loadFolders(); }
+  }
+  function loadFolders() {   // the first Show all, and again when a change to the record lands while the list is loaded (W4)
+    ptileLoaded = true;
+    fetch('/api/high-seat/projects', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { var f = $('#folders'); if (f && j && j.html && !f.contains(document.activeElement) && !$('.tile.open', f)) { f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f); } })
+      .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
   }
   var ptileToggle = $('#ptileToggle'); if (ptileToggle) ptileToggle.addEventListener('click', function () { setPtile(!ptile.classList.contains('open')); });
   // the old dashboard's list inside the tile: its folder heads and rows call these two by name (every folder starts closed)
@@ -592,37 +588,137 @@
     l.className = 'tlight ' + cls; l.title = DOT_WORDS[cls] + (why ? ': ' + why : '');
     l.setAttribute('aria-label', l.title + (card.getAttribute('data-attention') ? '; ' + card.getAttribute('data-attention') : ''));
   }
-  var facesBusy = false, facesAgain = false;
-  function refreshFaces() {
-    if (facesBusy) { facesAgain = true; return; }   // a stamp that lands mid-fetch runs one more fetch after (Grok W2e-8)
-    if (whenIdle('faces', refreshFaces)) return;
-    facesBusy = true;
-    fetch('/high-seat', { headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
+  function refreshFaces() { renewInPlace(); }   // one way the page takes the record (W4)
+  // W4 (his word, 2026-10-08: "Anchor is rebuilding AI Cockpits, I thought that was not supposed to happen for the open
+  // ones"): EVERY change to the record - an act, an undo, a verb said in the composer or the Cave's dialogue, a project
+  // made, the steward's own change, a card's stamp - is taken IN PLACE from one fresh render of the page. Each section
+  // is placed where it stands; the shelves are reconciled card by card. An open card is never replaced, moved or
+  // reloaded (its frame, draft, focus and stream stay); a change that would move or remove it waits until it closes
+  // (closeTile). Nothing is placed while he types or dictates in a card, and no section he is in is replaced.
+  var placeBusy = false, placeAgain = false, placeHeld = false;
+  function renewInPlace(text, undo, bad) {
+    if (text) receipt(text, !!bad, undo || null);
+    if (placeBusy) { placeAgain = true; return; }   // a change that lands mid-fetch runs one more fetch after (Grok W2e-8)
+    if (placeWait()) { if (!deferred.place) deferred.place = setTimeout(function () { deferred.place = 0; renewInPlace(); }, 3000); return; }
+    placeBusy = true;
+    fetch('/high-seat', { cache: 'no-store', headers: window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers() })
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (html) {
         if (!html) return;
-        if (typingInCard()) { facesAgain = false; setTimeout(refreshFaces, 3000); return; }   // he started typing mid-fetch
+        if (placeWait()) { placeAgain = true; return; }   // he started typing mid-fetch: placed once he is idle
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        $$('.tile[data-tile]').forEach(function (card) {
-          var fresh = doc.getElementById(card.id); if (!fresh) return;
-          var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && !f0.contains(document.activeElement) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
-          // Activity and attention have their own continuing read below. A face render must
-          // not overwrite a newer cockpit state or clear an independent review border.
-        });
-        // the steward's nudge follows the record too (W3b; the brief is gone, 2026-10-03) - unless he is in that section
-        var s0 = $('#nudgeSlot'), s1 = doc.getElementById('nudgeSlot');
-        if (s0 && s1 && !s0.contains(document.activeElement) && s0.innerHTML !== s1.innerHTML) s0.innerHTML = s1.innerHTML;
-        // the interrupt lane arrives at a natural break, never while he types (2026-10-03)
-        var ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable);
-        if (!typing) {
-          var l0 = $('#lane'), l1 = doc.getElementById('lane'), bd = $('.board');
-          if (l0 && !l1) l0.remove();
-          else if (l1 && !l0 && bd) bd.insertAdjacentHTML('afterbegin', l1.outerHTML);
-          else if (l0 && l1 && l0.outerHTML !== l1.outerHTML) l0.outerHTML = l1.outerHTML;
-        }
+        if (doc.querySelector('.board')) placeBoard(doc);   // a locked or failed answer is never placed
       })
       .catch(function () {})
-      .then(function () { facesBusy = false; if (facesAgain) { facesAgain = false; refreshFaces(); } });
+      .then(function () { placeBusy = false; if (placeAgain) { placeAgain = false; renewInPlace(); } });
+  }
+  function busyIn(el) {   // he is IN this element: a box he types in (or a frame's) has the focus inside it - a button he just clicked does not count
+    var a = document.activeElement;
+    return !!(el && a && el.contains(a) && (a.tagName === 'IFRAME' || a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.isContentEditable));
+  }
+  // he is typing or dictating in an open card (its view reports it, or his keys went into it in the last ten seconds):
+  // nothing on the page moves under his words until he is idle (E5, 2026-10-07)
+  function placeWait() { return $$('.tile.open').some(function (c) { return !!c._typing || (busyIn(c) && Date.now() - lastKey < 10000); }); }
+  function held(card) { return card.classList.contains('open') || busyIn(card); }
+  function morph(a, b) {   // the same element, carrying the fresh attributes and content; an open section stays open
+    if (busyIn(a)) { placeHeld = true; return false; }
+    var open = a.classList.contains('open');
+    Array.prototype.slice.call(a.attributes).forEach(function (x) { if (!b.hasAttribute(x.name)) a.removeAttribute(x.name); });
+    Array.prototype.slice.call(b.attributes).forEach(function (x) { if (a.getAttribute(x.name) !== x.value) a.setAttribute(x.name, x.value); });
+    if (open) a.classList.add('open');
+    if (a.innerHTML !== b.innerHTML) a.innerHTML = b.innerHTML;
+    return true;
+  }
+  function placeBoard(doc) {
+    placeHeld = false;
+    // the health banner (W3: its words change in place, never a reload)
+    var h0 = $('.healthbar'), h1 = doc.querySelector('.healthbar'), mh = $('.masthead');
+    if (h0 && !h1) h0.remove(); else if (h1 && !h0 && mh) mh.insertAdjacentElement('afterend', document.importNode(h1, true)); else if (h0 && h1) morph(h0, h1);
+    // the interrupt lane arrives at a natural break, never while he types (2026-10-03)
+    var ae = document.activeElement, typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable);
+    if (!typing) {
+      var l0 = $('#lane'), l1 = doc.getElementById('lane'), bd = $('.board');
+      if (l0 && !l1) l0.remove(); else if (l1 && !l0 && bd) bd.insertAdjacentElement('afterbegin', document.importNode(l1, true)); else if (l0 && l1) morph(l0, l1);
+    }
+    // the steward's nudge (W3b) and the seeds
+    ['nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
+    // the goals: the line and the rows, the rows he opened kept open
+    var cb0 = $('#campBody'), cb1 = doc.getElementById('campBody'), cl0 = $('#campLine'), cl1 = doc.getElementById('campLine');
+    if (cl0 && cl1) morph(cl0, cl1);
+    if (cb0 && cb1) {
+      var openG = $$('.grow.open', cb0).map(function (g) { return g.getAttribute('data-g'); });
+      if (morph(cb0, cb1)) { openG.forEach(function (g) { var r = $('.grow[data-g="' + g + '"]', cb0); if (r) r.classList.add('open'); }); bindDrags(cb0); }
+    }
+    placeShelves(doc);
+    // the Candidates: the groups and the count; the search, the sort and the open tile stay as he left them
+    var c0 = $('#shCands'), c1 = doc.getElementById('shCands');
+    if (c0 && !c1 && !busyIn(c0)) c0.remove();
+    else if (c1 && !c0) { var deck = $('#shDeck'); if (deck) { deck.insertAdjacentElement('afterend', document.importNode(c1, true)); bindCands(); } }
+    else if (c0 && c1 && $('#candsTile', c0) && !$$('.cand-group', c0).some(busyIn)) {
+      var t0 = $('#candsTile', c0), n0 = $('summary .c', c0), n1 = $('summary .c', c1);
+      if (n0 && n1) n0.textContent = n1.textContent;
+      $$('.cand-group', c0).forEach(function (g) { g.remove(); });
+      $$('.cand-group', c1).forEach(function (g) { t0.appendChild(document.importNode(g, true)); });
+      candApply();
+    }
+    // the Desk's line (its rows open as he left them)
+    var d0 = $('#deskline'), d1 = doc.getElementById('deskline');
+    if (d0 && d1 && morph(d0, d1)) setDesk(d0.classList.contains('open'));
+    // the dated deliveries: the ruler and its counts (a balloon over a marker that moved is closed)
+    var r0 = $('#ruler'), r1 = doc.getElementById('ruler');
+    if (r0 && r1 && r0.innerHTML !== r1.innerHTML && !busyIn(r0)) { if (balloon) closeBalloon(); morph(r0, r1); bindMarkers(r0); }
+    var s0 = $('#shDated > .shelf-h .c'), s1 = doc.querySelector('#shDated > .shelf-h .c'); if (s0 && s1) s0.textContent = s1.textContent;
+    if (ptileLoaded) loadFolders();
+  }
+  // the shelves, card by card: a card that stays keeps its element (only its face is placed again); a new one is made
+  // and wired as the page does at load; one that left is taken out; the order is the record's. The open card is never
+  // touched: the others are placed around it, and its own move waits until it closes.
+  function placeShelves(doc) {
+    var where = {};
+    ['shActive', 'shDeck'].forEach(function (z) { var f = doc.getElementById(z); if (f) $$('.grid > .tile', f).forEach(function (c) { where[c.id] = z; }); });
+    ['shActive', 'shDeck'].forEach(function (z) {
+      var live = document.getElementById(z); if (!live) return;
+      $$('.grid > .tile', live).forEach(function (c) { if (where[c.id]) return; if (held(c)) { placeHeld = true; return; } dropCard(c); });
+    });
+    ['shActive', 'shDeck'].forEach(function (z) {
+      var live = document.getElementById(z), fresh = doc.getElementById(z); if (!live || !fresh) return;
+      var grid = $('.grid', live), want = [];
+      $$('.grid > .tile', fresh).forEach(function (f) {
+        var c = document.getElementById(f.id);
+        if (c && c.parentNode !== grid) { if (held(c)) { placeHeld = true; return; } }   // a held card keeps its shelf until it closes
+        if (!c) { c = document.importNode(f, true); c._fresh = true; }
+        else placeFace(c, f);
+        want.push(c);
+      });
+      // the record's order around the held card(s): each wanted card goes before the next free one
+      function nextFree(n) { while (n && (!n.classList || !n.classList.contains('tile') || held(n))) n = n.nextElementSibling; return n; }
+      var at = nextFree(grid.firstElementChild);
+      want.forEach(function (c) {
+        if (held(c)) return;
+        if (c === at) { at = nextFree(c.nextElementSibling); return; }
+        if (at) grid.insertBefore(c, at); else grid.appendChild(c);
+      });
+      want.forEach(function (c) { if (c._fresh) { c._fresh = false; wireCard(c); } });
+      var empty = $('.grid > .empty', live), n = $$('.grid > .tile', live).length;
+      if (n && empty) empty.remove();
+      else if (!n && !empty) { var fe = $('.grid > .empty', fresh); if (fe) grid.appendChild(document.importNode(fe, true)); }
+      var k0 = $('.shelf-h .c', live), k1 = $('.shelf-h .c', fresh); if (k0 && k1) k0.textContent = k1.textContent;
+    });
+  }
+  function placeFace(card, fresh) {   // the lines the record writes; activity and attention keep their own continuing read (below)
+    var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && !busyIn(f0) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
+    var g0 = $('.t-goal', card), g1 = $('.t-goal', fresh); if (g0 && g1 && g0.innerHTML !== g1.innerHTML) g0.innerHTML = g1.innerHTML;
+  }
+  function dropCard(card) {
+    if (card._warmTalk) card._warmTalk.stop();
+    stopTalk(card); card.remove();
+  }
+  function wireCard(card) {   // a card the record added: the same wiring the page gives its cards at load
+    compactTiles(card.parentNode); initiativeCockpitLinks(card.parentNode); bindDrags(card);
+    if (card.getAttribute('data-tile')) bindCard(card);
+    if (card.hasAttribute('data-ready')) paintReady(card, true, 'needs your attention');
+    if (card.closest('#shActive')) setTimeout(function () { warmTile(card); }, 1500);
+    refreshFeedback();
   }
   // Closed tiles have no dialogue stream. Read the same exact-effort cockpit state every
   // five seconds, with no wake/send/model call, and refresh review metadata on change or
@@ -720,7 +816,10 @@
     if (body) { body.hidden = true; if (warm) Array.prototype.slice.call(body.children).forEach(function (n) { if (!n.classList.contains('cdlg')) n.remove(); }); else body.innerHTML = ''; }
     $$('.t-acts button.on, .t-eff-open.on', card).forEach(function (b) { b.classList.remove('on'); });
     if (!warm) setTimeout(function () { warmTile(card); }, 1500);   // an Active card opened the ordinary way is preloaded from here on (warmTile skips the rest)
-    if (!another && pendingRenew) renew(pendingRenew);   // the renewal the open tile held back
+    if (!another) {   // what the open tile held back: a new build's reload, or the record's move of this card (W4)
+      if (pendingBuild) renewBuild(pendingBuild);
+      else if (placeHeld) renewInPlace();
+    }
   }
   function openPart(card, pid, part, btn) {
     // W1/W2 (2026-09-28): a button may name ITS effort (another effort's wait; the head's pick) — its data-dir wins,
@@ -751,7 +850,9 @@
       .then(function (html) { if (card.getAttribute('data-open') === key) det.innerHTML = html; })
       .catch(function () { det.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
   }
-  $$('.tile[data-tile]').forEach(function (card) {
+  $$('.tile[data-tile]').forEach(bindCard);
+  function bindCard(card) {   // at load, and on a card the record adds (W4)
+    if (card._cardBound) return; card._cardBound = true;
     var pid = card.getAttribute('data-tile');
     card.addEventListener('click', function (e) {
       if (card._compact) return;   // the compact card's own handler toggles its inline dialogue
@@ -762,7 +863,7 @@
     card.addEventListener('dragover', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {} card.classList.add('dropping'); });
     card.addEventListener('dragleave', function (e) { if (!card.contains(e.relatedTarget)) card.classList.remove('dropping'); });
     card.addEventListener('drop', function (e) { if (drag || !isFileDrag(e) || !card.classList.contains('open')) return; e.preventDefault(); e.stopPropagation(); card.classList.remove('dropping'); dropFiles(card, pid, e.dataTransfer.files); });
-  });
+  }
   // a card's act buttons and its wait line's open/see are delegated (W3b, Grok's read): a face re-rendered in place keeps them
   document.addEventListener('click', function (e) {
     var b = e.target.closest('.tile[data-tile] [data-part]'); if (!b || b.classList.contains('h-open')) return;
@@ -866,7 +967,9 @@
   function closeBalloon() { if (balloon) { balloon.remove(); balloon = null; } $$('.mkcard.on').forEach(function (m) { m.classList.remove('on'); }); }
   document.addEventListener('click', function (e) { if (balloon && !e.target.closest('.balloon, .mkcard')) closeBalloon(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeBalloon(); });
-  $$('.mkcard').forEach(function (mk) {
+  function bindMarkers(root) { $$('.mkcard', root).forEach(bindMarker); }   // at load, and on a ruler placed again (W4)
+  bindMarkers(document);
+  function bindMarker(mk) {
     mk.addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation();
       if (mk.classList.contains('on')) { closeBalloon(); return; }
@@ -893,7 +996,7 @@
         .then(function (html) { if (balloon) body.innerHTML = html; })
         .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
     });
-  });
+  }
 
   // the Calendar / Email tile
   var cal = $('#cal'), calTog = $('#calTog');
@@ -904,22 +1007,20 @@
     else cal.classList.toggle('open');
     if (calTog) calTog.textContent = cal.classList.contains('open') ? 'Close' : 'Open';
   });
-  $$('.dchip[data-desk]').forEach(function (c) {
-    c.addEventListener('click', function () {
+  // the Desk's chips and the tools are delegated (W4): a Desk line or a health banner placed again keeps them
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest('.dchip[data-desk]');
+    if (c) {
       var k = c.getAttribute('data-desk');
       if (k === 'tasks') { openWin('/dashboard#tile-tasks'); }
       else { cal && cal.classList.add('open'); setCalTab(k === 'mail' ? 'mail' : 'cal'); cal && cal.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    });
-  });
-
-  // the tools
-  $$('.tool[data-tool]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var k = b.getAttribute('data-tool');
-      if (k === 'doctor') openWin('/doctor' + tokenQ());
-      else if (k === 'zombie') openWin('/api/rnd/zombie_hunter_report' + tokenQ());
-      else if (k === 'foundry') openWin('/foundry');
-    });
+      return;
+    }
+    var b = e.target.closest('.tool[data-tool]'); if (!b) return;
+    var t = b.getAttribute('data-tool');
+    if (t === 'doctor') openWin('/doctor' + tokenQ());
+    else if (t === 'zombie') openWin('/api/rnd/zombie_hunter_report' + tokenQ());
+    else if (t === 'foundry') openWin('/foundry');
   });
 
   // R11 (2026-09-28): New project — the old dashboard's folder-creation dialog ALONE, in a small window; it reports
@@ -935,8 +1036,7 @@
     if (ev.origin !== location.origin || !ev.data || ev.data.anchor !== 'project-created') return;
     var en = ev.data.entry || {};
     var text = ev.data.message || ('Project \u201c' + (en.name || '?') + '\u201d created' + (en.group ? ' in the folder ' + en.group : '') + '.');
-    try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null, bad: !!ev.data.group_error })); } catch (e) {}
-    location.reload();
+    renewInPlace(text, null, !!ev.data.group_error);   // W4: the new project is placed in the page, never a reload
   });
   // R11: the steward's "start a new project" comes back as a project_create act — a confirm card under the
   // composer with the folder to put it in; nothing is created until Create it
@@ -960,8 +1060,7 @@
         .then(function (d) {
           if (!d || !d.ok) { receipt('Not created: ' + ((d && (d.error || d.message)) || 'unknown'), true); go.disabled = false; go.textContent = 'Create it'; return; }
           var text = d.message || ('Project \u201c' + name + '\u201d created' + (sel.value ? ' in the folder ' + sel.value : '') + '.');
-          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: text, undo: null, bad: !!d.group_error })); } catch (e) {}
-          location.reload();
+          card.remove(); renewInPlace(text, null, !!d.group_error);   // W4: placed in the page, never a reload
         })
         .catch(function () { receipt('That did not go through \u2014 nothing was created.', true); go.disabled = false; go.textContent = 'Create it'; });
     });
@@ -984,14 +1083,12 @@
   if (seedBtn && seedPanel) seedBtn.addEventListener('click', function () {
     var open = seedPanel.classList.toggle('open'); seedBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  $$('#seedPanel .go[data-seed-text]').forEach(function (g) {
-    g.addEventListener('click', function () {
-      if (!say) return;
-      say.value = 'make ' + g.getAttribute('data-seed-text') + ' an initiative in tier 3';
-      say.dispatchEvent(new Event('input'));
-      say.focus(); say.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      receipt('The verb is in the composer — add the tier or the life area if you want, then Send.');
-    });
+  document.addEventListener('click', function (e) {   // delegated (W4): a seed panel placed again keeps its buttons
+    var g = e.target.closest('#seedPanel .go[data-seed-text]'); if (!g || !say) return;
+    say.value = 'make ' + g.getAttribute('data-seed-text') + ' an initiative in tier 3';
+    say.dispatchEvent(new Event('input'));
+    say.focus(); say.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    receipt('The verb is in the composer — add the tier or the life area if you want, then Send.');
   });
   // W2c-2 (2026-09-30, his word: the dialogue must "engage the steward and then show the dialogue"): the composer is
   // ONE box. A Campaign verb and the new-project ask are answered by the High Seat's own route as before (a receipt,
@@ -1003,7 +1100,11 @@
     goalName: function (id) { var g = $('.grow[data-g="' + id + '"] .gn'); return (g && g.textContent.trim()) || id; },
     openGoal: function (id) { window.open('/project/' + encodeURIComponent(CAMPAIGN) + '?open=' + encodeURIComponent(id), '_blank', 'noopener'); },   // the goal's place, as the rendered chip opens it (Grok W2c-2)
     onAuth: function () { showLogin('The steward’s words cannot reach this page until this browser is logged in.'); },
-    you: YOU, onStamp: function (st) { renew('The steward changed the record \u2014 the page is renewed.', st); }   // W3b: never under an open tile or his typing
+    // W4: the steward's change, a verb said here, and a stale page each have their own way in - the record is placed in
+    // the page (no line: the dialogue already shows the turn), a stale build waits for the open card to close
+    you: YOU, onStamp: function () { renewInPlace(); },
+    onRecord: function (text, undo, bad) { renewInPlace(text, undo, bad); },
+    onBuild: function (text) { renewBuild(text); }
   }) : null;
   // the box he types into is always in view (his word, 2026-10-02): the column ends at the window's foot wherever the
   // page is scrolled (sticky alone left the composer ~150 px below the fold until he scrolled), and the box grows with
@@ -1037,10 +1138,7 @@
         if (j && j.ok && j.talk && dlg) { dlg.send(text, null, dlg.mainList(), send, say, DRAFT_KEY); return; }   // not a verb: the steward, in the dialogue
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
         say.value = ''; say.dispatchEvent(new Event('input')); clearDraft(); receipt(j.say || '…', false, j.undo || null);
-        if (j.campaign_act && !j.read_only) {   // the Campaign tile shows the change after the reload; the line and its undo survive it
-          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
-          setTimeout(function () { location.reload(); }, 900); return;
-        }
+        if (j.campaign_act && !j.read_only) { renewInPlace(); return; }   // W4: the change is placed in the page; the line and its undo stay
         if (j.project_create && j.project_create.folder) projectCard(j.project_create);   // R11: the card is here, not on the old dashboard
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
@@ -1053,12 +1151,12 @@
   (function () {
     var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
-    // W2c-4: never while he types; W3b: never under an open tile either - the renewal waits (renew), the draft and the open tile come back after it
+    // W2c-4: never while he types; W3b: never under an open tile either - the reload waits (renewBuild), the draft and the open tile come back after it
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
         var v = d && d.version; if (!v || v === mine) return;
         try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; } catch (e) {}
-        renewVersion = String(v); renew('A new build is live \u2014 the page is renewed.');
+        renewVersion = String(v); renewBuild('A new build is live \u2014 the page is renewed.');
       }).catch(function () {});
     }, 30000);
   })();

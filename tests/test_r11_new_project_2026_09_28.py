@@ -94,7 +94,7 @@ def test_lint_the_page_opens_the_dialog_alone_and_confirms_a_spoken_project_here
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     js = open(os.path.join(root, "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "window.open('/dashboard?new=1&only=1', 'anchor-new-project'" in js
-    assert "ev.data.anchor !== 'project-created'" in js and "location.reload()" in js and "bad: !!ev.data.group_error" in js
+    assert "ev.data.anchor !== 'project-created'" in js and "renewInPlace(text, null, !!ev.data.group_error);" in js   # W4: placed, never reloaded
     assert "function projectCard(pc)" in js and "mode: 'auto', name: name, folder_path: folder, group: sel.value || ''" in js
     assert "o.value === pc.group" in js, "the spoken folder preselects only when it is one of the folders"
     assert "confirm it on the old dashboard" not in js
