@@ -1464,11 +1464,23 @@ def test_a_steward_commit_to_served_code_is_reported_but_a_landing_is_not(tmp_pa
     _sp.run(["git", "-C", str(repo), "add", "job_runner.py"], check=True)
     _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "direct"], check=True)
     assert steward_engine._served_code_changes(before) == ["job_runner.py"]
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    before = steward_engine._served_code_snapshot()
+    (repo / "posing.py").write_text("x\n", encoding="utf-8")                    # an author NAME proves nothing
+    _sp.run(["git", "-C", str(repo), "add", "posing.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "-c", "user.name=Anchor lander", "commit", "-q", "-m", "land"], check=True)
+    assert steward_engine._served_code_changes(before) == ["posing.py"]
     before = steward_engine._served_code_snapshot()
     (repo / "landed.py").write_text("x\n", encoding="utf-8")
     _sp.run(["git", "-C", str(repo), "add", "landed.py"], check=True)
-    _sp.run(["git", "-C", str(repo), "-c", "user.name=Anchor lander", "commit", "-q", "-m", "land"], check=True)
-    assert steward_engine._served_code_changes(before) == []
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "a verified landing"], check=True)
+    code_jobs.record_landed_commit(_sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                                           text=True).stdout.strip())
+    assert steward_engine._served_code_changes(before) == []                    # its exact hash is on record
+    before = steward_engine._served_code_snapshot()
+    (repo / "steward_cockpit" / "static").mkdir(parents=True)
+    (repo / "steward_cockpit" / "static" / "v1.html").write_text("<script>x</script>", encoding="utf-8")
+    assert steward_engine._served_code_changes(before) == ["steward_cockpit/static/v1.html"]
 
 
 def test_a_published_receipt_is_shown_once_even_when_replayed(tmp_path, monkeypatch):
@@ -1490,3 +1502,14 @@ def test_a_published_receipt_is_shown_once_even_when_replayed(tmp_path, monkeypa
     eng._publish_delivery_receipt("t1")
     eng._replay_saved_receipts()
     assert len([e for e in shown if e.get("t") == "receipt"]) == 1
+
+
+def test_another_runs_halt_never_reaches_a_running_skill_jobs_status(tmp_path):
+    import json as _j, time as _t
+    c = _campaign(tmp_path, steps=3)
+    st = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(_t.time() - 60))
+    (c / ".ecgberht" / "skill-jobs.json").write_text(_j.dumps({"B": {
+        "status": "running", "started": st, "label": "B", "argv": ["node", "C:/dev/trio/gandalf/bin/run.mjs"]}}), encoding="utf-8")
+    (c / "_gandalf-status.log").write_text("[10:00] Gandalf review · final\nBlocker  HALT: model session limit\n", encoding="utf-8")
+    out = sc.compose_status(str(c), {})
+    assert out["halt"] is None and "STOPPED" not in " ".join(out["now"])

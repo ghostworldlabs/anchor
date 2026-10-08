@@ -341,6 +341,45 @@ def authors_of(engine):
     return sorted({CLI_FAMILY.get(c.lower(), c.lower()) for c in used if c})
 
 
+def _landed_path():
+    return jobs_base() / "landed-commits.json"
+
+
+def record_landed_commit(commit):
+    """Remember a commit a reviewed, verified code-job landing made (the only commits the served-code audit exempts)."""
+    with _LOCK:
+        try:
+            d = json.loads(_landed_path().read_text(encoding="utf-8")) if _landed_path().is_file() else []
+        except Exception:
+            d = []
+        if commit not in d:
+            d = (d + [commit])[-2000:]
+            tmp = _landed_path().with_suffix(".json.%s.tmp" % uuid.uuid4().hex[:6])
+            tmp.write_text(json.dumps(d), encoding="utf-8")
+            os.replace(str(tmp), str(_landed_path()))
+
+
+def landed_commits():
+    try:
+        return set(json.loads(_landed_path().read_text(encoding="utf-8")))
+    except Exception:
+        return set()
+
+
+APP_CODE_EXT = (".py", ".js", ".mjs", ".css", ".ps1")
+
+
+def is_app_file(path):
+    """Application code of a repository: code files anywhere, HTML only in application folders (static/, templates/,
+    ...). The ONE classifier the steward guard and the served-code audit share."""
+    p = str(path).replace(chr(92), "/").lower()
+    if p.endswith(APP_CODE_EXT):
+        return True
+    if p.endswith((".html", ".htm")):
+        return bool(set(p.split("/")[:-1]) & APP_FOLDERS)
+    return False
+
+
 def dirty_snapshot(repo):
     """{path: content hash} of every uncommitted/untracked file in the source repository right now (its own dirt).
     Compared at finish: a NEW or changed dirty file there means something wrote into the served tree during the job
@@ -822,6 +861,8 @@ def land(job, files):
         return False, note + "; the work is kept at %s" % wt, fields
     c, out, _ = _git(repo, "rev-parse", "HEAD")
     fields["landed_commit"] = out.strip() if c == 0 else ""
+    if fields["landed_commit"]:
+        record_landed_commit(fields["landed_commit"])     # the served-code audit exempts exactly this commit
     # the placed tree is the reviewed one for every path the job touched - additions, edits AND deletions
     code, diff, _ = _git_raw(repo, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z",
                          fields["landed_commit"] or "HEAD", cand, "--", *land_files)

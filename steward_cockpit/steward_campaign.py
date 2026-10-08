@@ -1945,6 +1945,10 @@ def compose_status(campaign_dir: str, engine_state=None):
                           and expected_source.strip().replace("\\", "/") == actual_source.strip().replace("\\", "/"))
         if not active or not source_matches:
             look = None
+    if look is not None and running_skill_jobs(campaign_dir):
+        # (final review) no run-to-log binding exists for a registered skill job: a status log may be another run's
+        # (a finished Gandalf's HALT while Gandalf B runs) - none of it feeds running, halt, blocker or attention
+        look = None
     local_evidence = _local_status_evidence(campaign_dir, m, st, active)
     if restart_attention_is_stale(campaign_dir, m["attention"], st):
         m["attention"] = dict(m["attention"], state="quiet", reason="")

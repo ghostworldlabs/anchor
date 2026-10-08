@@ -2426,10 +2426,8 @@ class Engine:
             # a steward never edits the served Anchor tree's code - that is a code job (worktree + review gate)
             served = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             from steward_cockpit import code_jobs as _cj1
-            statics = [os.path.join(served, "static"), os.path.join(served, "steward_cockpit", "static")]
-            code = [p for p in absolute0 if _cj1.inside(p, served) and (
-                os.path.splitext(p)[1].lower() in (".py", ".js", ".mjs", ".css", ".ps1")
-                or (os.path.splitext(p)[1].lower() in (".html", ".htm") and any(_cj1.inside(p, d) for d in statics)))]
+            code = [p for p in absolute0 if _cj1.inside(p, served)
+                    and _cj1.is_app_file(os.path.relpath(p, served))]
             if code:
                 reason = "production code goes to a code job"
                 note = ("(interface - not John) Your last turn was ended: it edited Anchor's served code (%s). Anchor's "
@@ -3924,7 +3922,8 @@ def _served_code_snapshot():
         snap = {}
         for rec in r.stdout.split("\0"):
             path = rec[3:] if len(rec) > 3 else ""
-            if path and path.lower().endswith(_CODE_EXT):
+            from steward_cockpit import code_jobs as _cjc
+            if path and _cjc.is_app_file(path):
                 try:
                     st = (_SERVED / path).stat()
                     snap[path] = (st.st_mtime_ns, st.st_size)
@@ -3945,16 +3944,18 @@ def _served_code_changes(before):
         return []
     out = [p for p, v in now["files"].items() if before["files"].get(p) != v]
     if now["head"] != before["head"]:
-        # commits made during the turn: code they touched counts, unless the commit is a verified code-job landing
-        # (git_safety's lander commits as "Anchor lander")
+        # commits made during the turn: application code they touched counts, unless the commit is one a reviewed,
+        # verified code-job landing recorded (exact hashes - never an author name)
         try:
-            r = subprocess.run(["git", "-C", str(_SERVED), "-c", "core.quotepath=false", "log", "--format=%x00%an",
+            from steward_cockpit import code_jobs as _cjc
+            verified = _cjc.landed_commits()
+            r = subprocess.run(["git", "-C", str(_SERVED), "-c", "core.quotepath=false", "log", "--format=%x00%H",
                                 "--name-only", "--no-renames", "%s..%s" % (before["head"], now["head"])],
                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
             for block in r.stdout.split("\x00")[1:]:
                 lines = [ln for ln in block.splitlines() if ln.strip()]
-                if lines and lines[0].strip() != "Anchor lander":
-                    out += [ln.strip() for ln in lines[1:] if ln.strip().lower().endswith(_CODE_EXT)]
+                if lines and lines[0].strip() not in verified:
+                    out += [ln.strip() for ln in lines[1:] if _cjc.is_app_file(ln.strip())]
         except Exception:
             out.append("(could not read the commits made during the turn)")
     for p, v in before["files"].items():
