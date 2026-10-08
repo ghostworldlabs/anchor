@@ -589,6 +589,12 @@
       "text": "The follow-up has landed and passed its test gate. I’ll check the final review and the account-binding results, then update the campaign record; the changes still await an authorized restart.\nThe tests passed, but both reviewers still found a Grok sign-in failure on the actual Setup route; one also found a Gemini account-cache gap. I’m turning those exact cases into failing tests so the next repair cannot pass while they remain unresolved.\nThe follow-up landed with 235 tests passing, but its reviews still identified two account-route blockers. I reproduced both and made those cases mandatory failing tests; Foreman is repairing them, provisionally by 9:25–9:55 p.m. Mountain. The changes are not live on your screen, and activation remains on hold.",
       "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:10:58",
       "at": "2026-10-08T02:55:16.538655+00:00"
+    },
+    {
+      "role": "steward",
+      "text": "The repair has landed and passed the expanded gate. I’ll verify the two previously failing cases and the final review, then record what remains before the changes can reach your screen.\nThe two previously failing account routes now pass, and both reviewers returned no findings. Activation and verification in your laptop window are still outstanding; I’m recording that boundary so the rail reflects it.\nThe repair landed with 237 tests passing, including both previously failing account routes; both reviewers returned no findings. Your original model preferences are restored, and no build is running. The changes await an authorized Anchor restart, then verification of Setup, Cave and actual subscription connections in your laptop window.",
+      "turn_id": "chatgpt:01a11287-5787-7532-af96-84f668e596cb:10:59",
+      "at": "2026-10-08T03:57:31.722887+00:00"
     }
   ]
 }

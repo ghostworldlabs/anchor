@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-07 21:49",
-  "status_id": "01791431363293403500",
+  "at": "2026-10-07 21:57",
+  "status_id": "01791431851962047600",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
+    "activity": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
     "latest_event": null,
     "next": [
-      "Connect named provider accounts"
+      "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
     ],
     "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Implement the bounded repair in plan v2 Refinement\u2026"
+        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Plan v2 Refinement 3 repair landed in ed14dc1: 237\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)"
+        "value": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status\u2026"
       },
       {
         "label": "Status",
-        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 stale"
+        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 quiet"
       },
       {
         "label": "Tests",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0033-real-route-blockers-and-failing-gates: Landed follow-up; real enrollment and warm-cache blockers\u2026"
+        "value": "0034-final-route-repair-landed: Final route repair landed; activation and real account proof remain"
       },
       {
         "label": "ETA",
@@ -49,35 +49,28 @@
       },
       {
         "label": "To do",
-        "value": "Connect named provider accounts"
+        "value": "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
       }
     ]
   },
-  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
+  "lead_line": "Next: Arrange authorized activation, then verify Setup and Cave in the existing laptop window. \u2014 No build running. Actual enrollment, allowance, API execution and installer proof remain distinct from passing tests.",
   "now": [
-    "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
     "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
     "landed, waits for a restart \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement"
   ],
-  "running": {
-    "kind": "code_job",
-    "label": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
-    "skill": "coder",
-    "source": ".ecgberht/code-jobs.json",
-    "age": "54 min"
-  },
+  "running": null,
   "slice": {
     "n": 2,
     "total": 11,
     "id": "gwl-access",
     "name": "Connect named provider accounts; Google Ultra uses agy",
     "part": "integrate",
-    "summary": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused\u2026",
+    "summary": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0033-real-route-blockers-and-failing-gates: Landed follow-up; real enrollment and warm-cache blockers reproduced",
+  "journal": "0034-final-route-repair-landed: Final route repair landed; activation and real account proof remain",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -87,9 +80,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0033-real-route-blockers-and-failing-gates.md",
-      "entry_id": "0033-real-route-blockers-and-failing-gates",
-      "at": "2026-10-08T02:55:13Z",
+      "path": "journal/0034-final-route-repair-landed.md",
+      "entry_id": "0034-final-route-repair-landed",
+      "at": "2026-10-08T03:57:31Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
@@ -100,9 +93,7 @@
   },
   "focus_warning": "",
   "next_bullets": [
-    "Connect named provider accounts",
-    "Google",
-    "then Show authentication and allowance for each named provider account"
+    "Arrange authorized activation, then verify Setup and Cave in the existing laptop window."
   ],
   "project": {
     "brief": "\"The service sits on one computer, and you just Tailscale into the other computer\"",
@@ -113,7 +104,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.",
+    "text": "Provider route repairs landed; 237 tests and clean independent review. Activation and laptop account proof remain.",
     "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
@@ -125,9 +116,9 @@
     "steps_total": 11,
     "waiting_on_you": "",
     "waiting_since": null,
-    "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-    "why": "Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
-    "attention": "stale",
+    "next": "Arrange authorized activation, then verify Setup and Cave in the existing laptop window.",
+    "why": "No build running. Actual enrollment, allowance, API execution and installer proof remain distinct from passing tests.",
+    "attention": "quiet",
     "goal_reread": true
   },
   "map": [
@@ -337,7 +328,7 @@
           "id": "gwl-access",
           "name": "Connect named provider accounts; Google Ultra uses agy",
           "status": "active",
-          "done_when": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused reproductions and provider/account/first-launch/status regressions; report real-flow proof and missing prerequisites. No activation or slice close.",
+          "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close.",
           "if_then": "",
           "waiting_on": null,
           "due": null,
