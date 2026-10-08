@@ -666,8 +666,9 @@ def resolve_quality(family, settings, connection, *, surface="cockpit"):
     choice = settings.get("provider_preferences", metadata.DEFAULT_PREFERENCES)["quality"].get(family)
     if surface == "jobs" and family == "chatgpt" and choice and choice != {"model": "latest_supported", "effort": "highest_supported"}:
         raise ValueError("The Codex one-shot adapter requires latest model and highest reasoning")
-    selected = (model_policy.resolve(family, settings=settings) if connection["native_default"]
-                else model_policy.resolve(family, settings=settings, env=native.account_env(connection)))
+    # Default accounts still need their own marker and homes when this process
+    # was launched under another provider. Keep the selected native login.
+    selected = model_policy.resolve(family, settings=settings, env=native.account_env(connection))
     if not choice or choice == {"model": "latest_supported", "effort": "highest_supported"}:
         return selected
     rows, _ = model_policy.discover(family, env=native.account_env(connection))

@@ -1256,7 +1256,7 @@ class Engine:
         thread.start()
 
     def _account_policy_kwargs(self, family):
-        if self.provider_connection["family"] == family and not self.provider_connection["native_default"]:
+        if self.provider_connection["family"] == family:
             import provider_native
             return {"env": provider_native.account_env(self.provider_connection)}
         return {}
@@ -1292,7 +1292,7 @@ class Engine:
                                      "quality": {family: self.provider_quality} if self.provider_quality else {}}}
                     selection = _provider_setup.resolve_quality(family, bound_settings, self.provider_connection)
                 else:
-                    selection = model_policy.resolve(family, settings=settings)
+                    selection = model_policy.resolve(family, settings=settings, **self._account_policy_kwargs(family))
             except (ValueError, RuntimeError) as exc:
                 failed.append(family)
                 self._journal_routing(action="unavailable", family=family,

@@ -564,7 +564,7 @@ class NativeProviders:
             cap = self.capabilities(family)
             if not cap.get("isolated") or not cap.get("login"):
                 raise NativeError("unsupported")
-            self.observe(connection)
+            self.observe(connection, capability=cap)
             def line_progress(line):
                 for candidate in re.findall(r"https://[^\s<>]+", line):
                     url = safe_auth_url(candidate.rstrip(".,)"), family)

@@ -470,6 +470,29 @@ from tests.test_provider_setup import stack, row
 FOLLOWUP_DISCOVER = model_policy.discover
 
 
+def followup_inherited_account_env(monkeypatch, tmp_path, identity="chatgpt-default"):
+    # Match a check launched by an existing steward after dashboard preferences
+    # change: its account marker and homes still belong to the parent process.
+    inherited = {"ANCHOR_PROVIDER_CONNECTION": identity,
+                 "CODEX_HOME": str(tmp_path / "parent-codex"),
+                 "CLAUDE_CONFIG_DIR": str(tmp_path / "parent-claude"),
+                 "GROK_HOME": str(tmp_path / "parent-grok"),
+                 "OPENAI_API_KEY": "inherited-account-api-canary"}
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
+    return inherited
+
+
+def followup_assert_agy_binding(calls, inherited):
+    catalogs = [env for argv, env in calls if argv == ["agy-fixture", "models"]]
+    assert catalogs, "The selected account must reach native model discovery"
+    for env in catalogs:
+        assert env["ANCHOR_PROVIDER_CONNECTION"] == "gemini-default"
+        assert not any(key in env for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "GROK_HOME"))
+        assert not any(key.endswith("API_KEY") for key in env)
+    assert {key: os.environ.get(key) for key in inherited} == inherited
+
+
 def followup_agy_service(monkeypatch):
     calls = []
     monkeypatch.setattr(native, "executable", lambda family: "agy-fixture" if family == "gemini" else None)
@@ -480,7 +503,7 @@ def followup_agy_service(monkeypatch):
         if argv == ["agy-fixture", "--version"]:
             return 0, "1.3.0"
         assert argv == ["agy-fixture", "models"]
-        assert env.get("ANCHOR_PROVIDER_CONNECTION", "gemini-default") == "gemini-default"
+        assert env["ANCHOR_PROVIDER_CONNECTION"] == "gemini-default"
         assert not any(key.endswith("API_KEY") for key in env)
         return 0, ("gemini-frontier-high\tGemini frontier\n"
                    "gemini-frontier-max\tGemini frontier\n"
@@ -496,6 +519,7 @@ def followup_agy_service(monkeypatch):
 
 def test_retained_agy_unknown_observation_can_apply_and_bind_new_work(stack, monkeypatch, tmp_path):
     from steward_cockpit import steward_engine
+    inherited = followup_inherited_account_env(monkeypatch, tmp_path)
     service, calls = followup_agy_service(monkeypatch)
     monkeypatch.setattr(steward_engine, "STATE_FILE", tmp_path / "engines.json")
     directory = tmp_path / "retained-conversation"
@@ -527,6 +551,7 @@ def test_retained_agy_unknown_observation_can_apply_and_bind_new_work(stack, mon
     assert existing.session_id == "owned-session"
     assert calls[1][1]["ANCHOR_PROVIDER_CONNECTION"] == "gemini-default"
     assert all(argv in (["agy-fixture", "--version"], ["agy-fixture", "models"]) for argv, _ in calls)
+    followup_assert_agy_binding(calls, inherited)
 
 
 @pytest.mark.parametrize("failure", ["cli_missing", "auth_required", "capability_unavailable"])
@@ -548,7 +573,8 @@ def test_retained_agy_missing_prerequisite_cannot_apply(stack, monkeypatch, fail
 
 def test_agy_transient_catalog_keeps_bound_source_and_last_full_quality(stack, monkeypatch, tmp_path):
     from steward_cockpit import steward_engine
-    service, _ = followup_agy_service(monkeypatch)
+    inherited = followup_inherited_account_env(monkeypatch, tmp_path)
+    service, calls = followup_agy_service(monkeypatch)
     connection = metadata.find_connection(settings.load_settings(), "gemini-default")
     service.refresh(connection)
     config = settings.load_settings()
@@ -575,6 +601,58 @@ def test_agy_transient_catalog_keeps_bound_source_and_last_full_quality(stack, m
     monkeypatch.setattr(native, "executable", lambda _: None)
     with pytest.raises(ValueError, match="unavailable"):
         setup.selected_for_launch(config, "gemini")
+    followup_assert_agy_binding(calls, inherited)
+
+
+def test_default_agy_selection_cache_and_background_refresh_use_bound_account(stack, monkeypatch, tmp_path):
+    from steward_cockpit import steward_engine
+
+    parent = metadata.new_connection("chatgpt", "Parent named account")
+    config = settings.load_settings()
+    settings.save_settings(provider_connections=config["provider_connections"] + [parent],
+                           expected_revision=config["settings_revision"])
+    inherited = followup_inherited_account_env(monkeypatch, tmp_path, identity=parent["id"])
+    _, calls = followup_agy_service(monkeypatch)
+    monkeypatch.setattr(model_policy, "_MEMORY", {})
+    monkeypatch.setattr(steward_engine, "STATE_FILE", tmp_path / "default-agy-engines.json")
+    config = settings.load_settings()
+    saved = settings.settings_path().read_bytes()
+    connection = metadata.find_connection(config, "gemini-default")
+    directory = tmp_path / "default-agy-conversation"
+    directory.mkdir()
+    steward_engine._update_state(str(directory), {"cli": "gemini", "session_id": "owned-agy-session",
+        "provider_connection": connection, "pending_queue": ["Keep this unsent turn"]})
+    engine = steward_engine.Engine(str(directory), fake=True)
+    engine.session_id = "owned-agy-session"
+    assert engine.provider_quality is None and engine.provider_connection["native_default"]
+    family, selection = engine._select_available_policy(config, "gemini")
+    assert family == "gemini" and selection["model"] == "gemini-frontier" and selection["effort"] == "max"
+    assert model_policy.launch_args(selection) == ["--model", "gemini-frontier-max"]
+    engine.model_selection = selection
+    cached_environments = []
+    cached_selection = model_policy.cached_selection
+
+    def qualified_cached_selection(family, **kwargs):
+        cached_environments.append(dict(kwargs["env"]))
+        return cached_selection(family, **kwargs)
+
+    monkeypatch.setattr(model_policy, "cached_selection", qualified_cached_selection)
+    before = len(calls)
+    cached_family, cached = engine._current_selection_uncapped(config, "gemini")
+    assert cached_family == "gemini" and cached == selection and len(calls) == before
+    assert cached_environments[0]["ANCHOR_PROVIDER_CONNECTION"] == connection["id"]
+    engine._refresh_catalog_async(config)
+    engine._catalog_refresh_thread.join(5)
+    assert not engine._catalog_refresh_thread.is_alive()
+    assert len(calls) == before + 1 and calls[-1][0] == ["agy-fixture", "models"]
+    assert engine.provider_connection == connection and engine.session_id == "owned-agy-session"
+    assert engine.model_selection == selection and engine.model_selection["effort"] == "max"
+    assert engine.queue == ["Keep this unsent turn"]
+    retained = steward_engine._read_state_entry(str(directory))
+    assert retained["session_id"] == "owned-agy-session" and retained["provider_connection"] == connection
+    assert retained["pending_queue"] == engine.queue
+    assert settings.settings_path().read_bytes() == saved
+    followup_assert_agy_binding(calls, inherited)
 
 
 def followup_grok_service(monkeypatch, connection, *, signed=True, wrong_home=False, transient=False):
@@ -632,6 +710,34 @@ def test_grok_refresh_reuses_one_capability_probe_and_qualifies_account(stack, m
     assert report["catalog"]["state"] == "fresh"
 
 
+def test_grok_login_reuses_verified_capability_before_browser_enrollment(stack, monkeypatch):
+    import threading
+
+    connection = followup_registered_grok()
+    service, commands, probes = followup_grok_service(monkeypatch, connection, signed=False, transient=True)
+    native_command = native.run_command
+    progress = []
+
+    def command(argv, env, cancel=None, timeout=None, line_progress=None, **kwargs):
+        if argv[1:] == ["auth", "login", "--browser"]:
+            commands.append((argv[1:], dict(env)))
+            assert env["GROK_HOME"] == str(native.account_home(connection))
+            line_progress("https://grok.com/login")
+            return 0, ""
+        return native_command(argv, env, **kwargs)
+
+    monkeypatch.setattr(native, "run_command", command)
+    service.native.login(connection, threading.Event(), progress.append)
+    assert probes == ["grok"]
+    assert commands[-1][0] == ["auth", "login", "--browser"]
+    status_homes = [env["GROK_HOME"] for tail, env in commands if tail == ["auth", "status", "--json"]]
+    assert len(status_homes) == 2 and status_homes[0] != status_homes[1]
+    assert status_homes[-1] == str(native.account_home(connection))
+    assert progress[0]["state"] == "awaiting_browser"
+    assert progress[0]["url"] == "https://grok.com/login"
+    assert "must-not-export" not in json.dumps(progress)
+
+
 def test_cold_grok_apply_reconciles_retained_account_and_new_work(stack, monkeypatch, tmp_path):
     from steward_cockpit import steward_engine
     connection = followup_registered_grok()
@@ -680,6 +786,7 @@ def test_cold_native_choice_is_usable_in_cave_and_apply_verifies_before_new_work
 
     origin, _, _ = cave_server
     if family == "gemini":
+        inherited = followup_inherited_account_env(monkeypatch, tmp_path)
         service, commands = followup_agy_service(monkeypatch)
         connection = metadata.find_connection(settings.load_settings(), "gemini-default")
         probes = None
@@ -741,6 +848,7 @@ def test_cold_native_choice_is_usable_in_cave_and_apply_verifies_before_new_work
                 assert applied["allowance"]["state"] == "unsupported"
                 selected_family, selection = pending._select_available_policy(settings.load_settings(), family)
                 assert selected_family == family and selection["effort"] == "max"
+                followup_assert_agy_binding(commands, inherited)
             else:
                 assert probes == ["grok"]
                 assert pending._account_policy_kwargs(family)["env"]["GROK_HOME"] == str(native.account_home(connection))
