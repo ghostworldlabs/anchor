@@ -563,7 +563,30 @@ def _kill_tree(proc):
         pass
 
 
-def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill=""):
+def declared_outputs(outputs):
+    """([relative paths], None) or (None, why): the files a job names up front as its outputs (W2, 2026-10-08) - a
+    plain path inside the repository, never a runtime record, never foreman.config.json, at most 40."""
+    out = []
+    for raw in list(outputs or [])[:41]:
+        p = str(raw or "").strip().replace(chr(92), "/")
+        if not p:
+            continue
+        if p.startswith("/") or re.match(r"^[A-Za-z]:", p) or ".." in p.split("/") or "*" in p or "?" in p:
+            return None, "a declared output is a plain path inside the repository: %s" % p
+        try:
+            import git_safety as _gs
+            if _gs.is_runtime_path(p) or never_lands(p) or _RECORDS.search(p):
+                return None, "a declared output may not be a runtime record or foreman.config.json: %s" % p
+        except Exception:
+            return None, "the declared outputs could not be checked"
+        if p not in out:
+            out.append(p)
+    if len(out) > 40:
+        return None, "at most 40 declared outputs"
+    return out, None
+
+
+def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
     family choice (else the Coder seat); ``check`` is an argument list or the full command text."""
@@ -576,6 +599,9 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     family, why = choose_coder(coder)
     if why:
         return {"ok": False, "error": why}
+    outputs, why = declared_outputs(outputs)
+    if why:
+        return {"ok": False, "error": why}
     root = _repo_root(repo or "")
     if root is None:
         return {"ok": False, "error": "not a git repository: %s" % repo}
@@ -585,7 +611,19 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     with _LOCK:      # the check, the worktree and the busy entry: one step, so two stewards never both start
         if _norm(root) in busy_repos():
             return {"ok": False, "error": "a code job is already running on %s; one writer at a time" % root}
-        code, base, err = _git(root, "rev-parse", "HEAD")
+        # W1a (2026-10-08): a job on Anchor's own repository starts from anchor-next and lands there, in the lander's
+        # own checkout - never in the running Anchor; John's restart makes it live
+        land_to = ""
+        try:
+            import anchor_next
+            if anchor_next.is_served_repo(root):
+                ip, why = anchor_next.ensure_integration(root)
+                if ip is None:
+                    return {"ok": False, "error": "no job started: %s" % why}
+                land_to = str(ip)
+        except Exception as e:
+            return {"ok": False, "error": "no job started: could not prepare anchor-next (%s)" % e}
+        code, base, err = _git(land_to or root, "rev-parse", "HEAD")
         if code != 0:
             return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
         code, _, err = _git(root, "worktree", "add", "-b", branch, str(wt), base, timeout=600)
@@ -596,7 +634,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
         job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
                "repo_dirt": served_dirt,
-               "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+               "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
                "steward_dir": str(cdir), "steward": steward, "worker": "coder", "coder_family": family,
                "started_by": str(actor or "the steward")}
         # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
@@ -671,8 +709,10 @@ def coder_brief(job):
             "edit the code with your file tools (only the files your tools write will land; anything else that "
             "changes keeps the work from landing), run the checks that apply, and end with a plain summary of what "
             "you changed and how you checked it. Do not commit; the job commits your files, a reviewer of another "
-            "model family reviews them, and they land only if that review passes.%s\n\nBRIEF:\n%s") % (
-        job["repo"], job["branch"], ("\nThe job will run this check after you finish: " + (
+            "model family reviews them, and they land only if that review passes.%s%s\n\nBRIEF:\n%s") % (
+        job["repo"], job["branch"], ("\nNamed up front as this job's outputs (they may land even when a command you ran "
+                                     "wrote them, not your file tools): " + ", ".join(job["outputs"])) if job.get("outputs") else "",
+        ("\nThe job will run this check after you finish: " + (
             " ".join(job["check"]) if isinstance(job["check"], list) else job["check"])) if job.get("check") else "", job["brief"])
 
 
@@ -715,7 +755,9 @@ def _finish(cdir, job_id, job, result):
             fields["unexpected"] = left
             note = "nothing landable changed; outputs git ignores are kept at %s (%s)" % (wt, ", ".join(left[:8]))
     else:
-        allowed = {p for p in manifest if not never_lands(p)}
+        # W2 (2026-10-08): only what the coder's tools recorded writing lands - plus a file the job named up front as
+        # its declared output (a render a script made), still reviewed; the exclusions hold for both
+        allowed = {p for p in manifest + list(job.get("outputs") or []) if not never_lands(p)}
         unexpected = [p for p in changed if p not in allowed]
         files = [p for p in changed if p in allowed]
         fields.update(unexpected=unexpected, files=files)
@@ -735,7 +777,10 @@ def _finish(cdir, job_id, job, result):
             served = _served_tree_changes(job)
             if late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
-            if fields["check_ok"] is False:
+            if fields["check_ok"] is None:       # W1a (2026-10-08): every landing needs an explicit passing check
+                note = ("not landed: no check was given - every landing needs a passing check (start the job with "
+                        "--check); the work is kept at %s" % wt)
+            elif fields["check_ok"] is not True:
                 note = "not landed: the check failed in the job's tree; the work is kept at %s" % wt
             elif late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
@@ -864,20 +909,24 @@ def land(job, files):
     with HEAD unchanged - place only the job's own files with git_safety.land_locked and verify each placed file.
     Returns (landed, note, fields)."""
     import git_safety as _gs
-    repo, wt = job["repo"], job["worktree"]
+    wt = job["worktree"]
+    # W1a (2026-10-08): the landing target - the lander's checkout of anchor-next for Anchor's own repository (named at
+    # the job's start and checked again here), else the repository itself. The running Anchor is refused by land_locked.
+    repo = job.get("land_to") or job["repo"]
     fields = {"verified": False}
+    if job.get("land_to"):
+        import anchor_next
+        ip, why = anchor_next.ensure_integration(job["repo"])
+        if ip is None or os.path.normcase(str(ip)) != os.path.normcase(str(job["land_to"])):
+            return False, "not landed: %s; the work is kept at %s" % (why or "the lander's checkout moved", wt), fields
     code, cand, _ = _git(wt, "rev-parse", "HEAD")
     if code != 0:
         return False, "not landed: could not read the candidate; the work is kept at %s" % wt, fields
     if _stop_asked(job):
         return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
-    docs_only = all(is_document(f) for f in files)
-    if docs_only:
-        rec = {"ok": True, "skipped": "documents only - no code to review", "verdict": "SKIPPED"}
-    else:
-        rec = run_review(job, wt, cand)
+    rec = run_review(job, wt, cand)           # W2 (2026-10-08): every job is reviewed by another family, documents too
     fields["review"] = rec
-    why = "" if docs_only else review_blocks(job, rec, wt, cand)
+    why = review_blocks(job, rec, wt, cand)
     if why:
         return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
     code, head, err = _git(repo, "rev-parse", "HEAD")
@@ -891,13 +940,13 @@ def land(job, files):
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
         code, merged, _ = _git(wt, "rev-parse", "HEAD")
         ok, out = run_check(job, wt)
-        if ok is False:
-            return False, "not landed: the check failed after bringing in newer changes; the work is kept at %s" % wt, fields
+        if ok is not True:                                 # a missing check is a failure too (W1a)
+            return False, "not landed: the check did not pass after bringing in newer changes; the work is kept at %s" % wt, fields
         if _stop_asked(job):
             return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
-        delta = {"ok": True, "verdict": "SKIPPED"} if docs_only else run_review(job, wt, merged, delta_from=cand)
+        delta = run_review(job, wt, merged, delta_from=cand)
         fields["delta_review"] = delta
-        why = "" if docs_only else review_blocks(job, delta, wt, merged)
+        why = review_blocks(job, delta, wt, merged)
         if why:
             return False, "not landed (after integration): %s; the work is kept at %s" % (why, wt), fields
         cand = merged
@@ -1045,7 +1094,7 @@ def announce_kept(cdir, job):
         from steward_cockpit import steward_engine as _se
         import deliverables_register as _dr
         pid, rel = _dr.project_and_rel(cdir)
-        out, links = Path(cdir) / "code-job-outputs" / job["id"], []
+        out, links, unlisted = Path(cdir) / "code-job-outputs" / job["id"], [], []
         preserved = list(job.get("files") or []) + [str(u).replace(" (ignored by git)", "") for u in job.get("unexpected") or []]
         for f in dict.fromkeys(preserved):
             src = Path(job["kept_worktree"]) / f
@@ -1061,16 +1110,17 @@ def announce_kept(cdir, job):
                 reg = _dr.register(cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(f).name), "`%s`" % where)
                 if reg.get("written") or reg.get("reason") == "dup":
                     continue                           # registered: Deliverables, Next steps and the receipt carry it
-                line = "**Anchor** · kept from code job %s (not landed): [%s](%s)" % (job["id"], Path(f).name, t["read"] or t["download"])
-                _se._default_record(cdir)(line, "receipt:kept:%s:%s" % (job["id"], f))
-                try:
-                    from steward_cockpit import steward_routes as _sr
-                    eng = _sr.get_engine(str(cdir), create=False)
-                    if eng is not None:
-                        (getattr(eng, "emit_receipt", None) or eng._emit)(
-                            {"t": "receipt", "text": line, "id": "receipt:kept:%s:%s" % (job["id"], f)})
-                except Exception:
-                    pass
+                unlisted.append("[%s](%s)" % (Path(f).name, t["read"] or t["download"]))
+        if unlisted:      # W2 (2026-10-08): ONE line for the job, never one per file
+            line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(unlisted))
+            _se._default_record(cdir)(line, "receipt:kept:%s" % job["id"])
+            try:
+                from steward_cockpit import steward_routes as _sr
+                eng = _sr.get_engine(str(cdir), create=False)
+                if eng is not None:
+                    (getattr(eng, "emit_receipt", None) or eng._emit)({"t": "receipt", "text": line, "id": "receipt:kept:%s" % job["id"]})
+            except Exception:
+                pass
         return links
     except Exception:
         return []

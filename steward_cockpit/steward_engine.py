@@ -699,6 +699,31 @@ FENCE_NOTE = (
 )
 
 
+# W1a (2026-10-08): inside the running Anchor checkout a fenced Claude steward may still edit its records and documents,
+# never a code file - the same file kinds code_jobs.is_app_file calls application code (deny wins over the allow list)
+SERVED_CODE_DENY = tuple("%s(./**/*%s)" % (tool, ext) for tool in ("Edit", "NotebookEdit")
+                         for ext in (".py", ".js", ".mjs", ".css", ".ps1", ".html", ".htm"))
+# John's choice in the morning report (2026-10-09): the two Anchor-revision cockpits inside the checkout (Setup and
+# Mother Ship, Distribution and Collaboration) run ChatGPT, whose shell cannot start inside the service's sandbox - read
+# only, they can talk but not hand off. ANCHOR_SERVED_READ_ONLY=0 keeps the old, unbounded behaviour.
+SERVED_READ_ONLY = os.environ.get("ANCHOR_SERVED_READ_ONLY", "1") == "1"
+SERVED_READ_ONLY_NOTE = (
+    " YOUR FOLDER IS INSIDE THE RUNNING ANCHOR, and this provider has no proven write boundary there, so you run "
+    "read-only: you read, think and talk; any change - code or records - goes to a code job "
+    "(`python C:/dev/Anchor/tools/steward_code_job.py start ...`), which lands on anchor-next and goes live at John's "
+    "restart. "
+)
+
+
+def _in_served(folder):
+    """Is ``folder`` inside the running Anchor checkout (the tree the service serves its code from)?"""
+    try:
+        from steward_cockpit import code_jobs as _cj
+        return bool(folder) and _cj.inside(str(folder), str(_SERVED))
+    except Exception:
+        return True      # unknown: the careful answer
+
+
 def _cap_effort(selection, cap):
     """The selection with its effort no higher than ``cap`` (2026-10-05); unchanged when there is no cap, the cap is not a
     known level, or the selection is already at or below it."""
@@ -1529,13 +1554,22 @@ class Engine:
             self.fenced = fenced
             if fenced:
                 persona += FENCE_NOTE
+            # W1a (2026-10-08): no writer edits the running Anchor's code in place - it lands on anchor-next through a
+            # code job. A steward whose folder is inside the running checkout: Claude's fence refuses code files there
+            # (the deny rules below, before any write); a provider with no proven boundary there (ChatGPT's sandbox is
+            # unproven under the service; Grok, Gemini) runs read-only - it talks and reads, a code job changes code.
+            in_served = not self.general and _in_served(self.dir)
+            read_only = in_served and self.cli in ("chatgpt", "grok", "gemini") and SERVED_READ_ONLY
+            if read_only:
+                persona += SERVED_READ_ONLY_NOTE
             if self.cli in ("chatgpt", "grok", "gemini"):
                 import sys
                 bridge = {"chatgpt": "codex_turn_bridge.py", "grok": "grok_turn_bridge.py",
                           "gemini": "gemini_turn_bridge.py"}[self.cli]
                 cmd = [sys.executable, str(HERE / bridge),
                        "--target", self.dir, "--model", selection["model"],
-                       "--effort", selection["effort"], "--permission-mode", "fenced" if fenced else self.permission_mode]
+                       "--effort", selection["effort"], "--permission-mode",
+                       "plan" if read_only else ("fenced" if fenced else self.permission_mode)]
                 if stored:
                     cmd += ["--resume", stored]
                 self._bridge_system_prompt = persona + self._contract() + "\n" + history_reference
@@ -1548,7 +1582,7 @@ class Engine:
                 ] + (["--setting-sources", "project", "--permission-mode", "default",
                       "--allowedTools", *FENCE_ALLOWED_TOOLS] if fenced else
                      ["--permission-mode", self.permission_mode]) + [
-                "--disallowedTools", "AskUserQuestion",
+                "--disallowedTools", "AskUserQuestion", *(SERVED_CODE_DENY if (fenced and in_served) else ()),
                 "--append-system-prompt", persona + self._contract() + "\n" + history_reference,
                 "--name", "steward-proto",
                 ] + model_policy.launch_args(selection)

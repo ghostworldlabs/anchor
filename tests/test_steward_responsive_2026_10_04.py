@@ -189,7 +189,7 @@ def test_one_writer_and_a_dirty_repository_is_not_overwritten(tmp_path, monkeypa
     repo, cdir = _repo(tmp_path), tmp_path / "steward"
     cdir.mkdir()
     (repo / "a.txt").write_text("his own edit\n", encoding="utf-8")       # uncommitted work in the repository
-    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", engine_factory=lambda wt: FakeCoder(wt))
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: FakeCoder(wt))
     job = _wait(str(cdir), out["job"])
     assert job["landed"] is False and "has uncommitted edits in" in job["land_note"]
     assert (repo / "a.txt").read_text(encoding="utf-8") == "his own edit\n", "his work is untouched"
@@ -203,9 +203,9 @@ def test_a_second_job_on_the_same_repository_waits_and_stop_keeps_the_branch(tmp
             return True, "awake"                                          # still working
     repo, cdir = _repo(tmp_path), tmp_path / "steward"
     cdir.mkdir()
-    first = code_jobs.start(str(cdir), str(repo), "Long work.", engine_factory=lambda wt: Slow(wt))
+    first = code_jobs.start(str(cdir), str(repo), "Long work.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
     assert first["ok"] and code_jobs.active_repos(str(cdir)) == [code_jobs._norm(repo)]
-    again = code_jobs.start(str(cdir), str(repo), "More.", engine_factory=lambda wt: Slow(wt))
+    again = code_jobs.start(str(cdir), str(repo), "More.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
     assert again["ok"] is False and "one writer" in again["error"]
     s = code_jobs.stop(str(cdir))
     assert s["ok"] and code_jobs.read_jobs(str(cdir))[first["job"]]["status"] == "stopped" and not code_jobs.active_repos(str(cdir))
@@ -243,7 +243,7 @@ def test_a_coder_that_commits_its_own_work_is_kept_and_landed(tmp_path, monkeypa
             return True, "awake"
     repo, cdir = _repo(tmp_path), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", engine_factory=lambda wt: Committer(wt))
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Committer(wt))
     job = _wait(str(cdir), out["job"])
     assert job["files"] == ["a.txt"] and job["landed"] is True, "the coder's own commit is the change (Grok code F1)"
     assert (repo / "a.txt").read_text(encoding="utf-8") == "committed by the coder\n"
@@ -258,7 +258,7 @@ def test_stop_keeps_the_branch_and_the_report_wakes_the_real_steward(tmp_path, m
             return True, "awake"
     repo, cdir = _repo(tmp_path), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Long work.", engine_factory=lambda wt: Slow(wt))
+    out = code_jobs.start(str(cdir), str(repo), "Long work.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
     assert code_jobs.stop(str(cdir))["ok"]
     branches = subprocess.run(["git", "-C", str(repo), "branch", "--list", "steward-job-*"], capture_output=True, text=True).stdout
     assert out["branch"] in branches, "his stop keeps the work on its branch"
@@ -283,8 +283,8 @@ def test_one_writer_holds_across_stewards_and_on_a_path_boundary(tmp_path, monke
     repo = _repo(tmp_path)
     a, b = tmp_path / "cave", tmp_path / "star"
     a.mkdir(); b.mkdir()
-    assert code_jobs.start(str(a), str(repo), "One.", engine_factory=lambda wt: Slow(wt))["ok"]
-    other = code_jobs.start(str(b), str(repo), "Two.", engine_factory=lambda wt: Slow(wt))
+    assert code_jobs.start(str(a), str(repo), "One.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))["ok"]
+    other = code_jobs.start(str(b), str(repo), "Two.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
     assert other["ok"] is False and "one writer" in other["error"], "another steward cannot start a second writer"
     assert code_jobs.inside(str(repo / "x.py"), str(repo)) and not code_jobs.inside(str(repo) + "-wt/x.py", str(repo))
 
@@ -302,7 +302,7 @@ def test_two_stewards_starting_at_once_get_one_writer(tmp_path, monkeypatch):
     dirs = [tmp_path / ("s%d" % k) for k in range(4)]
     for d in dirs:
         d.mkdir()
-    ts = [_th.Thread(target=lambda d=d: outs.append(code_jobs.start(str(d), str(repo), "Go.", engine_factory=lambda wt: Slow(wt)))) for d in dirs]
+    ts = [_th.Thread(target=lambda d=d: outs.append(code_jobs.start(str(d), str(repo), "Go.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt)))) for d in dirs]
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert sum(1 for o in outs if o.get("ok")) == 1, outs
@@ -339,7 +339,7 @@ def test_a_git_failure_in_finish_keeps_the_work(tmp_path, monkeypatch):
     monkeypatch.setattr(code_jobs, "_git", flaky)
     repo, cdir = _repo(tmp_path), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", engine_factory=lambda wt: FakeCoder(wt))
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: FakeCoder(wt))
     job = _wait(str(cdir), out["job"])
     assert job["status"] == "failed" and "git add failed" in job["error"] and job["landed"] is False
     assert Path(job["worktree"], "a.txt").read_text(encoding="utf-8") == "two\n", "the coder's uncommitted work is kept"

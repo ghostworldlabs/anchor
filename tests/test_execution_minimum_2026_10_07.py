@@ -549,7 +549,10 @@ class _Coder:
         pass
 
 
-def _job(tmp_path, monkeypatch, coder_kw=None, check="", coder_family="claude", repo_name="repo"):
+PASS_CHECK = [_sys.executable, "-c", "pass"]   # W1a (2026-10-08): every landing needs an explicit passing check
+
+
+def _job(tmp_path, monkeypatch, coder_kw=None, check=PASS_CHECK, coder_family="claude", repo_name="repo"):
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
     monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
     monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
@@ -645,7 +648,7 @@ def test_model_preferences_are_byte_identical_after_a_job(tmp_path, monkeypatch)
     monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", "", engine_factory=lambda wt: _Coder(wt), coder="chatgpt")
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", PASS_CHECK, engine_factory=lambda wt: _Coder(wt), coder="chatgpt")
     assert out["ok"] and out["coder"] == "chatgpt"
     for _ in range(300):
         if (code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}).get("status") in ("done", "failed"):
@@ -664,7 +667,7 @@ def test_stop_records_who_stopped_it_and_keeps_the_worktree_as_it_is(tmp_path, m
             return True, "awake"
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Long.", "", engine_factory=lambda wt: Slow(wt))
+    out = code_jobs.start(str(cdir), str(repo), "Long.", PASS_CHECK, engine_factory=lambda wt: Slow(wt))
     r = code_jobs.stop(str(cdir), actor="John")
     job = code_jobs.read_jobs(str(cdir))[out["job"]]
     assert r["ok"] and job["stopped_by"] == "John" and "stopped by John" in job["land_note"]
@@ -808,7 +811,7 @@ def test_a_reviewer_of_any_family_that_actually_wrote_is_refused(tmp_path, monke
     monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: FellBack(wt))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: FellBack(wt))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
@@ -831,7 +834,7 @@ def test_a_rename_lands_the_deletion_too(tmp_path, monkeypatch):
     monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "rename", "", engine_factory=lambda wt: Renamer(wt))
+    out = code_jobs.start(str(cdir), str(repo), "rename", PASS_CHECK, engine_factory=lambda wt: Renamer(wt))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
@@ -914,10 +917,11 @@ def test_a_reviewer_out_of_quota_is_remembered_and_a_contradictory_pass_fails(tm
     assert job["landed"] is False and "says PASS but lists a MAJOR" in job["land_note"]
 
 
-def test_documents_only_never_enter_the_gate(tmp_path, monkeypatch):
-    monkeypatch.setenv("FAKE_REVIEW_MODE", "crash")                       # the reviewer would fail - it is not asked
+def test_documents_enter_the_gate_too(tmp_path, monkeypatch):
+    # W2 (2026-10-08): every job is reviewed by another family, documents included - a reviewer that fails keeps them
+    monkeypatch.setenv("FAKE_REVIEW_MODE", "crash")
     repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"notes.md": "# notes"}})
-    assert job["landed"] is True and job["review"]["verdict"] == "SKIPPED" and (repo / "notes.md").is_file()
+    assert job["landed"] is False and "the review failed" in job["land_note"] and not (repo / "notes.md").is_file()
 
 
 def _guard_engine(tmp_path, monkeypatch, directory, code_job=None):
@@ -1118,7 +1122,7 @@ def test_a_write_into_the_served_tree_during_the_job_blocks_landing(tmp_path, mo
     monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Sneaky(wt))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: Sneaky(wt))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
@@ -1203,7 +1207,7 @@ def test_a_file_already_dirty_in_the_repo_and_changed_again_is_seen(tmp_path, mo
     _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "app"], check=True)
     (repo / "app.py").write_text("his own unstaged edit\n", encoding="utf-8")   # " M app.py" - a leading space
     assert code_jobs.porcelain_paths(str(repo)) == ["app.py"]
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Sneaky(wt, tool_writes={"b.txt": "new\n"}))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: Sneaky(wt, tool_writes={"b.txt": "new\n"}))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
@@ -1223,7 +1227,7 @@ def test_a_source_write_is_reported_even_when_the_candidate_is_unchanged(tmp_pat
     monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: OnlySource(wt))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: OnlySource(wt))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
@@ -1317,7 +1321,7 @@ def test_a_stop_audits_the_source_repository(tmp_path, monkeypatch):
             return True, "awake"
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Slow(wt))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: Slow(wt))
     r = code_jobs.stop(str(cdir), actor="John")
     assert r["served_tree_changed"] == ["live.py"]
     assert code_jobs.read_jobs(str(cdir))[out["job"]]["served_tree_changed"] == ["live.py"]
@@ -1580,7 +1584,7 @@ def _job_in(tmp_path, monkeypatch, cdir_of, coder_cls=None, coder_kw=None):
     repo = _git_repo(tmp_path / "repo")
     cdir = cdir_of(repo)
     (cdir / ".ecgberht").mkdir(parents=True, exist_ok=True)
-    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: (coder_cls or _Coder)(wt, **(coder_kw or {})))
+    out = code_jobs.start(str(cdir), str(repo), "x", PASS_CHECK, engine_factory=lambda wt: (coder_cls or _Coder)(wt, **(coder_kw or {})))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}
         if job.get("status") in ("done", "failed"):

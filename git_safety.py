@@ -72,9 +72,18 @@ def is_runtime_path(rel):
 
 # ---------- the commit lock ----------
 def _lock_path(repo):
+    """Keyed on the repository's SHARED git directory (W1a, 2026-10-08): the running checkout, the lander's checkout of
+    anchor-next and every job worktree of one repository take the one lock; a path that is not a repository keys on
+    itself."""
     base = Path(os.environ.get("ANCHOR_CODE_JOBS_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or str(Path.home()), "anchor-code-jobs"))
     (base / "locks").mkdir(parents=True, exist_ok=True)
-    return base / "locks" / (hashlib.sha1(os.path.normcase(str(Path(repo).resolve())).encode()).hexdigest()[:16] + ".lock")
+    code, common, _ = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=60)
+    key = common if code == 0 and common else str(repo)
+    try:
+        key = str(Path(key).resolve())
+    except Exception:
+        pass
+    return base / "locks" / (hashlib.sha1(os.path.normcase(key).encode()).hexdigest()[:16] + ".lock")
 
 
 @contextlib.contextmanager
@@ -323,6 +332,13 @@ def land_locked(repo, source_rev, files, message, who="code job", expect_head=""
     Returns (landed: bool, note: str). Every refusal names the file and the reason."""
     repo = str(repo)
     root = Path(toplevel(repo) or repo)
+    try:      # W1a (2026-10-08): the running Anchor is never a landing target, whatever a caller passes
+        import anchor_next
+        if anchor_next.is_served_checkout(repo):
+            return False, ("not landed: %s is the running Anchor - a change lands on %s and goes live at John's restart"
+                           % (root, anchor_next.BRANCH))
+    except Exception as e:
+        return False, "not landed: could not tell whether %s is the running Anchor (%s)" % (root, e)
     files = [f.replace("\\", "/") for f in files if f.strip()]
     if not files:
         return False, "nothing to land"

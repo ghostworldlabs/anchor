@@ -39,6 +39,8 @@ def main():
     ap.add_argument("--check-argv", default="", help="the check as a JSON argument list (no shell)")
     ap.add_argument("--coder", default="", help="this job's coder family (claude|chatgpt|grok|gemini); default: the Coder seat")
     ap.add_argument("--skill", default="", help="the skill this job runs (e.g. Chekhov), so the status names it")
+    ap.add_argument("--output", action="append", default=[],
+                    help="a file this job will PRODUCE (e.g. a render), named up front so it may land; repeatable")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args()
     pid, rel = project_for(os.getcwd())
@@ -48,7 +50,8 @@ def main():
         if not (a.repo and brief.strip()):
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
-        body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill)
+        body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
+                    outputs=a.output)
     if a.action == "stop":
         body["actor"] = "the steward"
     if a.job:

@@ -44,6 +44,26 @@ function Get-PortOwners {
   return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
+# 0. W1a (2026-10-08): "landed" and "live" are two places. Code jobs land on the branch anchor-next; this restart is
+#    what makes them live: check -> drain -> stop -> activate (anchor-next takes the running branch's own commits, then
+#    C:\dev\Anchor fast-forwards to it) -> start. The check changes nothing; if an uncommitted file here would be
+#    overwritten, or the branches conflict, the restart stops now and lists why - never a reset.
+Write-Host "`n==> 0/3 What this restart makes live (anchor-next)" -ForegroundColor Cyan
+if ($Py) {
+  Push-Location $AnchorDir
+  try {
+    & $Py "anchor_next.py" status 2>&1 | ForEach-Object { "    $_" }
+    & $Py "anchor_next.py" check 2>&1 | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "[STOP] The landed changes cannot be made live as things stand (above). Nothing was changed; the service was not stopped." -ForegroundColor Red
+      Write-Host "RESULT: RESTART STOPPED BEFORE ANY CHANGE" -ForegroundColor Red; exit 3
+    }
+    Write-Host "[ok] Nothing blocks the activation." -ForegroundColor Green
+  } finally { Pop-Location }
+} else {
+  Write-Host "[FAIL] python not found; the activation cannot be checked - nothing changed." -ForegroundColor Red; exit 2
+}
+
 # 1. WARM DRAIN (while the service is still up) - park every live session warm.
 Write-Host "`n==> 1/3 Warm drain (park live sessions, persist docs + cache summaries)" -ForegroundColor Cyan
 if ($Py) {
@@ -65,6 +85,17 @@ Write-Host "`n==> 2/3 Restarting 'anchor'" -ForegroundColor Cyan
 & $Nssm stop anchor 2>&1 | ForEach-Object { "    $_" }
 $deadline = (Get-Date).AddSeconds(10)
 while ((Get-PortOwners).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 400 }
+if ((Get-PortOwners).Count -gt 0) {
+  Write-Host "[warn] something still listens on $Port; the activation waits for a stopped service - not activating." -ForegroundColor Yellow
+} else {
+  # W1a: the one change, with the service stopped; a refusal leaves the checkout as it was and starts the old build
+  Push-Location $AnchorDir
+  try {
+    & $Py "anchor_next.py" activate 2>&1 | ForEach-Object { "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "[warn] The activation was refused (above); nothing changed - starting the build that was running." -ForegroundColor Yellow }
+    else { Write-Host "[ok] C:\dev\Anchor now carries anchor-next." -ForegroundColor Green }
+  } finally { Pop-Location }
+}
 & $Nssm start anchor 2>&1 | ForEach-Object { "    $_" }
 # The port shows LISTENING only once the server's boot reconcile is done (it
 # binds at once but listen()s when ready) — under load that has taken 80s+.
