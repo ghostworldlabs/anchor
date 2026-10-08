@@ -1741,6 +1741,9 @@ def test_a_taller_window_never_rearms_follow_after_he_scrolled_away(cockpit):
     scroll.hover()
     page.mouse.wheel(0, -600)
     page.wait_for_timeout(1700)                                   # past his input window
-    scroll.evaluate("s => { s.style.height = (s.clientHeight + 2400) + 'px'; }")   # the viewport grows: a clamp
-    page.wait_for_timeout(300)
-    assert scroll.evaluate("s => s._follow") is False
+    before = scroll.evaluate("s => s.clientHeight")
+    page.set_viewport_size({"width": 1365, "height": 2600})       # the real window grows (ChatGPT confirm 3)
+    page.wait_for_timeout(500)
+    assert scroll.evaluate("s => s.clientHeight") > before         # the viewport really grew...
+    assert scroll.evaluate("s => s.scrollHeight - s.scrollTop - s.clientHeight") < 4   # ...and clamped to the bottom
+    assert scroll.evaluate("s => s._follow") is False              # a clamp is not his scroll: following stays off
