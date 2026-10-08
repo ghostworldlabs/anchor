@@ -645,8 +645,8 @@ def test_model_preferences_are_byte_identical_after_a_job(tmp_path, monkeypatch)
     monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", "", engine_factory=lambda wt: _Coder(wt), coder="grok")
-    assert out["ok"] and out["coder"] == "grok"
+    out = code_jobs.start(str(cdir), str(repo), "Change a.txt.", "", engine_factory=lambda wt: _Coder(wt), coder="chatgpt")
+    assert out["ok"] and out["coder"] == "chatgpt"
     for _ in range(300):
         if (code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}).get("status") in ("done", "failed"):
             break
@@ -1542,7 +1542,7 @@ def test_an_interrupted_turn_still_reports_a_direct_code_change(tmp_path, monkey
     monkeypatch.setattr(eng, "_hold_queue", lambda reason: None)
     eng._interrupt_turn_locked("Take this now")
     assert Writer.killed
-    assert any("served code directly" in str(ev.get("text")) for ev in said) and eng._served_snap is None
+    assert any("served code changed during this turn" in str(ev.get("text")) and "STANDS" in str(ev.get("text")) for ev in said) and eng._served_snap is None
 
 
 def test_a_skill_job_never_shows_a_steps_check_as_its_own(tmp_path):
@@ -1621,3 +1621,48 @@ def test_a_code_commit_made_directly_in_the_source_is_caught(tmp_path, monkeypat
             return super().wake(fresh, seed)
     repo, cdir, job = _job_in(tmp_path, monkeypatch, lambda r: r.parent / "steward", Committer)
     assert job["landed"] is False and any(p.startswith("live.py (committed ") for p in job["served_tree_changed"])
+
+
+# ---------- dual review consensus C3, C5, C6, C7, C9/C10 ----------
+
+def test_grok_and_gemini_are_refused_as_coders_until_they_report_writes(monkeypatch):
+    import anchor_settings
+    monkeypatch.setattr(anchor_settings, "get_launch_settings",
+                        lambda: {"coding_family": "grok", "default_cli": "gemini", "review_family": "chatgpt",
+                                 "settings_revision": "r"})
+    fam, why = code_jobs.choose_coder("grok")
+    assert fam is None and "does not report which files it wrote" in why
+    assert code_jobs.choose_coder() == ("chatgpt", None)                     # the ladder skips grok/gemini
+
+
+def test_served_foundry_html_is_code_not_a_document():
+    assert not code_jobs.is_document("foundry-gui/dist/index.html") and code_jobs.is_app_file("foundry-gui/dist/index.html")
+
+
+def test_a_stop_during_finishing_is_honoured_before_placement(tmp_path, monkeypatch):
+    real = code_jobs.run_review
+
+    def review_then_stop(job, tree, head, delta_from=""):
+        rec = real(job, tree, head, delta_from)
+        r = code_jobs.stop(job["steward_dir"], actor="John")             # a fresh finishing job: not stale
+        assert r["ok"] and r.get("stop_requested")
+        return rec
+    monkeypatch.setattr(code_jobs, "run_review", review_then_stop)
+    repo, job = _job(tmp_path, monkeypatch)
+    assert job["landed"] is False and "asked to stop it" in job["land_note"]
+    assert (repo / "a.txt").read_text(encoding="utf-8") == "one\n"
+
+
+def test_the_hold_refuses_engines_not_folders_and_is_a_structured_refusal(monkeypatch, tmp_path):
+    import job_runner, lanes
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
+    fdir = tmp_path / "trio" / "foreman"
+    (fdir / "bin").mkdir(parents=True)
+    try:
+        job_runner.launch("build", cwd=str(tmp_path), prompt="x")
+        raise AssertionError("not refused")
+    except lanes.EngineNotAllowedError as e:                                  # the dashboard answers it as 400 JSON
+        assert "foreman-crucible-hold" in str(e)
+    from steward_cockpit import code_jobs as _cj
+    harmless = [_sys.executable, "-c", "pass"]
+    assert not any(("/foreman/bin/" in str((fdir / a).resolve()).replace(chr(92), "/").lower()) for a in harmless[1:])

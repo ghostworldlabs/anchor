@@ -1339,7 +1339,7 @@ class Engine:
         if getattr(self, "code_job", None) is not None:   # item 3: a code job never selects an exhausted family
             try:
                 from steward_cockpit import code_jobs as _cjs
-                excluded = set(excluded) | _cjs.exhausted_families()
+                excluded = set(excluded) | _cjs.exhausted_families() | (set(_cjs.FAMILIES) - set(_cjs.CODE_JOB_FAMILIES))
             except Exception:
                 pass
         for family in ladder:
@@ -2348,8 +2348,9 @@ class Engine:
             snap, self._served_snap = getattr(self, "_served_snap", None), None
             changed = _served_code_changes(snap)
             if changed:
-                self._emit({"t": "sys", "text": "the steward changed Anchor's served code directly this turn, "
-                            "with no code job and no review: %s - John should know" % ", ".join(changed[:8])})
+                self._emit({"t": "sys", "text": "Anchor's served code changed during this turn (the steward or someone "
+                            "else), with no code job and no review: %s. The change STANDS in the served tree, unreviewed - "
+                            "revert it or send it to a code job." % ", ".join(changed[:8])})
         except Exception:
             pass
 
@@ -2450,9 +2451,9 @@ class Engine:
                     and _cj1.is_app_file(os.path.relpath(p, served))]
             if code:
                 reason = "production code goes to a code job"
-                note = ("(interface - not John) Your last turn was ended: it edited Anchor's served code (%s). Anchor's "
-                        "application files change only through a code job (its own worktree, another family's review). "
-                        "Start one with tools/steward_code_job.py and tell John in one line." % code[0])
+                note = ("(interface - not John) Your last turn was ended: it edited Anchor's served code (%s). That edit "
+                        "STANDS in the served tree, unreviewed - tell John in one line, and either revert it or send the "
+                        "change to a code job (tools/steward_code_job.py: its own worktree, another family's review)." % code[0])
         if reason:
             with self._lock:
                 self._emit({"t": "sys", "text": "%s ended its turn (%s)" % (self.steward or "The steward", reason)})

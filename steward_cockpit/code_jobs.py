@@ -227,6 +227,12 @@ def mark_exhausted(family):
     os.replace(str(tmp), str(_exhausted_path()))
 
 
+# consensus C3: a coder family must report its completed file writes (the manifest) - Claude and Codex do; the Grok
+# and Gemini bridges do not yet, so their jobs could never land. Refused, honestly, until their bridges report writes.
+CODE_JOB_FAMILIES = ("claude", "chatgpt")
+NO_MANIFEST = "%s cannot run a code job yet: its bridge does not report which files it wrote, so its work could never land"
+
+
 def choose_coder(requested=""):
     """(family, None) or (None, reason): the job's own choice, else the Coder seat, else the Terminal seat - never a
     family known to be exhausted. Reads the dashboard settings; writes nothing."""
@@ -240,14 +246,16 @@ def choose_coder(requested=""):
     if asked:
         if asked not in FAMILIES:
             return None, "unknown coder family %r" % asked
+        if asked not in CODE_JOB_FAMILIES:
+            return None, NO_MANIFEST % asked
         if asked in tired:
             return None, "%s hit its usage limit recently; choose another family or wait" % asked
         return asked, None
     for fam in (settings.get("coding_family"), settings.get("default_cli"), settings.get("review_family")):
         fam = str(fam or "").lower()
-        if fam in FAMILIES and fam not in tired:
+        if fam in CODE_JOB_FAMILIES and fam not in tired:
             return fam, None
-    return None, "every configured family is exhausted for now"
+    return None, "no configured code-job family (Claude or ChatGPT) is available now"
 
 
 # ── Checks: an argument list or a temp script; never cut, never re-quoted ──────────────────────────────────────────
@@ -459,7 +467,8 @@ DOCUMENT_EXTS = {".md", ".markdown", ".pdf", ".ics", ".docx", ".pptx", ".xlsx", 
 INSTRUCTION_FILES = {"claude.md", "agents.md", "skill.md", "gemini.md", "copilot-instructions.md"}
 
 
-APP_FOLDERS = {"static", "templates", "template", "public", "src", "app", "steward_cockpit", "vendor", "lib", "shell"}
+APP_FOLDERS = {"static", "templates", "template", "public", "src", "app", "steward_cockpit", "vendor", "lib", "shell",
+               "foundry-gui", "dist", "foundry-display"}   # consensus C5: served application HTML is code
 
 
 def is_document(path):
@@ -831,6 +840,10 @@ def _commit_manifest(wt, job, files):
     return ""
 
 
+def _stop_asked(job):
+    return bool((read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}).get("stop_requested"))
+
+
 def land(job, files):
     """Bring the job's branch up to the repository's current HEAD inside the job's OWN worktree, review the candidate
     (and, when integration changed it, the delta), re-run the check there, then - under the repository's commit lock,
@@ -842,6 +855,8 @@ def land(job, files):
     code, cand, _ = _git(wt, "rev-parse", "HEAD")
     if code != 0:
         return False, "not landed: could not read the candidate; the work is kept at %s" % wt, fields
+    if _stop_asked(job):
+        return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
     docs_only = all(is_document(f) for f in files)
     if docs_only:
         rec = {"ok": True, "skipped": "documents only - no code to review", "verdict": "SKIPPED"}
@@ -864,6 +879,8 @@ def land(job, files):
         ok, out = run_check(job, wt)
         if ok is False:
             return False, "not landed: the check failed after bringing in newer changes; the work is kept at %s" % wt, fields
+        if _stop_asked(job):
+            return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
         delta = {"ok": True, "verdict": "SKIPPED"} if docs_only else run_review(job, wt, merged, delta_from=cand)
         fields["delta_review"] = delta
         why = "" if docs_only else review_blocks(job, delta, wt, merged)
@@ -882,6 +899,9 @@ def land(job, files):
         if not held:
             return False, "not landed: the repository's commit lock is busy; the work is kept at %s" % wt, fields
         current = read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}
+        if current.get("stop_requested"):              # his Stop, honoured under the same lock placement holds
+            return False, "not landed: %s asked to stop it; the work is kept at %s" % (
+                current.get("stop_requested_by") or "John", wt), fields
         if current.get("status") != "finishing":       # a stop released it while it was being reviewed: no landing
             return False, "not landed: the job was stopped (%s) before placement; the work is kept at %s" % (
                 current.get("stopped_by") or current.get("status") or "unknown", wt), fields
@@ -1052,7 +1072,16 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
     who = str(actor or "unknown")
     if job.get("status") == "finishing":
         if time.time() - float(job.get("finishing_at") or 0) < 2 * (CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S) + 900:
-            return {"ok": False, "error": "the code job is already finishing; its result is on the way"}
+            # consensus C6: his Stop counts NOW - recorded with its actor; the finish checks it before every review and
+            # under the placement lock, so the job does not land after it (a landing already placed stays placed)
+            asked = _transition(cdir, job["id"], ("finishing",), stop_requested=time.strftime("%Y-%m-%d %H:%M:%S"),
+                                stop_requested_by=who)
+            if asked is None:
+                return {"ok": False, "error": "the code job finished while the stop was asked; see its result"}
+            if asked.get("placed"):
+                return {"ok": False, "error": "it has already landed; its report is on the way"}
+            return {"ok": True, "job": job["id"], "branch": job["branch"], "stop_requested": True, "kept": job["worktree"],
+                    "note": "stop recorded; the job will not land and its work is kept"}
         import git_safety as _gs
         # the release happens under the repository's commit lock - the same lock placement holds - so a landing in
         # progress finishes first, and a landing not yet begun sees the release and refuses

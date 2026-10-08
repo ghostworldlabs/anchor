@@ -758,13 +758,20 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         # "lanes" (set ONLY by the hermetic test harness for modules whose plan/build lanes run the fake runner) lifts
         # the lane refusal; a command that reaches into either engine is refused whatever the setting
         if _hold_value != "lanes" and str(lane or "").lower() in ("plan", "planning", "build"):
-            raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+            import lanes as _lanes_hold
+            raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
         if command:
+            # consensus C7: an ENGINE invocation (a script under foreman/bin or crucible/bin, or run-live.mjs), resolved
+            # against cwd - never a harmless command that merely runs in a folder named foreman
             base = Path(str(cwd)) if cwd else Path.cwd()
-            places = [str(base)] + [str(a) for a in command] + [str((base / str(a)).resolve()) for a in command[1:]
-                                                                  if str(a) and not str(a).startswith("-")]
-            if any(seg.lower() in ("foreman", "crucible") for p_ in places for seg in p_.replace("\\", "/").split("/")):
-                raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+            for a in command[1:]:
+                a = str(a)
+                if not a or a.startswith("-"):
+                    continue
+                full = str((base / a).resolve()).replace("\\", "/").lower()
+                if ("/foreman/bin/" in full or "/crucible/bin/" in full or full.endswith("/run-live.mjs")):
+                    import lanes as _lanes_hold
+                    raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
     import anchor_settings as _aset
     import model_policy as _mp
     settings_snapshot = None if command else _aset.get_launch_settings()
