@@ -1380,3 +1380,30 @@ def test_an_ordinary_project_folder_gets_no_receipt_files(tmp_path):
     # a Gandalf run registering its report in a plain project must not leave receipt state or a conversation there
     assert dr.register(tmp_path, "Gandalf read", "`gandalf/report.md`")["written"]
     assert not (tmp_path / ".ecgberht").exists()
+
+
+# ---------- item 3 round 6 + items 4-6 round 5 ----------
+
+def test_foremans_real_header_gives_the_runs_start_and_the_etas_time(tmp_path):
+    import time as _t
+    (tmp_path / "logs").mkdir()
+    log = tmp_path / "logs" / "_foreman-status.log"
+    t0 = _t.localtime(_t.time() - 1800)
+    hm, hms = _t.strftime("%H:%M", t0), _t.strftime("%H:%M:%S", t0)
+    log.write_text("[%s] [%s] Foreman build · x\nSummary  s\nETA  ~35m to run end\n" % (hms, hm), encoding="utf-8")
+    began = sc.look_started(str(tmp_path), {"source": "logs/_foreman-status.log"})
+    assert began and abs((_t.time() - 1800) - began) < 120
+    assert sc._last_table_time(log.read_text(encoding="utf-8")) == hm
+
+
+def test_two_runs_of_one_skill_never_share_a_log(tmp_path):
+    import json as _j, time as _t
+    (tmp_path / ".ecgberht").mkdir()
+    st = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(_t.time() - 60))
+    (tmp_path / ".ecgberht" / "skill-jobs.json").write_text(_j.dumps({
+        k: {"status": "running", "started": st, "label": k, "argv": ["node", "C:/dev/trio/gandalf/bin/run.mjs"]}
+        for k in ("A", "B")}), encoding="utf-8")
+    (tmp_path / "g.log").write_text("x", encoding="utf-8")
+    look = {"skill": "Gandalf review", "tests": "passed", "status": "synthesis", "source": "g.log", "final": False}
+    _w, phase, _s, tests, _f = sc.who_is_working(str(tmp_path), {}, [], look)
+    assert phase == "running" and tests == "tests not run yet"

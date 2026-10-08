@@ -1074,7 +1074,14 @@ def status_lookthrough(campaign_dir, now=None):
             "procs": rows.get("procs", ""), "eta": rows.get("eta", ""),
             "todo": rows.get("to_do", ""), "final": head.get("tick") == "final",
             "halt_reason": halt_reason, "limit": limit,
-            "age": _humanize(age), "age_seconds": age, "source": source, "table_at": head.get("at") or ""}
+            "age": _humanize(age), "age_seconds": age, "source": source,
+            "table_at": head.get("at") or _last_table_time(text)}
+
+
+def _last_table_time(text):
+    """The [HH:MM] of the last status table in a log, whatever follows it."""
+    found = re.findall(r"^\s*(?:\[\d{1,2}:\d{2}:\d{2}\]\s*)?\[(\d{1,2}:\d{2})\]", str(text or "")[-20000:], re.M)
+    return found[-1] if found else ""
 
 
 def blocker_text(look):
@@ -1795,6 +1802,9 @@ def canonical_skill(label):
     return next((n for n in _KNOWN_SKILLS if n.replace("-", "") in flat.replace("-", "")), "")
 
 
+_TABLE_HEAD = r"^\s*(?:\[\d{1,2}:\d{2}:\d{2}\]\s*)?\[(\d{1,2}):(\d{2})\]"
+
+
 def look_started(campaign_dir, look):
     """When the run behind a status log began: the log file's creation time (its first table), else None."""
     src = str((look or {}).get("source") or "")
@@ -1808,7 +1818,7 @@ def look_started(campaign_dir, look):
         mtime = f.stat().st_mtime
     except (OSError, ValueError):
         return None
-    first = re.search(r"^\s*\[(\d{1,2}):(\d{2})\]", text, re.M)    # the run's first status table, [HH:MM]
+    first = re.search(_TABLE_HEAD, text, re.M)    # the run's first status table, [HH:MM] (maybe after [HH:MM:SS])
     if not first:
         return None
     day = time.localtime(mtime)
@@ -1877,8 +1887,9 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
             log_mtime = (Path(campaign_dir) / str((look or {}).get("source") or "")).stat().st_mtime if look else 0
         except (OSError, ValueError):
             log_mtime = 0
-        own_log = (bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident
-                   and bool(started) and log_mtime >= started)   # this skill's log, written during THIS run
+        same = [r for r in skills if skill_identity(r) == ident]
+        own_log = (bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident and len(same) == 1
+                   and bool(started) and log_mtime >= started)   # the ONE run of this skill, its log written since
         if not own_log:
             look_tests = ""                              # another skill's log never speaks for this job
         phase = str(look.get("status") or look.get("doing") or "running")[:80] if own_log else "running"

@@ -667,6 +667,9 @@ def _finish(cdir, job_id, job, result):
                     keep = not (landed and extra.get("verified")) or bool(left)
                     if landed and left and left != ["not landed"]:
                         note += "; work the landing did not carry is kept at %s (%s)" % (wt, ", ".join(left[:6]))
+    if not fields.get("landed"):                     # the complete preserved inventory, whatever check failed
+        fields["unexpected"] = sorted(set(fields.get("unexpected") or [])
+                                      | {p + " (ignored by git)" for p in ignored_outputs(wt)})
     served = _served_tree_changes(job)              # on every path: did anything write into the source repository?
     if served:
         fields["served_tree_changed"] = served
