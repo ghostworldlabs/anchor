@@ -1107,11 +1107,12 @@ def announce_kept(cdir, job):
             t = _dr.reading_target({"path": where}, pid=pid, effort_rel=rel, effort_dir=cdir)
             if t["read"] or t["download"]:
                 links.append(Path(f).name)
-                reg = _dr.register(cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(f).name), "`%s`" % where)
-                if reg.get("written") or reg.get("reason") == "dup":
-                    continue                           # registered: Deliverables, Next steps and the receipt carry it
+                _dr.register(cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(f).name), "`%s`" % where, notify=False)
                 unlisted.append("[%s](%s)" % (Path(f).name, t["read"] or t["download"]))
-        if unlisted:      # W2 (2026-10-08): ONE line for the job, never one per file
+        # W2 (2026-10-08): ONE line for the job, never one per file - its register rows (Deliverables and Next steps
+        # still carry each) are marked announced, and this line says them all
+        _se.absorb_receipts(cdir, "Code job %s kept (not landed): " % job["id"])
+        if unlisted:
             line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(unlisted))
             _se._default_record(cdir)(line, "receipt:kept:%s" % job["id"])
             try:

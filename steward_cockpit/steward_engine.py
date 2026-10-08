@@ -701,8 +701,7 @@ FENCE_NOTE = (
 
 # W1a (2026-10-08): inside the running Anchor checkout a fenced Claude steward may still edit its records and documents,
 # never a code file - the same file kinds code_jobs.is_app_file calls application code (deny wins over the allow list)
-SERVED_CODE_DENY = tuple("%s(./**/*%s)" % (tool, ext) for tool in ("Edit", "NotebookEdit")
-                         for ext in (".py", ".js", ".mjs", ".css", ".ps1", ".html", ".htm"))
+SERVED_CODE_DENY = tuple("Edit(./**/*%s)" % ext for ext in (".py", ".js", ".mjs", ".css", ".ps1", ".html", ".htm"))   # Edit rules cover every file tool
 # John's choice in the morning report (2026-10-09): the two Anchor-revision cockpits inside the checkout (Setup and
 # Mother Ship, Distribution and Collaboration) run ChatGPT, whose shell cannot start inside the service's sandbox - read
 # only, they can talk but not hand off. ANCHOR_SERVED_READ_ONLY=0 keeps the old, unbounded behaviour.
@@ -713,6 +712,27 @@ SERVED_READ_ONLY_NOTE = (
     "(`python C:/dev/Anchor/tools/steward_code_job.py start ...`), which lands on anchor-next and goes live at John's "
     "restart. "
 )
+
+
+FENCE_GUARD = Path(__file__).resolve().parents[1] / "tools" / "fence_guard.py"
+
+
+def fence_settings(shell=False, root=""):
+    """(settings JSON for `claude --settings`, env) wiring tools/fence_guard.py as a PreToolUse hook - the shell
+    check for a fenced steward, the worktree check for a code job's coder; ("", {}) when neither applies."""
+    import sys as _sys
+    matchers, env = [], {}
+    if shell:
+        matchers.append("Bash|PowerShell")
+        env["ANCHOR_FENCE_SHELL"] = "1"
+    if root:
+        matchers.append("Write|Edit|MultiEdit|NotebookEdit")
+        env["ANCHOR_FENCE_ROOT"] = str(root)
+    if not matchers:
+        return "", {}
+    command = '"%s" "%s"' % (_sys.executable.replace("\\", "/"), str(FENCE_GUARD).replace("\\", "/"))
+    hooks = [{"matcher": m, "hooks": [{"type": "command", "command": command, "timeout": 30}]} for m in matchers]
+    return json.dumps({"hooks": {"PreToolUse": hooks}}), env
 
 
 def _in_served(folder):
@@ -1574,6 +1594,10 @@ class Engine:
                     cmd += ["--resume", stored]
                 self._bridge_system_prompt = persona + self._contract() + "\n" + history_reference
             elif self.cli == "claude":
+                # W1a (ChatGPT r1): the fence guard runs BEFORE a tool - a fenced steward's shell admits no operator,
+                # redirection or file-writing git option; a code job's coder writes files only in its worktree
+                guard = fence_settings(shell=fenced, root=(self.dir if self.code_job is not None else ""))
+                self._fence_env = guard[1]
                 cmd = base + [
                 "-p", "--verbose",
                 "--input-format", "stream-json",
@@ -1583,6 +1607,7 @@ class Engine:
                       "--allowedTools", *FENCE_ALLOWED_TOOLS] if fenced else
                      ["--permission-mode", self.permission_mode]) + [
                 "--disallowedTools", "AskUserQuestion", *(SERVED_CODE_DENY if (fenced and in_served) else ()),
+                *(("--settings", guard[0]) if guard[0] else ()),
                 "--append-system-prompt", persona + self._contract() + "\n" + history_reference,
                 "--name", "steward-proto",
                 ] + model_policy.launch_args(selection)
@@ -3075,6 +3100,9 @@ class Engine:
                                            folder_path=folder_path, session_id=self.session_id))
         except Exception:
             pass
+        env.pop("ANCHOR_FENCE_SHELL", None)
+        env.pop("ANCHOR_FENCE_ROOT", None)
+        env.update(getattr(self, "_fence_env", None) or {})   # W1a: what the fence guard enforces for THIS launch
         return env
 
     def _ledger_children(self, session_id=None):
@@ -4184,6 +4212,23 @@ def receipt_baseline(cdir):
         with _receipt_lock(cdir):
             if _read_seen(cdir) is None:
                 _write_seen(cdir, {_deliv_key(it) for it in _register_items(cdir)})
+    except Exception:
+        pass
+
+
+def absorb_receipts(cdir, what_prefix):
+    """Mark the register rows whose What starts with ``what_prefix`` as announced, without a line each - a caller that
+    announces them itself in ONE line (a kept code job, W2 2026-10-08). Never raises."""
+    if not _is_cockpit(cdir):
+        return
+    try:
+        with _receipt_lock(cdir):
+            seen = _read_seen(cdir)
+            if seen is None:
+                return
+            mine = {_deliv_key(it) for it in _register_items(cdir) if str(it.get("what") or "").startswith(what_prefix)}
+            if mine - seen:
+                _write_seen(cdir, seen | mine)
     except Exception:
         pass
 

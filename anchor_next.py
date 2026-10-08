@@ -45,10 +45,24 @@ def _norm(p):
         return os.path.normcase(str(p))
 
 
+class ServedUnknown(RuntimeError):
+    """The running checkout could not be identified: every caller refuses (fail closed)."""
+
+
 def served_root():
-    """The checkout the Anchor service serves from: this file's own folder in the service (C:\\dev\\Anchor), or
-    ANCHOR_SERVED_ROOT (a throwaway repository in tests)."""
-    return Path(os.environ.get("ANCHOR_SERVED_ROOT") or Path(__file__).resolve().parent)
+    """The checkout the Anchor service serves from - ONE answer wherever this module is imported from (ChatGPT W1a
+    r1: a job worktree or a development worktree must not take itself for the running Anchor): the MAIN worktree of
+    the repository this file belongs to (C:\\dev\\Anchor for every worktree of it), or ANCHOR_SERVED_ROOT (a throwaway
+    repository in tests). Raises ServedUnknown when git cannot say."""
+    env = os.environ.get("ANCHOR_SERVED_ROOT")
+    if env:
+        return Path(env)
+    here = Path(__file__).resolve().parent
+    code, out, _ = _git(here, "worktree", "list", "--porcelain", timeout=60)
+    first = next((ln[len("worktree "):] for ln in out.splitlines() if ln.startswith("worktree ")), "") if code == 0 else ""
+    if not first:
+        raise ServedUnknown("git could not name the main worktree of %s" % here)
+    return Path(first)
 
 
 def toplevel(path):
@@ -127,8 +141,11 @@ def waiting(repo=None):
 
 
 def _dirty(root):
-    """{path: status} for every uncommitted path in the running checkout, untracked included."""
-    code, out, _ = _git(root, "-c", "core.quotepath=false", "status", "--porcelain", "-z", "--untracked-files=all", timeout=300, strip=False)
+    """{path: status} for every path in the running checkout an activation must not overwrite: uncommitted, untracked
+    and IGNORED (ChatGPT W1a r1: git's default would overwrite an ignored local file). An ignored folder is listed as
+    ``dir/``."""
+    code, out, _ = _git(root, "-c", "core.quotepath=false", "status", "--porcelain", "-z", "--untracked-files=all",
+                        "--ignored=matching", timeout=300, strip=False)
     if code != 0:
         return None
     paths, items = {}, out.split("\0")
@@ -148,16 +165,36 @@ def _dirty(root):
 
 def _incoming(root, rev):
     """The paths the fast-forward to ``rev`` would write in the running checkout."""
-    code, out, _ = _git(root, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", "HEAD", rev, timeout=300)
+    code, out, _ = _git(root, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", "HEAD", rev,
+                        timeout=300, strip=False)
     return None if code != 0 else [p for p in out.split("\0") if p]
 
 
+def _incoming_tree(root, tree):
+    code, out, _ = _git(root, "-c", "core.quotepath=false", "diff-tree", "-r", "--no-renames", "--name-only", "-z", "HEAD",
+                        tree, timeout=300, strip=False)
+    return None if code != 0 else [p for p in out.split("\0") if p]
+
+
+def _collides(incoming, dirty):
+    """Incoming paths that meet a path the checkout holds: the same path, or one inside the other (a file where a
+    folder is, a folder where a file is)."""
+    held = [d.rstrip("/") for d in dirty]
+    out = set()
+    for p in incoming:
+        for d in held:
+            if p == d or p.startswith(d + "/") or d.startswith(p + "/"):
+                out.add(p)
+    return sorted(out)
+
+
 def check(repo=None):
-    """What the restart would do, changing nothing: {"ok", "waiting", "blockers", "conflicts", "why"}. A blocker is an
-    uncommitted path in the running checkout that the fast-forward would write; a conflict is a path where the running
-    branch's own new commits and anchor-next disagree."""
+    """What the restart would do, changing nothing: {"ok", "waiting", "blockers", "conflicts", "why", "incoming"}. A
+    blocker is a path the fast-forward would write that the running checkout holds uncommitted, untracked or ignored
+    (or a folder/file in its way); a conflict is a path where the running branch's own new commits and anchor-next
+    disagree."""
     root = Path(repo) if repo else served_root()
-    out = {"ok": False, "waiting": waiting(root), "blockers": [], "conflicts": [], "why": ""}
+    out = {"ok": False, "waiting": waiting(root), "blockers": [], "conflicts": [], "why": "", "incoming": []}
     if not head_of(root, "refs/heads/" + BRANCH):
         out.update(ok=True, why="nothing has landed on %s; nothing to activate" % BRANCH)
         return out
@@ -176,27 +213,47 @@ def check(repo=None):
     if incoming is None or dirty is None:
         out["why"] = "git could not compare the running checkout with %s" % BRANCH
         return out
-    out["blockers"] = sorted(p for p in incoming if p in dirty)
+    out["incoming"] = incoming
+    out["blockers"] = _collides(incoming, dirty)
     if out["blockers"]:
-        out["why"] = "uncommitted changes in %s would be overwritten: %s" % (root, ", ".join(out["blockers"][:12]))
+        out["why"] = "local files in %s would be overwritten: %s" % (root, ", ".join(out["blockers"][:12]))
         return out
     out["ok"] = True
     return out
 
 
-def _incoming_tree(root, tree):
-    code, out, _ = _git(root, "-c", "core.quotepath=false", "diff-tree", "-r", "--no-renames", "--name-only", "-z", "HEAD", tree, timeout=300)
-    return None if code != 0 else [p for p in out.split("\0") if p]
+def _restore(root, head, incoming, before):
+    """After a refused fast-forward: put back every incoming path git may have written before it gave up (each was
+    clean at the check, so HEAD's version IS its pre-image), and the index entries; then verify the checkout holds
+    exactly what it held at the check. Returns the paths that could not be verified ([] = restored)."""
+    for path in incoming:
+        full = Path(root) / path
+        in_head = _git(root, "cat-file", "-e", "%s:%s" % (head, path), timeout=60)[0] == 0
+        if in_head:
+            _git(root, "checkout", head, "--", path, timeout=120)
+        elif full.is_file() and path not in before:
+            try:
+                full.unlink()
+            except OSError:
+                pass
+    if incoming:
+        _git(root, "reset", "-q", head, "--", *incoming, timeout=300)
+    after = _dirty(root)
+    if after is None:
+        return ["(git could not read the checkout)"]
+    return sorted(set(after) ^ set(before)) + sorted(p for p in set(after) & set(before) if after[p] != before[p])
 
 
 def activate(repo=None):
     """The restart's one change, run while the service is STOPPED: anchor-next takes the running branch's own new
-    commits (a merge in the lander's checkout), then the running checkout is fast-forwarded to it. Under the
-    repository's commit lock. {"ok", "from", "to", "why", "blockers", "conflicts"}; on any refusal nothing in the
-    running checkout changed."""
+    commits (a merge in the lander's checkout), then the running checkout is fast-forwarded to it, never overwriting
+    an ignored file. Under the repository's commit lock. {"ok", "from", "to", "why", "blockers", "conflicts",
+    "unverified"}. On a refusal the checkout is verified to hold what it held at the check; when it cannot be
+    verified, ``unverified`` lists why and the service must NOT be started on it (ChatGPT W1a r1: git may write files
+    before it fails to move HEAD)."""
     import git_safety as _gs
     root = Path(repo) if repo else served_root()
-    out = {"ok": False, "from": head_of(root), "to": "", "why": "", "blockers": [], "conflicts": []}
+    out = {"ok": False, "from": head_of(root), "to": "", "why": "", "blockers": [], "conflicts": [], "unverified": []}
     if not head_of(root, "refs/heads/" + BRANCH):
         out.update(ok=True, to=out["from"], why="nothing has landed on %s" % BRANCH)
         return out
@@ -208,9 +265,10 @@ def activate(repo=None):
         if not pre["ok"]:
             out.update(why=pre["why"], blockers=pre["blockers"], conflicts=pre["conflicts"])
             return out
+        before = _dirty(root)
         ip, why = ensure_integration(root)
-        if ip is None:
-            out["why"] = why
+        if ip is None or before is None:
+            out["why"] = why or "git could not read the running checkout"
             return out
         code, _, _ = _git(root, "merge-base", "--is-ancestor", "HEAD", BRANCH, timeout=60)
         if code != 0:
@@ -220,14 +278,22 @@ def activate(repo=None):
                 _git(ip, "merge", "--abort")
                 out["why"] = "%s and the running branch would not merge (%s); nothing changed" % (BRANCH, err[:200])
                 return out
-        code, _, err = _git(root, "merge", "--ff-only", BRANCH)
-        if code != 0:
-            out["why"] = "the fast-forward was refused (%s); nothing changed" % err[:300]
+        incoming = _incoming(root, BRANCH) or []
+        want = head_of(root, "refs/heads/" + BRANCH)
+        code, _, err = _git(root, "merge", "--ff-only", "--no-overwrite-ignore", BRANCH)
+        now = head_of(root)
+        if code == 0 and now == want:
+            out.update(ok=True, to=now)
             return out
-        out["to"] = head_of(root)
-        out["ok"] = out["to"] == head_of(root, "refs/heads/" + BRANCH)
-        if not out["ok"]:
-            out["why"] = "the running checkout is at %s, not %s" % (out["to"][:12], BRANCH)
+        if now == out["from"]:
+            out["unverified"] = _restore(root, out["from"], incoming, before)
+            out["why"] = "the fast-forward was refused (%s); %s" % (err[:300], "the running checkout was restored and "
+                         "verified - nothing changed" if not out["unverified"] else "the running checkout could NOT be "
+                         "verified (%s) - do not start it until it is looked at" % ", ".join(out["unverified"][:8]))
+        else:
+            out["unverified"] = ["HEAD is at %s - neither the old build nor %s" % (now[:12], BRANCH)]
+            out["why"] = out["unverified"][0] + " - do not start it until it is looked at"
+        out["to"] = now
     return out
 
 
@@ -246,7 +312,7 @@ def _main(argv):
     if cmd == "activate":
         r = activate()
         print(json.dumps(r, indent=1))
-        return 0 if r["ok"] else 3
+        return 0 if r["ok"] else (4 if r.get("unverified") else 3)     # 4: do not start on this checkout
     print("usage: python anchor_next.py status|check|activate")
     return 2
 

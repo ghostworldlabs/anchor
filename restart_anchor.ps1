@@ -82,20 +82,33 @@ if ($Py) {
 
 # 2. Restart the service.
 Write-Host "`n==> 2/3 Restarting 'anchor'" -ForegroundColor Cyan
+$OldPids = @(Get-PortOwners)
 & $Nssm stop anchor 2>&1 | ForEach-Object { "    $_" }
-$deadline = (Get-Date).AddSeconds(10)
-while ((Get-PortOwners).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 400 }
-if ((Get-PortOwners).Count -gt 0) {
-  Write-Host "[warn] something still listens on $Port; the activation waits for a stopped service - not activating." -ForegroundColor Yellow
-} else {
-  # W1a: the one change, with the service stopped; a refusal leaves the checkout as it was and starts the old build
-  Push-Location $AnchorDir
-  try {
-    & $Py "anchor_next.py" activate 2>&1 | ForEach-Object { "    $_" }
-    if ($LASTEXITCODE -ne 0) { Write-Host "[warn] The activation was refused (above); nothing changed - starting the build that was running." -ForegroundColor Yellow }
-    else { Write-Host "[ok] C:\dev\Anchor now carries anchor-next." -ForegroundColor Green }
-  } finally { Pop-Location }
+# W1a (ChatGPT r1): the activation runs only on a CONFIRMED stopped service - the service reports Stopped AND nothing
+# listens on the port - never on an empty port list alone (a service still booting has no listener yet).
+$deadline = (Get-Date).AddSeconds(60)
+do {
+  $svc = (Get-Service anchor -ErrorAction SilentlyContinue).Status
+  $stopped = ($svc -eq 'Stopped') -and ((Get-PortOwners).Count -eq 0)
+  if (-not $stopped) { Start-Sleep -Milliseconds 500 }
+} while (-not $stopped -and (Get-Date) -lt $deadline)
+if (-not $stopped) {
+  Write-Host "[FAIL] The service did not stop (status: $svc; listeners: $((Get-PortOwners) -join ',')). Nothing was activated; it keeps running the build it had." -ForegroundColor Red
+  Write-Host "RESULT: RESTART FAILED - NOTHING CHANGED" -ForegroundColor Red; exit 1
 }
+# W1a: the one change, with the service stopped. Exit 3: refused, the checkout verified as it was - the old build
+# starts. Exit 4: the checkout could not be verified - the service is NOT started on it.
+Push-Location $AnchorDir
+try {
+  & $Py "anchor_next.py" activate 2>&1 | ForEach-Object { "    $_" }
+  $act = $LASTEXITCODE
+} finally { Pop-Location }
+if ($act -eq 4) {
+  Write-Host "[FAIL] The activation was refused and C:\dev\Anchor could not be verified as it was (above). The service is NOT started; John or the steward looks first." -ForegroundColor Red
+  Write-Host "RESULT: RESTART STOPPED - SERVICE LEFT STOPPED" -ForegroundColor Red; exit 4
+}
+if ($act -ne 0) { Write-Host "[warn] The activation was refused (above); the checkout was verified unchanged - starting the build that was running." -ForegroundColor Yellow }
+else { Write-Host "[ok] C:\dev\Anchor now carries anchor-next." -ForegroundColor Green }
 & $Nssm start anchor 2>&1 | ForEach-Object { "    $_" }
 # The port shows LISTENING only once the server's boot reconcile is done (it
 # binds at once but listen()s when ready) — under load that has taken 80s+.
@@ -105,7 +118,12 @@ if ((Get-PortOwners).Count -eq 0) {
   Write-Host "[FAIL] Service did not become ready (listening) on $Port within 180s." -ForegroundColor Red
   Write-Host "RESULT: RESTART FAILED" -ForegroundColor Red; exit 1
 }
-Write-Host ("[ok] anchor is listening on {0} (PID {1})." -f $Port, ((Get-PortOwners) -join ',')) -ForegroundColor Green
+$NewPids = @(Get-PortOwners)
+if (@($NewPids | Where-Object { $OldPids -contains $_ }).Count -gt 0) {
+  Write-Host "[FAIL] The listener on $Port is the process from before the restart (PID $($NewPids -join ',')) - the restart did not take." -ForegroundColor Red
+  Write-Host "RESULT: RESTART FAILED" -ForegroundColor Red; exit 1
+}
+Write-Host ("[ok] anchor is listening on {0} (PID {1}, a new process)." -f $Port, ($NewPids -join ',')) -ForegroundColor Green
 
 # 3. Verify the service is serving.
 Write-Host "`n==> 3/3 Verifying the dashboard is live" -ForegroundColor Cyan

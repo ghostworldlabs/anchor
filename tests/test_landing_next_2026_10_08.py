@@ -176,7 +176,7 @@ def test_the_landers_checkout_written_by_someone_else_is_refused_never_cleaned(t
 def test_a_steward_inside_the_running_anchor_cannot_write_code_there():
     from steward_cockpit import steward_engine as se
     assert "Edit(./**/*.py)" in se.SERVED_CODE_DENY and "Edit(./**/*.js)" in se.SERVED_CODE_DENY
-    assert "NotebookEdit(./**/*.css)" in se.SERVED_CODE_DENY
+    assert "Edit(./**/*.css)" in se.SERVED_CODE_DENY
     assert se._in_served(str(se._SERVED / "Setup and Mother Ship")) and not se._in_served(str(ROOT.parent / "elsewhere"))
     src = (ROOT / "steward_cockpit" / "steward_engine.py").read_text(encoding="utf-8")
     assert '"plan" if read_only else ("fenced" if fenced else self.permission_mode)' in src

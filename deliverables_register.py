@@ -157,7 +157,7 @@ def _existing_rows(text):
 
 
 def register(effort_dir, what, where, *, date=None, step=None,
-             project_folder=None) -> dict:
+             project_folder=None, notify=True) -> dict:
     """Append ONE row to ``<effort_dir>/DELIVERABLES.md`` — idempotent, locked,
     atomic, never raises.
 
@@ -218,7 +218,8 @@ def register(effort_dir, what, where, *, date=None, step=None,
                 except OSError:
                     pass
                 raise
-        notify_receipt(effort_dir)
+        if notify:                   # a caller that announces several rows in ONE line passes notify=False (W2)
+            notify_receipt(effort_dir)
         return {"written": True, "reason": "written"}
     except Exception as exc:
         return {"written": False,
