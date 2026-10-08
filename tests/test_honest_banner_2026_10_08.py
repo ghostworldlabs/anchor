@@ -25,9 +25,11 @@ import health_state as hs  # noqa: E402
 
 RED = "# Anchor Health Report\n\nStatus: ISSUES FOUND\nTarget: running\nRevision: x\n\n## Issues\n- [server] /api/status 500\n"
 GREEN = "# Anchor Health Report\n\nStatus: OK\nTarget: running\nRevision: y\n\n## Warnings\n(none)\n"
-STUB_CHECK = """import os, pathlib
+STUB_CHECK = """import os, pathlib, subprocess
+rev = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
 pathlib.Path(os.environ["ANCHOR_HEALTH_REPORT_OUT"]).write_text(
-    "# Anchor Health Report\\n\\nStatus: OK\\nTarget: " + os.environ.get("ANCHOR_HEALTHCHECK_TARGET", "") + "\\n", encoding="utf-8")
+    "# Anchor Health Report\\n\\nStatus: OK\\nTarget: " + os.environ.get("ANCHOR_HEALTHCHECK_TARGET", "") + "\\nRevision: " + rev
+    + "\\nData: " + os.environ.get("ANCHOR_DATA_DIR", "") + "\\nCwd: " + os.getcwd() + "\\n", encoding="utf-8")
 """
 
 
@@ -197,3 +199,113 @@ def test_the_doctors_code_repair_is_off(monkeypatch):
     assert sent and sent[0][0] == 409 and sent[0][1]["status"] == "repair_off"
     src = (ROOT / "anchor_gui.py").read_text(encoding="utf-8")
     assert "resolve: true" not in src.split("_DOCTOR_PAGE_TEMPLATE", 1)[1], "the Doctor page never asks for a write session"
+
+
+
+# ---------- ChatGPT review round 1 ----------
+
+def test_a_candidate_runs_on_its_own_throwaway_data_and_leaves_nothing(world):
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    _land_fix(served)
+    rec = hs.check_candidate()
+    assert rec["status"] == "green", rec
+    body = (reports / rec["report"]).read_text(encoding="utf-8")
+    data, cwd = hs.field(body, "Data"), hs.field(body, "Cwd")
+    assert data and os.path.normcase(os.path.realpath(data)) == os.path.normcase(os.path.realpath(cwd)), "its data folder is its own worktree"
+    assert os.path.normcase(str(reports.parent)) not in os.path.normcase(data), "never the live data folder"
+    assert not os.path.exists(cwd), "the throwaway worktree is gone"
+    assert "wt" not in _g(served, "worktree", "list")
+
+
+def test_a_candidate_report_must_be_this_runs_and_this_revisions(world, monkeypatch):
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    rev = _land_fix(served)
+    ip, _ = anchor_next.ensure_integration(served)
+    (Path(ip) / "anchor_healthcheck.py").write_text(
+        "import os, pathlib\npathlib.Path(os.environ['ANCHOR_HEALTH_REPORT_OUT']).write_text("
+        "'Status: OK\\nTarget: candidate\\nRevision: 0000000\\n', encoding='utf-8')\n", encoding="utf-8")
+    _g(ip, "commit", "-qam", "a check that reports another revision")
+    rec = hs.check_candidate()
+    assert rec["status"] == "unknown" and "not this candidate" in rec["why"], rec
+    assert "verified" not in hs.banner()["why"]
+
+
+def test_the_owed_recheck_starts_from_the_server_start_once_and_only_after_it_launched(world, monkeypatch):
+    import anchor_gui
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    _land_fix(served)
+    hs.check_candidate()
+    assert anchor_next.activate(served)["ok"]
+    monkeypatch.setenv("ANCHOR_RUNNING_HEAD", _g(served, "rev-parse", "HEAD"))
+    monkeypatch.setenv("ANCHOR_STARTED_AT", str(time.time()))
+    assert hs.recheck_needed()
+    src = (ROOT / "anchor_gui.py").read_text(encoding="utf-8")
+    body = src[src.index("def latest_health_report"):src.index("def ", src.index("def latest_health_report") + 10)]
+    assert "_health_recheck_if_owed" not in body, "rendering never starts a check"
+    launches = []
+    monkeypatch.setattr(anchor_gui, "_doctor_start_healthcheck_run", lambda: launches.append(1) or {"ok": False, "error": "no log"})
+    anchor_gui._health_recheck_if_owed()
+    assert launches == [1] and hs.recheck_needed(), "a failed launch does not use up the owed re-check"
+    monkeypatch.setattr(anchor_gui, "_doctor_start_healthcheck_run", lambda: launches.append(2) or {"ok": True})
+    anchor_gui._health_recheck_if_owed()
+    anchor_gui._health_recheck_if_owed()
+    assert launches == [1, 2] and not hs.recheck_needed(), "owed once, durably"
+    monkeypatch.setenv("ANCHOR_HEALTHCHECK", "1")
+    hs_c = hs.read_candidate(); hs_c.pop("rechecked_for"); hs.write_candidate(hs_c)
+    anchor_gui._health_recheck_if_owed()
+    assert launches == [1, 2], "never inside a health check's own processes"
+
+
+def test_8777_is_never_a_test_port(monkeypatch):
+    import anchor_healthcheck as hc
+    netstat = "  TCP    0.0.0.0:8777     0.0.0.0:0   LISTENING   4242\n"
+    killed = []
+    monkeypatch.setattr(hc, "TEST_PORT", 8777)
+    monkeypatch.setattr(hc.sys, "platform", "win32")
+    monkeypatch.setattr(hc.subprocess, "check_output", lambda *a, **k: netstat)
+    monkeypatch.setattr(hc.subprocess, "run", lambda argv, **k: killed.append(argv) or type("R", (), {"stdout": "2026-01-01T00:00:00"})())
+    monkeypatch.delenv("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE", raising=False)
+    hc.cleanup_stale_processes(hc.Report())
+    assert not [a for a in killed if a[0] == "taskkill"]
+    monkeypatch.setattr(hc, "TARGET", "candidate")
+    monkeypatch.setenv("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE", "1")
+    hc.cleanup_stale_processes(hc.Report())
+    assert not [a for a in killed if a[0] == "taskkill"], "a candidate check never runs the killer"
+
+
+class _Version(http.server.BaseHTTPRequestHandler):
+    build = "abc1234+ff"
+
+    def do_GET(self):
+        body = json.dumps({"version": self.build}).encode()
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+def test_a_running_pass_needs_the_running_service_on_the_checked_revision(monkeypatch):
+    import anchor_healthcheck as hc
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Version)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
+        monkeypatch.setattr(hc, "_revision", lambda: "abc1234def")
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert not r.has_issues
+        monkeypatch.setattr(hc, "_revision", lambda: "9999999")
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert r.has_issues, "a different revision is running"
+        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", "1")
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert r.has_issues, "no running service, no pass"
+    finally:
+        srv.shutdown()

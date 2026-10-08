@@ -6185,6 +6185,30 @@ def _revision():
         return "unknown"
 
 
+def check_running_service(report: Report):
+    """W3 (ChatGPT r1, 2026-10-08): a pass of the RUNNING target requires the running service itself - on
+    ANCHOR_HEALTHCHECK_LIVE_PORT (the Doctor's re-run and the owed re-check set it), else 8777 - to answer and to run
+    the revision this report checked (its build id names its HEAD). A candidate check never asks it."""
+    if TARGET == "candidate":
+        return
+    import urllib.request
+    port = int(os.environ.get("ANCHOR_HEALTHCHECK_LIVE_PORT") or 8777)
+    name = "the running service answers on %d" % port
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/version" % port, timeout=10) as r:
+            ok = 200 <= r.getcode() < 300
+            build = (json.loads(r.read().decode("utf-8")) or {}).get("version") or ""
+    except Exception as e:
+        report.check(name, False, "no answer from the running service: %s" % type(e).__name__)
+        return
+    rev = _revision().split("+")[0]
+    running = str(build).split("+")[0]
+    report.check(name, ok, "build %s" % build)
+    if ok and rev and running:
+        report.check("the running service runs the checked revision", rev.startswith(running) or running.startswith(rev),
+                     "running %s, checked %s" % (running[:12], rev[:12]))
+
+
 def cleanup_stale_processes(report: Report):
     """If port 8777 or 8778 is held by a Python process older than 24h, terminate it.
     On Windows, use `tasklist` and `taskkill`. Best-effort: errors are logged but not fatal."""
@@ -6201,8 +6225,10 @@ def cleanup_stale_processes(report: Report):
     # W3 (2026-10-08): the RUNNING service (8777) is never killed by a health check - not the daily run, not a
     # Doctor re-run, never a candidate check: a service up more than a day is normal, and killing it threw every open
     # cockpit out. Only an explicit ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE=1 (outside a candidate check) restores it.
-    ports = {str(TEST_PORT)}
-    if os.environ.get("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE") == "1" and TARGET != "candidate":
+    if TARGET == "candidate":
+        return                                  # a candidate check never runs the killer at all (ChatGPT W3 r1)
+    ports = {str(TEST_PORT)} - {"8777"}         # 8777 is never a TEST port, whatever the configuration says
+    if os.environ.get("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE") == "1":
         ports.add("8777")
     pids, test_pids = set(), set()
     for line in out.splitlines():
@@ -6216,7 +6242,7 @@ def cleanup_stale_processes(report: Report):
             except ValueError:
                 continue
             pids.add(pid)
-            if port == str(TEST_PORT):
+            if port == str(TEST_PORT) and port != "8777":
                 test_pids.add(pid)
     if not pids:
         return
@@ -6943,6 +6969,7 @@ def main():
             check_markdown_parses(report, mod)
 
         server_proc = check_server_and_endpoints(report)
+        check_running_service(report)          # W3: a running report's pass needs the RUNNING service too
         check_route_table_walk(report, server_proc)
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)

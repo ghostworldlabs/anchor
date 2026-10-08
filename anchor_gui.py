@@ -482,8 +482,6 @@ def latest_health_report():
     if not status:
         return None
     b = _hs.banner()
-    if b:
-        _health_recheck_if_owed()          # after the restart that made a verified fix live: one re-check
     return (path.stem, status, path, (b or {}).get("why") or "")
 
 
@@ -17477,6 +17475,12 @@ def handle_doctor_session_start(handler, path, body):
                 "session and wait — do not sit on a tool-permission dialog."
                 % ((issue.get("message") or "")[:400],
                    (issue.get("component") or "")[:120]))
+        elif issue and issue.get("all") is True:
+            # W3 (ChatGPT r1): Resolve all, read-only - the whole bounded all-issues brief, its repair turned into a
+            # diagnosis (the Doctor's code repair is off)
+            seed = ("ANCHOR DOCTOR - DIAGNOSE ALL OPEN ISSUES (read-only: the Doctor's code repair is off). For each "
+                    "issue below say plainly what is wrong and the fix a code job should make; change nothing.\n\n"
+                    + str(issue.get("message") or ""))[:2600]
         elif short_only or issue:
             seed = start_plan.get("seedText") or _w8_format_doctor_short_seed_text(
                 start_plan.get("seed"))
@@ -17908,21 +17912,35 @@ def _doctor_start_candidate_check():
         return {"ok": True, "started": True, "log": str(log_path)}
 
 
-_RECHECK = {"done": False}
+_RECHECK_LOCK = threading.Lock()
 
 
 def _health_recheck_if_owed():
     """W3: after the restart that made a verified fix live, ONE re-run of the check against the code the service
-    runs - only its pass clears the banner. At most once per server process."""
-    if _RECHECK["done"]:
+    runs AND the running service itself - only its pass clears the banner. Started from the server's start (never
+    from a page render, never inside a health check's own throwaway server); claimed, durably, only once the run has
+    actually launched (ChatGPT W3 r1)."""
+    if os.environ.get("ANCHOR_HEALTHCHECK") == "1":
         return
     try:
         import health_state as _hs
-        if _hs.recheck_needed():
-            _RECHECK["done"] = True
-            _doctor_start_healthcheck_run()
+        with _RECHECK_LOCK:
+            if not _hs.recheck_needed():
+                return
+            receipt = _doctor_start_healthcheck_run()
+            if receipt.get("ok") and not receipt.get("already_running"):
+                _hs.mark_rechecked(time.strftime("%Y%m%d-%H%M%S"))
     except Exception:
         pass
+
+
+def _schedule_health_recheck(delay_s=90):
+    """Called once when the service starts listening: the owed re-check, after the boot settles."""
+    if os.environ.get("ANCHOR_HEALTHCHECK") == "1":
+        return
+    t = threading.Timer(delay_s, _health_recheck_if_owed)
+    t.daemon = True
+    t.start()
 
 
 def _doctor_start_healthcheck_run():
@@ -17943,6 +17961,8 @@ def _doctor_start_healthcheck_run():
             proc = subprocess.Popen(
                 _doctor_hc_cmd(), stdout=fh, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, cwd=str(_paths.data_dir()),
+                # W3: the re-run checks THIS service too (its port), and never kills it
+                env=dict(os.environ, ANCHOR_HEALTHCHECK_LIVE_PORT=str(_doctor_live_port())),
                 creationflags=_paths.NO_WINDOW)
         except OSError as exc:
             fh.close()
@@ -24362,6 +24382,7 @@ def main():
     _logger.info("Server ready — accepting connections on %s (boot reconcile %.1fs)",
                  url, _boot_dt)
     print(f"  Ready — accepting connections (boot reconcile {_boot_dt:.1f}s).")
+    _schedule_health_recheck()   # W3: the re-check a verified fix's restart owes (never from a render)
 
     try:
         server.serve_forever()

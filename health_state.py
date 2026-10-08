@@ -69,13 +69,22 @@ def field(body, name):
 
 
 def latest():
-    """(path, body) of the newest dated report, or (None, "")."""
+    """(path, body) of the newest dated report of the RUNNING target (a report naming another target is skipped; one
+    written before targets were named counts as running), or (None, "")."""
     for p in dated_reports():
         try:
-            return p, p.read_text(encoding="utf-8", errors="replace")
+            body = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        if field(body, "Target") in ("", "running"):
+            return p, body
     return None, ""
+
+
+def issues_of(body):
+    """The report's issue lines - the identity a candidate's pass answers."""
+    m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body or "", re.S | re.M)
+    return [ln.strip()[2:].strip() for ln in (m.group(1).splitlines() if m else []) if ln.strip().startswith("- ")][:20]
 
 
 def _git(repo, *args):
@@ -142,9 +151,12 @@ def verified_candidate():
         return None
     if is_live(rev):                                # running now: only a re-check of the running build counts
         return None
-    path, _ = latest()
+    path, body = latest()
     if path is not None and float(c.get("at") or 0) < path.stat().st_mtime:
         return None                                 # a newer report has been written since the candidate ran
+    answers = c.get("answers") or {}
+    if path is None or answers.get("report") != path.name or answers.get("issues") != issues_of(body):
+        return None                                 # it answered another report's issues
     return c
 
 
@@ -157,8 +169,18 @@ def recheck_needed():
         return False
     if not is_live(str(c.get("revision") or "")):
         return False
+    if c.get("rechecked_for") == running_head():    # already launched for this running build (durable)
+        return False
     started = float(os.environ.get("ANCHOR_STARTED_AT") or 0)
     return path.stat().st_mtime < started if started else True
+
+
+def mark_rechecked(run):
+    """The owed re-check was LAUNCHED for this running build: recorded on the candidate, so it is owed once."""
+    c = read_candidate()
+    if c is not None:
+        c["rechecked_for"], c["recheck_run"] = running_head(), run
+        write_candidate(c)
 
 
 def banner():
@@ -188,57 +210,81 @@ def signature():
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
+def _kill_tree(proc):
+    """The whole process tree a check owns (the health check and the throwaway server it started)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=60,
+                           creationflags=_NO_WINDOW)
+        else:
+            proc.kill()
+        proc.wait(timeout=60)
+    except Exception:
+        pass
+
+
 def check_candidate(log=None, timeout=3600):
-    """Check anchor-next's head in a throwaway worktree on a private port (never 8777, never the process killer),
-    writing its report beside the dated ones as candidate-<rev>.md and the verdict to candidate.json. Returns the
-    record. The lander's checkout and the running checkout are never touched."""
+    """Check anchor-next's head in a throwaway worktree that is ALSO its data folder (ChatGPT W3 r1: never the live
+    data, the live worktrees or the code-jobs folder - its server's boot maintenance and the synthetic checks write
+    only there), on a private port, with the process killer off. One report per run (candidate-<rev>-<run>.md); the
+    pass counts only when the run completed and its report names target "candidate" and this revision. The verdict,
+    with the report and issues it answers, goes to candidate.json. The running checkout and the lander's checkout are
+    never touched; the whole process tree is killed on a timeout; a cleanup that fails is said."""
     import anchor_next
     import shutil
     import tempfile
     served = anchor_next.served_root()
     rev = anchor_next.head_of(served, "refs/heads/" + anchor_next.BRANCH)
-    rec = {"target": "candidate", "revision": rev, "status": "unknown", "at": time.time(),
-           "run": time.strftime("%Y%m%d-%H%M%S"), "why": ""}
+    run = time.strftime("%Y%m%d-%H%M%S")
+    path, body = latest()
+    rec = {"target": "candidate", "revision": rev, "status": "unknown", "at": time.time(), "run": run, "why": "",
+           "answers": {"report": path.name if path else "", "issues": issues_of(body)}}
     if not rev:
         rec["why"] = "nothing has landed on %s" % anchor_next.BRANCH
         return rec
     if is_live(rev):
         rec["why"] = "%s is already running - the daily check and the Doctor's re-run check it" % rev[:10]
         return rec
-    base = Path(os.environ.get("ANCHOR_CODE_JOBS_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or str(Path.home()), "anchor-code-jobs"))
-    wt = Path(tempfile.mkdtemp(prefix="candidate-%s-" % rev[:8], dir=str(base) if base.is_dir() else None))
-    shutil.rmtree(str(wt), ignore_errors=True)
-    out = reports_dir() / ("candidate-%s.md" % rev[:12])
+    scratch = Path(tempfile.mkdtemp(prefix="anchor-candidate-"))
+    wt = scratch / "wt"
+    out = reports_dir() / ("candidate-%s-%s.md" % (rev[:12], run))
     try:
         code, _ = _git(served, "worktree", "add", "--detach", str(wt), rev)
         if code != 0:
             rec["why"] = "could not make a worktree of %s" % rev[:10]
             return rec
         env = dict(os.environ, ANCHOR_HEALTHCHECK_TARGET="candidate", ANCHOR_HEALTH_REPORT_OUT=str(out),
-                   ANCHOR_HEALTHCHECK_PORT="0", ANCHOR_DATA_DIR=str(_data_dir()))
-        env.pop("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE", None)
+                   ANCHOR_HEALTHCHECK_PORT="0", ANCHOR_DATA_DIR=str(wt), ANCHOR_CODE_JOBS_DIR=str(scratch / "jobs"),
+                   ANCHOR_WORKTREE_BASE=str(scratch / "worktrees"))
+        for k in ("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE", "ANCHOR_HEALTHCHECK_LIVE_PORT"):
+            env.pop(k, None)
+        proc = subprocess.Popen([sys.executable, str(wt / "anchor_healthcheck.py")], cwd=str(wt), env=env,
+                                stdout=log or subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                                creationflags=_NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         try:
-            r = subprocess.run([sys.executable, str(wt / "anchor_healthcheck.py")], cwd=str(wt), env=env,
-                               stdout=log or subprocess.DEVNULL, stderr=subprocess.STDOUT, timeout=timeout,
-                               creationflags=_NO_WINDOW)
-            rc = r.returncode
+            rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            rc = None
+            _kill_tree(proc)
+            rec["why"] = "the check ran longer than %ss and was stopped" % timeout
+            return rec
         try:
-            body = out.read_text(encoding="utf-8", errors="replace")
+            report = out.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            body = ""
-        rec["status"] = status_of(body) if body else "unknown"
-        rec["report"] = out.name
-        if rc is None:
-            rec["status"], rec["why"] = "unknown", "the check ran longer than %ss" % timeout
-        elif not body:
-            rec["why"] = "the check wrote no report (exit %s)" % rc
+            report = ""
+        if rc not in (0, 1) or not report:
+            rec["why"] = "the check did not complete (exit %s)" % rc
+        elif field(report, "Target") != "candidate" or not field(report, "Revision").startswith(rev):
+            rec["why"] = "the report is not this candidate's (target %s, revision %s)" % (field(report, "Target"), field(report, "Revision")[:12])
+        else:
+            rec["status"], rec["report"] = status_of(report), out.name
     finally:
         _git(served, "worktree", "remove", "--force", str(wt))
-        shutil.rmtree(str(wt), ignore_errors=True)
-    rec["at"] = time.time()
-    write_candidate(rec)
+        shutil.rmtree(str(scratch), ignore_errors=True)
+        _git(served, "worktree", "prune")
+        if scratch.exists():
+            rec["why"] = (rec["why"] + "; " if rec["why"] else "") + "the throwaway folder %s could not be removed" % scratch
+        rec["at"] = time.time()
+        write_candidate(rec)
     return rec
 
 
