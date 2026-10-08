@@ -608,7 +608,12 @@
   // is placed where it stands; the shelves are reconciled card by card. An open card is never replaced, moved or
   // reloaded (its frame, draft, focus and stream stay); a change that would move or remove it waits until it closes
   // (closeTile). Nothing is placed while he types or dictates in a card, and no section he is in is replaced.
-  var placeBusy = false, placeAgain = false, placeHeld = false;
+  var placeBusy = false, placeAgain = false, placeHeld = false, placeSkipped = false;
+  // a section he was IN when the record moved (a search box, a button row) is placed once he leaves it (ChatGPT W4 r3)
+  document.addEventListener('focusout', function () {
+    if (!placeSkipped) return;
+    setTimeout(function () { if (placeSkipped) { placeSkipped = false; renewInPlace(); } }, 300);
+  }, true);
   function renewInPlace(text, undo, bad) {
     if (text) receipt(text, !!bad, undo || null);
     if (placeBusy) { placeAgain = true; return; }   // a change that lands mid-fetch runs one more fetch after (Grok W2e-8)
@@ -634,7 +639,7 @@
   function placeWait() { return $$('.tile.open').some(function (c) { return !!c._typing || (busyIn(c) && Date.now() - lastKey < 10000); }); }
   function held(card) { return card.classList.contains('open') || busyIn(card); }
   function morph(a, b) {   // the same element, carrying the fresh attributes and content; an open section stays open
-    if (busyIn(a)) { placeHeld = true; return false; }
+    if (busyIn(a)) { placeSkipped = true; return false; }   // retried when he leaves it (below)
     var open = a.classList.contains('open');
     Array.prototype.slice.call(a.attributes).forEach(function (x) { if (!b.hasAttribute(x.name)) a.removeAttribute(x.name); });
     Array.prototype.slice.call(b.attributes).forEach(function (x) { if (a.getAttribute(x.name) !== x.value) a.setAttribute(x.name, x.value); });
@@ -643,7 +648,7 @@
     return true;
   }
   function placeBoard(doc) {
-    placeHeld = false;
+    placeHeld = false; placeSkipped = false;
     // the open card stays where it is ON SCREEN (ChatGPT W4 r1): whatever is placed above it, the page scrolls by the
     // same amount, so the box he dictates into never moves under him
     var anchor = $('.tile.open'), top0 = anchor ? anchor.getBoundingClientRect().top : 0;
@@ -673,9 +678,10 @@
     placeShelves(doc);
     // the Candidates: the groups and the count; the search, the sort and the open tile stay as he left them
     var c0 = $('#shCands'), c1 = doc.getElementById('shCands');
-    if (c0 && !c1 && !busyIn(c0)) c0.remove();
+    if (c0 && !c1) { if (busyIn(c0)) placeSkipped = true; else c0.remove(); }
     else if (c1 && !c0) { var deck = $('#shDeck'); if (deck) { deck.insertAdjacentElement('afterend', document.importNode(c1, true)); bindCands(); } }
-    else if (c0 && c1 && $('#candsTile', c0) && !$$('.cand-group', c0).some(busyIn)) {
+    else if (c0 && c1 && $$('.cand-group', c0).some(busyIn)) placeSkipped = true;
+    else if (c0 && c1 && $('#candsTile', c0)) {
       var t0 = $('#candsTile', c0), n0 = $('summary .c', c0), n1 = $('summary .c', c1);
       if (n0 && n1) n0.textContent = n1.textContent;
       $$('.cand-group', c0).forEach(function (g) { g.remove(); });
@@ -687,7 +693,8 @@
     if (d0 && d1 && morph(d0, d1)) setDesk(d0.classList.contains('open'));
     // the dated deliveries: the ruler and its counts (a balloon over a marker that moved is closed)
     var r0 = $('#ruler'), r1 = doc.getElementById('ruler');
-    if (r0 && r1 && !busyIn(r0)) {   // compared without the open balloon and the marker it hangs from (ChatGPT W4 r1)
+    if (r0 && r1 && busyIn(r0)) placeSkipped = true;
+    else if (r0 && r1) {   // compared without the open balloon and the marker it hangs from (ChatGPT W4 r1)
       var bare = r0.cloneNode(true);
       $$('.balloon', bare).forEach(function (b) { b.remove(); }); $$('.mkcard.on', bare).forEach(function (m) { m.classList.remove('on'); });
       if (bare.innerHTML !== r1.innerHTML) { if (balloon) closeBalloon(); morph(r0, r1); bindMarkers(r0); }
@@ -1206,11 +1213,15 @@
   // a redeploy reloads the open page, as the old home did (the verification law: a mechanism, not "refresh"): /api/version
   // every 30 s; a build other than the one this page booted with reloads it once — never while he is typing
   (function () {
-    var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
+    var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '', healthSig = '';
     if (!mine) return;
     // W2c-4: never while he types; W3b: never under an open tile either - the reload waits (renewBuild), the draft and the open tile come back after it
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+        // W3 (2026-10-08): the banner's facts moved (a report, a verified candidate) - placed in the page, never a reload
+        var h = d && d.health;
+        if (h && healthSig && h !== healthSig) renewInPlace();
+        if (h) healthSig = h;
         var v = d && d.version; if (!v || v === mine) return;
         try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; } catch (e) {}
         renewVersion = String(v); renewBuild('A new build is live \u2014 the page is renewed.');

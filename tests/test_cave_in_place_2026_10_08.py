@@ -51,6 +51,9 @@ class Cave:
         self.loads = 0
         self.names = {}                # step id -> a new name (a rename)
         self.refuse = False            # the events stream answers 401 (a rotated token)
+        self.health = "h1"             # /api/version's fingerprint of the banner's facts (W3)
+        self.hold = False              # hold the next answers until release() (ChatGPT W4 r3: focus restored first)
+        self.held = []
 
     def steps(self):
         out = [s for s in base._steps() if s["id"] not in ("mba-project",)]
@@ -86,6 +89,9 @@ class Cave:
         def js(obj, status=200):
             route.fulfill(status=status, content_type="application/json", body=json.dumps(obj))
 
+        if self.hold and path in ("/api/high-seat/campaign", "/high-seat") and req.resource_type != "document":
+            self.held.append(route)
+            return None
         if path in ("/", "/high-seat"):
             if req.resource_type == "document":
                 self.loads += 1
@@ -104,7 +110,7 @@ class Cave:
                 with open(src, "rb") as fh:
                     return route.fulfill(status=200, content_type=ctype, body=fh.read())
         if path == "/api/version":
-            return js({"version": "test"})
+            return js({"version": "test", "health": self.health})
         if path == "/api/auth/login":
             self.refuse = False
             return js({"ok": True})
@@ -137,6 +143,13 @@ class Cave:
         if path == "/api/rnd/new_project":
             return js({"ok": True, "message": "Project \u201cNew\u201d created."})
         return js({}, status=404)
+
+
+def _release(world):
+    world.hold = False
+    held, world.held = world.held, []
+    for r in held:
+        world.serve(r)
 
 
 @pytest.fixture()
@@ -339,9 +352,16 @@ def test_focus_survives_an_act_and_a_renamed_card_is_made_again(cave):
     world.names["trusts-project"] = "The trusts, renamed"
     page.evaluate("document.querySelector('#camp').classList.add('open')")
     page.click("#camp .grow[data-g='trusts'] .gh")
+    world.hold = True                         # the act's answer and the fresh page wait ...
     page.click("#camp [data-seat='deck'][data-step='third-project']")
+    page.wait_for_timeout(300)
+    assert world.held, "the act is held"
     frame = page.query_selector("#card-%s iframe.cframe" % MBA).content_frame()
-    frame.focus("#box")                       # he goes back to his box before the change lands
+    frame.focus("#box")                       # ... while he goes back to his box
+    assert _frame_state(page, MBA)["focus"]
+    _release(world)
+    page.wait_for_timeout(300)
+    _release(world)                           # the fresh render the act asked for
     _receipt(page, "Seated.")
     page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=8000)
     page.wait_for_function("() => (document.querySelector('#card-%s .t-nm') || {}).textContent === 'The trusts, renamed'" % TRUSTS, timeout=8000)
@@ -363,4 +383,19 @@ def test_a_login_taken_in_place_resumes_the_dialogue(cave):
     world.stamp = "s9"                          # heard only through the resumed stream
     page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=10000)
     _survived(page, MBA, ident, st, focus=False, what="a login")
+    assert world.loads == 1
+
+
+def test_a_banner_that_changes_with_no_record_change_is_placed_in_place(cave):
+    """W3: a report or a verified candidate changes the banner while nothing in the record moves - the version poll's
+    fingerprint brings it in, the open card untouched (two 30-second polls: the first learns the fingerprint)."""
+    world, page = cave
+    ident = _open(page, MBA)
+    _type_into(page, MBA, "reading")
+    st = _frame_state(page, MBA)
+    page.wait_for_timeout(31000)
+    world.banner = "Health check found issues"
+    world.health = "h2"
+    page.wait_for_selector(".healthbar", timeout=40000)
+    _survived(page, MBA, ident, st, what="a banner from the health fingerprint")
     assert world.loads == 1
