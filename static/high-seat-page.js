@@ -350,11 +350,11 @@
       .then(function (j) {
         var f = $('#folders'); if (!(f && j && j.html) || f.contains(document.activeElement) || $('.tile.open', f)) return;
         // the folders he opened stay open (ChatGPT W4 r4), known by their head's words
-        var opened = $$('.rnd-folder:not(.rnd-collapsed) .rnd-folder-head', f).map(function (h) { return (h.textContent || '').trim(); });
+        var opened = $$('.rnd-folder:not(.rnd-collapsed)', f).map(function (d) { return d.getAttribute('data-group'); });
         f.innerHTML = j.html; initiativeCockpitLinks(f); compactTiles(f);
         $$('.rnd-folder', f).forEach(function (d) {
-          var h = $('.rnd-folder-head', d); if (!h || opened.indexOf((h.textContent || '').trim()) < 0) return;
-          d.classList.remove('rnd-collapsed'); var tw = $('.rnd-tw', h); if (tw) tw.textContent = '\u25BE';
+          if (opened.indexOf(d.getAttribute('data-group')) < 0) return;   // known by its folder, never its rendered words
+          d.classList.remove('rnd-collapsed'); var tw = $('.rnd-tw', d); if (tw) tw.textContent = '\u25BE';
         });
       })
       .catch(function () { ptileLoaded = false; var l = $('#ptileLoading'); if (l) l.textContent = 'the list could not be read - press Show all again'; });
@@ -648,7 +648,7 @@
         }
       })
       .catch(function () {})
-      .then(function () { placeBusy = false; if (placeAgain || (healthPending && healthPending !== healthSig)) { placeAgain = false; renewInPlace(); } });
+      .then(function () { placeBusy = false; if (placeAgain) { placeAgain = false; renewInPlace(); } });   // a failed health repaint retries on the next 30 s poll
   }
   function busyIn(el) {   // he is IN this element: a box he types in (or a frame's) has the focus inside it - a button he just clicked does not count
     var a = document.activeElement;

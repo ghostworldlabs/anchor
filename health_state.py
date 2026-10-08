@@ -166,20 +166,24 @@ def _answers_this_report(c, path, body):
 
 
 def recheck_needed():
-    """The running build carries a verified candidate's revision, and the newest report is still red and older than
-    this build's start: one re-run of the check against the running code is owed."""
+    """One re-run of the check against the running code AND the running service is owed when: a verified candidate
+    (target candidate, passed) is now running, its obligation is not yet consumed, and THIS service instance has not
+    passed - the newest report is still the red one the candidate answered and predates this start, or it is a pass
+    of an earlier instance (ChatGPT hardening: an earlier instance's green never cancels it)."""
     c = read_candidate()
     path, body = latest()
-    if not c or path is None or status_of(body) != "red" or c.get("status") not in ("green", "yellow"):
+    if not c or path is None or c.get("target") != "candidate" or c.get("status") not in ("green", "yellow"):
         return False
-    if c.get("target") != "candidate" or c.get("rechecked_for"):
-        return False                                # one obligation per verified candidate, consumed when launched
-    if not _answers_this_report(c, path, body):
+    if c.get("rechecked_for"):                      # one obligation per verified candidate, consumed when launched
         return False
     if not is_live(str(c.get("revision") or "")):
         return False
-    started = float(os.environ.get("ANCHOR_STARTED_AT") or 0)
-    return path.stat().st_mtime < started if started else True
+    started = os.environ.get("ANCHOR_STARTED_AT") or ""
+    if status_of(body) != "red":
+        return bool(started) and field(body, "Service-Boot") != started
+    if not _answers_this_report(c, path, body):
+        return False
+    return path.stat().st_mtime < float(started) if started else True
 
 
 def mark_rechecked(run):

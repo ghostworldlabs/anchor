@@ -177,6 +177,7 @@ class Report:
             f"Target: {TARGET}",
             f"Revision: {RUN_REVISION or _revision()}",
             f"Run: {RUN_ID}",
+            f"Service-Boot: {SERVICE_BOOT}",
             f"Run time: {elapsed:.1f}s ({self.started.strftime('%H:%M:%S')})",
             "",
             "## Executive summary",
@@ -6188,6 +6189,7 @@ def _revision():
 
 RUN_REVISION = ""      # the revision this run checks, read when it STARTS (never at publication - ChatGPT W3 r2)
 RUN_ID = ""            # this run's identity: its start time
+SERVICE_BOOT = ""      # the running service instance this run probed (its start time) - a pass is bound to it
 
 
 def _previous_issue_paths():
@@ -6212,19 +6214,29 @@ def check_running_service(report: Report):
     import urllib.request
     port = int(os.environ.get("ANCHOR_HEALTHCHECK_LIVE_PORT") or 8777)
     name = "the running service answers on %d" % port
+    global SERVICE_BOOT
     try:
         with urllib.request.urlopen("http://127.0.0.1:%d/api/version" % port, timeout=10) as r:
             ok = 200 <= r.getcode() < 300
-            build = (json.loads(r.read().decode("utf-8")) or {}).get("version") or ""
+            info = json.loads(r.read().decode("utf-8")) or {}
+            build, SERVICE_BOOT = str(info.get("version") or ""), str(info.get("boot") or "")
     except Exception as e:
         report.check(name, False, "no answer from the running service: %s" % type(e).__name__)
         return
-    rev = (RUN_REVISION or _revision()).split("+")[0]
-    running = str(build).split("+")[0]
     report.check(name, ok, "build %s" % build)
-    if ok and rev and running:
-        report.check("the running service runs the checked revision", rev.startswith(running) or running.startswith(rev),
-                     "running %s, checked %s" % (running[:12], rev[:12]))
+    # the running service runs the code this run checked: the served SOURCES' fingerprint (the part of the build id
+    # after '+', computed the same way by the throwaway server on this run's code) - never the commit, which a
+    # steward's record checkpoint moves without changing a line of code (ChatGPT hardening)
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/version" % TEST_PORT, timeout=10) as r:
+            checked = str((json.loads(r.read().decode("utf-8")) or {}).get("version") or "")
+    except Exception:
+        checked = ""
+    if ok and "+" in build and "+" in checked:
+        report.check("the running service runs the checked code", build.split("+", 1)[1] == checked.split("+", 1)[1],
+                     "running sources %s, checked %s" % (build.split("+", 1)[1][:12], checked.split("+", 1)[1][:12]))
+    elif ok:
+        report.warn("the running service runs the checked code", "a build id carried no source fingerprint (%s / %s)" % (build, checked))
     # ChatGPT W3 r2: the RUNNING service's own pages and reads - the core GETs and every GET path the previous
     # report's issues name - asked as John's browser asks (the token, when this run has it); 2xx/3xx only
     tok = "" if _TOKEN_MINTED else (os.environ.get("ANCHOR_TOKEN") or "").strip()   # the SERVICE's token, never the throwaway's
@@ -6277,9 +6289,10 @@ def _publish(report, path):
             time.sleep(0.2)
     try:
         target = path
-        if _newer_run_published(path):
-            target = path.with_name(f"superseded-{TODAY}-{RUN_ID.replace('.', '')}.md")
-        tmp = target.with_name(target.name + ".tmp")
+        if fd is None or _newer_run_published(path):
+            # without the lock - or with a newer run published - this run is kept beside, never as, the report
+            target = path.with_name(f"{'superseded' if fd is not None else 'unpublished'}-{TODAY}-{RUN_ID.replace('.', '')}.md")
+        tmp = target.with_name("%s.%d.%s.tmp" % (target.name, os.getpid(), RUN_ID.replace(".", "")))
         report.write(tmp)
         os.replace(str(tmp), str(target))
     finally:

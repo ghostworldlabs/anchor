@@ -12035,7 +12035,7 @@ def handle_version(handler, path, body):
         health = _hs.signature()
     except Exception:
         health = ""
-    payload = json.dumps({"version": BUILD_ID, "health": health}).encode()
+    payload = json.dumps({"version": BUILD_ID, "health": health, "boot": os.environ.get("ANCHOR_STARTED_AT", "")}).encode()
     handler.send_response(200)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(payload)))

@@ -106,7 +106,7 @@ def test_red_stays_until_the_running_code_passes_and_a_verified_fix_says_so(worl
     b = hs.banner()
     assert b is not None and "verified" not in b["why"], "after the restart only a re-check of the running code counts"
     assert hs.recheck_needed()
-    _report(reports, "2026-10-08.md", GREEN)        # the owed re-check of the running code passes
+    _report(reports, "2026-10-08.md", GREEN + "Service-Boot: %s\n" % os.environ["ANCHOR_STARTED_AT"])   # THIS instance's pass
     assert hs.banner() is None and not hs.recheck_needed()
 
 
@@ -289,30 +289,36 @@ class _Version(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def test_a_running_pass_needs_the_running_service_on_the_checked_revision(monkeypatch):
+def test_a_running_pass_needs_the_running_service_on_the_checked_code(monkeypatch):
+    """The served SOURCES' fingerprint decides (ChatGPT hardening): a steward's record checkpoint moves HEAD without
+    changing the code - still a pass; different code running - a failure; nothing running - a failure."""
     import anchor_healthcheck as hc
-    srv = http.server.HTTPServer(("127.0.0.1", 0), _Version)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def server(build):
+        h = type("V", (_Version,), {"build": build})
+        s = http.server.HTTPServer(("127.0.0.1", 0), h)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        return s
+    running, checked = server("aaaaaaa+fp1"), server("bbbbbbb+fp1")      # another commit, the same code
     try:
-        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
-        monkeypatch.setattr(hc, "_revision", lambda: "abc1234def")
+        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(running.server_address[1]))
+        monkeypatch.setattr(hc, "TEST_PORT", checked.server_address[1])
+        monkeypatch.setattr(hc, "_previous_issue_paths", lambda: [])
         r = hc.Report()
         hc.check_running_service(r)
-        assert not r.has_issues
-        monkeypatch.setattr(hc, "_revision", lambda: "9999999")
+        assert any(c[0] == "the running service runs the checked code" and c[1] for c in r.checks), r.checks
+        checked.RequestHandlerClass.build = "bbbbbbb+fp2"                 # different code
         r = hc.Report()
         hc.check_running_service(r)
-        assert r.has_issues, "a different revision is running"
+        assert any(c[0] == "the running service runs the checked code" and not c[1] for c in r.checks)
         monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", "1")
         r = hc.Report()
         hc.check_running_service(r)
         assert r.has_issues, "no running service, no pass"
     finally:
-        srv.shutdown()
+        running.shutdown()
+        checked.shutdown()
 
-
-
-# ---------- ChatGPT review round 2 ----------
 
 class _Service(http.server.BaseHTTPRequestHandler):
     build = "abc1234+ff"
@@ -400,7 +406,7 @@ def test_the_cave_acknowledges_only_the_fingerprint_a_placed_request_carried():
     assert "if (h && h !== healthSig) { healthPending = h; renewInPlace(); }" in js
     assert "var sig = healthPending;   // the fingerprint THIS request will place" in js
     assert "if (sig) { healthSig = sig; if (healthPending === sig) healthPending = ''; }" in js
-    assert "if (placeAgain || (healthPending && healthPending !== healthSig))" in js
+    assert "if (placeAgain || (healthPending" not in js, "a failed repaint waits for the next poll, never loops"
 
 
 # ---------- ChatGPT review round 3 ----------
@@ -442,3 +448,35 @@ def test_publication_is_one_locked_step_and_an_older_run_never_overwrites(tmp_pa
     assert ("\nRun: %s\n" % newer_id) in path.read_text(encoding="utf-8"), "the newer run's report stands"
     assert list(tmp_path.glob("superseded-*.md")), "kept beside it, never over it"
     assert not (tmp_path / ".publish.lock").exists()
+
+
+
+# ---------- the hardening round ----------
+
+def test_a_pass_from_an_earlier_service_instance_does_not_cancel_the_owed_recheck(world, monkeypatch):
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    _land_fix(served)
+    hs.check_candidate()
+    assert anchor_next.activate(served)["ok"]
+    monkeypatch.setenv("ANCHOR_RUNNING_HEAD", _g(served, "rev-parse", "HEAD"))
+    monkeypatch.setenv("ANCHOR_STARTED_AT", "2000.0")                  # this instance
+    _report(reports, "2026-10-08.md", GREEN + "Service-Boot: 1000.0\n")   # a pass of the instance BEFORE the restart
+    assert hs.recheck_needed(), "only this instance's own pass counts"
+    _report(reports, "2026-10-08.md", GREEN + "Service-Boot: 2000.0\n")
+    assert not hs.recheck_needed()
+
+
+def test_without_its_lock_a_run_never_publishes_the_report(tmp_path, monkeypatch):
+    import anchor_healthcheck as hc
+    path = tmp_path / ("%s.md" % hc.TODAY)
+    path.write_text("Status: ISSUES FOUND\n", encoding="utf-8")
+    (tmp_path / ".publish.lock").write_text("held", encoding="utf-8")      # a fresh lock another run holds
+    monkeypatch.setattr(hc.time, "sleep", lambda s: None)
+    real_time = hc.time.time
+    clock = [real_time()]
+    monkeypatch.setattr(hc.time, "time", lambda: clock.__setitem__(0, clock[0] + 5) or clock[0])
+    monkeypatch.setattr(hc, "RUN_ID", "%.3f" % real_time())
+    hc._publish(hc.Report(), path)
+    assert path.read_text(encoding="utf-8") == "Status: ISSUES FOUND\n", "the report another run holds is untouched"
+    assert list(tmp_path.glob("unpublished-*.md"))
