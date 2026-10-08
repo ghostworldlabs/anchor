@@ -7811,6 +7811,9 @@ def _high_seat_context():
         sessions = _sessreg.list_sessions()
     except Exception:
         sessions = []
+    # the banner's fingerprint FIRST, then the banner (ChatGPT + Grok, last pass): a report published in between leaves
+    # the page's fingerprint older than its banner, so the page's next poll sees the difference and places it
+    health_sig = _health_sig_for_boot()
     hr = latest_health_report()
     names = {e.get("id"): e.get("name") or "" for e in entries}
     rows = _ha.build_attention(tasks=[], sessions=sessions, health=(hr[0], hr[1], hr[3]) if hr else None,
@@ -7962,7 +7965,7 @@ def _high_seat_context():
         "projects_html": '<p class="ptile-note" id="ptileLoading">the list opens when you press Show all</p>',
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
-        "health_sig": _health_sig_for_boot(),
+        "health_sig": health_sig,
         "lights": lights, "nudge": nudge, "lane": lane, "resume": resume, "resume_from": resume_from,
     }
 

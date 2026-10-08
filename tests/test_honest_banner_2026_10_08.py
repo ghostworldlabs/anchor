@@ -590,3 +590,11 @@ def test_a_pass_is_published_only_with_its_probed_instance_still_running(tmp_pat
 def test_every_issue_is_kept_for_verification():
     body = "Status: ISSUES FOUND\n\n## Issues\n" + "".join("- [HTTP endpoints] GET /p%d: 500\n" % i for i in range(30))
     assert len(hs.issues_of(body)) == 30
+
+
+def test_the_cave_reads_the_banners_fingerprint_before_the_banner():
+    """ChatGPT + Grok, last pass: read in that order, a report published in between leaves the page's fingerprint
+    older than its banner, and the page's next poll places the newer one."""
+    src = (ROOT / "anchor_gui.py").read_text(encoding="utf-8")
+    i_sig, i_banner = src.index("    health_sig = _health_sig_for_boot()"), src.index("    hr = latest_health_report()\n    names = {")
+    assert i_sig < i_banner and '"health_sig": health_sig,' in src
