@@ -857,12 +857,10 @@ def land(job, files):
             job["id"], job["brief"][:600]), who="code job " + job["id"], expect_head=head)
         if landed:                                      # recorded before the lock goes: a stop can no longer release it
             _transition(job.get("steward_dir") or "", job["id"], ("finishing",), placed=True)
+            c, out, _ = _git(repo, "rev-parse", "HEAD")  # the landing commit itself: read while nothing else can commit
+            fields["landed_commit"] = out.strip() if c == 0 else ""
     if not landed:
         return False, note + "; the work is kept at %s" % wt, fields
-    c, out, _ = _git(repo, "rev-parse", "HEAD")
-    fields["landed_commit"] = out.strip() if c == 0 else ""
-    if fields["landed_commit"]:
-        record_landed_commit(fields["landed_commit"])     # the served-code audit exempts exactly this commit
     # the placed tree is the reviewed one for every path the job touched - additions, edits AND deletions
     code, diff, _ = _git_raw(repo, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z",
                          fields["landed_commit"] or "HEAD", cand, "--", *land_files)
@@ -871,6 +869,8 @@ def land(job, files):
         return True, "landed, but %d placed file(s) differ from the candidate (%s); the worktree is kept at %s" % (
             len(bad), ", ".join(bad[:8]), wt), fields
     fields["verified"] = True
+    if fields.get("landed_commit"):
+        record_landed_commit(fields["landed_commit"])     # only a verified landing's own commit is ever exempt
     return True, note, fields
 
 

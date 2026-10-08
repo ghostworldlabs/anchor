@@ -1895,6 +1895,7 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
         if not own_log:
             look_tests = ""                              # another skill's log never speaks for this job
         phase = str(look.get("status") or look.get("doing") or "running")[:80] if own_log else "running"
+        real_tests = ""                                  # no check receipt names this run: its tests stay "not run yet"
         if own_log and real_forecast(look.get("eta")):
             own_finish = str(look["eta"]) + (" (its own estimate, given %s)" % look["table_at"] if look.get("table_at") else " (its own estimate)")
             return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), phase, started,

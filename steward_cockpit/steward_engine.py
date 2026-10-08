@@ -2275,6 +2275,7 @@ class Engine:
             if not self.general:
                 self._deliv_baseline()          # before the first turn (once per effort), so what it registers is announced
                 if self.code_job is None:
+                    self._finish_served_audit()                    # a previous turn's open audit is never overwritten
                     self._served_snap = _served_code_snapshot()   # final review: a steward's own writes are audited
             self.turn_text = ""
             self._turn_origin = "control" if is_control else "human"
@@ -2338,10 +2339,25 @@ class Engine:
         self._submitted = None
         _update_state(self.skey(), {"submitted": None, "pending_queue": list(self.queue)})
 
+    def _finish_served_audit(self):
+        """End of a steward turn - however it ended (a result, an interruption, the process exiting): report any
+        change to Anchor's served application code it made directly, then clear the snapshot. Never raises."""
+        try:
+            if self.general or self.code_job is not None:
+                return
+            snap, self._served_snap = getattr(self, "_served_snap", None), None
+            changed = _served_code_changes(snap)
+            if changed:
+                self._emit({"t": "sys", "text": "the steward changed Anchor's served code directly this turn, "
+                            "with no code job and no review: %s - John should know" % ", ".join(changed[:8])})
+        except Exception:
+            pass
+
     def _interrupt_turn_locked(self, reason):
         """Wave 1.2/1.3: end the running turn. The exec protocol has no
         retractable item boundary, so the outcome is recorded as uncertain;
         partial writes stay on disk; the queue and the native thread are kept."""
+        self._finish_served_audit()
         proc = self.proc
         if proc is None or proc.poll() is not None or not self.busy:
             return {"ok": False, "error": "no running turn"}
@@ -2560,6 +2576,7 @@ class Engine:
         if code not in (0, None):
             self.broken = True
         why = getattr(self, "_model_limit", "") or ""
+        self._finish_served_audit()
         self._emit({"t": "sys", "text": f"steward session ended (exit {code})"
                     + (" \u2014 " + why if why else "")})
         # the subprocess died unexpectedly - hand back any queued message the
@@ -3143,12 +3160,7 @@ class Engine:
             if history_saved and not err_text:
                 self._publish_delivery_receipt(completed_turn_id, reply=txt,
                                                written=list(getattr(self, "_turn_output_refs", []) or []))
-            if not self.general and self.code_job is None:
-                changed = _served_code_changes(getattr(self, "_served_snap", None))
-                self._served_snap = None
-                if changed:
-                    self._emit({"t": "sys", "text": "the steward changed Anchor's served code directly this turn, "
-                                "with no code job and no review: %s - John should know" % ", ".join(changed[:8])})
+            self._finish_served_audit()
 
             # The complete result boundary is one arbitration transaction.
             # Exactly one next writer wins: an already accepted human message,

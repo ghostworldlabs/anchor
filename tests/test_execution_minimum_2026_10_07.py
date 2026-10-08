@@ -1513,3 +1513,27 @@ def test_another_runs_halt_never_reaches_a_running_skill_jobs_status(tmp_path):
     (c / "_gandalf-status.log").write_text("[10:00] Gandalf review · final\nBlocker  HALT: model session limit\n", encoding="utf-8")
     out = sc.compose_status(str(c), {})
     assert out["halt"] is None and "STOPPED" not in " ".join(out["now"])
+
+
+# ---------- final whole-patch review, round 4 ----------
+
+def test_an_interrupted_turn_still_reports_a_direct_code_change(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "served")
+    monkeypatch.setattr(steward_engine, "_SERVED", repo)
+    eng = steward_engine.Engine(str(tmp_path / "c"), fake=True)
+    said = []
+    eng._emit = lambda ev: said.append(ev)
+    eng._served_snap = steward_engine._served_code_snapshot()
+    (repo / "job_runner.py").write_text("x\n", encoding="utf-8")
+    eng._interrupt_turn_locked("Take this now")
+    assert any("served code directly" in str(ev.get("text")) for ev in said) and eng._served_snap is None
+
+
+def test_a_skill_job_never_shows_a_steps_check_as_its_own(tmp_path):
+    import json as _j, time as _t
+    (tmp_path / ".ecgberht").mkdir()
+    st = _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(_t.time() - 60))
+    (tmp_path / ".ecgberht" / "skill-jobs.json").write_text(_j.dumps({"G": {
+        "status": "running", "started": st, "label": "G", "argv": ["node", "C:/dev/trio/gandalf/bin/run.mjs"]}}), encoding="utf-8")
+    _w, _p, _s, tests, _f = sc.who_is_working(str(tmp_path), {}, [], None, evidence_tests="Passed - pytest (exit 0)")
+    assert tests == "tests not run yet"
