@@ -66,6 +66,20 @@ FENCE_CONFIG = (
 _SKILL_FOLDER_RE = re.compile(r"(?:^|[\\/\s\"'])skills[\\/]([A-Za-z0-9_.-]{1,40})[\\/]", re.I)
 
 
+_SERVED_ROOT = str(Path(__file__).resolve().parents[1]).replace("\\", "/").lower().rstrip("/")
+
+
+def _names_served(command) -> bool:
+    """True when a command names Anchor's served folder (the code-job launcher's own path excused), or cannot be read."""
+    if isinstance(command, list):
+        command = " ".join(str(x) for x in command)
+    if not isinstance(command, str) or not command.strip():
+        return True
+    flat = command.replace("\\\\", "/").replace("\\", "/").lower()
+    flat = flat.replace(_SERVED_ROOT + "/tools/steward_code_job.py", " ")
+    return re.search(re.escape(_SERVED_ROOT) + r"(?:[^a-z0-9_.-]|$)", flat) is not None
+
+
 def _skill_token(*values):
     """The skill folder's NAME from a command or path (a derived token, never the command itself)."""
     for value in values:
@@ -500,6 +514,10 @@ class EventNormalizer:
                         metadata["paths"] = paths
                 elif type(item.get("_change_count")) is int and item["_change_count"] >= 0:
                     metadata["change_count"] = item["_change_count"]
+                if item_type == "command_execution":
+                    # 2026-10-08: never the command itself - only whether it names Anchor's served folder (or could:
+                    # an unreadable command counts), so the end-of-turn audit speaks to the steward that could have written
+                    metadata["names_served"] = _names_served(item.get("command"))
                 skill = _skill_token(item.get("command"), item.get("tool"), *(metadata.get("paths") or []))
                 if skill:
                     metadata["skill"] = skill   # the cockpit marks the skill in use; the folder's name only

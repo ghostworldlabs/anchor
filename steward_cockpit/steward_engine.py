@@ -187,6 +187,14 @@ _WRITE_VERBS = re.compile(r"(apply_patch|WriteAllText|WriteAllBytes|Set-Content|
                           r"New-Item|git (?:commit|merge|checkout|reset|apply|am|cherry-pick|rebase)|\bsed -i|\.write_text\(|"
                           r"\.write_bytes\(|open\([^)]*['\"][wa]['\"]|writeFileSync|(?<![=<>\-])\d?>>?\s*(?![&=>])[\w./\\$'\"~:-])", re.I)
 _SHELL_TOOLS = {"exec_command", "command_execution", "Bash", "PowerShell", "shell", "local_shell_call", "exec"}
+def _names_served(command, served):
+    """A command that names Anchor's served folder anywhere except as the code-job launcher's own path (2026-10-08)."""
+    flat = str(command or "").replace("\\\\", "/").replace("\\", "/").lower()
+    root = str(served).replace("\\", "/").lower().rstrip("/")
+    flat = flat.replace(root + "/tools/steward_code_job.py", " ")
+    return re.search(re.escape(root) + r"(?:[^a-z0-9_.-]|$)", flat) is not None
+
+
 _STOP_CODER = re.compile(r"^\s*(?:please\s+)?stop (?:the )?(?:coder|code job|job)\b", re.I)
 MACHINE_MARK = "(machine report - not John) "
 
@@ -353,6 +361,13 @@ def _scoped_text(text, goal, goal_name):
     if not goal or not goal_name:
         return text
     return "About the goal \u2018%s\u2019 (the Campaign initiative %s) \u2014 %s" % (goal_name, goal, text)
+
+
+def _unscoped(text):
+    """The inverse of _scoped_text: his words without the goal named in front or the cockpit's marked note after."""
+    text = str(text or "").split("\n\n[cockpit, not John]")[0]
+    m = re.match(r"About the goal ‘.*?’ \(the Campaign initiative .*?\) — ", text, re.S)
+    return text[m.end():] if m else text
 
 
 def _reported_cost(value):
@@ -1960,6 +1975,11 @@ class Engine:
                 # 2026-10-08 (John: "no received line"): it is said AFTER his own words are shown, never above them
                 from steward_cockpit import maintenance as _mt5
                 received = not self.busy and not _mt5.is_active()
+
+                def show_his_words():   # his words, then - on the idle path - the one receipt under them
+                    self._emit({"t": "john", "text": text})
+                    if received:
+                        self._emit({"t": "sys", "text": "Received."})
                 # Only bare UI commands are controls. "go with option B" and
                 # "hold on" are substantive words, not drive switches.
                 low = text.lower().rstrip(".!").strip()
@@ -1996,7 +2016,7 @@ class Engine:
                     self.open_question = ""
                     self.open_question_kind = ""
                     if control and self._question_contexts(wait):
-                        self._emit({"t": "john", "text": text})
+                        show_his_words()
                         return {"ok": True, "queued": False, "control_only": True}
                 elif self.open_question:
                     kind = (self.open_question_kind
@@ -2004,7 +2024,7 @@ class Engine:
                     if control and kind != "drive_offer":
                         # Drive is an interface command, not an answer. Never
                         # put a bare approval-shaped token on model stdin.
-                        self._emit({"t": "john", "text": text})
+                        show_his_words()
                         self._emit({"t": "sys", "text":
                                     ("drive armed" if control == "go"
                                      else "drive paused")
@@ -2023,9 +2043,10 @@ class Engine:
                     self.question_context = None
                     _update_state(self.skey(), {"question_context":None})
 
-            self._emit({"t": "john" if human else "sys", "text": text})
-            if human and received:
-                self._emit({"t": "sys", "text": "Received."})
+            if human:
+                show_his_words()
+            else:
+                self._emit({"t": "sys", "text": text})
             text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
             if not human and not _is_machine_text(text):
                 text = MACHINE_MARK + text                   # persisted with the entry: never delivered as John's
@@ -2264,6 +2285,7 @@ class Engine:
             proc.stdin.flush()
             self._bridge_system_prompt = None
             self._last_submitted = text
+            self._turn_words = _unscoped(human_text) if origin == "human" else ""   # what the receipt quotes
             self._turn_had_tools = False
             if not self.busy:
                 self._turn_tools = 0
@@ -2346,21 +2368,31 @@ class Engine:
 
     def _note_served_touch(self, block):
         """2026-10-08 (seen live: the Doctor's edit to the Cave was reported in Book 1, which cannot touch Anchor): this
-        turn's own tool calls that could write into Anchor's served tree - a file tool on a path in it, or a shell
-        command naming it with a write verb. The end-of-turn audit speaks only to a steward that could have done it."""
+        turn's own tool calls that COULD have written into Anchor's served tree. Conservative (ChatGPT review): a file
+        tool with a path in it or with no path at all, a shell command that names the served root (only the code-job
+        launcher's own path is excused), a shell call whose command is not visible (the ChatGPT bridge sends only a
+        flag), or one too long to read - each counts. Only a command we can read that never names Anchor is cleared."""
         try:
             served = str(_SERVED)
             inp = block.get("input") or {}
             name = block.get("name") or ""
-            paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
             from steward_cockpit import code_jobs as _cjt
-            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch") and any(
-                    _cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
-                self._turn_touched_served = True
+            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
+                paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
+                if not paths or any(_cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
+                    self._turn_touched_served = True
             elif name in _SHELL_TOOLS:
-                flat = json.dumps(inp, ensure_ascii=False)[:6000].replace("\\\\", "/").replace("\\", "/").lower()
-                root = served.replace("\\", "/").lower().rstrip("/")
-                if re.search(re.escape(root) + r"(?:/|[\"' ]|$)", flat) and _WRITE_VERBS.search(flat):
+                if "names_served" in inp:                      # the ChatGPT bridge's flag (the command itself is never sent)
+                    if inp.get("names_served"):
+                        self._turn_touched_served = True
+                    return
+                cmd = inp.get("command") if isinstance(inp.get("command"), str) else inp.get("cmd")
+                if isinstance(cmd, list):
+                    cmd = " ".join(str(x) for x in cmd)
+                if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 6000:
+                    self._turn_touched_served = True
+                    return
+                if _names_served(cmd, served):
                     self._turn_touched_served = True
         except Exception:
             self._turn_touched_served = True     # unsure counts as possible: the warning is kept, never lost
@@ -2567,13 +2599,8 @@ class Engine:
         if said:
             first = re.split(r"(?<=[.!?])\s", said, maxsplit=1)[0]
             return first[:110] + ("\u2026" if len(first) > 110 else "")
-        asked = str(getattr(self, "_last_submitted", "") or "")
-        # 2026-10-08 (seen live): after a wake the submitted text starts with the resume brief - quote only his words
-        joined = list(re.finditer(r"JOHN SAYS \([^)]*\):\s*", asked))
-        if joined:
-            asked = asked[joined[-1].end():]
-        asked = re.sub(r"^About the goal ‘.*?’ \(the Campaign initiative .*?\) — ", "", " ".join(asked.split()))
-        asked = re.sub(r"^\(.*?\)\s*", "", asked)
+        # 2026-10-08 (seen live): his own words as he sent them - never the resume brief the turn carried
+        asked = " ".join(str(getattr(self, "_turn_words", "") or "").split())
         return ("your message \u201c%s\u201d" % (asked[:80] + ("\u2026" if len(asked) > 80 else ""))) if asked else "a turn"
 
     def _queued_receipt(self):

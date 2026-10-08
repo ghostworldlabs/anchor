@@ -67,13 +67,22 @@ def test_received_is_painted_under_his_message_in_the_cockpit(cockpit):
 # ---------- 1b: the working receipt quotes his words ----------
 
 def test_the_working_receipt_quotes_his_words_after_a_wake(tmp_path):
+    import io
+
+    class Proc:
+        stdin = io.StringIO()
     eng = steward_engine.Engine(str(tmp_path), fake=True)
+    eng.proc = Proc()
+    eng._resume_prefix = steward_engine.RESUME_BRIEF                       # this morning: the first turn after a wake
+    words = steward_engine._scoped_text("Little bit of feedback on v1.", "g1", "Book")
+    with eng._lock:
+        assert eng._send_locked(words + "\n\n[cockpit, not John] PLAN DRIFT: behind.", origin="human")
+    assert "You are" in eng._last_submitted                                # the model still gets the brief
     eng.turn_text = ""
-    eng._last_submitted = (steward_engine.RESUME_BRIEF + steward_engine.JOIN_PICKUP
-                           + "About the goal ‘Book’ (the Campaign initiative g1) — Little bit of feedback on v1.")
     assert eng._turn_activity() == "your message “Little bit of feedback on v1.”"
-    eng._last_submitted = "plain words from John"
-    assert eng._turn_activity() == "your message “plain words from John”"
+    with eng._lock:
+        assert eng._send_locked("(drive - not John) Continue.", origin="control")
+    assert eng._turn_activity() == "a turn"                                # a control turn never quotes him
 
 
 # ---------- 5: the served-code notice speaks only to a steward that could have made the change ----------
@@ -177,3 +186,49 @@ def test_the_launcher_carries_the_skill(tmp_path):
     import inspect
     src = inspect.getsource(launcher.main)
     assert '"--skill"' in src and "skill=a.skill" in src
+
+
+# ---------- ChatGPT review round 1 (morning fixes) ----------
+
+def test_unreadable_or_unlisted_writes_count_as_possible(tmp_path, monkeypatch):
+    eng, said, served = _audit_engine(tmp_path, monkeypatch, tmp_path / "Writing" / "Book 1")
+    root = str(served).replace("/", chr(92))
+    cases = [({"name": "command_execution", "input": {"item_id": "x", "names_served": True}}, True),
+             ({"name": "command_execution", "input": {"item_id": "x", "names_served": False}}, False),
+             ({"name": "Bash", "input": {}}, True),                                         # no command visible
+             ({"name": "Bash", "input": {"command": "git -C %s apply fix.patch" % root}}, True),
+             ({"name": "Bash", "input": {"command": "cp new.js %s/static/x.js" % str(served)}}, True),
+             ({"name": "PowerShell", "input": {"command": "cd %s; Set-Content a.txt x" % root}}, True),
+             ({"name": "Bash", "input": {"command": "x" * 7000}}, True),                    # too long to read
+             ({"name": "Write", "input": {}}, True),                                        # a file tool without a path
+             ({"name": "Bash", "input": {"command": "python %s/tools/steward_code_job.py start --repo r" % str(served)}}, False),
+             ({"name": "Bash", "input": {"command": "Get-ChildItem C:/dev/Writing"}}, False)]
+    for block, want in cases:
+        eng._turn_touched_served = False
+        eng._note_served_touch(block)
+        assert eng._turn_touched_served is want, block
+
+
+def test_the_chatgpt_bridge_sends_only_a_flag_never_the_command():
+    from steward_cockpit import codex_turn_bridge as bridge
+    root = bridge._SERVED_ROOT
+    assert bridge._names_served("Set-Content %s/static/x.js 1" % root)
+    assert bridge._names_served(None) and bridge._names_served("")                   # unreadable counts
+    assert not bridge._names_served("python %s/tools/steward_code_job.py start" % root)
+    assert not bridge._names_served("dir C:/dev/Writing")
+    assert not bridge._names_served("dir %s-other/x" % root)                           # a sibling folder is not it
+
+
+def test_an_idle_control_still_hears_received_after_his_words(tmp_path, monkeypatch):
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    said = []
+    monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
+    monkeypatch.setattr(eng, "alive", lambda: True)
+    monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": True)
+    eng.busy = False
+    eng.open_question = "Which chapter first?"
+    eng.open_question_kind = "decision"
+    assert eng.say("pause")["control_only"]
+    kinds = [(e.get("t"), e.get("text")) for e in said]
+    assert kinds.index(("john", "pause")) + 1 == kinds.index(("sys", "Received."))

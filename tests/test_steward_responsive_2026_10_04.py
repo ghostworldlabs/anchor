@@ -93,7 +93,7 @@ def test_the_queued_receipt_names_what_the_steward_is_on_and_since_when(eng):
     r = eng._queued_receipt()
     assert r.startswith("Aladdin is on: I'll make the tile border thinner and pulse it., since ") and "(34 min)" in r and r.endswith("Your message is next.")
     eng.turn_text = ""
-    eng._last_submitted = "(scoped) fix the dots on the tiles"
+    eng._turn_words = "fix the dots on the tiles"      # 2026-10-08: the receipt quotes his recorded words, not the sent text
     assert "your message “fix the dots on the tiles”" in eng._queued_receipt()
 
 

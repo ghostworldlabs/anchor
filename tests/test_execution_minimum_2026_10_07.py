@@ -1537,6 +1537,7 @@ def test_an_interrupted_turn_still_reports_a_direct_code_change(tmp_path, monkey
         def poll(self): return None if not Writer.killed else 0
         def wait(self, timeout=None): return 0
     eng.proc, eng.busy, eng._last_submitted = Writer(), True, "x"
+    eng._turn_touched_served = True                 # the steward's own tool wrote there (2026-10-08: only then is it said)
     monkeypatch.setattr(eng, "_kill_tree", lambda p: setattr(Writer, "killed", True))
     monkeypatch.setattr(eng, "_journal_routing", lambda **k: None)
     monkeypatch.setattr(eng, "_hold_queue", lambda reason: None)
