@@ -309,3 +309,90 @@ def test_a_running_pass_needs_the_running_service_on_the_checked_revision(monkey
         assert r.has_issues, "no running service, no pass"
     finally:
         srv.shutdown()
+
+
+
+# ---------- ChatGPT review round 2 ----------
+
+class _Service(http.server.BaseHTTPRequestHandler):
+    build = "abc1234+ff"
+    broken = "/api/status"
+
+    def do_GET(self):
+        if self.path == "/api/version":
+            body = json.dumps({"version": self.build}).encode()
+            self.send_response(200)
+        elif self.path.split("?")[0] == self.broken:
+            body = b"boom"
+            self.send_response(500)
+        else:
+            body = b"ok"
+            self.send_response(200)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+def test_the_running_service_must_answer_its_own_pages_not_only_its_version(monkeypatch):
+    import anchor_healthcheck as hc
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Service)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
+        monkeypatch.setenv("ANCHOR_TOKEN", "t")
+        monkeypatch.setattr(hc, "RUN_REVISION", "abc1234def")
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert r.has_issues and any("GET /api/status" in c[0] and not c[1] for c in r.checks), r.checks
+        _Service.broken = "/nothing"
+        r = hc.Report()
+        hc.check_running_service(r)
+        assert not r.has_issues, r.checks
+    finally:
+        _Service.broken = "/api/status"
+        srv.shutdown()
+
+
+def test_an_older_run_never_overwrites_a_newer_runs_report(tmp_path, monkeypatch):
+    import anchor_healthcheck as hc
+    today = tmp_path / ("%s.md" % hc.TODAY)
+    today.write_text("Status: OK\nRun: %.3f\n" % (time.time() + 100), encoding="utf-8")
+    monkeypatch.setattr(hc, "RUN_ID", "%.3f" % time.time())
+    assert hc._newer_run_published(today) is True
+    monkeypatch.setattr(hc, "RUN_ID", "%.3f" % (time.time() + 200))
+    assert hc._newer_run_published(today) is False
+
+
+def test_a_failed_recheck_launch_is_tried_again_and_the_obligation_is_per_candidate(world, monkeypatch):
+    import anchor_gui
+    served, reports = world
+    _report(reports, "2026-10-08.md", RED, age_s=120)
+    _land_fix(served)
+    hs.check_candidate()
+    assert anchor_next.activate(served)["ok"]
+    monkeypatch.setenv("ANCHOR_RUNNING_HEAD", _g(served, "rev-parse", "HEAD"))
+    monkeypatch.setenv("ANCHOR_STARTED_AT", str(time.time()))
+    scheduled = []
+    monkeypatch.setattr(anchor_gui, "_schedule_health_recheck", lambda delay_s=90: scheduled.append(delay_s))
+    monkeypatch.setattr(anchor_gui, "_RECHECK_TRIES", [0])
+    monkeypatch.setattr(anchor_gui, "_doctor_start_healthcheck_run", lambda: {"ok": False, "error": "no log"})
+    anchor_gui._health_recheck_if_owed()
+    assert scheduled == [120] and hs.recheck_needed(), "tried again later"
+    monkeypatch.setattr(anchor_gui, "_doctor_start_healthcheck_run", lambda: {"ok": True})
+    anchor_gui._health_recheck_if_owed()
+    assert not hs.recheck_needed()
+    ip, _ = anchor_next.ensure_integration(served)
+    (Path(ip) / "later.py").write_text("x = 1\n", encoding="utf-8")
+    _g(ip, "add", "-A")
+    _g(ip, "commit", "-qm", "a later landing")
+    anchor_next.activate(served)
+    monkeypatch.setenv("ANCHOR_RUNNING_HEAD", _g(served, "rev-parse", "HEAD"))
+    assert not hs.recheck_needed(), "a later restart does not revive a consumed candidate's obligation"
+
+
+def test_the_cave_acknowledges_a_banner_fingerprint_only_once_it_is_placed():
+    js = (ROOT / "static" / "high-seat-page.js").read_text(encoding="utf-8")
+    assert "if (h && h !== healthSig) { healthPending = h; renewInPlace(); }" in js
+    assert "if (sig && healthPending === sig) { healthSig = sig; healthPending = ''; }" in js

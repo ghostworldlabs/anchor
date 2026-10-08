@@ -624,6 +624,7 @@
   // reloaded (its frame, draft, focus and stream stay); a change that would move or remove it waits until it closes
   // (closeTile). Nothing is placed while he types or dictates in a card, and no section he is in is replaced.
   var placeBusy = false, placeAgain = false, placeHeld = false, placeSkipped = false;
+  var healthSig = '', healthPending = '';   // the banner's fingerprint the page shows, and one it is placing (W3)
   // a section he was IN when the record moved (a search box, a button row) is placed once he leaves it (ChatGPT W4 r3)
   document.addEventListener('focusout', function () {
     if (!placeSkipped) return;
@@ -640,7 +641,11 @@
         if (!html) return;
         if (placeWait()) { placeAgain = true; return; }   // he started typing mid-fetch: placed once he is idle
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        if (doc.querySelector('.board')) placeBoard(doc);   // a locked or failed answer is never placed
+        if (doc.querySelector('.board')) {   // a locked or failed answer is never placed
+          var sig = healthPending;
+          placeBoard(doc);
+          if (sig && healthPending === sig) { healthSig = sig; healthPending = ''; }
+        }
       })
       .catch(function () {})
       .then(function () { placeBusy = false; if (placeAgain) { placeAgain = false; renewInPlace(); } });
@@ -1234,14 +1239,14 @@
   // a redeploy reloads the open page, as the old home did (the verification law: a mechanism, not "refresh"): /api/version
   // every 30 s; a build other than the one this page booted with reloads it once — never while he is typing
   (function () {
-    var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '', healthSig = '';
+    var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
     if (!mine) return;
     // W2c-4: never while he types; W3b: never under an open tile either - the reload waits (renewBuild), the draft and the open tile come back after it
     setInterval(function () {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
         // W3 (2026-10-08): the banner's facts moved (a report, a verified candidate) - placed in the page, never a reload
         var h = d && d.health;
-        if (h && h !== healthSig) { renewInPlace(); healthSig = h; }   // the first one too: a change before it is not lost
+        if (h && h !== healthSig) { healthPending = h; renewInPlace(); }   // acknowledged only once placed (ChatGPT W3 r2)
         var v = d && d.version; if (!v || v === mine) return;
         try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; } catch (e) {}
         renewVersion = String(v); renewBuild('A new build is live \u2014 the page is renewed.');

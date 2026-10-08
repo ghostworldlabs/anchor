@@ -175,7 +175,8 @@ class Report:
             "",
             f"Status: {status_line}",
             f"Target: {TARGET}",
-            f"Revision: {_revision()}",
+            f"Revision: {RUN_REVISION or _revision()}",
+            f"Run: {RUN_ID}",
             f"Run time: {elapsed:.1f}s ({self.started.strftime('%H:%M:%S')})",
             "",
             "## Executive summary",
@@ -6185,6 +6186,21 @@ def _revision():
         return "unknown"
 
 
+RUN_REVISION = ""      # the revision this run checks, read when it STARTS (never at publication - ChatGPT W3 r2)
+RUN_ID = ""            # this run's identity: its start time
+
+
+def _previous_issue_paths():
+    """The GET paths the newest dated report's issues name (what failed last time is asked of the running service)."""
+    try:
+        rd = REPORTS_DIR
+        dated = sorted((p for p in rd.glob("*.md") if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", p.name)), reverse=True)
+        body = dated[0].read_text(encoding="utf-8", errors="replace") if dated else ""
+    except Exception:
+        return []
+    return sorted(set(m for m in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", body) if not m.startswith("/api/rnd/term")))[:8]
+
+
 def check_running_service(report: Report):
     """W3 (ChatGPT r1, 2026-10-08): a pass of the RUNNING target requires the running service itself - on
     ANCHOR_HEALTHCHECK_LIVE_PORT (the Doctor's re-run and the owed re-check set it), else 8777 - to answer and to run
@@ -6201,12 +6217,36 @@ def check_running_service(report: Report):
     except Exception as e:
         report.check(name, False, "no answer from the running service: %s" % type(e).__name__)
         return
-    rev = _revision().split("+")[0]
+    rev = (RUN_REVISION or _revision()).split("+")[0]
     running = str(build).split("+")[0]
     report.check(name, ok, "build %s" % build)
     if ok and rev and running:
         report.check("the running service runs the checked revision", rev.startswith(running) or running.startswith(rev),
                      "running %s, checked %s" % (running[:12], rev[:12]))
+    # ChatGPT W3 r2: the RUNNING service's own pages and reads - the core GETs and every GET path the previous
+    # report's issues name - asked as John's browser asks (the token, when this run has it); 2xx/3xx only
+    tok = (os.environ.get("ANCHOR_TOKEN") or "").strip()
+    paths = ["/", "/high-seat"] + (["/api/status"] if tok else []) + _previous_issue_paths()
+    for path in dict.fromkeys(paths):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), headers=({"Authorization": "Bearer " + tok} if tok else {}))
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                code = r.getcode()
+        except urllib.error.HTTPError as e:
+            code = e.code
+        except Exception as e:
+            code = type(e).__name__
+        report.check("the running service: GET %s" % path, isinstance(code, int) and 200 <= code < 400, "answered %s" % code)
+    if not tok:
+        report.warn("the running service: authenticated reads", "no token in this run's environment - /api/status was not asked")
+
+
+def _newer_run_published(path):
+    try:
+        m = re.search(r"^Run:\s*([0-9.]+)\s*$", path.read_text(encoding="utf-8", errors="replace"), re.M)
+        return bool(m and RUN_ID and float(m.group(1)) > float(RUN_ID))
+    except Exception:
+        return False
 
 
 def cleanup_stale_processes(report: Report):
@@ -6904,6 +6944,9 @@ def check_supervisor_live_probes(report: Report):
 
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
+    global RUN_REVISION, RUN_ID
+    RUN_REVISION = _revision()             # captured BEFORE checking: a restart mid-run never relabels it
+    RUN_ID = "%.3f" % time.time()
     report = Report()
     server_proc = None
 
@@ -7065,6 +7108,10 @@ def main():
                 pass
 
     report_path = Path(REPORT_OUT) if REPORT_OUT else REPORTS_DIR / f"{TODAY}.md"
+    if not REPORT_OUT and _newer_run_published(report_path):
+        # ChatGPT W3 r2: a run that STARTED later already published today's report - this older run never
+        # overwrites it; it is kept beside it as superseded
+        report_path = REPORTS_DIR / f"superseded-{TODAY}-{RUN_ID.replace('.', '')}.md"
     try:
         report.write(report_path)
     except Exception as e:

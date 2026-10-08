@@ -42,9 +42,17 @@ def get(port, path, timeout=30):
 
 
 def banner(port):
-    _, html = get(port, "/high-seat", timeout=120)
-    m = re.search(r'<div class="healthbar".*?</div>', html, re.S)
-    return re.sub(r"<[^>]+>", " ", m.group(0)).replace("&middot;", "·").replace("&mdash;", "—") if m else ""
+    """What a REAL browser shows (ChatGPT W3 r2): the Cave opened in Chromium; the painted banner's words, or ""."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        try:
+            pg = b.new_page()
+            pg.goto("http://127.0.0.1:%d/high-seat" % port, wait_until="load", timeout=180000)
+            bar = pg.query_selector(".healthbar")
+            return bar.inner_text() if bar and bar.is_visible() else ""
+        finally:
+            b.close()
 
 
 def start(served, port, env):

@@ -17913,6 +17913,7 @@ def _doctor_start_candidate_check():
 
 
 _RECHECK_LOCK = threading.Lock()
+_RECHECK_TRIES = [0]
 
 
 def _health_recheck_if_owed():
@@ -17922,6 +17923,7 @@ def _health_recheck_if_owed():
     actually launched (ChatGPT W3 r1)."""
     if os.environ.get("ANCHOR_HEALTHCHECK") == "1":
         return
+    launched = False
     try:
         import health_state as _hs
         with _RECHECK_LOCK:
@@ -17930,8 +17932,13 @@ def _health_recheck_if_owed():
             receipt = _doctor_start_healthcheck_run()
             if receipt.get("ok") and not receipt.get("already_running"):
                 _hs.mark_rechecked(time.strftime("%Y%m%d-%H%M%S"))
+                launched = True
     except Exception:
         pass
+    if not launched:                       # ChatGPT W3 r2: a failed launch is tried again, with a bounded backoff
+        _RECHECK_TRIES[0] += 1
+        if _RECHECK_TRIES[0] <= 6:
+            _schedule_health_recheck(delay_s=120 * _RECHECK_TRIES[0])
 
 
 def _schedule_health_recheck(delay_s=90):

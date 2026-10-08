@@ -160,6 +160,11 @@ def verified_candidate():
     return c
 
 
+def _answers_this_report(c, path, body):
+    answers = (c or {}).get("answers") or {}
+    return path is not None and answers.get("report") == path.name and answers.get("issues") == issues_of(body)
+
+
 def recheck_needed():
     """The running build carries a verified candidate's revision, and the newest report is still red and older than
     this build's start: one re-run of the check against the running code is owed."""
@@ -167,9 +172,11 @@ def recheck_needed():
     path, body = latest()
     if not c or path is None or status_of(body) != "red" or c.get("status") not in ("green", "yellow"):
         return False
-    if not is_live(str(c.get("revision") or "")):
+    if c.get("target") != "candidate" or c.get("rechecked_for"):
+        return False                                # one obligation per verified candidate, consumed when launched
+    if not _answers_this_report(c, path, body):
         return False
-    if c.get("rechecked_for") == running_head():    # already launched for this running build (durable)
+    if not is_live(str(c.get("revision") or "")):
         return False
     started = float(os.environ.get("ANCHOR_STARTED_AT") or 0)
     return path.stat().st_mtime < started if started else True
