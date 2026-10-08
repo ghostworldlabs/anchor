@@ -311,10 +311,10 @@ def test_renderers_stay_route_generic_and_name_foundry_routes():
 # ─── (5) the rule rides in the loaded delivery instructions ──────────────────
 
 def test_delivery_instructions_carry_the_review_link_rule():
-    rules = engine.EFFORT_RULES
+    rules = engine.CONTRACT          # 2026-10-07 (execution minimum item 4): the register rule is in the base contract
     assert "/foundry?skill=<id>" in rules
     assert "never claim FOR REVIEW" in rules
-    assert "openable same-version target registered and linked" in rules
+    assert "openable same-version target registered in" in rules
 
 
 # ─── (6) the correction artifact for the supervising register ────────────────

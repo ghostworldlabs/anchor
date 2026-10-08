@@ -68,7 +68,10 @@ if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
     # Foreman/Crucible are held in production (2026-10-07, execution minimum item 3) and in every test by default.
     # Only test modules that drive the plan/build lane MACHINERY through the fake runner above lift it, per test
     # (the autouse fixture below) - never a suite-wide exemption.
-    os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "1"
+    # Hermetic tests run every model lane through the fake runner above, so only the LANE refusal is lifted here
+    # ("lanes"); an explicit Foreman/Crucible command and a Foreman/Crucible skill job stay refused in every test,
+    # and the hold's own tests set it fully on ("1").
+    os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "lanes"
     # gh reachable a real `gh repo create` from two healthcheck/cli tests.
     if _STUB_GH.exists():
         os.environ["ANCHOR_GH_CMD"] = f"python {_STUB_GH}"
@@ -188,24 +191,6 @@ def _thread_excepthook(args):
         _PREV_THREAD_EXCEPTHOOK(args)
     else:  # pragma: no cover - threading always installs a default hook
         threading.__excepthook__(args)
-
-
-_LANE_MACHINERY = re.compile(r"""launch(?:_guarded)?\(\s*['"](?:build|plan|planning)['"]|lane\s*=\s*['"](?:build|plan|planning)['"]|"""
-                             r"""['"]lane['"]\s*:\s*['"](?:build|plan|planning)['"]""")
-
-
-@pytest.fixture(autouse=True)
-def _foreman_crucible_hold_for_lane_machinery(request, monkeypatch):
-    """The hold stays ON unless this test module drives plan/build lanes through the fake runner (no real Foreman or
-    Crucible can run there: ANCHOR_RUNNER_CMD is the fake, and live runs need ANCHOR_TESTS_ALLOW_LIVE=1)."""
-    if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() == "1":
-        return
-    try:
-        source = Path(str(request.node.fspath)).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return
-    if _LANE_MACHINERY.search(source) and "fake_claude" in os.environ.get("ANCHOR_RUNNER_CMD", ""):
-        monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "lanes")   # lanes only: an engine command stays refused
 
 
 def pytest_configure(config):

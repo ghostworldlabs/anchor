@@ -177,6 +177,7 @@ def test_reading_target_is_one_encoded_url_per_kind(tmp_path):
 def _receipt_engine(tmp_path, monkeypatch, rows):
     eff = tmp_path / "eff"
     eff.mkdir()
+    (eff / "ECGBERHT.md").write_text("# a steward cockpit\n", encoding="utf-8")
     (eff / "DELIVERABLES.md").write_text(
         "| What | Where | Date | Step |\n|---|---|---|---|\n" + "".join(rows), encoding="utf-8")
     eng = steward_engine.Engine.__new__(steward_engine.Engine)
@@ -444,6 +445,7 @@ def test_a_writer_announces_with_no_steward_loaded(tmp_path, monkeypatch):
     monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "eff"))
     eff = tmp_path / "eff"
     eff.mkdir()
+    (eff / "ECGBERHT.md").write_text("# a steward cockpit\n", encoding="utf-8")
     (eff / "DELIVERABLES.md").write_text("| What | Where | Date | Step |\n|---|---|---|---|\n", encoding="utf-8")
     steward_engine.receipt_baseline(str(eff))
     (eff / "Notes.md").write_text("# n", encoding="utf-8")
@@ -677,6 +679,7 @@ def test_the_first_write_to_a_never_seen_effort_is_announced_not_swallowed(tmp_p
     monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "eff"))
     eff = tmp_path / "eff"
     eff.mkdir()
+    (eff / "ECGBERHT.md").write_text("# a steward cockpit\n", encoding="utf-8")
     (eff / "Plan.md").write_text("# p", encoding="utf-8")
     assert dr.register(eff, "Plan", "`Plan.md`")["written"]                # no baseline existed before this write
     turns = read_history_document(str(eff))["turns"]
@@ -1134,6 +1137,7 @@ def test_a_kept_pdf_is_copied_and_linked_in_the_dialogue(tmp_path, monkeypatch):
     (tmp_path / "wt" / "app.py").write_text("x", encoding="utf-8")
     cdir = tmp_path / "steward"
     cdir.mkdir()
+    (cdir / "ECGBERHT.md").write_text("# a steward cockpit\n", encoding="utf-8")
     assert code_jobs.announce_kept(str(cdir), job) == ["report.pdf"]
     # registered through the existing registrar - so Deliverables, Next steps and the receipt all carry it
     assert "code-job-outputs/j9/out/report.pdf" in (cdir / "DELIVERABLES.md").read_text(encoding="utf-8")
@@ -1370,3 +1374,9 @@ def test_a_bound_but_empty_strip_uses_the_steps_own_actions(tmp_path):
     (c / "roadmap.json").write_text(_j.dumps(rm), encoding="utf-8")
     (c / "strip.json").write_text(_j.dumps({"current_step_id": "s0"}), encoding="utf-8")
     assert sc.compose_status(str(c), {})["next3"] == ["Review draft", "Revise figures", "Send to Joe"]
+
+
+def test_an_ordinary_project_folder_gets_no_receipt_files(tmp_path):
+    # a Gandalf run registering its report in a plain project must not leave receipt state or a conversation there
+    assert dr.register(tmp_path, "Gandalf read", "`gandalf/report.md`")["written"]
+    assert not (tmp_path / ".ecgberht").exists()

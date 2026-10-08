@@ -3870,6 +3870,15 @@ _PATH_IN_TEXT = re.compile(r"[A-Za-z]:[\\/][^\r\n`\"<>|*?]*?[.](?:md|markdown|pd
                            r"|[^\s`'\"<>|*?]+[.](?:md|markdown|pdf|html?|docx|pptx|xlsx|ics)\b", re.I)
 
 
+def _is_cockpit(cdir):
+    """Receipts live only in a steward cockpit's dialogue: a folder with ECGBERHT.md or a .ecgberht record. An
+    ordinary project folder (a Gandalf run registering its report) is never given receipt files or a conversation."""
+    try:
+        return (Path(cdir) / "ECGBERHT.md").is_file() or (Path(cdir) / ".ecgberht").is_dir()
+    except OSError:
+        return False
+
+
 def _receipt_lock(cdir):
     key = os.path.normcase(str(Path(cdir).resolve()))
     with _RECEIPT_GUARD:
@@ -3913,6 +3922,8 @@ def _register_items(cdir):
 def receipt_baseline(cdir):
     """The first time an effort is seen, what its register already holds is the starting point - announced as
     nothing. A no-op once the effort has a baseline. Never raises."""
+    if not _is_cockpit(cdir):
+        return
     try:
         with _receipt_lock(cdir):
             if _read_seen(cdir) is None:
@@ -3937,6 +3948,8 @@ def _default_record(cdir):
 def publish_delivery_receipts(cdir, *, reply="", written=(), since=0.0, record=None, emit=None):
     """Announce every product version new to the register (and every document the turn wrote or made and NAMED in
     its reply without registering it) - one line per product, its formats together. Never raises."""
+    if not _is_cockpit(cdir):
+        return
     record = record or _default_record(cdir)
     try:
         with _receipt_lock(cdir):
