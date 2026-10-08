@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-08",
   "phase": "verifying",
-  "active_effort": "Provider route repairs landed; 237 tests and clean independent review. Activation and laptop account proof remain.",
+  "active_effort": "Provider repairs are in the running service; Claude/ChatGPT enrollment supported. Gemini/Grok and laptop delivery remain incomplete.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -24,7 +24,7 @@
     }
   ],
   "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-  "why_next": "No build running. Actual enrollment, allowance, API execution and installer proof remain distinct from passing tests.",
+  "why_next": "Service activation is confirmed; Gemini/Grok enrollment and API execution still require resolution.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -1151,6 +1151,36 @@
         "gwl-access",
         "gwl-provider-status"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-08",
+      "source": "verb_update",
+      "phase": "verifying",
+      "wait_ref": "none",
+      "next_recommended": "Add the second Claude account in Setup and verify its Cave summary.",
+      "why_next": "Service activation is confirmed; Gemini/Grok enrollment and API execution still require resolution.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Provider repairs are in the running service; Claude/ChatGPT enrollment supported. Gemini/Grok and laptop delivery remain incomplete.",
+      "human_wait": "",
+      "current_step_id": "gwl-access"
+    },
+    {
+      "_kind": "instrument",
+      "kind": "horizon",
+      "as_of": "2026-10-08",
+      "source": "verb_update:horizon",
+      "derived": true,
+      "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
+      "why_next": "Service activation is confirmed; Gemini/Grok enrollment and API execution still require resolution.",
+      "horizon_source_seq": 103,
+      "horizon_focus": "gwl-access",
+      "horizon_steps": [
+        "gwl-access",
+        "gwl-provider-status"
+      ]
     }
   ],
   "receipts": [
@@ -1552,7 +1582,7 @@
       "summary": "Final route repair landed; activation and real account proof remain"
     }
   ],
-  "horizon_source_seq": 102,
+  "horizon_source_seq": 103,
   "horizon_focus": "gwl-access",
   "current_step_id": "gwl-access",
   "wait_ref": "none"

@@ -46,3 +46,14 @@ Job 20261007-205432-251d17 landed ed14dc1b0dcdee274174ebd751a6759d23f51395 at 21
 The temporary coding/review settings were restored to Claude/Gemini revision49; root runner configuration was restored. No code job owns Anchor. No additional rebuild or repeated full gate is needed for these settled findings.
 
 This is a checked source landing, not activation or human acceptance. Running Anchor and John's existing laptop window have not been verified with these bytes. Provider enrollment used disposable homes and fake provider responses; real isolated Gemini/Grok enrollment and allowance, explicit API execution and complete executable installation packaging remain unproved as described above. No real login, paid request, restart, executable deployment or slice close was performed. Follow the existing plan's authorized activation boundary before checking Setup and Cave in the persistent client.
+
+
+## Running host capability check - October 8
+
+The authenticated running service reports94c7b04+152f9a9; git ancestry confirms its revision contains ed14dc1. The previous activation wait is stale. GET /setup includes Add account, and the cached provider snapshot contains all four families. These reads do not prove the already-open client loaded current assets.
+
+A passive GET /api/provider-setup?refresh=1 completed in8 seconds without enrollment or inference. Existing Claude and ChatGPT report signed_in and test passed. Claude Code2.1.294 advertises isolated browser enrollment; Codex0.159.3 advertises isolated device enrollment. The second Claude account has not yet been added; Setup Add account opens provider-owned sign-in, and successful enrollment must be separately confirmed.
+
+Google Ultra remains on agy1.3.1 with native model capabilities, while isolated enrollment, passive authentication reporting and allowance reporting remain unsupported. Grok1.0.41 does not expose the required isolated browser enrollment/status interfaces; its snapshot is unready for the new account path. This is unfinished requested functionality, not a delivery claim for all four providers. Optional API credential entry/storage is present; API execution remains incomplete. Claude allowance observations are stale, so their historical percentages are not represented as current; Codex supplied a fresh allowance report.
+
+Next usable action under the existing plan is adding the second Claude subscription through Setup, then checking separate account status in the persistent Cave window. No restart, new build, provider sign-in, credential replacement, paid request, acceptance or slice close was performed by this inspection.

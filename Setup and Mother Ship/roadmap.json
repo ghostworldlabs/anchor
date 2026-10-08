@@ -1630,6 +1630,20 @@
       },
       "seq": 102,
       "at": "2026-10-08"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "October8 live service 94c7b04+152f9a9 contains repair ed14dc1. Passive host refresh confirms Claude2.1.294 browser enrollment and Codex0.159.3 device enrollment; existing accounts signed in. Add and prove second Claude account and persistent laptop UI. Google Ultra agy1.3.1 retained, isolated enrollment/allowance unsupported; Grok1.0.41 lacks required enrollment/status/isolation interfaces. API credential storage exists but execution remains incomplete. No human acceptance or slice close."
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "John asks next usable step; retire stale activation wait after checking running version and installed native capabilities."
+      },
+      "seq": 103,
+      "at": "2026-10-08"
     }
   ],
   "roadmap_projection": [
@@ -1663,7 +1677,7 @@
       "id": "gwl-access",
       "name": "Connect named provider accounts; Google Ultra uses agy",
       "status": "active",
-      "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close.",
+      "done_when": "October8 live service 94c7b04+152f9a9 contains repair ed14dc1. Passive host refresh confirms Claude2.1.294 browser enrollment and Codex0.159.3 device enrollment; existing accounts signed in. Add and prove second Claude account and persistent laptop UI. Google Ultra agy1.3.1 retained, isolated enrollment/allowance unsupported; Grok1.0.41 lacks required enrollment/status/isolation interfaces. API credential storage exists but execution remains incomplete. No human acceptance or slice close.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
