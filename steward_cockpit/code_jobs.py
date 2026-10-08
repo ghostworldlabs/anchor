@@ -49,10 +49,11 @@ _LOCK = threading.RLock()
 
 
 def jobs_base():
-    """Where the worktrees live: outside every repo and outside C:\\dev, so no scan or reaper meets them."""
-    root = os.environ.get("ANCHOR_CODE_JOBS_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or str(Path.home()), "anchor-code-jobs")
-    Path(root).mkdir(parents=True, exist_ok=True)
-    return Path(root)
+    """Where the worktrees live: outside every repository, beside the Anchor checkout under C:\\dev (backed up)."""
+    import paths as _paths      # under C:\dev, beside the checkout (John, 2026-10-08: C:\dev is backed up)
+    root = _paths.code_jobs_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _git(repo, *args, timeout=120):
@@ -368,10 +369,15 @@ def record_landed_commit(commit):
 
 
 def landed_commits():
-    try:
-        return set(json.loads(_landed_path().read_text(encoding="utf-8")))
-    except Exception:
-        return set()
+    """Every verified landing's commit - the ledger here, and the one kept in the old %LOCALAPPDATA% folder."""
+    out = set()
+    import paths as _paths
+    for p in (_landed_path(), _paths.legacy_code_jobs_dir() / "landed-commits.json"):
+        try:
+            out |= set(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return out
 
 
 APP_CODE_EXT = (".py", ".js", ".mjs", ".css", ".ps1")

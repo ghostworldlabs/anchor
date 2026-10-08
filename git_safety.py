@@ -75,7 +75,8 @@ def _lock_path(repo):
     """Keyed on the repository's SHARED git directory (W1a, 2026-10-08): the running checkout, the lander's checkout of
     anchor-next and every job worktree of one repository take the one lock; a path that is not a repository keys on
     itself."""
-    base = Path(os.environ.get("ANCHOR_CODE_JOBS_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or str(Path.home()), "anchor-code-jobs"))
+    import paths as _paths
+    base = _paths.code_jobs_dir()
     (base / "locks").mkdir(parents=True, exist_ok=True)
     code, common, _ = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir", timeout=60)
     key = common if code == 0 and common else str(repo)

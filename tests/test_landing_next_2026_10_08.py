@@ -358,3 +358,12 @@ def test_code_jobs_on_the_running_anchor_are_off_until_john_turns_them_on(tmp_pa
     cdir.mkdir()
     out = code_jobs.start(str(cdir), str(served), "x", PASS, engine_factory=lambda wt: _Coder(wt, {}))
     assert out["ok"] is False and "ANCHOR_SERVED_CODE_JOBS=1" in out["error"]
+
+
+def test_temporary_builds_live_under_c_dev_beside_the_checkout(monkeypatch):
+    """John, 2026-10-08: temporary builds go in a C:\dev folder (backed up), never inside C:\dev\Anchor."""
+    import paths
+    monkeypatch.delenv("ANCHOR_CODE_JOBS_DIR", raising=False)
+    d = paths.code_jobs_dir()
+    assert d.name == "Anchor-code-jobs" and d.parent == paths.CODE_DIR.parent
+    assert not str(d).lower().startswith(str(paths.CODE_DIR).lower() + os.sep.lower())

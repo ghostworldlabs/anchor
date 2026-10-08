@@ -89,7 +89,8 @@ def is_served_repo(path):
 
 
 def integration_dir(repo):
-    base = Path(os.environ.get("ANCHOR_CODE_JOBS_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or str(Path.home()), "anchor-code-jobs"))
+    import paths as _paths
+    base = _paths.code_jobs_dir()
     return base / "integration" / hashlib.sha1(common_dir(repo).encode()).hexdigest()[:16]
 
 

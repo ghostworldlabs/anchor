@@ -276,7 +276,10 @@ def check_candidate(log=None, timeout=3600):
     if is_live(rev):
         rec["why"] = "%s is already running - the daily check and the Doctor's re-run check it" % rev[:10]
         return rec
-    scratch = Path(tempfile.mkdtemp(prefix="anchor-candidate-"))
+    import paths as _paths
+    cands = _paths.code_jobs_dir() / "candidates"     # a temporary build lives under C:\dev (John, 2026-10-08)
+    cands.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix="c-", dir=str(cands)))
     wt = scratch / "wt"
     out = reports_dir() / ("candidate-%s-%s.md" % (rev[:12], run))
     try:
