@@ -322,6 +322,9 @@ class _Service(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/version":
             body = json.dumps({"version": self.build}).encode()
             self.send_response(200)
+        elif self.path.startswith("/api/") and not self.headers.get("Authorization"):
+            body = b"no"                                   # a protected read, asked without the service's token
+            self.send_response(401)
         elif self.path.split("?")[0] == self.broken:
             body = b"boom"
             self.send_response(500)

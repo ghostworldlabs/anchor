@@ -6229,16 +6229,10 @@ def check_running_service(report: Report):
     # report's issues name - asked as John's browser asks (the token, when this run has it); 2xx/3xx only
     tok = "" if _TOKEN_MINTED else (os.environ.get("ANCHOR_TOKEN") or "").strip()   # the SERVICE's token, never the throwaway's
     affected = _previous_issue_paths()
-    if not tok:
-        # ChatGPT W3 r3: without the service's token a run cannot verify the running service's protected surface - it
-        # never counts as a pass while the last report named affected endpoints (the Doctor's re-run and the owed
-        # re-check run inside the service and carry its token)
-        if affected:
-            report.check("the running service: the affected endpoints", False,
-                         "not verifiable without the service's token (%s) - the Doctor's re-run checks them" % ", ".join(affected[:6]))
-        else:
-            report.warn("the running service: authenticated reads", "no service token in this run - only its open pages were asked")
-    paths = (["/", "/high-seat", "/api/status"] if tok else ["/api/version"]) + (affected if tok else [])
+    # ChatGPT W3 r3: every path is asked of the running service; a run without the service's token that meets a
+    # PROTECTED answer (401/403) cannot verify it and never counts as a pass (the Doctor's re-run and the owed re-check
+    # run inside the service and carry its token); a service with no token configured answers openly and is judged
+    paths = ["/", "/high-seat", "/api/status"] + affected
     for path in dict.fromkeys(paths):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), headers=({"Authorization": "Bearer " + tok} if tok else {}))
         try:
@@ -6249,6 +6243,13 @@ def check_running_service(report: Report):
         except Exception as e:
             code, text = type(e).__name__, ""
         locked = "Anchor is locked" in text           # a locked page is not the page
+        if not tok and (code in (401, 403) or locked):
+            why = "not verifiable without the service's token (it answered %s) - the Doctor's re-run checks it" % code
+            if path in affected:     # a named failure stays red until a run that can see it passes it
+                report.check("the running service: GET %s" % path, False, why)
+            else:                    # a healthy protected page is never a false red (the locked severity rule)
+                report.warn("the running service: GET %s" % path, why)
+            continue
         report.check("the running service: GET %s" % path, isinstance(code, int) and 200 <= code < 400 and not locked,
                      "answered %s%s" % (code, " (the locked page)" if locked else ""))
 
