@@ -286,7 +286,8 @@
     z.addEventListener('dragleave', function (e) { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
     z.addEventListener('drop', function (e) {
       e.preventDefault(); z.classList.remove('over'); if (!drag || !drag.step) return;
-      var cards = $$('.grid > .tile', z).filter(function (c) { return c.getAttribute('data-step') !== drag.step; }), k = cards.length;
+      // a card the record already moved off this shelf (held while open, W4) is not counted
+      var cards = $$('.grid > .tile', z).filter(function (c) { return c.getAttribute('data-step') !== drag.step && !c._leaving; }), k = cards.length;
       for (var j = 0; j < cards.length; j++) { var b = cards[j].getBoundingClientRect(); if (e.clientY < b.top || (e.clientY <= b.bottom && e.clientX < b.left + b.width / 2)) { k = j; break; } }
       act({ act: 'seat', step: drag.step, seat: z.getAttribute('data-seat'), position: k });
     });
@@ -362,7 +363,12 @@
   // R14 (2026-09-29): the token is pasted INTO the page (no window.prompt \u2014 a browser that suppresses dialogs showed
   // nothing); the box's script is the dialogue module's, one for both pages (Grok's read of W2e-3). askToken() shows the
   // box and answers false at once; a successful login reloads the page, which then reads every card with the cookie.
-  var loginUi = window.StewardDialogue ? window.StewardDialogue.loginBox({ receiptKey: 'highseat_receipt' }) : null;
+  // W4 (ChatGPT r1): a login here is taken in place too - an open card is never reloaded by it
+  var loginUi = window.StewardDialogue ? window.StewardDialogue.loginBox({ receiptKey: 'highseat_receipt', onLogin: function () {
+    if (window.ANCHOR_BOOT) window.ANCHOR_BOOT.logged_in = true;
+    var lb = $('#loginBox'); if (lb) lb.hidden = true;
+    renewInPlace('Logged in. This browser holds the token now.'); refreshFeedback();
+  } }) : null;
   function login(t) { return loginUi ? loginUi.login(t) : Promise.resolve(null); }
   function showLogin(text) { if (loginUi) loginUi.show(text); }
   // W2c-4 (his word, 2026-09-30): a browser the server already knows by its login cookie is logged in — no box, even with no token held here
@@ -631,6 +637,14 @@
   }
   function placeBoard(doc) {
     placeHeld = false;
+    // the open card stays where it is ON SCREEN (ChatGPT W4 r1): whatever is placed above it, the page scrolls by the
+    // same amount, so the box he dictates into never moves under him
+    var anchor = $('.tile.open'), top0 = anchor ? anchor.getBoundingClientRect().top : 0;
+    try { placeSections(doc); } finally {
+      if (anchor && anchor.isConnected) { var dy = anchor.getBoundingClientRect().top - top0; if (Math.abs(dy) >= 1) window.scrollBy(0, dy); }
+    }
+  }
+  function placeSections(doc) {
     // the health banner (W3: its words change in place, never a reload)
     var h0 = $('.healthbar'), h1 = doc.querySelector('.healthbar'), mh = $('.masthead');
     if (h0 && !h1) h0.remove(); else if (h1 && !h0 && mh) mh.insertAdjacentElement('afterend', document.importNode(h1, true)); else if (h0 && h1) morph(h0, h1);
@@ -666,8 +680,14 @@
     if (d0 && d1 && morph(d0, d1)) setDesk(d0.classList.contains('open'));
     // the dated deliveries: the ruler and its counts (a balloon over a marker that moved is closed)
     var r0 = $('#ruler'), r1 = doc.getElementById('ruler');
-    if (r0 && r1 && r0.innerHTML !== r1.innerHTML && !busyIn(r0)) { if (balloon) closeBalloon(); morph(r0, r1); bindMarkers(r0); }
+    if (r0 && r1 && !busyIn(r0)) {   // compared without the open balloon and the marker it hangs from (ChatGPT W4 r1)
+      var bare = r0.cloneNode(true);
+      $$('.balloon', bare).forEach(function (b) { b.remove(); }); $$('.mkcard.on', bare).forEach(function (m) { m.classList.remove('on'); });
+      if (bare.innerHTML !== r1.innerHTML) { if (balloon) closeBalloon(); morph(r0, r1); bindMarkers(r0); }
+    }
     var s0 = $('#shDated > .shelf-h .c'), s1 = doc.querySelector('#shDated > .shelf-h .c'); if (s0 && s1) s0.textContent = s1.textContent;
+    var o0 = $('#shDated > .shelf-foot.late'), o1 = doc.querySelector('#shDated > .shelf-foot.late'), rl = $('#ruler');   // the overdue line too
+    if (o0 && !o1) o0.remove(); else if (o1 && !o0 && rl) rl.insertAdjacentElement('afterend', document.importNode(o1, true)); else if (o0 && o1) morph(o0, o1);
     if (ptileLoaded) loadFolders();
   }
   // the shelves, card by card: a card that stays keeps its element (only its face is placed again); a new one is made
@@ -678,15 +698,22 @@
     ['shActive', 'shDeck'].forEach(function (z) { var f = doc.getElementById(z); if (f) $$('.grid > .tile', f).forEach(function (c) { where[c.id] = z; }); });
     ['shActive', 'shDeck'].forEach(function (z) {
       var live = document.getElementById(z); if (!live) return;
-      $$('.grid > .tile', live).forEach(function (c) { if (where[c.id]) return; if (held(c)) { placeHeld = true; return; } dropCard(c); });
+      $$('.grid > .tile', live).forEach(function (c) {
+        c._leaving = false;
+        if (where[c.id] && where[c.id] === z) return;
+        if (held(c)) { placeHeld = true; c._leaving = true; return; }   // leaving this shelf once it closes: never counted for a drop
+        if (!where[c.id]) dropCard(c);
+      });
     });
     ['shActive', 'shDeck'].forEach(function (z) {
       var live = document.getElementById(z), fresh = doc.getElementById(z); if (!live || !fresh) return;
       var grid = $('.grid', live), want = [];
       $$('.grid > .tile', fresh).forEach(function (f) {
         var c = document.getElementById(f.id);
-        if (c && c.parentNode !== grid) { if (held(c)) { placeHeld = true; return; } }   // a held card keeps its shelf until it closes
+        if (c && c.parentNode !== grid && held(c)) { placeHeld = true; return; }   // a held card keeps its shelf until it closes
+        if (c && !held(c) && shapeOf(c) !== shapeOf(f)) { dropCard(c); c = null; }   // its kind changed (a quiet card got a record): made again
         if (!c) { c = document.importNode(f, true); c._fresh = true; }
+        else if (held(c) && shapeOf(c) !== shapeOf(f)) placeHeld = true;            // made again once it closes
         else placeFace(c, f);
         want.push(c);
       });
@@ -699,15 +726,32 @@
         if (at) grid.insertBefore(c, at); else grid.appendChild(c);
       });
       want.forEach(function (c) { if (c._fresh) { c._fresh = false; wireCard(c); } });
+      // a held card out of the record's order (moved within its shelf, or lifted to the top while open): placed on close
+      var now = $$('.grid > .tile', live).filter(function (c) { return !c._leaving; });
+      if (now.some(held) && now.map(function (c) { return c.id; }).join('|') !== want.map(function (c) { return c.id; }).join('|')) placeHeld = true;
       var empty = $('.grid > .empty', live), n = $$('.grid > .tile', live).length;
       if (n && empty) empty.remove();
       else if (!n && !empty) { var fe = $('.grid > .empty', fresh); if (fe) grid.appendChild(document.importNode(fe, true)); }
       var k0 = $('.shelf-h .c', live), k1 = $('.shelf-h .c', fresh); if (k0 && k1) k0.textContent = k1.textContent;
     });
   }
-  function placeFace(card, fresh) {   // the lines the record writes; activity and attention keep their own continuing read (below)
-    var f0 = $('.t-face', card), f1 = $('.t-face', fresh); if (f0 && f1 && !busyIn(f0) && f0.innerHTML !== f1.innerHTML) f0.innerHTML = f1.innerHTML;
-    var g0 = $('.t-goal', card), g1 = $('.t-goal', fresh); if (g0 && g1 && g0.innerHTML !== g1.innerHTML) g0.innerHTML = g1.innerHTML;
+  // what a card IS (ChatGPT W4 r1): its kind (quiet, desk, a record's card), the record it reads and whether it can
+  // open - the page's own passing state (open, peeking, ready, ...) is not part of it
+  var TRANSIENT = /^(open|talking|peeking|peek-pinned|peek-dismissed|ready|dropping|dragging|flash|over)$/;
+  function shapeOf(card) {
+    var cls = (card.getAttribute('class') || '').split(/\s+/).filter(function (c) { return c && !TRANSIENT.test(c); }).sort().join(' ');
+    return [cls, card.getAttribute('data-tile') || '', card.getAttribute('data-dir') || '', card.getAttribute('data-step') || '',
+            card.querySelector('.t-body') ? 'body' : ''].join('|');
+  }
+  function placeFace(card, fresh) {   // every line the record writes; activity and attention keep their own continuing read (below)
+    ['.t-face', '.t-goal', '.t-nm', '.t-eff'].forEach(function (s) {
+      var a = $(s, card), b = $(s, fresh); if (a && b && !busyIn(a) && a.innerHTML !== b.innerHTML) a.innerHTML = b.innerHTML;
+    });
+    if (!$('.t-face', card)) {   // a desk card: its state line
+      var l0 = $(':scope > .t-line', card), l1 = $(':scope > .t-line', fresh); if (l0 && l1 && l0.outerHTML !== l1.outerHTML) l0.outerHTML = l1.outerHTML;
+    }
+    var nm = fresh.getAttribute('data-name'); if (nm !== null && card.getAttribute('data-name') !== nm) card.setAttribute('data-name', nm);
+    card.classList.toggle('need', fresh.classList.contains('need'));
   }
   function dropCard(card) {
     if (card._warmTalk) card._warmTalk.stop();

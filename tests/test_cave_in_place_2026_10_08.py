@@ -264,6 +264,29 @@ def test_an_open_card_survives_every_change_to_the_record(cave):
     assert world.loads == 1, "the page was loaded again"
 
 
+def test_nothing_moves_while_he_dictates_and_the_open_card_keeps_its_place_on_screen(cave):
+    world, page = cave
+    page.set_viewport_size({"width": 1500, "height": 560})
+    ident = _open(page, MBA)
+    _type_into(page, MBA, "dictating now")
+    frame = page.query_selector("#card-%s iframe.cframe" % MBA).content_frame()
+    frame.evaluate("say({ kind: 'typing', active: true })")     # the cockpit view reports dictation (Win+H types into it)
+    st = _frame_state(page, MBA)
+    top0 = page.evaluate("document.querySelector('#card-%s').getBoundingClientRect().top" % MBA)
+    world.seats["third-project"] = ("deck", 0)
+    world.banner = "Health check found issues"                # a banner ABOVE the open card
+    world.stamp = "s2"
+    page.wait_for_timeout(4000)
+    assert page.query_selector("#shDeck #card-%s" % THIRD) is None and page.query_selector(".healthbar") is None, \
+        "nothing is placed while he dictates"
+    frame.evaluate("say({ kind: 'typing', active: false })")
+    page.wait_for_selector("#shDeck #card-%s" % THIRD, timeout=8000)
+    page.wait_for_selector(".healthbar", timeout=8000)
+    _survived(page, MBA, ident, st, what="placement after dictation")
+    top1 = page.evaluate("document.querySelector('#card-%s').getBoundingClientRect().top" % MBA)
+    assert abs(top1 - top0) < 2, "the open card moved on screen: %s -> %s" % (top0, top1)
+
+
 def test_a_change_that_moves_the_open_card_waits_until_it_closes(cave):
     world, page = cave
     ident = _open(page, MBA)

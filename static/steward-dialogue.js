@@ -261,6 +261,7 @@
       if (go) go.disabled = true; say('Logging in\u2026');
       login(t).then(function (r) {
         if (go) go.disabled = false;
+        if (r && r.ok && o.onLogin) { say('Logged in.'); o.onLogin(); return; }   // a page that takes the login in place (the Cave, W4)
         if (r && r.ok) { say('Logged in.'); if (o.receiptKey) { try { sessionStorage.setItem(o.receiptKey, JSON.stringify({ text: 'Logged in. This browser holds the token now.', undo: null })); } catch (e) {} } location.reload(); return; }
         try { localStorage.removeItem('anchor_token'); } catch (e) {}
         say((r && r.status === 401) ? 'That token was refused \u2014 it is not the current one.' : 'That did not go through; try again.');
