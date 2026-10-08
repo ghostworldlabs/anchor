@@ -4187,6 +4187,10 @@ def _receipt_line(cdir, group, pid, rel, registered):
         title = title.replace("-", " ")
     if not pid:
         return "**Anchor** · new: %s (this folder is not in a registered project, so no link)" % title
+    decks = [it for it in group if str(it.get("open_path") or it.get("path") or "").lower().endswith(".pptx")]
+    if decks:                                            # consensus C4: the deck's own freshness decision governs
+        others = [it for it in group if it not in decks and not str(it.get("path") or "").lower().endswith(".pdf")]
+        group = decks + others
     targets = [(it, dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=cdir, registered=registered))
                for it in group]
     readable = [(it, t) for it, t in targets if t["read"]]

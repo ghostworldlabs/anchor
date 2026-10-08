@@ -319,7 +319,7 @@ def next_html(cdir, pid, rel=""):
     except Exception:
         items = []
     current = campaign.current_review_items(m, items)
-    acts = campaign.review_acts(m, current)
+    acts = campaign.review_acts(m, current, cdir)
     by_what = {str(it.get("what") or "").strip().lower(): it for it in items}
     # W1 (2026-09-28): the ONE next-in-the-plan horizon (the cockpit renders the same list from the map) — the
     # declared focus, then what follows it; never a guess from the first active step; with no focus, empty (the

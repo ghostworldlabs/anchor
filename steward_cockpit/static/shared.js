@@ -378,13 +378,21 @@ const Proto = (() => {
     // review: a 120 px "near the bottom" band re-armed it after a small upward scroll, then yanked him down)
     let lastTop = s.scrollTop;
     const stick = () => { if (s._follow) { s.scrollTop = s.scrollHeight; lastTop = s.scrollTop; } };
+    // consensus C8: only HIS scrolling changes follow - a scroll within 1.5 s of his wheel, touch, key or pointer.
+    // A layout clamp (content shrank) never re-arms it; a wheel on a pane with nothing to scroll never disarms it.
+    let userAt = 0;
+    const mark = () => { userAt = Date.now(); };
+    ["wheel", "touchstart", "keydown", "pointerdown"].forEach(k => s.addEventListener(k, mark, { passive: true }));
     s.addEventListener("scroll", () => {
       const gap = s.scrollHeight - s.scrollTop - s.clientHeight;
-      if (gap < 4) s._follow = true;                       // at the bottom (also a clamp after content shrank)
-      else if (s.scrollTop < lastTop - 1) s._follow = false;
+      const his = Date.now() - userAt < 1500;
+      if (his && gap < 4) s._follow = true;
+      else if (his && s.scrollTop < lastTop - 1) s._follow = false;
       lastTop = s.scrollTop;
     }, { passive: true });
-    s.addEventListener("wheel", (e) => { if (e.deltaY < 0) s._follow = false; }, { passive: true });
+    s.addEventListener("wheel", (e) => {
+      if (e.deltaY < 0 && s.scrollHeight > s.clientHeight + 1) s._follow = false;
+    }, { passive: true });
     s.addEventListener("load", stick, true);                     // an image or frame inside finished loading
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(stick);

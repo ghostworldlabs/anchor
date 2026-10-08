@@ -46,12 +46,15 @@
       // any upward move of his stops following; only the very bottom resumes it (a near-bottom band re-armed it)
       var lastTop = el.scrollTop;
       var stick = function () { if (el._follow) { el.scrollTop = el.scrollHeight; lastTop = el.scrollTop; } };
+      // only his scrolling changes follow (a layout clamp never re-arms it; a wheel with nothing to scroll never disarms it)
+      var userAt = 0, mark = function () { userAt = Date.now(); };
+      ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(function (k) { el.addEventListener(k, mark, { passive: true }); });
       el.addEventListener('scroll', function () {
-        var gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if (gap < 4) el._follow = true; else if (el.scrollTop < lastTop - 1) el._follow = false;
+        var gap = el.scrollHeight - el.scrollTop - el.clientHeight, his = Date.now() - userAt < 1500;
+        if (his && gap < 4) el._follow = true; else if (his && el.scrollTop < lastTop - 1) el._follow = false;
         lastTop = el.scrollTop;
       }, { passive: true });
-      el.addEventListener('wheel', function (e) { if (e.deltaY < 0) el._follow = false; }, { passive: true });
+      el.addEventListener('wheel', function (e) { if (e.deltaY < 0 && el.scrollHeight > el.clientHeight + 1) el._follow = false; }, { passive: true });
       if (window.ResizeObserver) {
         var ro = new ResizeObserver(stick); ro.observe(el);
         Array.prototype.forEach.call(el.children, function (c) { ro.observe(c); });

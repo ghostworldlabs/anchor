@@ -1666,3 +1666,47 @@ def test_the_hold_refuses_engines_not_folders_and_is_a_structured_refusal(monkey
     from steward_cockpit import code_jobs as _cj
     harmless = [_sys.executable, "-c", "pass"]
     assert not any(("/foreman/bin/" in str((fdir / a).resolve()).replace(chr(92), "/").lower()) for a in harmless[1:])
+
+
+# ---------- dual review consensus C4 + C8 ----------
+
+def test_an_older_pdf_never_reads_for_a_newer_deck(tmp_path, monkeypatch):
+    import os as _os
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "Talk.pdf").write_text("old slides", encoding="utf-8")
+    (tmp_path / "d" / "Talk.pptx").write_text("new deck", encoding="utf-8")
+    _os.utime(tmp_path / "d" / "Talk.pdf", (1_000_000, 1_000_000))
+    items = [{"what": "Talk (PDF)", "path": "d/Talk.pdf", "step": "s1"}, {"what": "Talk", "path": "d/Talk.pptx", "step": "s1"}]
+    acts = [a for a in sc.review_acts({}, items, str(tmp_path)) if a["act"] != "Next"]
+    assert len(acts) == 1 and acts[0]["path"] == "d/Talk.pptx" and not acts[0].get("companions")
+    (tmp_path / "r").mkdir()
+    eng, eff, said, emitted = _receipt_engine(tmp_path / "r", monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    (eff / "Talk.pdf").write_text("old", encoding="utf-8")
+    (eff / "Talk.pptx").write_text("new", encoding="utf-8")
+    _os.utime(eff / "Talk.pdf", (1_000_000, 1_000_000))
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Talk (PDF) | `Talk.pdf` | 2026-10-07 | 1 |\n| Talk | `Talk.pptx` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t1")
+    assert len(said) == 1 and "preparing a reading copy: Talk" in said[0][1] and "ready to read" not in said[0][1]
+
+
+def test_follow_changes_only_on_his_scrolling(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    scroll = surface.locator('.scroll').first
+    # a wheel on a pane with nothing to scroll leaves following on
+    scroll.evaluate("s => { s.innerHTML = '<div>short</div>'; s._follow = true; }")
+    scroll.hover()
+    page.mouse.wheel(0, -200)
+    page.wait_for_timeout(200)
+    assert scroll.evaluate("s => s._follow") is True
+    # he scrolls up through long content; the content then shrinks (a layout clamp) - following stays off
+    scroll.evaluate("""s => { for (let i = 0; i < 40; i++) { const d = document.createElement('div');
+        d.style.height = '60px'; d.className = 'filler'; s.appendChild(d); } }""")
+    page.wait_for_timeout(300)
+    page.mouse.wheel(0, -600)
+    page.wait_for_timeout(1700)                                   # past his input window
+    scroll.evaluate("s => s.querySelectorAll('.filler').forEach((d, i) => { if (i > 5) d.remove(); })")
+    page.wait_for_timeout(300)
+    assert scroll.evaluate("s => s._follow") is False

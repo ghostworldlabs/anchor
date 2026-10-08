@@ -3007,11 +3007,36 @@ def read_deliverables(campaign_dir: str):
         owner = resolve_step(map_["steps"], it.get("step"))
         decorated.append({**it, "owner_step_id": owner.get("id") if owner else None,
                           "is_current": id(it) in current})
-    return {**result, "items": decorated, "acts": review_acts(map_, current_items),
+    return {**result, "items": decorated, "acts": review_acts(map_, current_items, campaign_dir),
             "current_warning": _focused_step(map_)[1]}
 
 
-def review_acts(map_, current_items):
+def _stale_deck_pdfs(campaign_dir, group):
+    """The PDFs in one product group that are OLDER than the group's PowerPoint deck - they show older slides and are
+    never the deck's reading copy (consensus C4). Managed decks pair only within one presentation, so they are bound."""
+    if not campaign_dir:
+        return set()
+    decks = [g for g in group if not g.get("managed") and str(g.get("path") or "").lower().endswith(".pptx")]
+    if not decks:
+        return set()
+    root = Path(campaign_dir)
+    stale = set()
+    for d in decks:
+        try:
+            deck_m = (root / str(d.get("path"))).stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        for g in group:
+            if str(g.get("path") or "").lower().endswith(".pdf") and not g.get("managed"):
+                try:
+                    if (root / str(g.get("path"))).stat().st_mtime < deck_m:
+                        stale.add(id(g))
+                except (OSError, ValueError):
+                    stale.add(id(g))
+    return stale
+
+
+def review_acts(map_, current_items, campaign_dir=None):
     """What John does now, in order: review each product awaiting him (from the
     current list), open the current step's featured file, then what the steward
     said comes next. (The open decision is added by the page from the engine state.)"""
@@ -3034,6 +3059,9 @@ def review_acts(map_, current_items):
     cur, _warn = _focused_step(map_)
     for key in order:
         group = sorted(groups[key], key=_format_rank)
+        stale = _stale_deck_pdfs(campaign_dir, group)
+        if stale:                                        # the deck leads; an older PDF is never its reading copy
+            group = [g for g in group if id(g) not in stale]
         row = group[0]
         label = _strip_format_tag(row.get("what") or row.get("product_id") or row.get("path") or "", keep_note=True)
         if key[0] == "Review":
