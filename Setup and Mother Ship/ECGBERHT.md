@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Launching focused repair of seven retained provider findings under plan v2 Refinement 3.
+Focused repair landed; finishing Grok sign-in review remainder and account-binding gate discrepancy.
 
 ## Why next
 
-Reversible decision window elapsed; preserve landed code and test account flows before activation.
+Worker tests passed; final reviewers agree on one remaining issue and root tests exposed three account-binding failures.
 
 ## Human wait
 
