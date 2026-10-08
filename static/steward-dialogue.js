@@ -50,12 +50,12 @@
       var userAt = 0, mark = function () { userAt = Date.now(); };
       ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(function (k) { el.addEventListener(k, mark, { passive: true }); });
       // content shrinking never re-arms following; reaching the bottom otherwise does; only his upward scroll disarms
-      var lastHeight = el.scrollHeight;
+      var lastRange = el.scrollHeight - el.clientHeight;   // content minus viewport: shrink or a taller window reduce it
       el.addEventListener('scroll', function () {
         var gap = el.scrollHeight - el.scrollTop - el.clientHeight, his = Date.now() - userAt < 1500,
-            shrank = el.scrollHeight < lastHeight - 1;
+            range = el.scrollHeight - el.clientHeight, shrank = range < lastRange - 1;
         if (gap < 4 && !shrank) el._follow = true; else if (his && !shrank && el.scrollTop < lastTop - 1) el._follow = false;
-        lastTop = el.scrollTop; lastHeight = el.scrollHeight;
+        lastTop = el.scrollTop; lastRange = range;
       }, { passive: true });
       el.addEventListener('wheel', function (e) { if (e.deltaY < 0 && el.scrollHeight > el.clientHeight + 1) el._follow = false; }, { passive: true });
       if (window.ResizeObserver) {

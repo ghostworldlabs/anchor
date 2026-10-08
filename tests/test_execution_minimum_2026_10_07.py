@@ -1729,3 +1729,18 @@ def test_a_deck_registered_first_and_its_older_pdf_after_never_reads_ready(tmp_p
     eng._publish_delivery_receipt("t2")                                        # the old PDF arrives second
     assert all("ready to read" not in t for _r, t, _i in said), said
     assert "preparing a reading copy: Talk" in said[0][1]
+
+
+def test_a_taller_window_never_rearms_follow_after_he_scrolled_away(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    scroll = surface.locator('.scroll').first
+    scroll.evaluate("""s => { for (let i = 0; i < 40; i++) { const d = document.createElement('div');
+        d.style.height = '60px'; s.appendChild(d); } }""")
+    page.wait_for_timeout(300)
+    scroll.hover()
+    page.mouse.wheel(0, -600)
+    page.wait_for_timeout(1700)                                   # past his input window
+    scroll.evaluate("s => { s.style.height = (s.clientHeight + 2400) + 'px'; }")   # the viewport grows: a clamp
+    page.wait_for_timeout(300)
+    assert scroll.evaluate("s => s._follow") is False

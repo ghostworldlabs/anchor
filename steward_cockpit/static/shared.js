@@ -386,15 +386,17 @@ const Proto = (() => {
     // (both final reviewers) the content SHRINKING is the only layout move that can land at the bottom without him -
     // it never re-arms following; otherwise reaching the very bottom does (an iPad momentum flick, a slow drag),
     // and only his own upward scrolling turns it off.
-    let lastHeight = s.scrollHeight;
+    // the scrollable RANGE (content minus viewport): content shrinking or the window growing both reduce it
+    let lastRange = s.scrollHeight - s.clientHeight;
     s.addEventListener("scroll", () => {
       const gap = s.scrollHeight - s.scrollTop - s.clientHeight;
-      const shrank = s.scrollHeight < lastHeight - 1;
+      const range = s.scrollHeight - s.clientHeight;
+      const shrank = range < lastRange - 1;
       const his = Date.now() - userAt < 1500;
       if (gap < 4 && !shrank) s._follow = true;
       else if (his && !shrank && s.scrollTop < lastTop - 1) s._follow = false;
       lastTop = s.scrollTop;
-      lastHeight = s.scrollHeight;
+      lastRange = range;
     }, { passive: true });
     s.addEventListener("wheel", (e) => {
       if (e.deltaY < 0 && s.scrollHeight > s.clientHeight + 1) s._follow = false;
