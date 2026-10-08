@@ -6287,7 +6287,7 @@ def check_running_service(report: Report):
         report.check("the running service runs the checked code", build.split("+", 1)[1] == checked.split("+", 1)[1],
                      "running sources %s, checked %s" % (build.split("+", 1)[1][:12], checked.split("+", 1)[1][:12]))
     elif ok:
-        report.warn("the running service runs the checked code", "a build id carried no source fingerprint (%s / %s)" % (build, checked))
+        report.check("the running service runs the checked code", False, "a build id carried no source fingerprint (%s / %s)" % (build, checked))
     # ChatGPT W3 r2: the RUNNING service's own pages and reads - the core GETs and every GET path the previous
     # report's issues name - asked as John's browser asks (the token, when this run has it); 2xx/3xx only
     tok = "" if _TOKEN_MINTED else (os.environ.get("ANCHOR_TOKEN") or "").strip()   # the SERVICE's token, never the throwaway's
@@ -6340,8 +6340,11 @@ def _publish(report, path):
             time.sleep(0.2)
     try:
         target = path
-        if TARGET != "candidate" and SERVICE_BOOT and _live_boot() not in ("", SERVICE_BOOT):
-            fd_ok = False                       # the service restarted under this run: its observations are another's
+        live = _live_boot() if TARGET != "candidate" else ""
+        if TARGET != "candidate" and not report.has_issues and (not SERVICE_BOOT or live != SERVICE_BOOT):
+            fd_ok = False      # a PASS needs the instance it probed confirmed still running (ChatGPT confirmation round)
+        elif TARGET != "candidate" and SERVICE_BOOT and live not in ("", SERVICE_BOOT):
+            fd_ok = False      # the service restarted under this run: its observations are another instance's
         else:
             fd_ok = fd is not None
         if not fd_ok or _newer_run_published(path):

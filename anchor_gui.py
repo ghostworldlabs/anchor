@@ -7962,6 +7962,7 @@ def _high_seat_context():
         "projects_html": '<p class="ptile-note" id="ptileLoading">the list opens when you press Show all</p>',
         # W2c-2: the dialogue on the High Seat — the Campaign's one conversation log and the record's stamp
         "turns": hs_turns[-40:], "n_turns": len(hs_turns), "goal_names": {i["id"]: i["name"] for i in initiatives}, "stamp": hs_stamp,
+        "health_sig": _health_sig_for_boot(),
         "lights": lights, "nudge": nudge, "lane": lane, "resume": resume, "resume_from": resume_from,
     }
 
@@ -17941,6 +17942,14 @@ def _health_recheck_if_owed():
         _RECHECK_TRIES[0] += 1
         if _RECHECK_TRIES[0] <= 6:
             _schedule_health_recheck(delay_s=120 * _RECHECK_TRIES[0])
+
+
+def _health_sig_for_boot():
+    try:
+        import health_state as _hs
+        return _hs.signature()
+    except Exception:
+        return ""
 
 
 def _schedule_health_recheck(delay_s=90):

@@ -352,6 +352,7 @@ def test_the_running_service_must_answer_its_own_pages_not_only_its_version(monk
         monkeypatch.setenv("ANCHOR_HEALTHCHECK_LIVE_PORT", str(srv.server_address[1]))
         monkeypatch.setenv("ANCHOR_TOKEN", "t")
         monkeypatch.setattr(hc, "RUN_REVISION", "abc1234def")
+        monkeypatch.setattr(hc, "TEST_PORT", srv.server_address[1])     # the checked code: the same build here
         r = hc.Report()
         hc.check_running_service(r)
         assert r.has_issues and any("GET /api/status" in c[0] and not c[1] for c in r.checks), r.checks
@@ -439,6 +440,8 @@ def test_a_run_without_the_services_token_never_passes_while_issues_are_open(tmp
 def test_publication_is_one_locked_step_and_an_older_run_never_overwrites(tmp_path, monkeypatch):
     import anchor_healthcheck as hc
     path = tmp_path / ("%s.md" % hc.TODAY)
+    monkeypatch.setattr(hc, "SERVICE_BOOT", "b1")                      # the probed instance is still the one running
+    monkeypatch.setattr(hc, "_live_boot", lambda: "b1")
     newer_id = "%.3f" % (time.time() + 100)
     monkeypatch.setattr(hc, "RUN_ID", newer_id)
     hc._publish(hc.Report(), path)
@@ -563,3 +566,27 @@ def test_a_candidate_replays_the_failures_it_answers_with_its_own_credentials(mo
 def pathlib_tmp():
     import tempfile
     return Path(tempfile.mkdtemp())
+
+
+
+# ---------- the confirmation round (ChatGPT) ----------
+
+def test_a_pass_is_published_only_with_its_probed_instance_still_running(tmp_path, monkeypatch):
+    import anchor_healthcheck as hc
+    path = tmp_path / ("%s.md" % hc.TODAY)
+    path.write_text("Status: ISSUES FOUND\n", encoding="utf-8")
+    monkeypatch.setattr(hc, "RUN_ID", "%.3f" % (time.time() + 500))
+    for probed, live in (("b1", ""), ("", "b1"), ("b1", "b2")):
+        monkeypatch.setattr(hc, "SERVICE_BOOT", probed)
+        monkeypatch.setattr(hc, "_live_boot", lambda live=live: live)
+        hc._publish(hc.Report(), path)
+        assert path.read_text(encoding="utf-8") == "Status: ISSUES FOUND\n", (probed, live)
+    monkeypatch.setattr(hc, "SERVICE_BOOT", "b1")
+    monkeypatch.setattr(hc, "_live_boot", lambda: "b1")
+    hc._publish(hc.Report(), path)
+    assert "Status: OK" in path.read_text(encoding="utf-8")
+
+
+def test_every_issue_is_kept_for_verification():
+    body = "Status: ISSUES FOUND\n\n## Issues\n" + "".join("- [HTTP endpoints] GET /p%d: 500\n" % i for i in range(30))
+    assert len(hs.issues_of(body)) == 30

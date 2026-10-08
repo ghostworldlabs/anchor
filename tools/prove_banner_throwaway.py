@@ -54,17 +54,20 @@ class Cave:
         self.page.evaluate("window.__proof = 'opened once'")
 
     def banner(self):
+        """The painted banner's words, "" when the LOADED Cave shows none, None when the page is not a working Cave."""
         try:
+            if not self.page.query_selector(".board"):
+                return None
             bar = self.page.query_selector(".healthbar")
             return bar.inner_text() if bar and bar.is_visible() else ""
         except Exception:
-            return ""
+            return None
 
     def wait_for(self, test, timeout=180):
         deadline = time.time() + timeout
         while time.time() < deadline:
             b = self.banner()
-            if test(b):
+            if b is not None and test(b):
                 return b
             self.page.wait_for_timeout(2000)
         return self.banner()
@@ -144,8 +147,8 @@ def main():
         red = hs.status_of(body)
         b1 = cave.wait_for(lambda b: "Health check found issues" in b)
         say({"step": "the real health check of the running revision", "exit": r.returncode, "status": red,
-             "issues": hs.issues_of(body)[:4], "banner": b1[:160]})
-        ok = ok and red == "red" and "Health check found issues" in b1
+             "issues": hs.issues_of(body)[:4], "banner": (b1 if b1 is not None else "(no working Cave page)")[:160]})
+        ok = ok and red == "red" and "Health check found issues" in (b1 or "")
         ip, why = anchor_next.ensure_integration(served)
         assert ip is not None, why
         src = (Path(ip) / "anchor_gui.py").read_text(encoding="utf-8")
@@ -154,8 +157,8 @@ def main():
         rec = hs.check_candidate(timeout=1800)
         b2 = cave.wait_for(lambda b: "fix verified" in b)
         say({"step": "the fix landed on anchor-next; the real candidate check", "status": rec["status"], "why": rec.get("why"),
-             "banner": b2[:200], "same_open_page_no_reload": cave.same_page()})
-        ok = ok and rec["status"] in ("green", "yellow") and "fix verified" in b2 and "live after your restart" in b2 and cave.same_page()
+             "banner": (b2 if b2 is not None else "(no working Cave page)")[:200], "same_open_page_no_reload": cave.same_page()})
+        ok = ok and rec["status"] in ("green", "yellow") and "fix verified" in (b2 or "") and "live after your restart" in (b2 or "") and cave.same_page()
     finally:
         stop(proc)
     act = anchor_next.activate(served)
@@ -172,13 +175,13 @@ def main():
                 break
             time.sleep(15)
         path, body = hs.latest()
-        b3 = cave.wait_for(lambda b: not b, timeout=240)
+        b3 = cave.wait_for(lambda b: b == "", timeout=240)
         reloaded = not cave.same_page()
         say({"step": "the owed re-check ran by itself", "status": hs.status_of(body), "target": hs.field(body, "Target"),
-             "revision": hs.field(body, "Revision")[:12], "banner_in_the_open_page": b3[:160] or "(no banner)",
+             "revision": hs.field(body, "Revision")[:12], "banner_in_the_open_page": ("(no banner)" if b3 == "" else (b3 if b3 is not None else "(no working Cave page)")[:160]),
              "the_page_reloaded_once_for_the_new_build": reloaded,
              "running_service_checked": "the running service answers" in body})
-        ok = ok and hs.status_of(body) in ("green", "yellow") and not b3 and "the running service answers" in body
+        ok = ok and hs.status_of(body) in ("green", "yellow") and b3 == "" and "the running service answers" in body
     finally:
         stop(proc)
         cave.close()

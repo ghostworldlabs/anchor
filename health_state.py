@@ -84,7 +84,7 @@ def latest():
 def issues_of(body):
     """The report's issue lines - the identity a candidate's pass answers."""
     m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body or "", re.S | re.M)
-    return [ln.strip()[2:].strip() for ln in (m.group(1).splitlines() if m else []) if ln.strip().startswith("- ")][:20]
+    return [ln.strip()[2:].strip() for ln in (m.group(1).splitlines() if m else []) if ln.strip().startswith("- ")]
 
 
 def _git(repo, *args):
@@ -108,12 +108,18 @@ def is_live(revision, repo=None):
     return _git(root, "merge-base", "--is-ancestor", revision, run)[0] == 0
 
 
+_SERVED_CACHE = {}
+
+
 def _served():
-    try:
-        import anchor_next
-        return anchor_next.served_root()
-    except Exception:
-        return Path(__file__).resolve().parent
+    key = os.environ.get("ANCHOR_SERVED_ROOT") or ""
+    if key not in _SERVED_CACHE:
+        try:
+            import anchor_next
+            _SERVED_CACHE[key] = anchor_next.served_root()
+        except Exception:
+            return Path(__file__).resolve().parent
+    return _SERVED_CACHE[key]
 
 
 def read_candidate():

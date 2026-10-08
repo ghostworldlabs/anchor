@@ -625,7 +625,7 @@
   // reloaded (its frame, draft, focus and stream stay); a change that would move or remove it waits until it closes
   // (closeTile). Nothing is placed while he types or dictates in a card, and no section he is in is replaced.
   var placeBusy = false, placeAgain = false, placeHeld = false, placeSkipped = false;
-  var healthSig = '', healthPending = '';   // the banner's fingerprint the page shows, and one it is placing (W3)
+  var healthSig = String((window.ANCHOR_BOOT && window.ANCHOR_BOOT.health) || ''), healthPending = '';   // the page's own (Fable)   // the banner's fingerprint the page shows, and one it is placing (W3)
   // a section he was IN when the record moved (a search box, a button row) is placed once he leaves it (ChatGPT W4 r3)
   document.addEventListener('focusout', function () {
     if (!placeSkipped) return;
