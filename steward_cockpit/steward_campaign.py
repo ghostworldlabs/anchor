@@ -1896,18 +1896,21 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
                 "stopped - no finish time to give")
     if jobs:
         j = jobs[0]
-        worker = str(j.get("worker") or "coder").split()[0]
+        native = j.get("native") or {}
+        worker = str(j.get("worker") or native.get("worker") or "coder").split()[0]
         name = "Foreman" if worker.lower() == "foreman" else ("the %s coder" % j.get("coder_family") if j.get("coder_family") else "a coder")
-        phase = (j.get("native") or {}).get("phase") or str(j.get("status") or "running")
+        phase = native.get("phase") or str(j.get("status") or "running")
         tests = {True: "tests passed", False: "tests failed"}.get(j.get("check_ok"), "tests not run yet")
         eta, src = _code_job_eta(j, now)
-        if (src or {}).get("native"):
+        if native.get("unavailable"):
+            finish = "Unavailable - " + native["unavailable"]     # an explicit native refusal is said, not papered over
+        elif (src or {}).get("native"):
             finish = eta                                   # the job's own forecast, with the time it was given
         elif typical_duration_s(campaign_dir, "code_job", worker):
             finish = finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)
         else:
             finish = eta or finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)   # phase window
-        return ("The steward is running %s on a code job (%s) and is in charge of it" % (name, j["title"]),
+        return ("The steward is running %s on a code job (%s) - %s - and is in charge of it" % (name, j["title"], phase),
                 phase, j.get("started_epoch"), tests, finish)
     skills = running_skill_jobs(campaign_dir)
     look_tests = (look or {}).get("tests") if (look or {}).get("tests") not in (None, "", "-", "\u2014") else ""
