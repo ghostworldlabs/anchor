@@ -235,6 +235,97 @@ def test_a_refused_fast_forward_is_restored_and_verified(tmp_path, monkeypatch, 
     assert _g(served, "status", "--porcelain") == ""
 
 
-def test_a_kept_jobs_documents_are_one_announcement():
-    src = (ROOT / "steward_cockpit" / "code_jobs.py").read_text(encoding="utf-8")
-    assert 'notify=False)' in src and '_se.absorb_receipts(cdir, "Code job %s kept (not landed): " % job["id"])' in src
+def test_a_kept_jobs_rows_are_never_announced_one_by_one(tmp_path, monkeypatch):
+    """ChatGPT W1a r2: the generic publisher never announces a kept code job's rows - its one line does (atomic: no
+    window between a registration and a suppression)."""
+    from steward_cockpit import steward_engine as se
+    import deliverables_register as dr
+    eff = tmp_path / "eff"
+    eff.mkdir()
+    (eff / "ECGBERHT.md").write_text("# cockpit\n", encoding="utf-8")
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", ""))
+    se.receipt_baseline(str(eff))
+    (eff / "code-job-outputs").mkdir()
+    for n in ("a.pdf", "b.pdf"):
+        (eff / "code-job-outputs" / n).write_bytes(b"%PDF-1.4")
+        assert dr.register(eff, "Code job J1 kept (not landed): " + n, "`code-job-outputs/%s`" % n, notify=False)["written"]
+    lines = []
+    se.publish_delivery_receipts(str(eff), record=lambda line, rid: lines.append(line), emit=None)
+    assert lines == []
+
+
+# ---------- ChatGPT review round 2 ----------
+
+def test_recovery_restores_only_what_the_activation_wrote(tmp_path, monkeypatch, served):
+    """A save made by someone else to an incoming file between the check and the fast-forward is KEPT, and the
+    refusal is unverified (the service is not started)."""
+    job = _run_job(tmp_path, monkeypatch, served, {"static/page.js": "var build = 'two';\n"})
+    assert job["landed"] is True, job.get("land_note")
+    head = _g(served, "rev-parse", "HEAD")
+    real_check = anchor_next.check
+
+    def check_then_save(root=None):
+        out = real_check(root)
+        (served / "static" / "page.js").write_text("var build = 'his save';\n", encoding="utf-8")   # after the check
+        return out
+    monkeypatch.setattr(anchor_next, "check", check_then_save)
+    r = anchor_next.activate(served)
+    assert r["ok"] is False and r["unverified"], r
+    assert (served / "static" / "page.js").read_text(encoding="utf-8") == "var build = 'his save';\n"
+    assert _g(served, "rev-parse", "HEAD") == head
+
+
+def test_recovery_reads_file_names_literally(tmp_path, monkeypatch, served):
+    (served / "a1.txt").write_text("tracked\n", encoding="utf-8")
+    (served / "a[1].txt").write_text("tracked too\n", encoding="utf-8")
+    _g(served, "add", "-A")
+    _g(served, "commit", "-qm", "two names a pattern could confuse")
+    ip, _ = anchor_next.ensure_integration(served)
+    (Path(ip) / "a[1].txt").write_text("next\n", encoding="utf-8")
+    _g(ip, "commit", "-qam", "changes a[1].txt only")
+    (served / "a1.txt").write_text("his local edit\n", encoding="utf-8")       # dirty, but not incoming
+    lock = Path(_g(served, "rev-parse", "--absolute-git-dir")) / "refs" / "heads" / "master.lock"
+    lock.write_text("held\n", encoding="utf-8")
+    try:
+        r = anchor_next.activate(served)
+    finally:
+        lock.unlink()
+    assert r["ok"] is False and r["unverified"] == [], r
+    assert (served / "a1.txt").read_text(encoding="utf-8") == "his local edit\n"
+    assert (served / "a[1].txt").read_text(encoding="utf-8") == "tracked too\n"
+
+
+def test_the_restart_starts_only_on_success_or_a_verified_refusal():
+    ps = (ROOT / "restart_anchor.ps1").read_text(encoding="utf-8")
+    assert "if ($act -ne 0 -and $act -ne 3) {" in ps and "SERVICE LEFT STOPPED" in ps
+
+
+@pytest.mark.parametrize("who,cmd,refused", [
+    ("steward", "git diff --stat", False), ("steward", "git diff --output=C:/dev/Anchor/static/x.js", True),
+    ("steward", 'git diff "--output=x"', True), ("steward", "git diff $'--output=x'", True),
+    ("steward", "git status > C:/dev/Anchor/a.py", True), ("steward", "git log -c core.pager=x", True),
+    ("steward", 'python C:/dev/Anchor/tools/steward_code_job.py start --repo C:/dev/Anchor --brief "fix a; b > c"', False),
+    ("steward", 'python C:/dev/Anchor/tools/steward_code_job.py start --brief "$(rm -rf x)"', True),
+    ("steward", "rm -rf C:/dev/Anchor", True), ("steward", "git diff a\\b", True),
+    ("coder", "pytest -q tests/test_a.py", False), ("coder", "cp x C:/dev/Anchor/static/a.js", True),
+    ("coder", "cd /c/dev/Anchor && ls", True), ("coder", "cd ../../../../dev && ls", True),
+])
+def test_the_fence_guard_grammar(who, cmd, refused, tmp_path):
+    env = dict(os.environ, **({"ANCHOR_FENCE_SHELL": "1"} if who == "steward" else
+                              {"ANCHOR_FENCE_ROOT": str(tmp_path), "ANCHOR_FENCE_SERVED": "C:/dev/Anchor"}))
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "fence_guard.py")],
+                       input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), capture_output=True, text=True, env=env)
+    assert (r.returncode == 2) is refused, (cmd, r.returncode, r.stderr)
+
+
+def test_a_chatgpt_coder_is_not_given_the_running_anchors_code(tmp_path, monkeypatch, served):
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("chatgpt", None))
+    cdir = tmp_path / "s"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(served), "x", PASS, engine_factory=lambda wt: _Coder(wt, {}))
+    assert out["ok"] is False and "Claude coder" in out["error"]
+
+
+def test_declared_outputs_are_normalized_and_one_the_check_made_lands(tmp_path, monkeypatch):
+    assert code_jobs.declared_outputs(["./out//report.pdf", "out/report.pdf"]) == (["out/report.pdf"], None)
+    assert code_jobs.declared_outputs(["out/../../x"])[0] is None

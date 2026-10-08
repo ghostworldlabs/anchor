@@ -13,7 +13,21 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MARK = "/* W1a restart proof marker */"
+MARK = ".w1a-proof-marker{color:#123456}"
+
+
+def page_has_marker(port):
+    """A REAL browser page (ChatGPT W1a r2): the Cave opened in Chromium - does its stylesheet carry the marker rule?"""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        try:
+            pg = b.new_page()
+            pg.goto("http://127.0.0.1:%d/high-seat" % port, wait_until="load", timeout=120000)
+            return pg.evaluate("""() => Array.from(document.styleSheets).some(s => { try { return Array.from(s.cssRules)
+                .some(r => r.selectorText === '.w1a-proof-marker'); } catch (e) { return false; } })""")
+        finally:
+            b.close()
 
 
 def g(repo, *args):
@@ -77,17 +91,16 @@ def main():
     rows, ok = [], True
     proc, build0 = start(served, port, env)
     try:
-        css0 = get(port, "/static/app.css")
-        rows.append({"step": "running", "build": build0, "marker_served": MARK in css0})
+        rows.append({"step": "running", "build": build0, "marker_in_a_page": page_has_marker(port)})
         ip, why = anchor_next.ensure_integration(served)            # a landing on anchor-next (the landing path is
         assert ip is not None, why                                   # proven by prove_anchor_next_real.py)
-        p = Path(ip) / "static" / "app.css"
+        p = Path(ip) / "static" / "high-seat-page.css"
         p.write_text(p.read_text(encoding="utf-8") + "\n" + MARK + "\n", encoding="utf-8")
         g(ip, "commit", "-qam", "W1a proof: a landed change")
-        css1 = get(port, "/static/app.css")
-        helper = subprocess.run([sys.executable, "-c", "print(open('static/app.css', encoding='utf-8').read().count(%r))" % MARK],
+        in_page = page_has_marker(port)
+        helper = subprocess.run([sys.executable, "-c", "print(open('static/high-seat-page.css', encoding='utf-8').read().count(%r))" % MARK],
                                 cwd=str(served), capture_output=True, text=True).stdout.strip()
-        r1 = {"step": "landed, before the restart", "marker_served_to_a_new_page": MARK in css1,
+        r1 = {"step": "landed, before the restart", "marker_served_to_a_new_page": in_page,
               "marker_seen_by_a_new_helper": helper != "0", "waiting": len(anchor_next.waiting(served))}
         rows.append(r1)
         ok = ok and not r1["marker_served_to_a_new_page"] and not r1["marker_seen_by_a_new_helper"] and r1["waiting"] == 1
@@ -98,8 +111,7 @@ def main():
     ok = ok and act["ok"]
     proc, build2 = start(served, port, env)
     try:
-        css2 = get(port, "/static/app.css")
-        r3 = {"step": "after the restart", "build": build2, "marker_served": MARK in css2,
+        r3 = {"step": "after the restart", "build": build2, "marker_served": page_has_marker(port),
               "new_build": build2 != build0, "waiting": len(anchor_next.waiting(served))}
         rows.append(r3)
         ok = ok and r3["marker_served"] and r3["new_build"] and r3["waiting"] == 0

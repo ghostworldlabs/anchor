@@ -579,6 +579,10 @@ def declared_outputs(outputs):
                 return None, "a declared output may not be a runtime record or foreman.config.json: %s" % p
         except Exception:
             return None, "the declared outputs could not be checked"
+        import posixpath
+        p = posixpath.normpath(p)
+        if p in (".", "") or p.startswith("../"):
+            return None, "a declared output is a plain path inside the repository: %s" % raw
         if p not in out:
             out.append(p)
     if len(out) > 40:
@@ -616,6 +620,13 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         land_to = ""
         try:
             import anchor_next
+            if anchor_next.is_served_repo(root) and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
+                # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
+                # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox
+                # cannot start a shell there) - so Anchor's own code goes to a Claude coder (John's choice in the
+                # morning report; ANCHOR_UNCONFINED_CODERS=1 lifts it)
+                return {"ok": False, "error": "no job started: a %s coder cannot be confined to its worktree under the "
+                        "service yet, so a change to Anchor's own code uses a Claude coder (--coder claude)" % family}
             if anchor_next.is_served_repo(root):
                 ip, why = anchor_next.ensure_integration(root)
                 if ip is None:
@@ -773,6 +784,11 @@ def _finish(cdir, job_id, job, result):
             fields["check_ok"], fields["check_output"] = run_check(job, wt)
             after = changed_paths(wt, job["base"])
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
+            made = [x for x in late if x in set(job.get("outputs") or []) and not never_lands(x)]
+            if made:                                     # a declared output the check produced lands with the rest (W2)
+                files = files + made
+                fields["files"] = files
+                late = [x for x in late if x not in made]
             late += [p + " (ignored by git)" for p in ignored_outputs(wt)]
             served = _served_tree_changes(job)
             if late:
@@ -1111,7 +1127,6 @@ def announce_kept(cdir, job):
                 unlisted.append("[%s](%s)" % (Path(f).name, t["read"] or t["download"]))
         # W2 (2026-10-08): ONE line for the job, never one per file - its register rows (Deliverables and Next steps
         # still carry each) are marked announced, and this line says them all
-        _se.absorb_receipts(cdir, "Code job %s kept (not landed): " % job["id"])
         if unlisted:
             line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(unlisted))
             _se._default_record(cdir)(line, "receipt:kept:%s" % job["id"])

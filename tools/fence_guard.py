@@ -1,13 +1,17 @@
-"""The fence's PreToolUse guard (W1a, ChatGPT review round 1 of 2026-10-08): a Claude Code hook that runs BEFORE a tool,
-so a refused call never happens.
+"""The fence's PreToolUse guard (W1a, ChatGPT reviews of 2026-10-08): a Claude Code hook that runs BEFORE a tool, so a
+refused call never happens. Stdlib only; any doubt refuses (never open on an error).
 
-  - A fenced steward's shell: the allow list admits only the two hand-off tools and read-only git, by prefix - and a
-    prefix admits ``git diff --output=C:/dev/Anchor/static/page.js`` or a redirection. This guard admits the command
-    only when it has no shell operator, no redirection, and no git option that writes a file or runs a program.
-  - A code job's coder (ANCHOR_FENCE_ROOT set): its file tools write only inside its own worktree.
+  - A fenced steward's shell (ANCHOR_FENCE_SHELL=1): the allow list admits the two hand-off tools and read-only git by
+    PREFIX, and a prefix admits `git diff --output=...`, a redirection, or a quoting trick. This guard admits a command
+    only when it parses under a POSITIVE grammar - words of plain characters, '...' (literal), and "..." with nothing
+    the shell would expand ($, backtick, backslash) - with no operator anywhere; git takes plain words only, never an
+    option that writes a file or runs a program.
+  - A code job's coder (ANCHOR_FENCE_ROOT=<its worktree>): its file tools write only inside the worktree, and its shell
+    never names the running Anchor (ANCHOR_FENCE_SERVED) or climbs out with `..` - the worktree is far from the running
+    checkout, so reaching it needs one of those.
 
 Protocol: the tool call arrives as JSON on stdin; exit 0 allows it, exit 2 refuses it with the reason on stderr (the
-model reads it). Stdlib only. Never crashes open: any doubt refuses.
+model reads it).
 """
 import json
 import os
@@ -16,41 +20,48 @@ import sys
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-OPERATORS = re.compile(r"[<>|;&`\n\r]|\$\(|\$\{")
+BARE = re.compile(r"[A-Za-z0-9_./:@=,+%^~-]+")
 GIT_ARG = re.compile(r"^(?:--output(?:=.*)?|-o.*|--output-directory.*|--ext-diff|--textconv|--exec(?:=.*)?|"
-                     r"--upload-pack.*|--receive-pack.*|-c|--config-env.*)$")
+                     r"--upload-pack.*|--receive-pack.*|-c|--config-env.*|--no-index)$")
 ALLOWED = (
-    re.compile(r"^python(?:\.exe)?\s+C:/dev/Anchor/tools/steward_(?:code_job|skill)\.py(?:\s|$)", re.I),
-    re.compile(r"^git\s+(?:status|log|diff|show)(?:\s|$)"),
+    ("tool", re.compile(r"^python(?:\.exe)?$", re.I), re.compile(r"^C:/dev/Anchor/tools/steward_(?:code_job|skill)\.py$", re.I)),
+    ("git", re.compile(r"^git$"), re.compile(r"^(?:status|log|diff|show)$")),
 )
 
 
-def unquoted(cmd):
-    """The command as the shell acts on it: single-quoted text is literal (dropped); in double quotes only command
-    substitution stays live (kept as a marker); an unclosed quote is refused by the caller (returns None)."""
+def tokens(cmd):
+    """[(text, quoted)] under the positive grammar, or None when the command holds anything else (an operator, a
+    redirection, an expansion, an escape, an unclosed quote)."""
     out, i, n = [], 0, len(cmd)
     while i < n:
         c = cmd[i]
-        if c == "\\" and i + 1 < n:
-            out.append("_"); i += 2; continue
+        if c in " \t":
+            i += 1
+            continue
         if c == "'":
             j = cmd.find("'", i + 1)
             if j < 0:
                 return None
-            out.append("_"); i = j + 1; continue
-        if c == '"':
-            j, live = i + 1, False
-            while j < n and cmd[j] != '"':
-                if cmd[j] == "\\" and j + 1 < n:
-                    j += 2; continue
-                if cmd[j] == "`" or cmd.startswith("$(", j) or cmd.startswith("${", j):
-                    live = True
-                j += 1
-            if j >= n:
+            out.append((cmd[i + 1:j], True))
+            i = j + 1
+        elif c == '"':
+            j = cmd.find('"', i + 1)
+            if j < 0:
                 return None
-            out.append("$(" if live else "_"); i = j + 1; continue
-        out.append(c); i += 1
-    return "".join(out)
+            body = cmd[i + 1:j]
+            if any(x in body for x in ("$", "`", "\\")):
+                return None
+            out.append((body, True))
+            i = j + 1
+        else:
+            m = BARE.match(cmd, i)
+            if not m:
+                return None
+            out.append((m.group(0), False))
+            i = m.end()
+        if i < n and cmd[i] not in " \t":      # a word glued to a quote ('a'"b"x) is not in the grammar
+            return None
+    return out
 
 
 def refuse(why):
@@ -74,6 +85,43 @@ def inside(path, root):
         return False
 
 
+def served_spellings():
+    served = os.environ.get("ANCHOR_FENCE_SERVED") or "C:/dev/Anchor"
+    s = served.replace("\\", "/").rstrip("/").lower()
+    out = {s}
+    if len(s) > 2 and s[1] == ":":
+        out.add("/" + s[0] + s[2:])                       # Git Bash: /c/dev/anchor
+        out.add(s[2:])                                    # /dev/anchor from a drive's root
+    return out
+
+
+def check_steward_shell(cmd):
+    toks = tokens(cmd)
+    if toks is None:
+        refuse("only plain words and simple quotes run here - no operator, redirection, expansion or escape")
+    if not toks:
+        refuse("an empty command")
+    for kind, prog, first in ALLOWED:
+        if len(toks) >= 2 and not toks[0][1] and prog.match(toks[0][0]) and not toks[1][1] and first.match(toks[1][0]):
+            if kind == "git":
+                rest = toks[2:]
+                if any(q for _, q in rest):
+                    refuse("git takes plain words here")
+                if any(GIT_ARG.match(w) for w, _ in rest):
+                    refuse("that git option writes a file or runs a program")
+            return
+    refuse("only the two hand-off tools and read-only git run here")
+
+
+def check_coder_shell(cmd):
+    flat = cmd.replace("\\", "/").lower()
+    for s in served_spellings():
+        if re.search(re.escape(s) + r"(?:/|[\"'\s]|$)", flat):
+            refuse("a code job works only in its own worktree - its shell never names the running Anchor (%s)" % s)
+    if re.search(r"(?:^|[/\s\"'=])\.\.(?:/|[\s\"']|$)", flat):
+        refuse("a code job works only in its own worktree - no `..` out of it")
+
+
 def main():
     try:
         call = json.loads(sys.stdin.read() or "{}")
@@ -88,24 +136,12 @@ def main():
         path = raw if os.path.isabs(raw) else os.path.join(cwd, raw)
         if not raw or not inside(path, root):
             refuse("a code job writes only inside its own worktree (%s); %s is outside" % (root, raw or "(no path)"))
-        sys.exit(0)
-    if tool in SHELL_TOOLS and os.environ.get("ANCHOR_FENCE_SHELL") == "1":
+    if tool in SHELL_TOOLS:
         cmd = str(inp.get("command") or "").strip()
-        bare = unquoted(cmd)
-        if bare is None:
-            refuse("an unclosed quote")
-        if OPERATORS.search(bare):
-            refuse("no shell operators or redirection in a fenced shell - run one hand-off tool or one read-only git command")
-        if not any(a.search(cmd) for a in ALLOWED):
-            refuse("only the two hand-off tools and read-only git run here")
-        if cmd.startswith("git"):
-            try:
-                import shlex
-                args = shlex.split(cmd, posix=True)[2:]     # a quoted option is still an option
-            except ValueError:
-                refuse("the git command could not be read")
-            if any(GIT_ARG.match(a) for a in args):
-                refuse("that git option writes a file or runs a program")
+        if os.environ.get("ANCHOR_FENCE_SHELL") == "1":
+            check_steward_shell(cmd)
+        if root:
+            check_coder_shell(cmd)
     sys.exit(0)
 
 

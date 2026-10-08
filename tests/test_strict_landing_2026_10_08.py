@@ -76,3 +76,24 @@ def test_the_launcher_carries_declared_outputs():
     assert 'ap.add_argument("--output", action="append", default=[]' in src and "outputs=a.output" in src
     routes = (ROOT / "steward_cockpit" / "steward_routes.py").read_text(encoding="utf-8")
     assert 'outputs=body.get("outputs") or []' in routes
+
+
+def test_a_declared_output_made_by_the_check_lands(tmp_path, monkeypatch):
+    """ChatGPT W1a r2: the coder edits the generator; the passing check renders the declared output."""
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", em._json.dumps([sys.executable, str(ROOT / "tests" / "fake_review.py")]))
+    repo, cdir = em._git_repo(tmp_path / "repo"), tmp_path / "steward-r"
+    cdir.mkdir()
+    render = [sys.executable, "-c", "import os; os.makedirs('out', exist_ok=True); open('out/report.html','w').write(open('a.txt').read())"]
+    out = code_jobs.start(str(cdir), str(repo), "Render.", render, engine_factory=lambda wt: em._Coder(wt, tool_writes={"a.txt": "two\n"}),
+                          outputs=["./out/report.html"])
+    assert out["ok"], out
+    for _ in range(300):
+        j = code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}
+        if j.get("status") in ("done", "failed"):
+            break
+        em._time.sleep(0.1)
+    assert j["landed"] is True, j.get("land_note")
+    assert (repo / "out" / "report.html").read_text(encoding="utf-8") == "two\n"

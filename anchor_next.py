@@ -222,26 +222,52 @@ def check(repo=None):
     return out
 
 
-def _restore(root, head, incoming, before):
-    """After a refused fast-forward: put back every incoming path git may have written before it gave up (each was
-    clean at the check, so HEAD's version IS its pre-image), and the index entries; then verify the checkout holds
-    exactly what it held at the check. Returns the paths that could not be verified ([] = restored)."""
+def _blob(root, rev, path):
+    code, out, _ = _git(root, "--literal-pathspecs", "rev-parse", "--verify", "-q", "%s:%s" % (rev, path), timeout=60)
+    return out if code == 0 else ""
+
+
+def _on_disk(root, path):
+    """The blob id the file on disk would have (git's own filters), "" when absent."""
+    if not (Path(root) / path).is_file():
+        return ""
+    code, out, _ = _git(root, "--literal-pathspecs", "hash-object", "--path=" + path, "--", path, timeout=60)
+    return out if code == 0 else "?"
+
+
+def _restore(root, head, want, incoming, before):
+    """After a refused fast-forward (ChatGPT W1a r1-r2): put back ONLY what this activation wrote. For each incoming
+    path the disk holds one of three things: HEAD's version (untouched - nothing to do), the version anchor-next would
+    have written (git wrote it before it gave up - HEAD's version is put back, or the new file removed), or something
+    else (someone else's save - kept as it is, and the result is unverified). Index entries are reset for restored
+    paths only, by literal path. Returns what could not be verified ([] = restored and verified)."""
+    unverified, restored = [], []
     for path in incoming:
-        full = Path(root) / path
-        in_head = _git(root, "cat-file", "-e", "%s:%s" % (head, path), timeout=60)[0] == 0
-        if in_head:
-            _git(root, "checkout", head, "--", path, timeout=120)
-        elif full.is_file() and path not in before:
-            try:
-                full.unlink()
-            except OSError:
-                pass
-    if incoming:
-        _git(root, "reset", "-q", head, "--", *incoming, timeout=300)
+        old, new, now = _blob(root, head, path), _blob(root, want, path), _on_disk(root, path)
+        if now == old:
+            continue
+        if now == new:
+            if old:
+                code, _, _ = _git(root, "--literal-pathspecs", "checkout", head, "--", path, timeout=120)
+                if code != 0:
+                    unverified.append(path + " (could not be put back)")
+                    continue
+            else:
+                try:
+                    (Path(root) / path).unlink()
+                except OSError:
+                    unverified.append(path + " (could not be removed)")
+                    continue
+            restored.append(path)
+        else:
+            unverified.append(path + " (changed by someone else during the restart - kept as it is)")
+    if restored:
+        _git(root, "--literal-pathspecs", "reset", "-q", head, "--", *restored, timeout=300)
     after = _dirty(root)
     if after is None:
-        return ["(git could not read the checkout)"]
-    return sorted(set(after) ^ set(before)) + sorted(p for p in set(after) & set(before) if after[p] != before[p])
+        return unverified + ["(git could not read the checkout)"]
+    drift = sorted(set(after) ^ set(before)) + sorted(p for p in set(after) & set(before) if after[p] != before[p])
+    return unverified + [d for d in drift if not any(d == u.split(" (")[0] for u in unverified)]
 
 
 def activate(repo=None):
@@ -286,7 +312,7 @@ def activate(repo=None):
             out.update(ok=True, to=now)
             return out
         if now == out["from"]:
-            out["unverified"] = _restore(root, out["from"], incoming, before)
+            out["unverified"] = _restore(root, out["from"], want, incoming, before)
             out["why"] = "the fast-forward was refused (%s); %s" % (err[:300], "the running checkout was restored and "
                          "verified - nothing changed" if not out["unverified"] else "the running checkout could NOT be "
                          "verified (%s) - do not start it until it is looked at" % ", ".join(out["unverified"][:8]))

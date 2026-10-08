@@ -103,7 +103,7 @@ try {
   & $Py "anchor_next.py" activate 2>&1 | ForEach-Object { "    $_" }
   $act = $LASTEXITCODE
 } finally { Pop-Location }
-if ($act -eq 4) {
+if ($act -ne 0 -and $act -ne 3) {   # only success (0) or a VERIFIED refusal (3) may start the service (ChatGPT W1a r2)
   Write-Host "[FAIL] The activation was refused and C:\dev\Anchor could not be verified as it was (above). The service is NOT started; John or the steward looks first." -ForegroundColor Red
   Write-Host "RESULT: RESTART STOPPED - SERVICE LEFT STOPPED" -ForegroundColor Red; exit 4
 }

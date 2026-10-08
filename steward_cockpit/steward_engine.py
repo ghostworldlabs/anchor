@@ -727,7 +727,14 @@ def fence_settings(shell=False, root=""):
         env["ANCHOR_FENCE_SHELL"] = "1"
     if root:
         matchers.append("Write|Edit|MultiEdit|NotebookEdit")
+        if not shell:
+            matchers.append("Bash|PowerShell")        # a coder's shell never names the running Anchor or climbs out
         env["ANCHOR_FENCE_ROOT"] = str(root)
+        try:
+            import anchor_next
+            env["ANCHOR_FENCE_SERVED"] = str(anchor_next.served_root())
+        except Exception:
+            env["ANCHOR_FENCE_SERVED"] = str(_SERVED)
     if not matchers:
         return "", {}
     command = '"%s" "%s"' % (_sys.executable.replace("\\", "/"), str(FENCE_GUARD).replace("\\", "/"))
@@ -4216,23 +4223,6 @@ def receipt_baseline(cdir):
         pass
 
 
-def absorb_receipts(cdir, what_prefix):
-    """Mark the register rows whose What starts with ``what_prefix`` as announced, without a line each - a caller that
-    announces them itself in ONE line (a kept code job, W2 2026-10-08). Never raises."""
-    if not _is_cockpit(cdir):
-        return
-    try:
-        with _receipt_lock(cdir):
-            seen = _read_seen(cdir)
-            if seen is None:
-                return
-            mine = {_deliv_key(it) for it in _register_items(cdir) if str(it.get("what") or "").startswith(what_prefix)}
-            if mine - seen:
-                _write_seen(cdir, seen | mine)
-    except Exception:
-        pass
-
-
 def _default_record(cdir):
     def record(line, rid):
         if os.environ.get("STEWARD_COCKPIT_FAKE"):
@@ -4260,6 +4250,9 @@ def publish_delivery_receipts(cdir, *, reply="", written=(), since=0.0, record=N
             emit({"t": "sys", "text": "delivery receipt unavailable: %s" % (str(exc)[:160],)})
 
 
+_KEPT_ROW = re.compile(r"^Code job \S+ kept \(not landed\): ")
+
+
 def _publish_locked(cdir, reply, written, since, record, emit):
     import hashlib
     from steward_cockpit import steward_campaign as campaign
@@ -4269,6 +4262,10 @@ def _publish_locked(cdir, reply, written, since, record, emit):
     if seen is None:                                     # no baseline yet: this read IS the baseline
         _write_seen(cdir, {_deliv_key(it) for it in items})
         return
+    kept = [it for it in items if _KEPT_ROW.match(str(it.get("what") or "")) and _deliv_key(it) not in seen]
+    if kept:                                             # a kept code job says its rows itself, in ONE line (W2)
+        seen = set(seen) | {_deliv_key(it) for it in kept}
+        _write_seen(cdir, seen)
     fresh = [it for it in items if _deliv_key(it) not in seen]
     fresh += _named_unregistered(cdir, items, reply, written, since)
     if not fresh:
