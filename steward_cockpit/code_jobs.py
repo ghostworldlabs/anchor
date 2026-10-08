@@ -429,8 +429,10 @@ def dirty_snapshot(repo):
             hashes = r.stdout.split() if r.returncode == 0 else []
         except Exception:
             hashes = []
-        for i, path in enumerate(present):
-            snap[path] = hashes[i] if i < len(hashes) else "?"
+        if len(hashes) != len(present):                  # one unreadable file must not spoil the batch: per path
+            snap.update(dirty_snapshot_paths(repo, present))
+        else:
+            snap.update(dict(zip(present, hashes)))
     return snap
 
 
@@ -1074,12 +1076,18 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
         if time.time() - float(job.get("finishing_at") or 0) < 2 * (CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S) + 900:
             # consensus C6: his Stop counts NOW - recorded with its actor; the finish checks it before every review and
             # under the placement lock, so the job does not land after it (a landing already placed stays placed)
-            asked = _transition(cdir, job["id"], ("finishing",), stop_requested=time.strftime("%Y-%m-%d %H:%M:%S"),
-                                stop_requested_by=who)
+            import git_safety as _gs
+            # under the repository's commit lock - the lock placement holds while it re-reads the Stop and places - so
+            # the answer is exact: recorded before placement (it will not land), or too late (it already landed)
+            with _gs.repo_lock(job["repo"], wait_s=900, who="stop of code job " + job["id"]) as held:
+                if not held:
+                    return {"ok": False, "error": "the repository is busy landing; try the stop again in a moment"}
+                if (read_jobs(cdir).get(job["id"]) or {}).get("placed"):
+                    return {"ok": False, "error": "too late: it has already landed; its report is on the way"}
+                asked = _transition(cdir, job["id"], ("finishing",), stop_requested=time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    stop_requested_by=who)
             if asked is None:
                 return {"ok": False, "error": "the code job finished while the stop was asked; see its result"}
-            if asked.get("placed"):
-                return {"ok": False, "error": "it has already landed; its report is on the way"}
             return {"ok": True, "job": job["id"], "branch": job["branch"], "stop_requested": True, "kept": job["worktree"],
                     "note": "stop recorded; the job will not land and its work is kept"}
         import git_safety as _gs

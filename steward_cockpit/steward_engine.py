@@ -4125,9 +4125,13 @@ def _publish_locked(cdir, reply, written, since, record, emit):
             order.append(k)
         groups[k].append(it)
     changed = False
+    whole = {}
+    for it in items:                                     # every registered format of each product, old and new
+        whole.setdefault(campaign._product_key(it, steps), []).append(it)
     for k in order:
         group = sorted(groups[k], key=campaign._format_rank)
-        line = _receipt_line(cdir, group, pid, rel, registered)
+        full = list(group) + [it for it in whole.get(k, []) if it not in group]
+        line = _receipt_line(cdir, sorted(full, key=campaign._format_rank), pid, rel, registered)
         gkeys = [_deliv_key(it) for it in group if not it.get("written_this_turn")]
         rid = "receipt:" + hashlib.sha1(("\n".join(sorted(gkeys)) + "\n" + line).encode("utf-8")).hexdigest()[:20]
         if not line or not record(line, rid):

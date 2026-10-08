@@ -1710,3 +1710,22 @@ def test_follow_changes_only_on_his_scrolling(cockpit):
     scroll.evaluate("s => s.querySelectorAll('.filler').forEach((d, i) => { if (i > 5) d.remove(); })")
     page.wait_for_timeout(300)
     assert scroll.evaluate("s => s._follow") is False
+
+
+# ---------- dual review CONFIRM round ----------
+
+def test_a_deck_registered_first_and_its_older_pdf_after_never_reads_ready(tmp_path, monkeypatch):
+    import os as _os
+    eng, eff, said, emitted = _receipt_engine(tmp_path, monkeypatch, [])
+    eng._publish_delivery_receipt("t0")
+    (eff / "Talk.pptx").write_text("new deck", encoding="utf-8")
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Talk | `Talk.pptx` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t1")                                        # the deck alone: preparing
+    (eff / "Talk.pdf").write_text("old slides", encoding="utf-8")
+    _os.utime(eff / "Talk.pdf", (1_000_000, 1_000_000))                       # older than the deck
+    with open(eff / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| Talk (PDF) | `Talk.pdf` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t2")                                        # the old PDF arrives second
+    assert all("ready to read" not in t for _r, t, _i in said), said
+    assert "preparing a reading copy: Talk" in said[0][1]
