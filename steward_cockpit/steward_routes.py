@@ -1626,11 +1626,12 @@ def handle_post(cdir, verb, body):
             out = _cj.start(cdir, body.get("repo") or "", body.get("brief") or "", body.get("check") or "",
                             engine_factory=lambda wt: get_engine(wt, general=True, tid="1"),
                             steward=(eng.steward if eng else ""), coder=str(body.get("coder") or ""),
-                            actor=str(body.get("actor") or "the steward"))
+                            actor=str(body.get("actor") or "the steward"), skill=str(body.get("skill") or ""))
             if out.get("ok") and eng is not None:
-                eng._emit({"t": "sys", "text": "code job %s started on %s - coder %s, in its own worktree; it lands only "
+                what = ("%s job" % str(body.get("skill")).strip()) if str(body.get("skill") or "").strip() else "code job"
+                eng._emit({"t": "sys", "text": "%s %s started on %s - coder %s, in its own worktree; it lands only "
                            "after another family's review passes; the steward stays free to talk" % (
-                               out["job"], body.get("repo"), out.get("coder"))})
+                               what, out["job"], body.get("repo"), out.get("coder"))})
             return out, (200 if out.get("ok") else 400)
         if action == "stop":
             return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False),

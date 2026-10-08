@@ -1681,6 +1681,28 @@ def running_code_jobs(campaign_dir):
     return list(reversed(out))
 
 
+def job_kind_key(job):
+    """2026-10-08: the history a job's finish time is reckoned from - its worker, and the skill it runs when it names
+    one (a Chekhov review is never timed by past coding jobs)."""
+    worker = str((job or {}).get("worker") or "coder").split()[0]
+    skill = str((job or {}).get("skill") or "").strip().lower()
+    return worker + (":" + skill if skill else "")
+
+
+def job_display_name(job):
+    """Who is doing a code job, in John's words: Foreman, '<Skill> (the <family> coder)', or 'the <family> coder'."""
+    worker = str((job or {}).get("worker") or ((job or {}).get("native") or {}).get("worker") or "coder").split()[0]
+    if worker.lower() == "foreman":
+        return "Foreman"
+    family = str((job or {}).get("coder_family") or "").strip()
+    model = str((job or {}).get("coder_model") or "").strip()
+    coder = ("the %s coder" % family) if family else "a coder"
+    if model:
+        coder += ", " + model
+    skill = str((job or {}).get("skill") or "").strip()
+    return ("%s (%s)" % (skill, coder)) if skill else coder
+
+
 def landed_not_live(campaign_dir):
     """Titles of this steward's code jobs landed in Anchor today whose commit the running build does not carry yet
     (two-lane step 6, 2026-10-05). [] when none or unreadable."""
@@ -1760,7 +1782,7 @@ def typical_duration_s(campaign_dir, kind, worker=""):
         if kind == "code_job":
             raw = json.loads((root / "code-jobs.json").read_text(encoding="utf-8"))
             for r in (raw.values() if isinstance(raw, dict) else raw or []):
-                if isinstance(r, dict) and r.get("finished") and str(r.get("worker") or "coder").split()[0] == (worker or "coder"):
+                if isinstance(r, dict) and r.get("finished") and job_kind_key(r) == (worker or "coder"):
                     a, b = _job_epoch(r.get("started")), _job_epoch(r.get("finished"))
                     if a and b and b > a:
                         out.append(b - a)
@@ -1897,8 +1919,9 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
     if jobs:
         j = jobs[0]
         native = j.get("native") or {}
-        worker = str(j.get("worker") or native.get("worker") or "coder").split()[0]
-        name = "Foreman" if worker.lower() == "foreman" else ("the %s coder" % j.get("coder_family") if j.get("coder_family") else "a coder")
+        worker = job_kind_key(dict(j, worker=j.get("worker") or native.get("worker") or "coder"))
+        name = job_display_name(j)
+        what = "a %s job" % j["skill"] if str(j.get("skill") or "").strip() else "a code job"
         phase = native.get("phase") or str(j.get("status") or "running")
         tests = {True: "tests passed", False: "tests failed"}.get(j.get("check_ok"), "tests not run yet")
         eta, src = _code_job_eta(j, now)
@@ -1908,9 +1931,13 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
             finish = eta                                   # the job's own forecast, with the time it was given
         elif typical_duration_s(campaign_dir, "code_job", worker):
             finish = finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)
+        elif str(j.get("skill") or "").strip():
+            # a skill's first run here: a coding job's phase window would be a false clock (John, 2026-10-08)
+            finish = "no finish time yet - the first %s job here, %s so far; it reports when done" % (
+                str(j["skill"]).strip(), ("%d min" % j["minutes"]) if j.get("minutes") is not None else "just started")
         else:
             finish = eta or finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)   # phase window
-        return ("The steward is running %s on a code job (%s) - %s - and is in charge of it" % (name, j["title"], phase),
+        return ("The steward is running %s on %s (%s) - %s - and is in charge of it" % (name, what, j["title"], phase),
                 phase, j.get("started_epoch"), tests, finish)
     skills = running_skill_jobs(campaign_dir)
     look_tests = (look or {}).get("tests") if (look or {}).get("tests") not in (None, "", "-", "\u2014") else ""
@@ -1995,8 +2022,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     waiting_restart = landed_not_live(campaign_dir)
     # 2026-10-05: a running code job is OBSERVED work - it leads, ahead of the steward's own note
     for j in jobs[:2]:
-        worker = str(j.get("worker") or j["native"].get("worker") or "coder")
-        skill = "Foreman" if worker.lower() == "foreman" else worker
+        skill = job_display_name(j)
         phase = j["native"]["phase"]
         now_lines.append("%s %s — %s%s" % (
             skill, phase, j["title"], (" (%d min)" % j["minutes"]) if j["minutes"] is not None else ""))
@@ -2006,7 +2032,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         job = jobs[0]
         worker = str(job.get("worker") or job["native"].get("worker") or "coder")
         running = {"kind": "code_job", "label": now_lines[0],
-                   "skill": "Foreman" if worker.lower() == "foreman" else worker,
+                   "skill": "Foreman" if worker.lower() == "foreman" else (str(job.get("skill") or "").strip() or worker),
                    "worker": worker, "job_id": job["id"], "phase": job["native"]["phase"],
                    "source": ".ecgberht/code-jobs.json", "native_source": job["native"].get("source", ""),
                    "age": ("%d min" % job["minutes"]) if job["minutes"] is not None else ""}

@@ -563,7 +563,7 @@ def _kill_tree(proc):
         pass
 
 
-def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor=""):
+def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill=""):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
     family choice (else the Coder seat); ``check`` is an argument list or the full command text."""
@@ -599,6 +599,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"),
                "steward_dir": str(cdir), "steward": steward, "worker": "coder", "coder_family": family,
                "started_by": str(actor or "the steward")}
+        # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
+        # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
+        label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
+        if label:
+            job["skill"] = label
         _write_job(cdir, job)
         b = _busy_read()
         b[_norm(root)] = {"job": job_id, "cdir": str(cdir)}
@@ -626,6 +631,13 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         ok, why = eng.wake(fresh=True, seed=coder_brief(job))
         if not ok:
             raise RuntimeError(why)
+        try:   # 2026-10-08: the status names the model and effort the coder was asked for, not only its family
+            sel = getattr(eng, "model_selection", None) or {}
+            asked = " ".join(str(x) for x in (sel.get("model"), sel.get("effort")) if x)
+            if asked:
+                _transition(cdir, job_id, LIVE, coder_model=asked[:60])
+        except Exception:
+            pass
     except Exception as e:
         j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error="the coder could not start: %s" % e)
         _cleanup(j or job, keep_branch=False)

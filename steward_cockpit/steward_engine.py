@@ -209,6 +209,8 @@ CONTRACT = (
     "a code job in its own worktree, never into the served tree; say the plan in a few lines first, and for a major "
     "coding effort wait for John's approval before starting it. Do not invent a validator, a verify script or a "
     "Foreman run; Foreman and Crucible are on hold. "
+    "A background job that runs a SKILL (Chekhov, a review, research) uses the same launcher with --skill <its "
+    "name> (John, 2026-10-08), so his status names the skill and its models - never 'code job'. "
     "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
     "your recommended answer, only when the answer would change what you deliver, only in reply to John's own "
     "request, and before any job or skill starts; never ask in an automatic turn, never re-ask what the record "
@@ -1954,10 +1956,10 @@ class Engine:
                     return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
                 self._mark_human_accepted()
                 # item 5 (2026-10-07): the path that used to say nothing until the turn spoke says one server line at
-                # durable accept - no model call, no speed claim (the queued paths already say their own receipt)
+                # durable accept - no model call, no speed claim (the queued paths already say their own receipt).
+                # 2026-10-08 (John: "no received line"): it is said AFTER his own words are shown, never above them
                 from steward_cockpit import maintenance as _mt5
-                if not self.busy and not _mt5.is_active():
-                    self._emit({"t": "sys", "text": "Received."})
+                received = not self.busy and not _mt5.is_active()
                 # Only bare UI commands are controls. "go with option B" and
                 # "hold on" are substantive words, not drive switches.
                 low = text.lower().rstrip(".!").strip()
@@ -2022,6 +2024,8 @@ class Engine:
                     _update_state(self.skey(), {"question_context":None})
 
             self._emit({"t": "john" if human else "sys", "text": text})
+            if human and received:
+                self._emit({"t": "sys", "text": "Received."})
             text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
             if not human and not _is_machine_text(text):
                 text = MACHINE_MARK + text                   # persisted with the entry: never delivered as John's
@@ -2263,6 +2267,7 @@ class Engine:
             self._turn_had_tools = False
             if not self.busy:
                 self._turn_tools = 0
+                self._turn_touched_served = False
                 self._progress_said = False
                 self._turn_wrote_files = False
                 self._turn_output_refs = []
@@ -2339,6 +2344,38 @@ class Engine:
         self._submitted = None
         _update_state(self.skey(), {"submitted": None, "pending_queue": list(self.queue)})
 
+    def _note_served_touch(self, block):
+        """2026-10-08 (seen live: the Doctor's edit to the Cave was reported in Book 1, which cannot touch Anchor): this
+        turn's own tool calls that could write into Anchor's served tree - a file tool on a path in it, or a shell
+        command naming it with a write verb. The end-of-turn audit speaks only to a steward that could have done it."""
+        try:
+            served = str(_SERVED)
+            inp = block.get("input") or {}
+            name = block.get("name") or ""
+            paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
+            from steward_cockpit import code_jobs as _cjt
+            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch") and any(
+                    _cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
+                self._turn_touched_served = True
+            elif name in _SHELL_TOOLS:
+                flat = json.dumps(inp, ensure_ascii=False)[:6000].replace("\\\\", "/").replace("\\", "/").lower()
+                root = served.replace("\\", "/").lower().rstrip("/")
+                if re.search(re.escape(root) + r"(?:/|[\"' ]|$)", flat) and _WRITE_VERBS.search(flat):
+                    self._turn_touched_served = True
+        except Exception:
+            self._turn_touched_served = True     # unsure counts as possible: the warning is kept, never lost
+
+    def _could_touch_served(self):
+        """A steward that could have changed Anchor's served tree this turn: its cockpit sits inside it (a relative
+        write lands there), its own tools wrote there, or its provider reports no tool paths (Grok, Gemini)."""
+        try:
+            from steward_cockpit import code_jobs as _cjs
+            served = str(_SERVED)
+            return (_cjs.inside(self.dir, served) or bool(getattr(self, "_turn_touched_served", False))
+                    or str(self.cli or "") in ("grok", "gemini"))
+        except Exception:
+            return True
+
     def _finish_served_audit(self):
         """End of a steward turn - however it ended (a result, an interruption, the process exiting): report any
         change to Anchor's served application code it made directly, then clear the snapshot. Never raises."""
@@ -2347,6 +2384,16 @@ class Engine:
                 return
             snap, self._served_snap = getattr(self, "_served_snap", None), None
             changed = _served_code_changes(snap)
+            if changed and not self._could_touch_served():
+                # someone else changed it (the Doctor, John, another session): kept on record, not said in this dialogue
+                try:
+                    import paths as _pth
+                    with open(_pth.data_dir() / "served-code-changes.jsonl", "a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"at": time.time(), "seen_by": self.dir, "cli": self.cli,
+                                             "changed": changed[:20]}) + "\n")
+                except Exception:
+                    pass
+                return
             if changed:
                 self._emit({"t": "sys", "text": "Anchor's served code changed during this turn (the steward or someone "
                             "else), with no code job and no review: %s. The change STANDS in the served tree, unreviewed - "
@@ -2419,6 +2466,8 @@ class Engine:
     def _guard_turn(self, block):
         """R2/R3: end a small-mode turn that has grown past the step cap (it is handed to a code job), and a turn
         that writes into a repository a running code job owns (one writer). True when the turn was ended."""
+        if not self.general and self.code_job is None:
+            self._note_served_touch(block)
         if self.fake or not self.busy:
             return False
         reason, note = "", ""
@@ -2518,7 +2567,12 @@ class Engine:
         if said:
             first = re.split(r"(?<=[.!?])\s", said, maxsplit=1)[0]
             return first[:110] + ("\u2026" if len(first) > 110 else "")
-        asked = " ".join(str(getattr(self, "_last_submitted", "") or "").split())
+        asked = str(getattr(self, "_last_submitted", "") or "")
+        # 2026-10-08 (seen live): after a wake the submitted text starts with the resume brief - quote only his words
+        joined = list(re.finditer(r"JOHN SAYS \([^)]*\):\s*", asked))
+        if joined:
+            asked = asked[joined[-1].end():]
+        asked = re.sub(r"^About the goal ‘.*?’ \(the Campaign initiative .*?\) — ", "", " ".join(asked.split()))
         asked = re.sub(r"^\(.*?\)\s*", "", asked)
         return ("your message \u201c%s\u201d" % (asked[:80] + ("\u2026" if len(asked) > 80 else ""))) if asked else "a turn"
 
