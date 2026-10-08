@@ -783,7 +783,7 @@ def test_the_silent_path_says_received_at_durable_accept(tmp_path, monkeypatch):
     monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
     monkeypatch.setattr(eng, "alive", lambda: True)
     monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
-    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human", **kw: True)
     eng.busy = False
     assert eng.say("please fix the calendar")["ok"]
     assert {"t": "sys", "text": "Received."} in said

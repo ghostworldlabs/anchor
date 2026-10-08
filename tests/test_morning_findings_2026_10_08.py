@@ -21,7 +21,7 @@ def test_received_is_said_after_his_words_never_above_them(tmp_path, monkeypatch
     monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
     monkeypatch.setattr(eng, "alive", lambda: True)
     monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
-    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human", **kw: True)
     eng.busy = False
     assert eng.say("please fix the calendar")["ok"]
     kinds = [(e.get("t"), e.get("text")) for e in said]
@@ -66,21 +66,31 @@ def test_received_is_painted_under_his_message_in_the_cockpit(cockpit):
 
 # ---------- 1b: the working receipt quotes his words ----------
 
-def test_the_working_receipt_quotes_his_words_after_a_wake(tmp_path):
+def test_the_working_receipt_quotes_his_words_after_a_wake(tmp_path, monkeypatch):
+    """His words travel with the message - through the wake brief, a goal scope, an answer's context and the queue."""
     import io
 
     class Proc:
         stdin = io.StringIO()
     eng = steward_engine.Engine(str(tmp_path), fake=True)
     eng.proc = Proc()
+    monkeypatch.setattr(eng, "alive", lambda: True)
+    monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
+    monkeypatch.setattr(eng, "_persist_queue", lambda: True)
+    eng.busy = False
     eng._resume_prefix = steward_engine.RESUME_BRIEF                       # this morning: the first turn after a wake
-    words = steward_engine._scoped_text("Little bit of feedback on v1.", "g1", "Book")
-    with eng._lock:
-        assert eng._send_locked(words + "\n\n[cockpit, not John] PLAN DRIFT: behind.", origin="human")
+    assert eng.say("Little bit of feedback on v1.")["ok"]
     assert "You are" in eng._last_submitted                                # the model still gets the brief
     eng.turn_text = ""
-    assert eng._turn_activity() == "your message “Little bit of feedback on v1.”"
+    assert eng._turn_activity() == "your message \u201cLittle bit of feedback on v1.\u201d"
+    assert eng.say("and the sandwich scene")["queued"]                     # mid-turn: queued with his words
+    eng.busy = False
     with eng._lock:
+        assert eng._deliver_next_queued_locked()
+    eng.turn_text = ""
+    assert eng._turn_activity() == "your message \u201cand the sandwich scene\u201d"
+    with eng._lock:
+        eng.busy = False
         assert eng._send_locked("(drive - not John) Continue.", origin="control")
     assert eng._turn_activity() == "a turn"                                # a control turn never quotes him
 
@@ -209,14 +219,27 @@ def test_unreadable_or_unlisted_writes_count_as_possible(tmp_path, monkeypatch):
         assert eng._turn_touched_served is want, block
 
 
-def test_the_chatgpt_bridge_sends_only_a_flag_never_the_command():
-    from steward_cockpit import codex_turn_bridge as bridge
-    root = bridge._SERVED_ROOT
-    assert bridge._names_served("Set-Content %s/static/x.js 1" % root)
-    assert bridge._names_served(None) and bridge._names_served("")                   # unreadable counts
-    assert not bridge._names_served("python %s/tools/steward_code_job.py start" % root)
-    assert not bridge._names_served("dir C:/dev/Writing")
-    assert not bridge._names_served("dir %s-other/x" % root)                           # a sibling folder is not it
+def test_the_chatgpt_stream_keeps_a_flag_never_the_command():
+    """Through the real Codex stream parser: the command is read only for the flag; change paths are kept, bounded."""
+    import io
+    from steward_cockpit.codex_event_stream import iter_codex_events, names_served, SERVED_ROOT
+    root = str(SERVED_ROOT).replace("\\", "/")
+
+    def project(item):
+        line = json.dumps({"type": "item.completed", "item": item}).encode("utf-8") + b"\n"
+        return list(iter_codex_events(io.BytesIO(line)))[0][0]["item"]
+    writes = project({"id": "a", "type": "command_execution", "command": "Set-Content %s/static/x.js 1" % root})
+    assert writes["_names_served"] is True and "command" not in writes
+    reads = project({"id": "b", "type": "command_execution", "command": "Get-Content C:/dev/Writing/notes.md"})
+    assert reads["_names_served"] is False and "command" not in reads
+    argv = project({"id": "c", "type": "command_execution", "command": ["powershell", "-c", "cp a %s/x.py" % root]})
+    assert argv["_names_served"] is True
+    change = project({"id": "d", "type": "file_change", "changes": [{"path": "C:/dev/Writing/n.md", "kind": "update"}]})
+    assert change["changes"] == [{"path": "C:/dev/Writing/n.md"}] and change["_change_count"] == 1
+    assert names_served(None) and names_served("")                                   # unreadable counts
+    assert not names_served("python %s/tools/steward_code_job.py start --repo r" % root)  # a RUN of the launcher
+    assert names_served("Set-Content %s/tools/steward_code_job.py -Value x" % root)      # a WRITE to it is not excused
+    assert not names_served("dir %s-other/x" % root)                                  # a sibling folder is not it
 
 
 def test_an_idle_control_still_hears_received_after_his_words(tmp_path, monkeypatch):
@@ -225,7 +248,7 @@ def test_an_idle_control_still_hears_received_after_his_words(tmp_path, monkeypa
     monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
     monkeypatch.setattr(eng, "alive", lambda: True)
     monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
-    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human", **kw: True)
     eng.busy = False
     eng.open_question = "Which chapter first?"
     eng.open_question_kind = "decision"

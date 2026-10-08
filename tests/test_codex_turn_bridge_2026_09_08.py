@@ -284,7 +284,8 @@ def test_tool_event_excludes_raw_arguments_outputs_and_reasoning():
              "command": "secret command", "aggregated_output": "private output", "status": "in_progress"}}
     translated = normalizer.accept(event)
     tool = translated[0]["message"]["content"][0]
-    assert tool["input"] == {"item_id": "tool", "status": "in_progress"}
+    # 2026-10-08: one derived flag (does the command name Anchor's served folder?), never the command itself
+    assert tool["input"] == {"item_id": "tool", "status": "in_progress", "names_served": False}
     assert "secret" not in json.dumps(translated) and "private" not in json.dumps(translated)
     assert normalizer.accept({**event, "type": "item.completed"}) == []
     assert normalizer.accept({"type": "item.completed", "item": {"type": "reasoning", "text": "private"}}) == []

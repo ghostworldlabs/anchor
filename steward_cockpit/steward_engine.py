@@ -188,11 +188,9 @@ _WRITE_VERBS = re.compile(r"(apply_patch|WriteAllText|WriteAllBytes|Set-Content|
                           r"\.write_bytes\(|open\([^)]*['\"][wa]['\"]|writeFileSync|(?<![=<>\-])\d?>>?\s*(?![&=>])[\w./\\$'\"~:-])", re.I)
 _SHELL_TOOLS = {"exec_command", "command_execution", "Bash", "PowerShell", "shell", "local_shell_call", "exec"}
 def _names_served(command, served):
-    """A command that names Anchor's served folder anywhere except as the code-job launcher's own path (2026-10-08)."""
-    flat = str(command or "").replace("\\\\", "/").replace("\\", "/").lower()
-    root = str(served).replace("\\", "/").lower().rstrip("/")
-    flat = flat.replace(root + "/tools/steward_code_job.py", " ")
-    return re.search(re.escape(root) + r"(?:[^a-z0-9_.-]|$)", flat) is not None
+    """The one shared check (codex_event_stream.names_served), against this engine's served tree."""
+    from steward_cockpit.codex_event_stream import names_served
+    return names_served(command, served)
 
 
 _STOP_CODER = re.compile(r"^\s*(?:please\s+)?stop (?:the )?(?:coder|code job|job)\b", re.I)
@@ -361,13 +359,6 @@ def _scoped_text(text, goal, goal_name):
     if not goal or not goal_name:
         return text
     return "About the goal \u2018%s\u2019 (the Campaign initiative %s) \u2014 %s" % (goal_name, goal, text)
-
-
-def _unscoped(text):
-    """The inverse of _scoped_text: his words without the goal named in front or the cockpit's marked note after."""
-    text = str(text or "").split("\n\n[cockpit, not John]")[0]
-    m = re.match(r"About the goal ‘.*?’ \(the Campaign initiative .*?\) — ", text, re.S)
-    return text[m.end():] if m else text
 
 
 def _reported_cost(value):
@@ -1888,6 +1879,7 @@ class Engine:
     # ---------- talking ----------
     def say(self, text, human=True, question_id=None, goal=None):
         text = (text or "").strip()
+        his_words = text if human else ""   # 2026-10-08: what the working receipt quotes - carried, never rebuilt
         if not text:
             return {"ok": False, "error": "empty"}
         if human:   # W1 of the two-lane plan (2026-10-05): the queue wait is measured from his message's arrival
@@ -1933,6 +1925,7 @@ class Engine:
                         if not self._record_conversation("john", text, goal=goal):
                             return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
                         self._mark_human_accepted()
+                        self._remember_words(_scoped_text(text, goal, goal_name), his_words)
                         self.queue.append(_scoped_text(text, goal, goal_name))
                         if not self._persist_queue():
                             self.queue.pop()
@@ -1948,6 +1941,7 @@ class Engine:
                         if not self._record_conversation("john", text, goal=goal):
                             return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
                         self._mark_human_accepted()
+                        self._remember_words(_scoped_text(text, goal, goal_name), his_words)
                         self.queue.append(_scoped_text(text, goal, goal_name))
                         if not self._persist_queue():
                             self.queue.pop()
@@ -2060,6 +2054,7 @@ class Engine:
             if self.busy:
                 # queued RAW: the drift line is computed when this is delivered
                 # (a line computed now can be false by then — journal 0111)
+                self._remember_words(text, his_words)
                 self.queue.append(text)
                 if not self._persist_queue():
                     self.queue.pop()
@@ -2091,6 +2086,7 @@ class Engine:
             if human and maintenance.is_active():
                 # Wave 1.6 (Grok R1 F3): an alive, idle steward behind the
                 # barrier takes no new turn; his words wait durably.
+                self._remember_words(text, his_words)
                 self.queue.append(text)
                 if not self._persist_queue():
                     self.queue.pop()
@@ -2098,7 +2094,7 @@ class Engine:
                 self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
                 return {"ok": True, "queued": True, "maintenance": True}
             ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general and self.effort_on()) else ""),
-                                   origin="human" if human else "control")
+                                   origin="human" if human else "control", words=his_words)
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}
@@ -2194,7 +2190,12 @@ class Engine:
             raise RuntimeError("Idle model refresh did not retain the native session.")
         return True
 
-    def _send_locked(self, text, *, origin=None):
+    def _remember_words(self, queued, words):
+        """His words for a queued entry (in memory: after a restart the receipt says 'a turn', never a guess)."""
+        if words:
+            self.__dict__.setdefault("_queued_words", {})[queued] = words
+
+    def _send_locked(self, text, *, origin=None, words=""):
         """Caller holds self._lock. Returns True iff the write reached stdin.
 
         ``origin`` (Wave 1.2): "human" for John's words, "control" for engine
@@ -2285,7 +2286,7 @@ class Engine:
             proc.stdin.flush()
             self._bridge_system_prompt = None
             self._last_submitted = text
-            self._turn_words = _unscoped(human_text) if origin == "human" else ""   # what the receipt quotes
+            self._turn_words = (words or "") if origin == "human" else ""   # what the receipt quotes: his own words
             self._turn_had_tools = False
             if not self.busy:
                 self._turn_tools = 0
@@ -2339,7 +2340,8 @@ class Engine:
         queued = self.queue[0]
         machine = _is_machine_text(queued)
         suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
-        if self._send_locked(queued + suffix, origin="control" if machine else "human"):
+        words = self.__dict__.setdefault("_queued_words", {}).pop(queued, "")   # unknown after a restart: not guessed
+        if self._send_locked(queued + suffix, origin="control" if machine else "human", words=words):
             self.queue.pop(0)
         if not self._persist_queue():
             self.broken = True

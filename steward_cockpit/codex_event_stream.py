@@ -8,6 +8,25 @@ import codecs
 import hashlib
 import math
 import re
+from pathlib import Path
+
+SERVED_ROOT = Path(__file__).resolve().parents[1]
+_SCAN_CAP = 20000
+_OVERFLOW = object()
+_LAUNCH = r"(?:python[0-9.]*|py)(?:\.exe)?[\"']?\s+[\"']?"
+
+
+def names_served(command, root=None):
+    """True when a command names Anchor's served folder, or cannot be read (2026-10-08). Only a RUN of the code-job
+    launcher is excused - an interpreter followed by its path - never a write to that file."""
+    if isinstance(command, (list, tuple)):
+        command = " ".join(str(x) for x in command if isinstance(x, str))
+    if not isinstance(command, str) or not command.strip() or len(command) > _SCAN_CAP:
+        return True
+    flat = command.replace("\\\\", "/").replace("\\", "/").lower()
+    root = str(root or SERVED_ROOT).replace("\\", "/").lower().rstrip("/")
+    flat = re.sub(_LAUNCH + re.escape(root) + r"/tools/steward_code_job\.py\b", " ", flat)
+    return re.search(re.escape(root) + r"(?:[^a-z0-9_.-]|$)", flat) is not None
 
 
 class EventStreamError(ValueError):
@@ -41,6 +60,7 @@ _FIELDS = {
     },
     'usage': {'input_tokens': 'id', 'cached_input_tokens': 'id', 'output_tokens': 'id'},
     'error': {'code': 'id', 'message': 'message'},
+    'change': {'path': 'scan'},
 }
 
 
@@ -121,7 +141,7 @@ class _Parser:
         self.expect('"')
         if mode == 'error':
             mode = 'message'
-        retain = mode in ('key', 'id', 'message', 'text')
+        retain = mode in ('key', 'id', 'message', 'text', 'scan')
         parts = []
         length = 0
         kept = 0
@@ -134,7 +154,7 @@ class _Parser:
             length += len(piece)
             if mode == 'id' and length > 256:
                 raise EventStreamError('Codex identity/provenance string exceeds 256 characters.')
-            limit = 256 if mode == 'key' else None
+            limit = 256 if mode == 'key' else (_SCAN_CAP if mode == 'scan' else None)
             if limit is None:
                 parts.append(piece)
             elif kept < limit:
@@ -172,6 +192,8 @@ class _Parser:
                 append_piece(pending_high)
                 if not retain or (mode == 'key' and length > 256):
                     return _DROP
+                if mode == 'scan' and length > _SCAN_CAP:
+                    return _OVERFLOW
                 return ''.join(parts)
             if char != '\\':
                 raise EventStreamError('Unescaped control character in Codex JSON string.')
@@ -252,11 +274,19 @@ class _Parser:
             if mode == 'item' and key == 'aggregated_output':
                 result['aggregated_output'] = self.hashed_value(depth)
             elif mode == 'item' and key == 'changes':
-                count = self.value('count', depth)
-                if count is _DROP:
+                changes = self.value('changes', depth)
+                if not isinstance(changes, list):
                     result.pop('_change_count', None)
+                    result.pop('changes', None)
                 else:
-                    result['_change_count'] = count
+                    result['_change_count'] = len(changes)
+                    result['changes'] = [{'path': c['path']} for c in changes[:20]
+                                         if isinstance(c, dict) and isinstance(c.get('path'), str)
+                                         and 0 < len(c['path']) <= 240]
+            elif mode == 'item' and key == 'command':
+                # 2026-10-08: the command is read only to answer "does it name Anchor's served folder?" - never kept
+                command = self.value('scan', depth)
+                result['_names_served'] = names_served(None if command is _OVERFLOW or command is _DROP else command)
             else:
                 child_mode = fields.get(key, 'discard') if fields is not None else 'discard'
                 child = self.value(child_mode, depth)
@@ -276,17 +306,26 @@ class _Parser:
             raise EventStreamError('Codex JSON nesting exceeds 128 levels.')
         self.expect('[')
         count = 0
+        kept = [] if mode in ('scan', 'changes') else None
+        child = {'scan': 'scan', 'changes': 'change'}.get(mode, 'discard')
+
+        def done():
+            if kept is not None:
+                return _OVERFLOW if (mode == 'scan' and _OVERFLOW in kept) else kept
+            return count if mode == 'count' else _DROP
         self.space()
         if self.frame.peek() == ']':
             self.frame.take()
-            return count if mode == 'count' else _DROP
+            return done()
         while True:
-            self.value('discard', depth)
+            item = self.value(child, depth)
+            if kept is not None and len(kept) < 200:
+                kept.append(item)
             count += 1
             self.space()
             if self.frame.peek() == ']':
                 self.frame.take()
-                return count if mode == 'count' else _DROP
+                return done()
             self.expect(',')
 
     def event(self):

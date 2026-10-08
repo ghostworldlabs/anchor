@@ -225,7 +225,7 @@ def test_machine_text_gets_no_receipt_and_is_delivered_as_control(eng, monkeypat
     eng.say("(code job 1 finished - not John) Status: done.", human=False)
     assert not any(ev.get("take_now") for ev in getattr(eng, "events", [])), "no receipt or button for machine text"
     eng.busy = False
-    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human": sent.append(origin) or True)
+    monkeypatch.setattr(eng, "_send_locked", lambda text, origin="human", **kw: sent.append(origin) or True)
     eng._deliver_next_queued_locked()
     assert sent == ["control"], "a job report never counts as his turn (no cap, no receipt)"
 

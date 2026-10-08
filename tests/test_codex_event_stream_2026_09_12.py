@@ -129,6 +129,7 @@ class CodexEventStreamTests(unittest.TestCase):
         event, _ = next(iter_codex_events(TinyPipe(source, 3)))
         self.assertEqual(event, {'item': {
             '_change_count': 2,
+            'changes': [{'path': 'a'}, {'path': 'b'}],   # 2026-10-08: bounded paths kept (the served-code audit)
             'aggregated_output': 'sha256:' + hashlib.sha256(raw_value).hexdigest(),
             'model': 'm', 'model_served': 'm2', 'effort_served': 'ultra',
         }})
