@@ -255,3 +255,38 @@ def test_an_idle_control_still_hears_received_after_his_words(tmp_path, monkeypa
     assert eng.say("pause")["control_only"]
     kinds = [(e.get("t"), e.get("text")) for e in said]
     assert kinds.index(("john", "pause")) + 1 == kinds.index(("sys", "Received."))
+
+
+# ---------- ChatGPT review round 3 (morning fixes) ----------
+
+def test_an_incomplete_change_list_counts_as_a_possible_served_write(tmp_path, monkeypatch):
+    import io
+    from steward_cockpit.codex_event_stream import iter_codex_events
+    eng, said, served = _audit_engine(tmp_path, monkeypatch, tmp_path / "Writing" / "Book 1")
+    many = [{"path": "C:/dev/Writing/n%d.md" % i, "kind": "update"} for i in range(21)]
+    line = json.dumps({"type": "item.completed", "item": {"id": "d", "type": "file_change", "changes": many}})
+    item = list(iter_codex_events(io.BytesIO(line.encode("utf-8") + b"\n")))[0][0]["item"]
+    assert item["_change_count"] == 21 and len(item["changes"]) == 20 and item["_paths_incomplete"]
+    eng._turn_touched_served = False
+    eng._note_served_touch({"name": "file_change", "input": {"paths": [c["path"] for c in item["changes"]],
+                                                             "paths_incomplete": True}})
+    assert eng._turn_touched_served
+    eng._turn_touched_served = False
+    eng._note_served_touch({"name": "file_change", "input": {"paths": ["C:/dev/Writing/n1.md"]}})
+    assert not eng._turn_touched_served                                  # a complete list of book files clears
+
+
+def test_received_survives_a_failed_question_bookkeeping(tmp_path, monkeypatch):
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    said = []
+    monkeypatch.setattr(eng, "_emit", lambda ev: said.append(ev))
+    monkeypatch.setattr(eng, "alive", lambda: True)
+    monkeypatch.setattr(eng, "_record_conversation", lambda *a, **k: True)
+    q = {"id": "q1", "text": "Which chapter?"}
+    monkeypatch.setattr(eng, "_question_contexts", lambda wait: [q])
+    monkeypatch.setattr(steward_engine, "_update_state", lambda key, upd: False if "question_history" in upd else True)
+    eng.busy = False
+    out = eng.say("Chapter two", question_id="q1")
+    assert not out["ok"]                                                  # the bookkeeping failed, and says so
+    kinds = [(e.get("t"), e.get("text")) for e in said]
+    assert kinds[:2] == [("john", "Chapter two"), ("sys", "Received.")]   # yet his durable words were shown + received

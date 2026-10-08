@@ -1970,10 +1970,11 @@ class Engine:
                 from steward_cockpit import maintenance as _mt5
                 received = not self.busy and not _mt5.is_active()
 
-                def show_his_words():   # his words, then - on the idle path - the one receipt under them
-                    self._emit({"t": "john", "text": text})
-                    if received:
-                        self._emit({"t": "sys", "text": "Received."})
+                # his words, then - on the idle path - the one receipt under them, at the moment they are durable:
+                # nothing after this (question bookkeeping, controls) can lose either (ChatGPT review round 3)
+                self._emit({"t": "john", "text": text})
+                if received:
+                    self._emit({"t": "sys", "text": "Received."})
                 # Only bare UI commands are controls. "go with option B" and
                 # "hold on" are substantive words, not drive switches.
                 low = text.lower().rstrip(".!").strip()
@@ -2010,7 +2011,6 @@ class Engine:
                     self.open_question = ""
                     self.open_question_kind = ""
                     if control and self._question_contexts(wait):
-                        show_his_words()
                         return {"ok": True, "queued": False, "control_only": True}
                 elif self.open_question:
                     kind = (self.open_question_kind
@@ -2018,7 +2018,6 @@ class Engine:
                     if control and kind != "drive_offer":
                         # Drive is an interface command, not an answer. Never
                         # put a bare approval-shaped token on model stdin.
-                        show_his_words()
                         self._emit({"t": "sys", "text":
                                     ("drive armed" if control == "go"
                                      else "drive paused")
@@ -2037,9 +2036,7 @@ class Engine:
                     self.question_context = None
                     _update_state(self.skey(), {"question_context":None})
 
-            if human:
-                show_his_words()
-            else:
+            if not human:
                 self._emit({"t": "sys", "text": text})
             text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
             if not human and not _is_machine_text(text):
@@ -2381,7 +2378,8 @@ class Engine:
             from steward_cockpit import code_jobs as _cjt
             if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
                 paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
-                if not paths or any(_cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
+                if not paths or inp.get("paths_incomplete") or any(
+                        _cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
                     self._turn_touched_served = True
             elif name in _SHELL_TOOLS:
                 if "names_served" in inp:                      # the ChatGPT bridge's flag (the command itself is never sent)

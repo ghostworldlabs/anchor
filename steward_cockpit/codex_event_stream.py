@@ -283,6 +283,8 @@ class _Parser:
                     result['changes'] = [{'path': c['path']} for c in changes[:20]
                                          if isinstance(c, dict) and isinstance(c.get('path'), str)
                                          and 0 < len(c['path']) <= 240]
+                    if len(result['changes']) < len(changes):   # cut or unreadable paths: the list is not the whole
+                        result['_paths_incomplete'] = True
             elif mode == 'item' and key == 'command':
                 # 2026-10-08: the command is read only to answer "does it name Anchor's served folder?" - never kept
                 command = self.value('scan', depth)

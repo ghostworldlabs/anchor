@@ -385,7 +385,7 @@ class EventNormalizer:
                 return False
             if item_type in ("agent_message", "reasoning") and not (isinstance(item.get("text"), str) and item["text"].strip()):
                 return False
-            fields = {"stage": kind, **{key: item[key] for key in ("type", "status", "exit_code", "text", "aggregated_output", "changes", "_change_count") if key in item}}
+            fields = {"stage": kind, **{key: item[key] for key in ("type", "status", "exit_code", "text", "aggregated_output", "changes", "_change_count", "_paths_incomplete") if key in item}}
             signature = hashlib.sha256(json.dumps(fields, sort_keys=True).encode("utf-8")).digest()
             key = str(item_type) + ":" + str(item.get("id") or "")
             if self._progress_items.get(key) == signature:
@@ -490,7 +490,8 @@ class EventNormalizer:
                     metadata["exit_code"] = item["exit_code"]
                 changes = item.get("changes")
                 if isinstance(changes, list):
-                    metadata["change_count"] = len(changes)
+                    metadata["change_count"] = (item["_change_count"] if type(item.get("_change_count")) is int
+                                                else len(changes))
                     paths = []                                  # bounded paths, never contents
                     for change in changes[:20]:
                         path = _bounded_string((change or {}).get("path") if isinstance(change, dict) else None, 240)
@@ -498,6 +499,8 @@ class EventNormalizer:
                             paths.append(path)
                     if paths:
                         metadata["paths"] = paths
+                    if item.get("_paths_incomplete") or len(changes) > 20 or len(paths) < metadata["change_count"]:
+                        metadata["paths_incomplete"] = True   # the audit treats an incomplete list as a possible write
                 elif type(item.get("_change_count")) is int and item["_change_count"] >= 0:
                     metadata["change_count"] = item["_change_count"]
                 if item_type == "command_execution":
