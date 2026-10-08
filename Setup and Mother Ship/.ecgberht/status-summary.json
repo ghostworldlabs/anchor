@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-07 19:47",
-  "status_id": "01791424027023924500",
+  "at": "2026-10-07 20:38",
+  "status_id": "01791427137925776400",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
+    "activity": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
     "latest_event": null,
     "next": [
       "Connect named provider accounts"
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48\u2026"
+        "value": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33\u2026"
       },
       {
         "label": "Status",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0030-provider-repair-proceeded-on-silence: Provider repair proceeds under the reversible decision window"
+        "value": "0032-login-recovery-launch-guard: Login remainder launch stopped before execution"
       },
       {
         "label": "ETA",
@@ -53,17 +53,18 @@
       }
     ]
   },
-  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Provisional checked-repair duration 60-90 minutes from launch; activation and enrollment remain separate.",
+  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
   "now": [
-    "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
-    "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction"
+    "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
+    "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
+    "landed, waits for a restart \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement"
   ],
   "running": {
     "kind": "code_job",
-    "label": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
+    "label": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
     "skill": "coder",
     "source": ".ecgberht/code-jobs.json",
-    "age": "48 min"
+    "age": "33 min"
   },
   "slice": {
     "n": 2,
@@ -76,7 +77,7 @@
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0030-provider-repair-proceeded-on-silence: Provider repair proceeds under the reversible decision window",
+  "journal": "0032-login-recovery-launch-guard: Login remainder launch stopped before execution",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -86,9 +87,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0030-provider-repair-proceeded-on-silence.md",
-      "entry_id": "0030-provider-repair-proceeded-on-silence",
-      "at": "2026-10-08T00:58:35Z",
+      "path": "journal/0032-login-recovery-launch-guard.md",
+      "entry_id": "0032-login-recovery-launch-guard",
+      "at": "2026-10-08T02:06:24Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
@@ -112,7 +113,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Launching focused repair of seven retained provider findings under plan v2 Refinement 3.",
+    "text": "Retrying the same login/account-binding repair after correcting a launch-only checkout reference.",
     "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
@@ -125,7 +126,7 @@
     "waiting_on_you": "",
     "waiting_since": null,
     "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-    "why": "Provisional checked-repair duration 60-90 minutes from launch; activation and enrollment remain separate.",
+    "why": "Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
     "attention": "stale",
     "goal_reread": true
   },

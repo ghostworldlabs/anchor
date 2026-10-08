@@ -1,0 +1,8 @@
+[20:04:16] === FOREMAN LIVE RUN ===
+[20:04:16] project: C:\Users\john\AppData\Local\anchor-code-jobs\20261007-200412-1fe4e9
+[20:04:16] reviewers=2 fixIterCap=3 maxWaves=∞ maxWallClock=∞min git=false branch=foreman/run
+[20:04:16] binding: headless `claude -p … --permission-mode acceptEdits --allowedTools Bash,Edit,Write,Read,Glob,Grep` (cwd=project); ground truth = orchestrator gate
+[20:04:16] model routing: execute=chatgpt-cli:driver-default · review=grok-cli:driver-default · fix=chatgpt-cli:driver-default
+[20:04:16] lock: acquired C:\Users\john\AppData\Local\anchor-code-jobs\20261007-200412-1fe4e9\.foreman\run.lock (pid 1352)
+[20:04:16] sibling-repos: checked 1 plan-named repo(s): C:\dev\Anchor
+[20:04:16] [taxonomy:dirty-sibling] HALT before start: plan-named repo(s) not clean — C:\dev\Anchor (38 uncommitted path(s)). Commit or stash them, or set FOREMAN_ALLOW_DIRTY_SIBLINGS=1 to proceed with the state recorded. Checked: C:\dev\Anchor
