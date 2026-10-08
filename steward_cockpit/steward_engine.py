@@ -705,7 +705,7 @@ SERVED_CODE_DENY = tuple("Edit(./**/*%s)" % ext for ext in (".py", ".js", ".mjs"
 # John's choice in the morning report (2026-10-09): the two Anchor-revision cockpits inside the checkout (Setup and
 # Mother Ship, Distribution and Collaboration) run ChatGPT, whose shell cannot start inside the service's sandbox - read
 # only, they can talk but not hand off. ANCHOR_SERVED_READ_ONLY=0 keeps the old, unbounded behaviour.
-SERVED_READ_ONLY = os.environ.get("ANCHOR_SERVED_READ_ONLY", "1") == "1"
+SERVED_READ_ONLY = os.environ.get("ANCHOR_SERVED_READ_ONLY", "1").strip() != "0"   # only an explicit 0 lifts it (Grok)
 SERVED_READ_ONLY_NOTE = (
     " YOUR FOLDER IS INSIDE THE RUNNING ANCHOR, and this provider has no proven write boundary there, so you run "
     "read-only: you read, think and talk. You cannot start a code job yourself here (the service's sandbox cannot run "
