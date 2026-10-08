@@ -336,7 +336,7 @@ def _cache_identity(family, env):
             stamps.append((str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
         except OSError:
             stamps.append((str(path), None))
-    return (family, str(profile), env.get("PATH"), str(provider_root), tuple(stamps))
+    return (family, str(profile), env.get("PATH"), str(provider_root), env.get('ANCHOR_PROVIDER_CONNECTION'), tuple(stamps))
 
 
 def resolve(family, *, settings=None, force=False, env=None, discoverer=None):

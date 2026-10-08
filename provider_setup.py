@@ -129,12 +129,12 @@ class ProviderService:
             raise anchor_settings.SettingsInvalid(state["error"])
         return self.snapshot()
 
-    def refresh(self, connection):
+    def refresh(self, connection, *, capability=None):
         key = self._key(connection["id"])
         with self.lock:
             gate = self.refresh_locks.setdefault(key, threading.Lock())
         with gate:
-            cap = self.capability(connection["family"], True)
+            cap = capability if capability is not None else self.capability(connection['family'], True)
             now = stamp()
             old = deepcopy(self.observations.get(key, empty_observation()))
             try:
@@ -370,7 +370,7 @@ class ProviderService:
             raise ValueError("Terminal-free isolated enrollment is unsupported by this installed native CLI")
         # Never replace the source of a live/previously bound bridge. Retry a
         # failed pending login, but renewal of a signed-in home needs a new home.
-        self.refresh(connection)
+        self.refresh(connection, capability=cap)
         observation = self.observations[self._key(identity)]
         if observation["auth"] == "signed_in":
             raise ValueError("This account is already signed in; add a separate subscription to change identity")
@@ -402,10 +402,10 @@ class ProviderService:
                     self.logins[login_id].update(value)
         def worker():
             try:
-                self.native.login(connection, cancel, progress)
+                self.native.login(connection, cancel, progress, **({'capability': cap} if connection['family'] == 'grok' and isinstance(self.native, native.NativeProviders) else {}))
                 if cancel.is_set():
                     raise native.NativeError("cancelled")
-                self.refresh(connection)
+                self.refresh(connection, capability=cap)
                 observation = self.observations[self._key(identity)]
                 if observation["auth"] == "signed_in":
                     state, message = "completed", "Native sign-in completed; account status refreshed on the mother ship"

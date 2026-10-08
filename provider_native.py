@@ -502,7 +502,7 @@ class NativeProviders:
                     "provider_usage": {"state": "unsupported", "source": "agy has no passive usage report", "tokens": None}}
         raise NativeError("unsupported")
 
-    def login(self, connection, cancel, progress):
+    def login(self, connection, cancel, progress, *, capability=None):
         if connection["native_default"] or connection["mode"] != "subscription":
             raise ValueError("Use a separate named subscription; existing login is preserved")
         account_home(connection).mkdir(parents=True, exist_ok=True)
@@ -561,7 +561,7 @@ class NativeProviders:
                 raise NativeError()
             return
         if family == "grok":
-            cap = self.capabilities(family)
+            cap = capability if capability is not None else self.capabilities(family)
             if not cap.get("isolated") or not cap.get("login"):
                 raise NativeError("unsupported")
             self.observe(connection, capability=cap)
