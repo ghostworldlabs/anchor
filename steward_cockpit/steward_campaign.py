@@ -1888,10 +1888,10 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
         except (OSError, ValueError):
             log_mtime = 0
         same = [r for r in skills if skill_identity(r) == ident]
-        log_began = look_started(campaign_dir, look) if look else None
-        own_log = (bool(look) and bool(ident) and canonical_skill(look.get("skill")) == ident and len(same) == 1
-                   and bool(started) and log_mtime >= started
-                   and bool(log_began) and log_began >= started - 90)   # its log BEGAN with this run, not before
+        # (final review) nothing records which status log belongs to which skill run, and names, start times and
+        # mtimes cannot prove it - so a registered skill job never adopts a log: its phase, tests and finish stay
+        # provisional and honest rather than borrowed from another run
+        own_log = False
         if not own_log:
             look_tests = ""                              # another skill's log never speaks for this job
         phase = str(look.get("status") or look.get("doing") or "running")[:80] if own_log else "running"

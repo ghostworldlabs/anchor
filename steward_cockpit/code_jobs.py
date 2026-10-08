@@ -942,7 +942,8 @@ def announce_kept(cdir, job):
                     from steward_cockpit import steward_routes as _sr
                     eng = _sr.get_engine(str(cdir), create=False)
                     if eng is not None:
-                        eng._emit({"t": "receipt", "text": line})
+                        (getattr(eng, "emit_receipt", None) or eng._emit)(
+                            {"t": "receipt", "text": line, "id": "receipt:kept:%s:%s" % (job["id"], f)})
                 except Exception:
                     pass
         return links

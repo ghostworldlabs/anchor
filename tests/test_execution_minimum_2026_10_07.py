@@ -1452,3 +1452,41 @@ def test_a_routed_deck_never_reads_through_an_older_pdf(tmp_path, monkeypatch):
     _os.utime(tmp_path / "slides" / "Talk.pdf", None)
     r = dr.reading_target({"route": "/artifact/p?path=slides/Talk.pptx"}, pid="p", effort_rel="", registered=reg)
     assert r["read"] == "/artifact/p?path=slides%2FTalk.pdf"
+
+
+# ---------- final whole-patch review, round 2 ----------
+
+def test_a_steward_commit_to_served_code_is_reported_but_a_landing_is_not(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "served")
+    monkeypatch.setattr(steward_engine, "_SERVED", repo)
+    before = steward_engine._served_code_snapshot()
+    (repo / "job_runner.py").write_text("edited and committed\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "job_runner.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "direct"], check=True)
+    assert steward_engine._served_code_changes(before) == ["job_runner.py"]
+    before = steward_engine._served_code_snapshot()
+    (repo / "landed.py").write_text("x\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "landed.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "-c", "user.name=Anchor lander", "commit", "-q", "-m", "land"], check=True)
+    assert steward_engine._served_code_changes(before) == []
+
+
+def test_a_published_receipt_is_shown_once_even_when_replayed(tmp_path, monkeypatch):
+    monkeypatch.delenv("STEWARD_COCKPIT_FAKE", raising=False)
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "c"))
+    (tmp_path / "ECGBERHT.md").write_text("# c\n", encoding="utf-8")
+    (tmp_path / "DELIVERABLES.md").write_text("| What | Where | Date | Step |\n|---|---|---|---|\n", encoding="utf-8")
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    shown = []
+    eng._emit = lambda ev: shown.append(ev)
+    eng._record_conversation = lambda role, text, turn_id=None, goal=None: (
+        __import__("steward_cockpit.conversation_history", fromlist=["x"]).append_turns(
+            str(tmp_path), [{"role": role, "text": text, "turn_id": turn_id}]) or True)
+    eng._replay_saved_receipts()
+    steward_engine.receipt_baseline(str(tmp_path))
+    (tmp_path / "N.md").write_text("# n", encoding="utf-8")
+    with open(tmp_path / "DELIVERABLES.md", "a", encoding="utf-8") as fh:
+        fh.write("| N | `N.md` | 2026-10-07 | 1 |\n")
+    eng._publish_delivery_receipt("t1")
+    eng._replay_saved_receipts()
+    assert len([e for e in shown if e.get("t") == "receipt"]) == 1

@@ -893,8 +893,23 @@ class Engine:
             return
         publish_delivery_receipts(
             self.dir, reply=reply, written=written, since=float(getattr(self, "turn_started", 0) or 0),
-            record=lambda line, rid: self._record_conversation("steward", line, turn_id=rid), emit=self._emit)
+            record=lambda line, rid: self._record_conversation("steward", line, turn_id=rid), emit=self.emit_receipt)
         self._replay_saved_receipts()
+
+    def emit_receipt(self, ev):
+        """THE one way a receipt reaches the open page: each receipt id is shown once, whether it was published here
+        or saved by another process and replayed."""
+        rid = ev.get("id") if isinstance(ev, dict) else None
+        if ev.get("t") != "receipt" or not rid:
+            self._emit(ev)
+            return
+        shown = self.__dict__.get("_receipts_shown")
+        if shown is None:
+            shown = self._receipts_shown = set()
+        if rid in shown:
+            return
+        shown.add(rid)
+        self._emit({"t": "receipt", "text": ev.get("text") or ""})
 
     def _replay_saved_receipts(self):
         """A receipt another process saved (a writer with no engine of its own) reaches the open page too: receipt
@@ -910,9 +925,7 @@ class Engine:
             self._receipts_shown = {t["turn_id"] for t in ids}
             return
         for t in ids:
-            if t["turn_id"] not in shown:
-                shown.add(t["turn_id"])
-                self._emit({"t": "receipt", "text": t.get("text") or ""})
+            self.emit_receipt({"t": "receipt", "text": t.get("text") or "", "id": t["turn_id"]})
 
     def _deliv_baseline(self):
         receipt_baseline(self.dir)
@@ -3928,9 +3941,22 @@ def _served_code_changes(before):
     if not before:
         return []
     now = _served_code_snapshot()
-    if not now or now["head"] != before["head"]:
+    if not now:
         return []
     out = [p for p, v in now["files"].items() if before["files"].get(p) != v]
+    if now["head"] != before["head"]:
+        # commits made during the turn: code they touched counts, unless the commit is a verified code-job landing
+        # (git_safety's lander commits as "Anchor lander")
+        try:
+            r = subprocess.run(["git", "-C", str(_SERVED), "-c", "core.quotepath=false", "log", "--format=%x00%an",
+                                "--name-only", "--no-renames", "%s..%s" % (before["head"], now["head"])],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
+            for block in r.stdout.split("\x00")[1:]:
+                lines = [ln for ln in block.splitlines() if ln.strip()]
+                if lines and lines[0].strip() != "Anchor lander":
+                    out += [ln.strip() for ln in lines[1:] if ln.strip().lower().endswith(_CODE_EXT)]
+        except Exception:
+            out.append("(could not read the commits made during the turn)")
     for p, v in before["files"].items():
         if p not in now["files"]:
             try:
@@ -4079,7 +4105,7 @@ def _publish_locked(cdir, reply, written, since, record, emit):
         if not line or not record(line, rid):
             continue                                     # not saved: not announced - the next pass tries again
         if emit:
-            emit({"t": "receipt", "text": line})
+            emit({"t": "receipt", "text": line, "id": rid})
         seen |= set(gkeys)
         changed = True
     if changed and not _write_seen(cdir, seen) and emit:
