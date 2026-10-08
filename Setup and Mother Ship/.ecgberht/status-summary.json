@@ -1,19 +1,19 @@
 {
-  "at": "2026-10-07 14:55",
-  "status_id": "01791406558980248700",
+  "at": "2026-10-07 19:47",
+  "status_id": "01791424027023924500",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
+    "activity": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
     "latest_event": null,
     "next": [
       "Connect named provider accounts"
     ],
-    "question": "Approve?",
+    "question": "",
     "facts": [
       {
         "label": "Summary",
-        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Follow proposed plan v2 Refinement 3: resolve seven\u2026"
+        "value": "Connect named provider accounts; Google Ultra uses agy \u2014 Implement the bounded repair in plan v2 Refinement\u2026"
       },
       {
         "label": "Effort",
@@ -21,11 +21,11 @@
       },
       {
         "label": "Doing",
-        "value": "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status\u2026"
+        "value": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48\u2026"
       },
       {
         "label": "Status",
-        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 quiet"
+        "value": "integrate: Connect named provider accounts; Google Ultra uses agy \u00b7 0/11 done \u00b7 stale"
       },
       {
         "label": "Tests",
@@ -33,7 +33,7 @@
       },
       {
         "label": "Blocker",
-        "value": "waiting on you: Approve proposed provider repair plan v2 Refinement 3."
+        "value": "none"
       },
       {
         "label": "Procs",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0029-landed-recovery-and-review-followup: Landed recovery and retained serious review findings - October 7,\u2026"
+        "value": "0030-provider-repair-proceeded-on-silence: Provider repair proceeds under the reversible decision window"
       },
       {
         "label": "ETA",
@@ -53,23 +53,30 @@
       }
     ]
   },
-  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Landed tests passed; seven retained concerns and provider prerequisites prevent activation. \u00b7 waiting on you: Approve proposed provider repair plan v2 Refinement 3.",
+  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Provisional checked-repair duration 60-90 minutes from launch; activation and enrollment remain separate.",
   "now": [
+    "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
     "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction"
   ],
-  "running": null,
+  "running": {
+    "kind": "code_job",
+    "label": "code job running \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement (48 min)",
+    "skill": "coder",
+    "source": ".ecgberht/code-jobs.json",
+    "age": "48 min"
+  },
   "slice": {
     "n": 2,
     "total": 11,
     "id": "gwl-access",
     "name": "Connect named provider accounts; Google Ultra uses agy",
     "part": "integrate",
-    "summary": "Follow proposed plan v2 Refinement 3: resolve seven retained findings, verify named-account enrollment and execution, preserve existing\u2026",
+    "summary": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused\u2026",
     "commissioned_as": ""
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0029-landed-recovery-and-review-followup: Landed recovery and retained serious review findings - October 7, 2026",
+  "journal": "0030-provider-repair-proceeded-on-silence: Provider repair proceeds under the reversible decision window",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -79,9 +86,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0029-landed-recovery-and-review-followup.md",
-      "entry_id": "0029-landed-recovery-and-review-followup",
-      "at": "2026-10-07T20:55:57Z",
+      "path": "journal/0030-provider-repair-proceeded-on-silence.md",
+      "entry_id": "0030-provider-repair-proceeded-on-silence",
+      "at": "2026-10-08T00:58:35Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
@@ -105,7 +112,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Provider code landed; seven concerns remain. Plan v2 Refinement 3 awaits John before repair.",
+    "text": "Launching focused repair of seven retained provider findings under plan v2 Refinement 3.",
     "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
@@ -115,11 +122,11 @@
     "step": "integrate: Connect named provider accounts; Google Ultra uses agy",
     "steps_done": 0,
     "steps_total": 11,
-    "waiting_on_you": "Approve proposed provider repair plan v2 Refinement 3.",
+    "waiting_on_you": "",
     "waiting_since": null,
     "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-    "why": "Landed tests passed; seven retained concerns and provider prerequisites prevent activation.",
-    "attention": "quiet",
+    "why": "Provisional checked-repair duration 60-90 minutes from launch; activation and enrollment remain separate.",
+    "attention": "stale",
     "goal_reread": true
   },
   "map": [
@@ -329,9 +336,9 @@
           "id": "gwl-access",
           "name": "Connect named provider accounts; Google Ultra uses agy",
           "status": "active",
-          "done_when": "Follow proposed plan v2 Refinement 3: resolve seven retained findings, verify named-account enrollment and execution, preserve existing sessions; wait for John before further implementation.",
+          "done_when": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused reproductions and provider/account/first-launch/status regressions; report real-flow proof and missing prerequisites. No activation or slice close.",
           "if_then": "",
-          "waiting_on": "Approve bounded resolution and testing plan v2 Refinement 3 before implementation.",
+          "waiting_on": null,
           "due": null,
           "ref": null,
           "tier": null,

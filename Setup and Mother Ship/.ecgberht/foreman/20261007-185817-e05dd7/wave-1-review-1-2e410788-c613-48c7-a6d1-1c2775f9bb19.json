@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 1,
+  "round_id": "2e410788-c613-48c7-a6d1-1c2775f9bb19",
+  "phase": "complete",
+  "review_status": "completed",
+  "configured_reviewers": 2,
+  "expected_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "completed_reviewers": [
+    "reviewer-1",
+    "reviewer-0"
+  ],
+  "failed_reviewers": [],
+  "responses": [
+    {
+      "seat": "reviewer-1",
+      "reviewer": "reviewer-1",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-1",
+        "answerable": "yes",
+        "note": "Wave 1 is answerable from .foreman-job/IMPLEMENTATION-PLAN.md line 14 (seven required dispositions) and line 24 (done when the named pytest gate passes and a test reaches the change). The listed production files implement those dispositions; this is not an unimplemented wave.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "provider_native.py",
+            "line": 567,
+            "rule": "grok-status-probed-twice",
+            "message": "Plan line 14 item 5: a Grok refresh must not repeat capabilities/help/disposable status inside observe. Refresh does pass its probe (provider_setup.py:160-161) into observe (provider_native.py:487). Sign-in does not. start_login refreshes, then native.login computes cap = self.capabilities(family) at provider_native.py:564 and calls self.observe(connection) at line 567 without that cap. observe line 487 therefore calls capabilities() again (help plus a disposable auth status) before grok_status. A transient raise on that second probe is NativeError, and the login worker at provider_setup.py:422-424 marks the attempt failed even though the refresh probe already succeeded. tests/test_provider_review_followup.py::test_grok_refresh_reuses_one_capability_probe_and_qualifies_account never calls login()."
+          }
+        ]
+      }
+    },
+    {
+      "seat": "reviewer-0",
+      "reviewer": "reviewer-0",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-0",
+        "answerable": "yes",
+        "note": "Yes. Frozen plan .foreman-job/IMPLEMENTATION-PLAN.md line 14 states the seven dispositions and line 16 the native Foreman run tag; done-when is line 24. The changed files implement those paths. Grok sign-in still repeats the capability probe inside observe.",
+        "findings": [
+          {
+            "severity": "MAJOR",
+            "file": "provider_native.py",
+            "line": 567,
+            "rule": "grok-login-reprobes",
+            "message": "Item 5 says a Grok refresh must not repeat capabilities/help/disposable status inside observe. ProviderService.refresh does pass its probe (provider_setup.py:160-161). NativeProviders.login still does not: it computes cap at provider_native.py:564, then calls observe(connection) at line 567 with no capability, so observe line 487 runs capabilities() again (help, auth help, status/login help, and a disposable auth status) before grok_status. A transient NativeError on that second probe is raised before auth login --browser. start_login's worker (provider_setup.py:405) then marks the attempt failed even though refresh's probe just succeeded. tests/test_provider_review_followup.py:619 only calls service.refresh, so the 233/233 gate never executes this path."
+          }
+        ]
+      }
+    }
+  ],
+  "merged_findings": [
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 567,
+      "rule": "grok-login-reprobes",
+      "message": "Item 5 says a Grok refresh must not repeat capabilities/help/disposable status inside observe. ProviderService.refresh does pass its probe (provider_setup.py:160-161). NativeProviders.login still does not: it computes cap at provider_native.py:564, then calls observe(connection) at line 567 with no capability, so observe line 487 runs capabilities() again (help, auth help, status/login help, and a disposable auth status) before grok_status. A transient NativeError on that second probe is raised before auth login --browser. start_login's worker (provider_setup.py:405) then marks the attempt failed even though refresh's probe just succeeded. tests/test_provider_review_followup.py:619 only calls service.refresh, so the 233/233 gate never executes this path.",
+      "id": "provider_native.py:567+grok-login-reprobes",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_native.py",
+          "line": 567,
+          "rule": "grok-login-reprobes",
+          "message": "Item 5 says a Grok refresh must not repeat capabilities/help/disposable status inside observe. ProviderService.refresh does pass its probe (provider_setup.py:160-161). NativeProviders.login still does not: it computes cap at provider_native.py:564, then calls observe(connection) at line 567 with no capability, so observe line 487 runs capabilities() again (help, auth help, status/login help, and a disposable auth status) before grok_status. A transient NativeError on that second probe is raised before auth login --browser. start_login's worker (provider_setup.py:405) then marks the attempt failed even though refresh's probe just succeeded. tests/test_provider_review_followup.py:619 only calls service.refresh, so the 233/233 gate never executes this path.",
+          "id": "provider_native.py:567+grok-login-reprobes",
+          "reviewer": "reviewer-0"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-0"
+      ]
+    },
+    {
+      "severity": "MAJOR",
+      "file": "provider_native.py",
+      "line": 567,
+      "rule": "grok-status-probed-twice",
+      "message": "Plan line 14 item 5: a Grok refresh must not repeat capabilities/help/disposable status inside observe. Refresh does pass its probe (provider_setup.py:160-161) into observe (provider_native.py:487). Sign-in does not. start_login refreshes, then native.login computes cap = self.capabilities(family) at provider_native.py:564 and calls self.observe(connection) at line 567 without that cap. observe line 487 therefore calls capabilities() again (help plus a disposable auth status) before grok_status. A transient raise on that second probe is NativeError, and the login worker at provider_setup.py:422-424 marks the attempt failed even though the refresh probe already succeeded. tests/test_provider_review_followup.py::test_grok_refresh_reuses_one_capability_probe_and_qualifies_account never calls login().",
+      "id": "provider_native.py:567+grok-status-probed-twice",
+      "status": "open",
+      "agreement": 1,
+      "evidence": [
+        {
+          "severity": "MAJOR",
+          "file": "provider_native.py",
+          "line": 567,
+          "rule": "grok-status-probed-twice",
+          "message": "Plan line 14 item 5: a Grok refresh must not repeat capabilities/help/disposable status inside observe. Refresh does pass its probe (provider_setup.py:160-161) into observe (provider_native.py:487). Sign-in does not. start_login refreshes, then native.login computes cap = self.capabilities(family) at provider_native.py:564 and calls self.observe(connection) at line 567 without that cap. observe line 487 therefore calls capabilities() again (help plus a disposable auth status) before grok_status. A transient raise on that second probe is NativeError, and the login worker at provider_setup.py:422-424 marks the attempt failed even though the refresh probe already succeeded. tests/test_provider_review_followup.py::test_grok_refresh_reuses_one_capability_probe_and_qualifies_account never calls login().",
+          "id": "provider_native.py:567+grok-status-probed-twice",
+          "reviewer": "reviewer-1"
+        }
+      ],
+      "reviewer_ids": [
+        "reviewer-1"
+      ]
+    }
+  ],
+  "decision": {
+    "go": true,
+    "reason": "gate GREEN and no verified blocking finding",
+    "blocking": []
+  }
+}
