@@ -35,7 +35,7 @@ const Proto = (() => {
     if (ta && ta.value) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; }
   }
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
-      opts = {}, map = null, lastState = null, latestStatusId = "";
+      opts = {}, map = null, lastState = null, latestStatusId = "", latestStatusRun = null;
 
   const $ = (s) => document.querySelector(s);
   const el = (tag, cls, text) => {
@@ -430,6 +430,19 @@ const Proto = (() => {
     }
     return waits;
   }
+  function paintRunTag(body) {
+    if (!body) return;
+    let runTag = body.querySelector("[data-run-tag]");
+    // The accepted status owns the exact run association; a map or state repaint cannot replace it.
+    if (latestStatusRun && latestStatusRun.kind === "code_job" && latestStatusRun.job_id) {
+      if (!runTag) { runTag = el("div", "sdmeta"); runTag.dataset.runTag = "1"; }
+      runTag.dataset.jobId = latestStatusRun.job_id;
+      const text = (latestStatusRun.skill || "Worker unreported") + " run " + latestStatusRun.job_id +
+        (latestStatusRun.phase ? " \u00b7 " + latestStatusRun.phase : "");
+      if (runTag.textContent !== text) runTag.textContent = text;
+      if (body.lastElementChild !== runTag) body.appendChild(runTag);
+    } else if (runTag) runTag.remove();
+  }
   function renderNextStepsTile() {
     const s = $("[data-delivmount]");
     if (!s) return;
@@ -443,7 +456,11 @@ const Proto = (() => {
       tile.appendChild(el("div", "body"));
       s.appendChild(tile);
     }
-    const n = paintNextSteps(tile.querySelector(".body"));
+    const body = tile.querySelector(".body");
+    const runTag = body.querySelector("[data-run-tag]");
+    const n = paintNextSteps(body);
+    if (runTag) body.appendChild(runTag);
+    paintRunTag(body);
     const act = (_deliv.acts || []).find(a => a && (a.label || (a.item && a.item.what)));
     const actLabel = act ? shortWhat(act.item || {what: act.label}).slice(0, 48) : "";
     tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you") + (actLabel ? " \u2014 " + actLabel : "");
@@ -456,6 +473,10 @@ const Proto = (() => {
     // status event replayed from the engine buffer.
     if (statusId && latestStatusId && statusId <= latestStatusId) return;
     if (statusId) latestStatusId = statusId;
+    latestStatusRun = stat.running || null;
+    const nextBody = $("[data-delivmount] .blk.next .body");
+    if (nextBody) paintRunTag(nextBody);
+    else renderNextStepsTile();
     const stick = atBottom(s);
     // only the newest status stays expanded (same fold rule as tick turns)
     s.querySelectorAll(".blk.steward:not(.folded)").forEach(old => {

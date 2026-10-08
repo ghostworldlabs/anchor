@@ -157,7 +157,10 @@ class ProviderService:
                 elif connection["family"] == "grok" and cap.get("status_supported") is False:
                     raise native.NativeError("unsupported")
                 else:
-                    out = self.native.observe(connection)
+                    if connection["family"] == "grok" and isinstance(self.native, native.NativeProviders):
+                        out = self.native.observe(connection, capability=cap)
+                    else:
+                        out = self.native.observe(connection)
                 out["observed_at"] = now
                 for metric in ("allowance", "provider_usage"):
                     prior, report = old[metric], out[metric]
@@ -187,7 +190,11 @@ class ProviderService:
             with self.lock:
                 self.observations[key] = deepcopy(out)
             # Capability discovery reads native model catalogs and help only.
-            if out["auth"] == "signed_in" and connection["family"] in ("claude", "chatgpt", "grok", "gemini"):
+            retained_agy = (connection["family"] == "gemini" and connection["id"] == "gemini-default"
+                            and connection["native_default"] and connection["mode"] == "subscription"
+                            and cap.get("installed") and cap.get("execution") is True
+                            and out["auth"] == "unknown" and out["test"] == "not_tested")
+            if out["auth"] == "signed_in" or retained_agy:
                 try:
                     rows, _ = model_policy.discover(connection["family"], env=native.account_env(connection), runner=native.catalog_command)
                     selection = model_policy.select_model(connection["family"], rows)
@@ -224,7 +231,12 @@ class ProviderService:
                         observation["state"] = "stale"
                 age = obs.get("observed_at")
                 obs["auth_stale"] = bool(age and time.time() - datetime.fromisoformat(age).timestamp() > TTL)
-                ready = (obs["auth"] == "signed_in" and not obs["auth_stale"] and connection["mode"] == "subscription"
+                retained_agy = (connection["family"] == "gemini" and connection["id"] == "gemini-default"
+                                and connection["native_default"] and connection["mode"] == "subscription"
+                                and cap.get("installed") and cap.get("execution") is True
+                                and obs["auth"] == "unknown" and obs["test"] == "not_tested"
+                                and obs.get("auth_source") == "Existing Google Ultra connection via agy CLI")
+                ready = ((obs["auth"] == "signed_in" or retained_agy) and not obs["auth_stale"] and connection["mode"] == "subscription"
                          and (connection["family"] in ("claude", "chatgpt", "gemini") or connection["family"] == "grok" and cap.get("execution") is True)
                          and (connection["native_default"] or cap["isolated"]))
                 catalog = deepcopy(self.catalogs.get(self._key(connection["id"]), {"state": "unknown", "rows": []}))
@@ -240,7 +252,10 @@ class ProviderService:
                                           "jobs": ready and (connection["family"] == "claude" or connection["native_default"]) and not exhausted,
                                           "reason": "API keys use separate provider billing. This subscription-seat architecture has no explicit API execution adapter; saving a key does not enable paid work." if connection["mode"] == "api" else
                                           "Isolated ChatGPT accounts can start new cockpits; the one-shot adapter retains its fixed default home." if connection["family"] == "chatgpt" and not connection["native_default"] else
-                                          "Native authentication checked; allowance may still be unknown." if ready else "Execution is unready; refresh host authentication and capabilities."},
+                                          "Retained Google Ultra via agy; passive authentication and allowance are unreported. Native model capabilities are available." if ready and retained_agy else
+                                          "Native authentication checked; allowance may still be unknown." if ready else
+                                          "Existing agy model capabilities are unavailable; refresh on the mother ship. Passive account reporting and additional enrollment remain incomplete." if connection["family"] == "gemini" else
+                                          "Execution is unready; refresh host authentication and capabilities."},
                             "capacity": "exhausted" if exhausted else "near_limit" if low and remaining else "usable" if remaining else "unknown",
                             "warning": (("Low allowance. " if remaining else "Last report indicated low allowance; its status is now " + obs["allowance"]["state"] + ". ")
                                         + "Full model strength stays selected until you apply a change.") if low else None,
@@ -303,6 +318,16 @@ class ProviderService:
         prefs = metadata.validate_preferences(body.get("preferences"), settings["provider_connections"])
         saved = settings["provider_preferences"]
         proposed = {**settings, "provider_preferences": prefs}
+        # Reconcile only proposed accounts on this explicit action. A cold
+        # cache is unchecked evidence, not a missing adapter or failed login.
+        candidates = [metadata.selected_connection(proposed, prefs["family"] or settings["default_cli"])]
+        candidates += [metadata.find_connection(settings, identity) for identity in prefs["accounts"].values()]
+        for candidate in {c["id"]: c for c in candidates}.values():
+            if candidate["family"] in ("grok", "gemini") and candidate["mode"] == "subscription":
+                with self.lock:
+                    unchecked = self._key(candidate["id"]) not in self.observations
+                if unchecked:
+                    self.refresh(candidate)
         snapshot = self.snapshot()
         by_id = {c["id"]: c for c in snapshot["connections"]}
         # H1: readiness gates a CHANGE of the account that will execute, not a
@@ -606,12 +631,30 @@ def require_capacity_choice(settings, connection):
 
 def selected_for_launch(settings, family, surface="cockpit", check_capacity=False):
     connection = metadata.selected_connection(settings, family)
+    if connection["family"] != family:
+        raise ValueError("Selected account belongs to a different provider")
     if connection["mode"] != "subscription" or not connection["native_default"] and family not in ("claude", "chatgpt", "grok"):
         raise ValueError("Selected connection has no subscription execution adapter")
+    if family == "gemini" and (connection["id"] != "gemini-default" or not connection["native_default"]
+                               or not native.executable(family)):
+        raise ValueError("Existing Google Ultra agy account or transport is unavailable; additional enrollment remains incomplete")
     if family == "grok" and not connection["native_default"]:
         cap = SERVICE.capability(family)
+        with SERVICE.lock:
+            observation = deepcopy(SERVICE.observations.get(SERVICE._key(connection["id"])))
+        observed = observation.get("observed_at") if observation else None
+        if (cap.get("state") == "not_checked" or not observation or not observed
+                or time.time() - datetime.fromisoformat(observed).timestamp() > TTL):
+            SERVICE.refresh(connection)
+            cap = SERVICE.capability(family)
+            with SERVICE.lock:
+                observation = deepcopy(SERVICE.observations.get(SERVICE._key(connection["id"]), empty_observation()))
         if not cap.get("isolated") or not cap.get("execution"):
+            if cap.get("state") == "error":
+                raise ValueError("Selected Grok account capability check did not succeed; existing credentials are retained")
             raise ValueError("Selected Grok account has no subscription execution adapter with verified isolated account support")
+        if observation["auth"] != "signed_in" or observation["test"] != "passed":
+            raise ValueError("Selected Grok account authentication could not be verified for its isolated home; refresh host status")
     if surface == "jobs" and family == "chatgpt" and not connection["native_default"]:
         raise ValueError("The Codex one-shot adapter cannot execute an isolated account; choose its existing native default explicitly")
     if check_capacity:
@@ -683,6 +726,7 @@ def local_request(handler):
 
 
 def handle_post(handler, path, body):
+    path = urlsplit(path).path
     if not handler._steward_same_origin():
         handler._send_json({"ok": False, "error": "Cross-origin provider action refused"}, 403)
         return
