@@ -324,8 +324,12 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
             out["download"] = url + "&download=1"
         if rext == ".pptx":
             # a deck behind a route reads through the same-name PDF route only when the register declares that too
-            pdf_route = _canonical_route(re.sub(r"[.]pptx(?=$|&)", ".pdf", str(route), flags=re.I))
-            if pdf_route and registered is not None and pdf_route.lower() in registered:
+            from urllib.parse import urlsplit as _us, parse_qsl as _pq, urlencode as _ue
+            parts = _us(str(route))
+            query = [(k, (re.sub(r"[.]pptx$", ".pdf", v, flags=re.I) if k == "path" else v))
+                     for k, v in _pq(parts.query, keep_blank_values=True)]
+            pdf_route = _canonical_route(parts.path + "?" + _ue(query))
+            if (pdf_route and pdf_route != url and registered is not None and pdf_route.lower() in registered):
                 out["read"] = pdf_route
             else:
                 out["preparing"] = True

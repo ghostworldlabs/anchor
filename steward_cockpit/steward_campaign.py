@@ -1713,7 +1713,7 @@ def typical_duration_s(campaign_dir, kind, worker=""):
         elif kind == "skill_job":
             raw = json.loads((root / "skill-jobs.json").read_text(encoding="utf-8"))
             for r in (raw.values() if isinstance(raw, dict) else raw or []):
-                if isinstance(r, dict) and r.get("finished") and (not worker or worker.split()[0].lower() in str(r.get("label") or "").lower()):
+                if isinstance(r, dict) and r.get("finished") and worker and skill_identity(r) == worker:
                     a, b = _job_epoch(r.get("started")), _job_epoch(r.get("finished"))
                     if a and b and b > a:
                         out.append(b - a)
@@ -1749,6 +1749,32 @@ def finish_time(started, now, kind, campaign_dir, worker="", own_eta=None, own_e
     return "about %s (provisional - no history here to estimate from)" % hm(started + max(2 * elapsed, 600))
 
 
+_FORECAST = re.compile(r"\d")
+_PLACEHOLDER = re.compile(r"unavailable|no current estimate|estimating|unknown|n/?a\b|tbd", re.I)
+
+
+def real_forecast(text):
+    """A skill's own ETA counts only when it is an actual forecast (a number of minutes or a clock time), never a
+    placeholder such as 'Unavailable' or 'estimating (no completed wave yet)'."""
+    t = str(text or "").strip()
+    return bool(t) and bool(_FORECAST.search(t)) and not _PLACEHOLDER.search(t)
+
+
+_KNOWN_SKILLS = ("gandalf", "jumper", "superjump", "researchprime", "ramanujan", "chekhov", "literature-review",
+                 "legal-beagle", "financial-analyst", "tidy-idy", "ecgberht", "crucible", "foreman")
+
+
+def skill_identity(record):
+    """Which skill a skill-job record ran, from its recorded script (argv), never its free-text label."""
+    argv = record.get("argv") if isinstance(record, dict) else None
+    script = str(argv[1]) if isinstance(argv, list) and len(argv) > 1 else ""
+    parts = [p.lower() for p in script.replace(chr(92), "/").split("/") if p]
+    for name in _KNOWN_SKILLS:
+        if name in parts:
+            return name
+    return parts[-3] if len(parts) >= 3 else (parts[-1] if parts else "")
+
+
 def running_skill_jobs(campaign_dir):
     try:
         raw = json.loads((Path(campaign_dir) / ".ecgberht" / "skill-jobs.json").read_text(encoding="utf-8"))
@@ -1758,10 +1784,17 @@ def running_skill_jobs(campaign_dir):
     return [r for r in rows if isinstance(r, dict) and r.get("status") == "running"]
 
 
-def who_is_working(campaign_dir, engine_state, jobs, look, now=None):
+def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_tests="", slice_started=None):
     """(who, phase, started_epoch, tests, finish) - John's three lines' first and third, from records only."""
     now = time.time() if now is None else now
     st = engine_state or {}
+    real_tests = evidence_tests if (evidence_tests and not str(evidence_tests).startswith("Unavailable")) else ""
+    if jobs and (jobs[0].get("native") or {}).get("stopped"):
+        j = jobs[0]
+        return ("The steward's code job (%s) has stopped - its record still says running; the steward should report "
+                "it" % j["title"], "stopped", j.get("started_epoch"),
+                {True: "tests passed", False: "tests failed"}.get(j.get("check_ok"), real_tests or "tests not run"),
+                "stopped - no finish time to give")
     if jobs:
         j = jobs[0]
         worker = str(j.get("worker") or "coder").split()[0]
@@ -1778,24 +1811,26 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None):
         return ("The steward is running %s on a code job (%s) and is in charge of it" % (name, j["title"]),
                 phase, j.get("started_epoch"), tests, finish)
     skills = running_skill_jobs(campaign_dir)
+    look_tests = (look or {}).get("tests") if (look or {}).get("tests") not in (None, "", "-", "\u2014") else ""
     if skills:
         k = skills[-1]
         started = _job_epoch(k.get("started"))
         label = str(k.get("label") or "a skill")
-        return ("The steward is running %s and is in charge of it" % label, "running", started, "tests not run yet",
-                finish_time(started, now, "skill_job", campaign_dir, label))
+        ident = skill_identity(k)
+        return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), "running", started,
+                look_tests or real_tests or "tests not run yet",
+                finish_time(started, now, "skill_job", campaign_dir, ident))
     if look and not look.get("final"):
-        own = look.get("eta") or None
-        return ("The steward is running %s and is in charge of it" % look.get("skill"), str(look.get("label") or "running")[:80],
-                None, look.get("tests") or "tests not run yet",
-                finish_time(now, now, "skill_job", campaign_dir, str(look.get("skill") or ""), own, None) if own
-                else finish_time(None, now, "skill_job", campaign_dir, str(look.get("skill") or "")))
+        skill = str(look.get("skill") or "")
+        return ("The steward is running %s and is in charge of it" % skill, str(look.get("label") or "running")[:80],
+                slice_started, look_tests or real_tests or "tests not run yet",
+                finish_time(slice_started, now, "skill_job", campaign_dir, skill.lower()))
     if st.get("busy"):
         started = float(st.get("turn_started") or 0) or None
         what = one_line(st.get("activity") or "") or "your request"
         who = ("The steward is doing this — " + what) if st.get("turn_origin") != "control" else \
               ("The steward is handling a job report — " + what)
-        return (who, "working", started, "tests not run", finish_time(started, now, "turn", campaign_dir))
+        return (who, "working", started, real_tests or "tests not run", finish_time(started, now, "turn", campaign_dir))
     return ("Nobody is working right now — the steward waits for you", "idle", None, "", "nothing running, so nothing to finish")
 
 
@@ -1828,6 +1863,8 @@ def compose_status(campaign_dir: str, engine_state=None):
         if not active or not source_matches:
             look = None
     local_evidence = _local_status_evidence(campaign_dir, m, st, active)
+    if restart_pause_is_stale(campaign_dir, st) and _RESTART_PAUSE.search(str(m["attention"].get("reason") or "")):
+        m["attention"] = dict(m["attention"], state="quiet", reason="")
     now_lines = []
     running = None
     jobs = running_code_jobs(campaign_dir)
@@ -1936,9 +1973,17 @@ def compose_status(campaign_dir: str, engine_state=None):
         plan_step = active["name"] if active else "(no active step)"
     next_text = (m["heartbeat"]["next_recommended"] or "").strip()
     pause_stale = restart_pause_is_stale(campaign_dir, st)
+    if pause_stale and _RESTART_PAUSE.search(str(m["attention"].get("reason") or "")):
+        m["attention"] = dict(m["attention"], state="quiet", reason="")
     if pause_stale and _RESTART_PAUSE.search(next_text):
         next_text = ""                                   # the old "resume after the restart" is history, not the next step
+    # (ChatGPT, items 4-6) the next actions are the CURRENT step's: a Strip line written for another step is not
+    hb_step = str(m["heartbeat"].get("current_step_id") or "")
+    if hb_step and active and hb_step != str(active.get("id") or ""):
+        next_text = ""
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
+    if pause_stale and _RESTART_PAUSE.search(waiting):
+        waiting = ""                                     # a stale "paused for restart" wait, after his own message
     if "pending_request" in m["heartbeat"]:
         pending = m["heartbeat"]["pending_request"]
         if pending is None:
@@ -1972,6 +2017,9 @@ def compose_status(campaign_dir: str, engine_state=None):
     # (2026-09-07, journals 0026/0111) the effort line carries its AGE, and a line
     # a day or more older than the newest work on disk is shouted, never kept quietly.
     effort_line = effort_line_freshness(campaign_dir, m)
+    if pause_stale and _RESTART_PAUSE.search(str(effort_line.get("text") or "")):
+        effort_line = dict(effort_line, text=_RESTART_PAUSE.sub("", str(effort_line["text"])).strip(" -\u2014\u00b7"))
+        plan["attention"] = "quiet" if plan.get("attention") in ("needs_you", "blocked") and not waiting else plan.get("attention")
     if effort_line.get("stale"):
         now_lines.append("effort line as of " + effort_line["as_of"] + " \u2014 "
                          + str(effort_line["behind_days"]) + " day(s) older than the newest work; the steward has not restamped it")
@@ -2005,7 +2053,8 @@ def compose_status(campaign_dir: str, engine_state=None):
             if feedback.get("at"):
                 events.append({"at":feedback["at"], "summary":"Feedback received for " + sl["title"]})
     latest_event = max(events, key=lambda event:event["at"]) if events else None
-    who, phase, work_started, tests_line, finish = who_is_working(campaign_dir, st, jobs, look if live_skill else None)
+    who, phase, work_started, tests_line, finish = who_is_working(
+        campaign_dir, st, jobs, look if live_skill else None, evidence_tests=local_evidence["tests"], slice_started=started)
     elapsed_line = ""
     if work_started:
         mins = int(max(0, time.time() - work_started) // 60)
@@ -2013,8 +2062,13 @@ def compose_status(campaign_dir: str, engine_state=None):
     else:
         elapsed_line = phase
     next3 = next_bullets(next_text)[:3] or ["Finish the current work, then wait for you."]
-    if live_skill and look.get("eta"):
-        finish = estimate_eta(slice_, look, started) + " (its own estimate)"   # the skill's own last ETA
+    if live_skill and real_forecast(look.get("eta")):
+        src = Path(campaign_dir) / str(look.get("source") or "")
+        try:
+            given = " given " + time.strftime("%H:%M", time.localtime(src.stat().st_mtime))
+        except OSError:
+            given = ""
+        finish = estimate_eta(slice_, look, started) + " (its own estimate%s)" % given   # the skill's own last ETA
     eta = finish                                          # always a clock time (or "nothing running"), never "Unavailable"
     eta_source = dict(eta_source or {}, value=finish, calculated=("estimate" in finish or "provisional" in finish))
     doing = who

@@ -753,8 +753,11 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # entries until their best-in-class review - refused BEFORE any job id, record or process exists. A control-plane
     # command that reaches into either engine is refused the same way. (This patch claims no machine-wide ban.)
     from steward_cockpit import code_jobs as _cj_hold
-    if _cj_hold.foreman_crucible_held():
-        if str(lane or "").lower() in ("plan", "planning", "build"):
+    _hold_value = os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip()
+    if _hold_value != "0":
+        # "lanes" (set ONLY by the hermetic test harness for modules whose plan/build lanes run the fake runner) lifts
+        # the lane refusal; a command that reaches into either engine is refused whatever the setting
+        if _hold_value != "lanes" and str(lane or "").lower() in ("plan", "planning", "build"):
             raise ValueError("foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
         if command:
             base = Path(str(cwd)) if cwd else Path.cwd()

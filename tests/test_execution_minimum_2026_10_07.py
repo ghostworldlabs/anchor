@@ -840,7 +840,8 @@ def test_a_rename_lands_the_deletion_too(tmp_path, monkeypatch):
 
 def test_work_a_check_leaves_behind_keeps_the_worktree(tmp_path, monkeypatch):
     repo, job = _job(tmp_path, monkeypatch, check='python -c "open(' + "'report.txt','w'" + ').write(' + "'x'" + ')"')
-    assert job["landed"] is True and job["kept_worktree"] and "report.txt" in job["land_note"]
+    # (ChatGPT item 3 round 2) a change the check made is unexpected: it blocks the landing, everything is kept
+    assert job["landed"] is False and "report.txt" in job["land_note"] and "report.txt" in job["unexpected"]
     assert (_P(job["kept_worktree"]) / "report.txt").is_file()
 
 
@@ -944,3 +945,233 @@ def test_a_steward_never_edits_the_served_trees_code(tmp_path, monkeypatch):
     assert "code job" in ended[0]
     eng2, ended2 = _guard_engine(tmp_path, monkeypatch, tmp_path)
     assert eng2._guard_turn({"name": "Write", "input": {"file_path": str(served / "planning" / "x" / "NOTES.md")}}) is False
+
+
+# ══════════ HARDENING on a disposable Anchor (Grok's 13, the integrated ones) ══════════
+# A real server on a free port with a temp data dir and a campaign folder whose name has a space ("foundation
+# campaign"), driven in a real browser. Never :8777, never a live campaign.
+
+def _reg_rows(server, rows):
+    _add_rows(server.campaign, rows)
+    _refresh_page = None
+
+
+def _open_next(surface):
+    tile = surface.locator('[data-delivmount] .blk.next')
+    if 'folded' in (tile.get_attribute('class') or ''):
+        tile.locator('> .who').click()
+    return tile
+
+
+def test_hardening_1_jitter_a_skill_row_holds_still_and_its_icon_loads(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    (server.campaign / "ch2.pdf").write_text("%PDF-1.4", encoding="utf-8")
+    icons = []
+    page.on("response", lambda r: icons.append((r.url, r.status)) if "/vendor/brand/" in r.url else None)
+    _add_rows(server.campaign, ["| FOR REVIEW: Chekhov Chapter 2 read | `ch2.pdf` | 2026-10-07 | foundation |\n"])
+    _refresh(page)
+    tile = _open_next(surface)
+    row = tile.locator('.navact a', has_text='Chekhov Chapter 2').first
+    expect(row).to_be_visible()
+    row.evaluate("a => { a.__mark = 'kept'; a.focus(); }")
+    xs = []
+    for _ in range(20):                                       # 20 s here; the starred 2-minute check is on his screen
+        xs.append(row.evaluate("a => Math.round(a.getBoundingClientRect().x)"))
+        page.wait_for_timeout(1000)
+    assert len(set(xs)) == 1, xs
+    assert surface.locator('body').evaluate("() => document.activeElement && document.activeElement.__mark") == "kept"
+    assert all(status == 200 for url, status in icons if "chekhov" in url.lower()), icons
+    with page.context.expect_event("request", predicate=lambda r: "deliverable-file" in r.url and "ch2.pdf" in r.url):
+        _refresh(page)                                         # a click as a poll lands still opens the item
+        row.click()
+
+
+def test_hardening_2_fraction_three_reviews_one_pair_no_history(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    for folder in ("a", "b", "c", "d"):
+        (server.campaign / folder).mkdir()
+    for name in ("a/Alpha.md", "b/Beta.md", "c/Gamma.md", "d/Deck.pptx", "d/Deck.pdf", "a/Old.md"):
+        (server.campaign / name).write_text("# x", encoding="utf-8")
+    _add_rows(server.campaign, [
+        "| FOR REVIEW: Alpha | `a/Alpha.md` | 2026-10-07 | foundation |\n",
+        "| FOR REVIEW: Beta | `b/Beta.md` | 2026-10-07 | foundation |\n",
+        "| FOR REVIEW: Gamma | `c/Gamma.md` | 2026-10-07 | foundation |\n",
+        "| FOR REVIEW: Deck (PDF) | `d/Deck.pdf` | 2026-10-07 | foundation |\n",
+        "| FOR REVIEW: Deck (PowerPoint) | `d/Deck.pptx` | 2026-10-07 | foundation |\n",
+        "| SUPERSEDED: Alpha first draft | `a/Old.md` | 2026-10-01 | foundation |\n"])
+    for attempt in range(2):                                   # and again after a refresh: the same rows
+        _refresh(page)
+        tile = _open_next(surface)
+        labels = tile.locator('.navact-open').all_inner_texts()
+        joined = " | ".join(labels)
+        assert sum(1 for w in ("Alpha", "Beta", "Gamma") if w in joined) == 3, joined
+        assert joined.count("Deck") == 1 and "first draft" not in joined, joined
+
+
+def test_hardening_3_and_4_the_dialogue_link_renders_and_a_deck_without_pdf_is_preparing(cockpit):
+    page, server = cockpit
+    surface = open_surface(page)
+    import deliverables_register as _dr
+    (server.campaign / "x (draft)").mkdir()
+    (server.campaign / "x (draft)" / "Calendar notes.md").write_text(
+        "# Notes\n\n| Week | Topic |\n|---|---|\n| 1 | Intro |\n", encoding="utf-8")
+    (server.campaign / "Talk.pptx").write_text("deck", encoding="utf-8")
+    # a managed campaign refuses the legacy registrar (correctly); the steward's own edit of the register is the
+    # writer here - the baseline first, the rows, then the writers' notification
+    _dr.receipt_baseline(server.campaign)
+    _add_rows(server.campaign, ["| Calendar notes | `x (draft)/Calendar notes.md` | 2026-10-07 | foundation |\n",
+                                "| Talk | `Talk.pptx` | 2026-10-07 | foundation |\n"])
+    _dr.notify_receipt(server.campaign)
+    link = surface.locator('.scroll a', has_text='Calendar notes').last
+    expect(link).to_be_visible(timeout=15000)                  # the engine put it in the dialogue - no model words
+    href = link.get_attribute('href')
+    assert "render=1" in href
+    reader = page.context.new_page()
+    reader.goto(server.origin + href if href.startswith("/") else href)
+    expect(reader.locator("table td").first).to_have_text("1")
+    reader.close()
+    expect(surface.locator('.scroll', has_text='preparing a reading copy: Talk')).to_be_visible(timeout=15000)
+    _refresh(page)
+    deliv = surface.locator('[data-delivmount] .blk.deliv')
+    expect(deliv.locator('.preparing', has_text='Talk')).to_have_count(1)   # the tile says preparing (no Open link)
+    expect(deliv.locator('a', has_text='Talk')).to_have_count(0)
+
+
+def test_hardening_11_a_restart_starts_nothing_by_itself(campaign_server):
+    import json as _j
+    import anchor_gui, job_runner, threading as _th
+    from steward_cockpit import steward_routes as _sr
+    camp = campaign_server.campaign
+    roadmap = _j.loads((camp / "roadmap.json").read_text(encoding="utf-8"))
+    before_files = sorted(p.name for p in camp.rglob("*") if p.is_file())
+    pending = [a for a in sc.read_deliverables(str(camp))["acts"] if a["act"] == "Review"]
+    server = anchor_gui.make_server("127.0.0.1", 0)              # a second boot of the same disposable data
+    worker = _th.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        __import__("time").sleep(3)
+        assert not [r for r in job_runner.list_records() if r.get("status") == job_runner.STATUS_RUNNING]
+        assert not (camp / ".ecgberht" / "code-jobs.json").exists()
+        assert not any(getattr(e, "busy", False) for e in _sr.ENGINES.values())
+        assert [a for a in sc.read_deliverables(str(camp))["acts"] if a["act"] == "Review"] == pending
+        assert _j.loads((camp / "roadmap.json").read_text(encoding="utf-8")) == roadmap
+        assert sorted(p.name for p in camp.rglob("*") if p.is_file()) == before_files
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_hardening_12_the_served_status_says_who_and_when_never_unavailable(cockpit):
+    import json as _j
+    from urllib.parse import quote
+    page, server = cockpit
+    open_surface(page)
+    url = "%s/api/steward/status?pid=%s&dir=%s" % (server.origin, quote(server.project_id, safe=""),
+                                                    quote(server.campaign.name, safe=""))
+    st = page.evaluate("u => fetch(u).then(r => r.json())", url)
+    assert st.get("who") and "Unavailable" not in st.get("eta", "") and "no current estimate" not in st.get("eta", "")
+    facts = {f["label"]: f["value"] for f in (st.get("compact") or {}).get("facts") or []}
+    assert "/" not in facts.get("Status", "")                  # no "n/m done" step count on the current-task line
+
+
+def test_hardening_13_the_patch_sends_nothing():
+    import subprocess as _s
+    diff = _s.run(["git", "-C", str(_P(__file__).resolve().parents[1]), "diff", "a3468d6", "HEAD", "--", "*.py", "*.mjs", "*.js"],
+                  capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    added = "\n".join(l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
+    for word in ("smtplib", "sendmail", "send_mail", "gmail", "outlook", "requests.post", "urlopen(", "fetch('https", 'fetch("https'):
+        assert word not in added, word
+
+
+# ---------- item 3 round 2 + items 4-6 round 1 ----------
+
+def test_an_ignored_output_a_check_makes_keeps_the_worktree(tmp_path, monkeypatch):
+    def with_gitignore(root):
+        r = _git_repo_orig(root)
+        (r / ".gitignore").write_text("*.pdf\n", encoding="utf-8")
+        _sp.run(["git", "-C", str(r), "add", ".gitignore"], check=True)
+        _sp.run(["git", "-C", str(r), "commit", "-q", "-m", "ignore pdfs"], check=True)
+        return r
+    monkeypatch.setitem(globals(), "_git_repo_orig", _git_repo)
+    monkeypatch.setitem(globals(), "_git_repo", with_gitignore)
+    repo, job = _job(tmp_path, monkeypatch, check='python -c "open(' + "'report.pdf','w'" + ').write(' + "'x'" + ')"')
+    assert job["landed"] is False and "report.pdf (ignored by git)" in job["land_note"]
+    assert (_P(job["kept_worktree"]) / "report.pdf").is_file()
+
+
+def test_a_write_into_the_served_tree_during_the_job_blocks_landing(tmp_path, monkeypatch):
+    class Sneaky(_Coder):
+        def wake(self, fresh=False, seed=None):
+            repo = _P(self.code_job["repo"])
+            (repo / "live.py").write_text("changed behind the gate\n", encoding="utf-8")   # e.g. a shell write
+            return super().wake(fresh, seed)
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Sneaky(wt))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir))[out["job"]]
+        if job["status"] in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert job["landed"] is False and "live.py" in job["land_note"] and job["served_tree_changed"] == ["live.py"]
+
+
+def test_a_kept_pdf_is_copied_and_linked_in_the_dialogue(tmp_path, monkeypatch):
+    from steward_cockpit.conversation_history import read_history_document
+    monkeypatch.delenv("STEWARD_COCKPIT_FAKE", raising=False)
+    monkeypatch.setattr(dr, "project_and_rel", lambda folder: ("p1", "steward"))
+    job = {"id": "j9", "kept_worktree": str(tmp_path / "wt"), "files": ["out/report.pdf", "app.py"]}
+    (tmp_path / "wt" / "out").mkdir(parents=True)
+    (tmp_path / "wt" / "out" / "report.pdf").write_text("%PDF", encoding="utf-8")
+    (tmp_path / "wt" / "app.py").write_text("x", encoding="utf-8")
+    cdir = tmp_path / "steward"
+    cdir.mkdir()
+    assert code_jobs.announce_kept(str(cdir), job) == ["report.pdf"]
+    turns = read_history_document(str(cdir))["turns"]
+    assert any("kept from code job j9 (not landed): [report.pdf](/api/steward/deliverable-file?" in t["text"] for t in turns)
+    assert (cdir / "code-job-outputs" / "j9" / "out" / "report.pdf").is_file()
+
+
+def test_html_content_is_a_document_but_an_app_page_is_not():
+    assert code_jobs.is_document("reports/week3.html") and not code_jobs.is_document("static/app.html")
+    assert not code_jobs.is_document("AGENTS.md") and not code_jobs.is_document("requirements.txt")
+
+
+def test_status_never_treats_a_placeholder_as_a_forecast_or_a_stopped_job_as_running():
+    assert sc.real_forecast("~35m to run end (pace estimate)") and not sc.real_forecast("ETA Unavailable")
+    assert not sc.real_forecast("estimating (no completed wave yet)")
+    job = {"id": "j", "title": "Fix", "status": "running", "native": {"stopped": True}, "started_epoch": None}
+    who, phase, _s, _t, finish = sc.who_is_working("x", {}, [job], None)
+    assert phase == "stopped" and "has stopped" in who and "Unavailable" not in finish
+
+
+def test_skill_history_matches_by_the_script_it_ran():
+    assert sc.skill_identity({"argv": ["node", "C:/dev/trio/gandalf/bin/run.mjs"]}) == "gandalf"
+    assert sc.skill_identity({"argv": ["node", "C:/x/einstein/bin/run.mjs"], "label": "Update guide"}) == "einstein"
+
+
+def test_the_code_rule_rides_in_every_mode(tmp_path):
+    import json as _jj
+    d = tmp_path / "effort"
+    d.mkdir()
+    (d / "roadmap.json").write_text(_jj.dumps({"roadmap_projection": [{"id": "a", "status": "active"}]}), encoding="utf-8")
+    e = steward_engine.Engine(str(d), fake=True)
+    assert e.effort_on() and "for a major coding effort wait for John's approval" in e._contract()
+    assert "Do not invent a validator" in e._contract()
+
+
+def test_a_stale_restart_wait_is_hidden_after_his_message(tmp_path):
+    import json as _j, time as _t
+    c = _campaign(tmp_path, steps=3)
+    stamp = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.gmtime(_t.time() - 3600)) + "+00:00"
+    (c / "strip.json").write_text(_j.dumps({"active_effort": "Calendar - paused for restart", "as_of": stamp,
+                                            "human_wait": "paused for restart - confirm the restart"}), encoding="utf-8")
+    st = sc.compose_status(str(c), {"human_accepted_at": _t.time()})
+    assert "restart" not in (st["plan"]["waiting_on_you"] or "")
+    assert "restart" not in str(st["effort_line"].get("text") or "")

@@ -205,7 +205,7 @@ def _foreman_crucible_hold_for_lane_machinery(request, monkeypatch):
     except OSError:
         return
     if _LANE_MACHINERY.search(source) and "fake_claude" in os.environ.get("ANCHOR_RUNNER_CMD", ""):
-        monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
+        monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "lanes")   # lanes only: an engine command stays refused
 
 
 def pytest_configure(config):

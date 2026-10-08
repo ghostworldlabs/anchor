@@ -205,6 +205,10 @@ _EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full
 _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
 
 CONTRACT = (
+    "CODE (John, 2026-10-07; every mode): any change to an Anchor application file or any program's code goes to "
+    "a code job in its own worktree, never into the served tree; say the plan in a few lines first, and for a major "
+    "coding effort wait for John's approval before starting it. Do not invent a validator, a verify script or a "
+    "Foreman run; Foreman and Crucible are on hold. "
     "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
     "your recommended answer, only when the answer would change what you deliver, only in reply to John's own "
     "request, and before any job or skill starts; never ask in an automatic turn, never re-ask what the record "
@@ -3168,6 +3172,13 @@ class Engine:
                             settings = anchor_settings.get_launch_settings()
                             excluded = set((self.policy_override or {}).get("failed_families") or [])
                             excluded.add(self.cli)
+                            if self.code_job is not None:     # item 3: a code job never falls back to an exhausted family
+                                try:
+                                    from steward_cockpit import code_jobs as _cjx
+                                    _cjx.mark_exhausted(_cjx.CLI_FAMILY.get(str(self.cli).lower(), str(self.cli).lower()))
+                                    excluded |= _cjx.exhausted_families()
+                                except Exception:
+                                    pass
                             target, selection = self._select_available_policy(settings, self.cli, excluded=excluded)
                             selection = _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT)
                             if ev.get("replay_safe") is True and not self._turn_had_tools:
