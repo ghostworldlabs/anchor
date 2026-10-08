@@ -1086,7 +1086,8 @@ def test_hardening_12_the_served_status_says_who_and_when_never_unavailable(cock
 
 def test_hardening_13_the_patch_sends_nothing():
     import subprocess as _s
-    diff = _s.run(["git", "-C", str(_P(__file__).resolve().parents[1]), "diff", "a3468d6", "HEAD", "--", "*.py", "*.mjs", "*.js",
+    diff = _s.run(["git", "-C", str(_P(__file__).resolve().parents[1]), "diff", "a3468d6", "94c7b04", "--",   # that night's patch, as installed 2026-10-08 (later nights add loopback-only probes)
+                    "*.py", "*.mjs", "*.js",
                    ":(exclude)tests/*"],
                   capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     added = "\n".join(l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))

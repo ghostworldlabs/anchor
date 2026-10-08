@@ -18,7 +18,7 @@ def test_the_high_seat_has_a_login_box_and_no_browser_prompt():
     assert "window.prompt(" not in js, "no browser pop-up anywhere on the High Seat"
     dlg = open(os.path.join(ROOT, "static", "steward-dialogue.js"), encoding="utf-8").read()
     assert "function loginBox(o)" in dlg and "function doLogin()" in dlg and "go.addEventListener('click', doLogin)" in dlg, "one login script, the dialogue module's (Grok's read of W2e-3)"
-    assert "loginBox({ receiptKey: 'highseat_receipt' })" in js and "function showLogin(" in js and "function doLogin()" not in js
+    assert "loginBox({ receiptKey: 'highseat_receipt', onLogin:" in js and "function showLogin(" in js and "function doLogin()" not in js
     assert "window.ANCHOR_BOOT.auth_required && !token() && !window.ANCHOR_BOOT.logged_in) showLogin('No login found in this browser at load" in js, "the box opens on load when a token is required and none is held"
     assert "'That token was refused" in dlg and "localStorage.removeItem('anchor_token')" in dlg, "a refused token is said and forgotten"
     cjs = open(os.path.join(ROOT, "static", "campaign-page.js"), encoding="utf-8").read()
