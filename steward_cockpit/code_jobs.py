@@ -380,21 +380,49 @@ def is_app_file(path):
     return False
 
 
+_RECORDS = re.compile(r"(?:^|/)\.ecgberht/|(?:^|/)\.anchor/|(?:^|/)(?:ECGBERHT|DELIVERABLES|STATUS[^/]*)\.md$"
+                      r"|(?:^|/)(?:strip|roadmap)\.json$|(?:^|/)journal/|(?:^|/)code-job-outputs/", re.I)
+
+
+def watched(path):
+    """What the source audit protects (consensus C1): application code and agent-instruction files - never a
+    cockpit's runtime records (its .ecgberht, strip, roadmap, register, journal), which change during every job when
+    the cockpit lives inside the repository."""
+    p = str(path).replace(chr(92), "/")
+    try:
+        import git_safety as _gs
+        if _gs.is_runtime_path(p):
+            return False
+    except Exception:
+        pass
+    if _RECORDS.search(p):
+        return False
+    return is_app_file(p) or p.rsplit("/", 1)[-1].casefold() in INSTRUCTION_FILES
+
+
 def dirty_snapshot(repo):
-    """{path: content hash} of every uncommitted/untracked file in the source repository right now (its own dirt).
-    Compared at finish: a NEW or changed dirty file there means something wrote into the served tree during the job
-    (the one-writer rule keeps stewards out, so it points at the job). None when git cannot say."""
+    """{path: content hash} of the source repository's changed or untracked WATCHED files right now (application code
+    and instruction files; never runtime records). Hashed in one batch. Compared at finish/stop with the commits made
+    since the job began. None when git cannot say."""
     paths = porcelain_paths(repo)
     if paths is None:
         return None
-    snap = {}
+    paths = [p for p in paths if watched(p)]
+    snap, present = {}, []
     for path in paths:
-        full = Path(repo) / path
-        if full.is_file():
-            c, h, _ = _git(repo, "hash-object", "--", path)
-            snap[path] = h if c == 0 else "?"
+        if (Path(repo) / path).is_file():
+            present.append(path)
         else:
             snap[path] = "(gone)"
+    if present:
+        try:
+            r = subprocess.run(["git", "-C", str(repo), "hash-object", "--stdin-paths"], input="\n".join(present) + "\n",
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+            hashes = r.stdout.split() if r.returncode == 0 else []
+        except Exception:
+            hashes = []
+        for i, path in enumerate(present):
+            snap[path] = hashes[i] if i < len(hashes) else "?"
     return snap
 
 
@@ -737,25 +765,47 @@ def _unlanded(wt, manifest):
 
 
 def _served_tree_changes(job):
-    """Dirty files of the source repository that are new or changed since the job started."""
+    """Watched source files new or changed since the job started - uncommitted (the dirty-file comparison, including
+    a file dirty at the start and now clean or gone) or COMMITTED since the job's base (consensus C2), except commits a
+    verified code-job landing recorded."""
     before = job.get("repo_dirt")
     now = dirty_snapshot(job["repo"])
     if before is None:
         return ["(no record of the repository's changes at the start)"]
     if now is None:
         return ["(git could not list the repository's changes)"]
+    before = {p: h for p, h in before.items() if watched(p)}
     changed = {p for p, h in now.items() if before.get(p) != h}
-    for p, h in before.items():                      # dirty at the start, clean or gone now: compare its content
-        if p in now:
-            continue
-        full = Path(job["repo"]) / p
-        cur = "(gone)"
-        if full.is_file():
-            c, out, _ = _git(job["repo"], "hash-object", "--", p)
-            cur = out if c == 0 else "?"
-        if cur != h:
-            changed.add(p)
+    gone = [p for p in before if p not in now]
+    if gone:
+        cur = dirty_snapshot_paths(job["repo"], gone)
+        changed |= {p for p in gone if cur.get(p) != before[p]}
+    base = job.get("base")
+    if base:
+        verified = landed_commits()
+        code, out, _ = _git_raw(job["repo"], "-c", "core.quotepath=false", "log", "--format=%x00%H", "--name-only",
+                                "--no-renames", "%s..HEAD" % base)
+        if code != 0:
+            changed.add("(could not read the commits made during the job)")
+        else:
+            for block in out.split("\x00")[1:]:
+                lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+                if lines and lines[0] not in verified:
+                    changed |= {"%s (committed %s)" % (p, lines[0][:10]) for p in lines[1:] if watched(p)}
     return sorted(changed)
+
+
+def dirty_snapshot_paths(repo, paths):
+    """Current content hashes of specific paths ("(gone)" when absent)."""
+    out = {}
+    for path in paths:
+        full = Path(repo) / path
+        if full.is_file():
+            c, h, _ = _git(repo, "hash-object", "--", path)
+            out[path] = h if c == 0 else "?"
+        else:
+            out[path] = "(gone)"
+    return out
 
 
 def _commit_manifest(wt, job, files):

@@ -1190,7 +1190,7 @@ def test_a_stale_restart_wait_is_hidden_after_his_message(tmp_path):
 def test_a_file_already_dirty_in_the_repo_and_changed_again_is_seen(tmp_path, monkeypatch):
     class Sneaky(_Coder):
         def wake(self, fresh=False, seed=None):
-            (_P(self.code_job["repo"]) / "a.txt").write_text("changed again by the job\n", encoding="utf-8")
+            (_P(self.code_job["repo"]) / "app.py").write_text("changed again by the job\n", encoding="utf-8")
             return super().wake(fresh, seed)
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
     monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
@@ -1198,15 +1198,18 @@ def test_a_file_already_dirty_in_the_repo_and_changed_again_is_seen(tmp_path, mo
     monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
     repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
-    (repo / "a.txt").write_text("his own unstaged edit\n", encoding="utf-8")     # " M a.txt" - a leading space
-    assert code_jobs.porcelain_paths(str(repo)) == ["a.txt"]
+    (repo / "app.py").write_text("v1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "app.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "app"], check=True)
+    (repo / "app.py").write_text("his own unstaged edit\n", encoding="utf-8")   # " M app.py" - a leading space
+    assert code_jobs.porcelain_paths(str(repo)) == ["app.py"]
     out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Sneaky(wt, tool_writes={"b.txt": "new\n"}))
     for _ in range(300):
         job = code_jobs.read_jobs(str(cdir))[out["job"]]
         if job["status"] in ("done", "failed"):
             break
         _time.sleep(0.1)
-    assert job["landed"] is False and job["served_tree_changed"] == ["a.txt"]
+    assert job["landed"] is False and job["served_tree_changed"] == ["app.py"]
 
 
 def test_a_source_write_is_reported_even_when_the_candidate_is_unchanged(tmp_path, monkeypatch):
@@ -1295,10 +1298,13 @@ def test_unbound_next_actions_need_both_stamps_after_the_step_began(tmp_path):
 
 def test_restoring_his_uncommitted_edit_is_seen(tmp_path):
     repo = _git_repo(tmp_path / "repo")
-    (repo / "a.txt").write_text("his uncommitted edit\n", encoding="utf-8")
+    (repo / "app.py").write_text("v1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "app.py"], check=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", "app"], check=True)
+    (repo / "app.py").write_text("his uncommitted edit\n", encoding="utf-8")
     job = {"repo": str(repo), "repo_dirt": code_jobs.dirty_snapshot(str(repo))}
-    _sp.run(["git", "-C", str(repo), "checkout", "--", "a.txt"], check=True)        # a shell restored it
-    assert code_jobs._served_tree_changes(job) == ["a.txt"]
+    _sp.run(["git", "-C", str(repo), "checkout", "--", "app.py"], check=True)       # a shell restored it
+    assert code_jobs._served_tree_changes(job) == ["app.py"]
 
 
 def test_a_stop_audits_the_source_repository(tmp_path, monkeypatch):
@@ -1561,3 +1567,57 @@ def test_checking_out_an_older_commit_is_reported(tmp_path, monkeypatch):
     before = steward_engine._served_code_snapshot()
     _sp.run(["git", "-C", str(repo), "checkout", "-q", old], check=True)            # backwards
     assert steward_engine._served_code_changes(before) == ["app.py"]
+
+
+# ---------- dual review consensus C1 + C2 ----------
+
+def _job_in(tmp_path, monkeypatch, cdir_of, coder_cls=None, coder_kw=None):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo = _git_repo(tmp_path / "repo")
+    cdir = cdir_of(repo)
+    (cdir / ".ecgberht").mkdir(parents=True, exist_ok=True)
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: (coder_cls or _Coder)(wt, **(coder_kw or {})))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir)).get(out["job"]) or {}
+        if job.get("status") in ("done", "failed"):
+            return repo, cdir, job
+        _time.sleep(0.1)
+    raise AssertionError(code_jobs.read_jobs(str(cdir)))
+
+
+def test_a_cockpit_inside_the_repo_still_lands_its_job(tmp_path, monkeypatch):
+    class Heartbeat(_Coder):                         # the cockpit's records change during the job, as they always do
+        def wake(self, fresh=False, seed=None):
+            cdir = _P(self.code_job["cdir"])
+            (cdir / "strip.json").write_text("{}", encoding="utf-8")
+            (cdir / ".ecgberht" / "attention.json").write_text("{}", encoding="utf-8")
+            (_P(self.code_job["repo"]) / "README.md").write_text("John edits a note\n", encoding="utf-8")
+            return super().wake(fresh, seed)
+    repo, cdir, job = _job_in(tmp_path, monkeypatch, lambda r: r / "Setup and Mother Ship", Heartbeat)
+    assert job["landed"] is True, job["land_note"]
+    assert not job.get("served_tree_changed") and (repo / "a.txt").read_text(encoding="utf-8") == "two\n"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "John edits a note\n"      # his bytes kept
+
+
+def test_a_root_cockpit_still_has_its_code_edits_detected(tmp_path, monkeypatch):
+    class Sneaky(_Coder):
+        def wake(self, fresh=False, seed=None):
+            (_P(self.code_job["repo"]) / "live.py").write_text("x\n", encoding="utf-8")
+            return super().wake(fresh, seed)
+    repo, cdir, job = _job_in(tmp_path, monkeypatch, lambda r: r, Sneaky)
+    assert job["landed"] is False and job["served_tree_changed"] == ["live.py"]
+
+
+def test_a_code_commit_made_directly_in_the_source_is_caught(tmp_path, monkeypatch):
+    class Committer(_Coder):
+        def wake(self, fresh=False, seed=None):
+            repo = self.code_job["repo"]
+            (_P(repo) / "live.py").write_text("x\n", encoding="utf-8")
+            _sp.run(["git", "-C", repo, "add", "live.py"], check=True)
+            _sp.run(["git", "-C", repo, "commit", "-q", "-m", "direct"], check=True)
+            return super().wake(fresh, seed)
+    repo, cdir, job = _job_in(tmp_path, monkeypatch, lambda r: r.parent / "steward", Committer)
+    assert job["landed"] is False and any(p.startswith("live.py (committed ") for p in job["served_tree_changed"])
