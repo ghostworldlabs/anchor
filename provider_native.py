@@ -420,11 +420,13 @@ class NativeProviders:
             if not out["isolated"]:
                 out["limit"] = "Requires installed Grok auth status --json, auth login --browser and documented GROK_HOME isolation, with configDirectory and subscription billing attribution. Existing Grok sign-in is retained."
         else:
-            out.update(status_supported=False, execution=False,
-                       limit="Existing Google Ultra uses the agy CLI. agy must expose a passive account/status report and isolated browser enrollment before Setup can verify or add a subscription. No IDE or replacement CLI is required.")
+            # Passive reporting and native execution are separate capabilities.
+            # No account enrollment or inferred authentication/allowance here.
+            out.update(status_supported=False, execution=out["state"] == "available",
+                       limit="Existing Google Ultra uses the agy CLI. Its passive account/status report is unsupported; the retained native account can use its supported model catalog. Isolated browser enrollment remains incomplete.")
         return out
 
-    def observe(self, connection):
+    def observe(self, connection, *, capability=None):
         family, env = connection["family"], account_env(connection)
         if not executable(family):
             raise NativeError("unavailable")
@@ -480,7 +482,9 @@ class NativeProviders:
                     "allowance": {"state": "unsupported", "source": "Account-qualified Claude rate_limit_event", "windows": []},
                     "provider_usage": {"state": "unsupported", "source": "Native CLI", "tokens": None}}
         if family == "grok":
-            cap = self.capabilities(family)
+            # Refresh passes its verified capability; standalone reads discover
+            # before touching the requested account.
+            cap = capability if capability is not None else self.capabilities(family)
             if not cap.get("status_supported"):
                 raise NativeError("unsupported")
             account = grok_status(connection)
@@ -498,7 +502,7 @@ class NativeProviders:
                     "provider_usage": {"state": "unsupported", "source": "agy has no passive usage report", "tokens": None}}
         raise NativeError("unsupported")
 
-    def login(self, connection, cancel, progress):
+    def login(self, connection, cancel, progress, *, capability=None):
         if connection["native_default"] or connection["mode"] != "subscription":
             raise ValueError("Use a separate named subscription; existing login is preserved")
         account_home(connection).mkdir(parents=True, exist_ok=True)
@@ -557,10 +561,10 @@ class NativeProviders:
                 raise NativeError()
             return
         if family == "grok":
-            cap = self.capabilities(family)
+            cap = capability if capability is not None else self.capabilities(family)
             if not cap.get("isolated") or not cap.get("login"):
                 raise NativeError("unsupported")
-            self.observe(connection)
+            self.observe(connection, capability=cap)
             def line_progress(line):
                 for candidate in re.findall(r"https://[^\s<>]+", line):
                     url = safe_auth_url(candidate.rstrip(".,)"), family)

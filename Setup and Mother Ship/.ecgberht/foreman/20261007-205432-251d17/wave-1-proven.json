@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "wave": 1,
+  "changed": [
+    ".foreman-job/foreman-run.log",
+    ".gitignore",
+    "model_policy.py",
+    "provider_native.py",
+    "provider_setup.py"
+  ],
+  "tests": 237,
+  "pass": 237,
+  "at": "2026-10-08T03:49:30.678Z",
+  "note": "auto-reachability-fill"
+}

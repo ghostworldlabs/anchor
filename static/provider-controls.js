@@ -38,12 +38,27 @@
     }
     efforts(); model.onchange=efforts;
   }
+  function canVerifyOnApply(account) {
+    // An empty process cache is an unchecked observation. Selection requests
+    // the existing Apply action's passive verification; it grants no execution.
+    const cap=account.capability || {};
+    if(account.mode!=='subscription' || !cap.installed || account.auth!=='unknown' ||
+       account.test!=='not_tested' || account.observed_at)return false;
+    if(account.family==='gemini')return account.native_default && account.id==='gemini-default' &&
+      (cap.state==='not_checked' || cap.execution===true);
+    return account.family==='grok' && !account.native_default &&
+      (cap.state==='not_checked' || cap.isolated===true && cap.execution===true);
+  }
   function controls(data, prefix, onChange) {
     const family=document.getElementById(prefix+'family'), account=document.getElementById(prefix+'account'), model=document.getElementById(prefix+'model'), effort=document.getElementById(prefix+'effort');
     let draft=JSON.parse(JSON.stringify(data.preferences));
     family.replaceChildren(); Object.keys(labels).forEach(value=>option(family,value,labels[value])); family.value=draft.family || data.default_family;
     function accounts() {
-      const f=family.value; account.replaceChildren(); data.connections.filter(c=>c.family===f).forEach(c=>option(account,c.id,c.name+' · '+(c.mode==='api' ? 'API · execution unready' : c.execution.ready ? 'native subscription' : 'execution unready'),c.mode==='api' || !c.execution.ready));
+      const f=family.value; account.replaceChildren(); data.connections.filter(c=>c.family===f).forEach(c=>{
+        const unchecked=canVerifyOnApply(c);
+        option(account,c.id,c.name+' · '+(c.mode==='api' ? 'API · execution unready' : c.execution.ready ? 'native subscription' : unchecked ? 'native status unchecked; Apply verifies' : 'execution unready'),
+          c.mode==='api' || !c.execution.ready && !unchecked);
+      });
       account.value=draft.accounts[f] || f+'-default'; if(!account.value)account.selectedIndex=0;
       qualities();
     }

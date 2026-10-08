@@ -235,6 +235,9 @@ def counting_native_substrate(patch, commands):
             return 0, "  --effort <level>  Reasoning effort (low, medium, high)\n"
         if tail[:2] == ("debug", "models"):
             return 0, catalog
+        if tail == ("models",):
+            assert argv[0].startswith("agy") and env["ANCHOR_PROVIDER_CONNECTION"] == "gemini-default"
+            return 0, "gemini-frontier-high\tGemini frontier\n"
         return 1, ""
     patch.setattr(native, "run_command", run_command)
     patch.setattr(native, "HiddenProcess", lambda argv, env, **kw: CountingChild(commands, argv, env, **kw))
@@ -253,6 +256,9 @@ def test_repeated_cached_page_load(server, monkeypatch, required_id):
     assert row(cold_snapshot, "chatgpt-default")["auth"] == "signed_in"
     assert row(cold_snapshot, "claude-default")["auth"] == "signed_in"
     assert row(cold_snapshot, "chatgpt-default")["capability"]["isolated"] is True
+    agy = row(cold_snapshot, "gemini-default")
+    assert agy["auth"] == "unknown" and agy["execution"]["ready"]
+    assert agy["catalog"]["selection"] == {"model": "gemini-frontier", "effort": "high"}
     breakdown = {}
     for tail in commands:
         # Display refresh stays passive, including the existing Google Ultra
@@ -262,8 +268,8 @@ def test_repeated_cached_page_load(server, monkeypatch, required_id):
         breakdown[key] = breakdown.get(key, 0) + 1
     assert breakdown == {"--version": 4, "app-server --help": 1, "app-server generate-json-schema --out": 1,
                          "app-server --listen stdio://": 2, "auth login --help": 1, "auth status": 1,
-                         "--help": 2, "debug models": 1, "debug models --bundled": 1}, breakdown
-    assert len(commands) == 14
+                         "--help": 2, "debug models": 1, "debug models --bundled": 1, "models": 1}, breakdown
+    assert len(commands) == 15
     measured(f"[{required_id}] cold ?refresh=1 with four native CLIs installed issued {len(commands)} hidden native "
              f"commands on the request thread: {breakdown}")
 

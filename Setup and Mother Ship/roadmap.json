@@ -1,7 +1,7 @@
 {
   "schema": "ecgberht-roadmap-v0",
   "project_id": null,
-  "as_of": "2026-10-07",
+  "as_of": "2026-10-08",
   "roadmap_events": [
     {
       "at": "2026-10-04T14:54:54.041Z",
@@ -1602,6 +1602,34 @@
       },
       "seq": 100,
       "at": "2026-10-07"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused reproductions and provider/account/first-launch/status regressions; report real-flow proof and missing prerequisites. No activation or slice close."
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Engine reports the four-hour reversible decision window elapsed for source turn chatgpt:01a11287-5787-7532-af96-84f668e596cb:10:54; no explicit human acceptance inferred."
+      },
+      "seq": 101,
+      "at": "2026-10-08"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close."
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Job 20261007-205432-251d17 clean landing; record checked code separately from running-client delivery."
+      },
+      "seq": 102,
+      "at": "2026-10-08"
     }
   ],
   "roadmap_projection": [
@@ -1635,8 +1663,8 @@
       "id": "gwl-access",
       "name": "Connect named provider accounts; Google Ultra uses agy",
       "status": "active",
-      "done_when": "Follow proposed plan v2 Refinement 3: resolve seven retained findings, verify named-account enrollment and execution, preserve existing sessions; wait for John before further implementation.",
-      "waiting_on": "Approve bounded resolution and testing plan v2 Refinement 3 before implementation.",
+      "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close.",
+      "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",
       "gate": null,

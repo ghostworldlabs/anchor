@@ -616,6 +616,7 @@ def read_map(campaign_dir: str):
         "refinement": refinement,
         "dir": str(root),
         "name": root.name,
+        "stamp": map_stamp(campaign_dir),
         "goal": goal,
         "goal_brief": _first_sentence(goal),
         "goal_md": goal_md,
@@ -897,7 +898,7 @@ _STATUS_LOG_NAME = re.compile(r"^_?([A-Za-z]+)-status[\w.-]*\.log$", re.I)
 _STATUS_ROW = re.compile(
     r"^(Effort|Doing|Status|Tests|Blocker|Procs|Journal|ETA|To do)\s{2,}(.*)$")
 _STATUS_HEAD = re.compile(
-    r"\[(\d\d:\d\d)\]\s+(.+?)\s+\u00b7\s+(t=0|final|t\+\d+[hm]\d*m?)\s*$")
+    r"\[(\d\d:\d\d)\]\s+(.+?)(?:\s+\u00b7\s+(t=0|final|t\+\d+[hm]\d*m?))?\s*$")
 _SKILL_LABELS = {"foreman": "Foreman build", "crucible": "Crucible plan",
                  "gandalf": "Gandalf review", "researchprime": "researchPrime",
                  "jumper": "Jumper", "ramanujan": "Ramanujan",
@@ -994,7 +995,7 @@ def parse_status_table(text):
                     h = _STATUS_HEAD.search(lines[j])
                     if h:
                         head = {"at": h.group(1), "title": h.group(2).strip(),
-                                "tick": h.group(3)}
+                                "tick": h.group(3) or ""}
                         break
                 break
         i -= 1
@@ -1427,21 +1428,29 @@ def _code_job_native(record, now):
     except (OSError, TypeError, ValueError, RuntimeError):
         return out
 
-    def read(name):
+    oversized = set()
+
+    def read(name, mode="tail", limit=20000):
         try:
             path = (root / name).resolve()
             path.relative_to(root)
-            mt = path.stat().st_mtime
+            stat = path.stat()
+            mt = stat.st_mtime
             if mt > now + 60 or (record.get("started_epoch") and mt < record["started_epoch"] - 5):
                 return "", None
             with path.open("rb") as stream:
-                stream.seek(max(0, path.stat().st_size - 20000))
-                return stream.read(20000).decode("utf-8", errors="replace"), mt
+                if mode == "tail":
+                    stream.seek(max(0, stat.st_size - limit))
+                data = stream.read(limit + (mode == "complete"))
+                if mode == "complete" and len(data) > limit:
+                    oversized.add(name)
+                    return "", None
+                return data.decode("utf-8", errors="replace"), mt
         except (OSError, TypeError, ValueError, RuntimeError):
             return "", None
 
-    def obj(name):
-        text, mt = read(name)
+    def obj(name, limit=20000):
+        text, mt = read(name, mode="complete", limit=limit)
         try:
             value = json.loads(text)
             return (value, mt) if isinstance(value, dict) else ({}, None)
@@ -1450,19 +1459,30 @@ def _code_job_native(record, now):
 
     # The job writer puts its exact id in this plan; inherited repository logs
     # and a different effort's worktree are not this job's evidence.
-    plan, _ = read(".foreman-job/IMPLEMENTATION-PLAN.md")
+    plan, _ = read(".foreman-job/IMPLEMENTATION-PLAN.md", mode="head", limit=4096)
     if not plan.startswith("# Code job " + identity + " - "):
         return out
-    checkpoint, cp_at = obj("foreman-checkpoint.json")
+    checkpoint, cp_at = obj("foreman-checkpoint.json", limit=4 * 1024 * 1024)
+    if "foreman-checkpoint.json" in oversized:
+        out["unavailable"] = "native checkpoint exceeds safe read limit"
+        out["phase"] = "unavailable"
+        return out
     if checkpoint:
         try:
-            bound = Path(checkpoint.get("plan_path", "")).resolve() == (root / ".foreman-job/IMPLEMENTATION-PLAN.md").resolve()
+            plan_path = checkpoint.get("plan_path")
+            bound_path = Path(plan_path) if isinstance(plan_path, str) and plan_path else None
+            if bound_path is not None and not bound_path.is_absolute():
+                bound_path = root / bound_path
+            bound = bound_path is not None and bound_path.resolve() == (root / ".foreman-job/IMPLEMENTATION-PLAN.md").resolve()
         except (OSError, TypeError, ValueError, RuntimeError):
             bound = False
         if not bound:
             checkpoint, cp_at = {}, None
-    if str(checkpoint.get("status", "")).lower() in ("done", "failed", "halt", "paused", "stopped", "cancelled", "budget-stop"):
-        out["stopped"] = True
+        else:
+            out.update(worker="foreman", source="foreman-checkpoint.json")
+    checkpoint_state = str(checkpoint.get("status", "")).lower()
+    if checkpoint_state in ("done", "failed", "halt", "halted", "paused", "stopped", "cancelled", "budget-stop", "budget_stopped"):
+        out.update(stopped=True, phase=checkpoint_state)
         return out
     phases = ("execute", "gate", "review", "fix", "landing", "finishing", "queued")
     candidates = []
@@ -1489,7 +1509,7 @@ def _code_job_native(record, now):
     hb_at = _job_epoch(heartbeat.get("ts"))
     if heartbeat.get("alive") is False and hb_at and hb_at <= now + 60:
         if not record.get("started_epoch") or hb_at >= record["started_epoch"]:
-            out["stopped"] = True
+            out.update(stopped=True, phase="stopped")
             return out
     if heartbeat.get("alive") is True and hb_at and hb_at <= now + 60:
         if not record.get("started_epoch") or hb_at >= record["started_epoch"]:
@@ -1497,10 +1517,12 @@ def _code_job_native(record, now):
     text, log_at = read("_foreman-status.log")
     parsed = parse_status_table(text)
     title = str(((parsed or {}).get("head") or {}).get("title") or "")
-    if not title.endswith(" \u00b7 " + identity):
+    if title != "Foreman build \u00b7 " + identity:
         parsed = None
+    if parsed:
+        out.update(worker="foreman", source="_foreman-status.log")
     if parsed and (parsed.get("head") or {}).get("tick") == "final":
-        out["stopped"] = True
+        out.update(stopped=True, phase="stopped")
         return out
     # Native pace is a finish forecast. The runner's timeout/cap is never read.
     eta = (parsed or {}).get("rows", {}).get("eta", "")
@@ -1512,11 +1534,21 @@ def _code_job_native(record, now):
         clock = head.get("at")
         tick = re.fullmatch(r"t\+(?:(\d+)h(?:(\d+)m)?|(\d+)m)", head.get("tick", ""))
         reference = log_at
-        if tick and record.get("started_epoch"):
+        run_started = _job_epoch(heartbeat.get("startedAt")) or record.get("started_epoch")
+        elapsed = re.search(r"\belapsed\s+(\d+)m\b", parsed["rows"].get("status", ""))
+        if elapsed and run_started and 0 <= int(elapsed[1]) <= 24 * 60:
+            # Native tables report elapsed run time without a t+ header tag.
+            # This also fixes their date across midnight and later waiting lines.
+            reference = run_started + int(elapsed[1]) * 60
+        elif tick and record.get("started_epoch"):
             reference = record["started_epoch"] + (int(tick[1] or 0) * 60 + int(tick[2] or tick[3] or 0)) * 60
         table_at = _job_epoch(time.strftime("%Y-%m-%d", time.localtime(reference)) + "T" + str(clock) + ":00")
-        if table_at and table_at > log_at + 60:
+        if table_at and table_at > reference + 12 * 3600:
             table_at = _job_epoch(time.strftime("%Y-%m-%d", time.localtime(reference - 86400)) + "T" + str(clock) + ":00")
+        elif table_at and table_at < reference - 12 * 3600:
+            table_at = _job_epoch(time.strftime("%Y-%m-%d", time.localtime(reference + 86400)) + "T" + str(clock) + ":00")
+        if table_at and table_at > log_at + 60:
+            table_at = None
         if table_at and (not record.get("started_epoch") or table_at >= record["started_epoch"] - 60):
             doing = parsed["rows"].get("doing", "")
             log_phase = next((p for p in phases if re.search(r"\b" + p + r"\b", doing)), out["phase"])
@@ -1530,8 +1562,9 @@ def _code_job_eta(job, now=None):
     """One current-job forecast for every existing status consumer."""
     now = time.time() if now is None else now
     observed = job["native"]
-    if observed["stopped"]:
-        return "", {"state": "unavailable", "source": "code_job", "job_id": job["id"]}
+    if observed["stopped"] or observed.get("unavailable"):
+        return "", {"state": "unavailable", "source": "code_job", "job_id": job["id"],
+                    "qualification": observed.get("unavailable", "")}
     phase = observed["phase"]
     elapsed = job.get("minutes")
     elapsed_text = "%dm elapsed" % elapsed if elapsed is not None else "elapsed unknown"
@@ -1959,12 +1992,21 @@ def compose_status(campaign_dir: str, engine_state=None):
     waiting_restart = landed_not_live(campaign_dir)
     # 2026-10-05: a running code job is OBSERVED work - it leads, ahead of the steward's own note
     for j in jobs[:2]:
-        now_lines.append("code job %s — %s%s" % (j["status"], j["title"], (" (%d min)" % j["minutes"]) if j["minutes"] is not None else ""))
+        worker = str(j.get("worker") or j["native"].get("worker") or "coder")
+        skill = "Foreman" if worker.lower() == "foreman" else worker
+        phase = j["native"]["phase"]
+        now_lines.append("%s %s — %s%s" % (
+            skill, phase, j["title"], (" (%d min)" % j["minutes"]) if j["minutes"] is not None else ""))
     for w in waiting_restart[:2]:
         now_lines.append("landed, waits for a restart \u2014 %s" % w)
     if jobs:
-        running = {"kind": "code_job", "label": now_lines[0], "skill": "coder", "source": ".ecgberht/code-jobs.json",
-                   "age": ("%d min" % jobs[0]["minutes"]) if jobs[0]["minutes"] is not None else ""}
+        job = jobs[0]
+        worker = str(job.get("worker") or job["native"].get("worker") or "coder")
+        running = {"kind": "code_job", "label": now_lines[0],
+                   "skill": "Foreman" if worker.lower() == "foreman" else worker,
+                   "worker": worker, "job_id": job["id"], "phase": job["native"]["phase"],
+                   "source": ".ecgberht/code-jobs.json", "native_source": job["native"].get("source", ""),
+                   "age": ("%d min" % job["minutes"]) if job["minutes"] is not None else ""}
     # THE LOOK-THROUGH: the commissioned skill is what is happening;
     # "steward working" is the whole story only when nothing else runs.
     if look and not look["final"] and not jobs:
@@ -2133,7 +2175,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     if jobs:
         eta, eta_source = _code_job_eta(jobs[0])
         if not eta:
-            eta = "Unavailable - the native job has stopped"
+            eta = "Unavailable - " + (eta_source.get("qualification") or "the native job has stopped")
             eta_source["value"] = eta
     elif live_skill and look.get("eta"):
         eta = estimate_eta(slice_, look, started)

@@ -283,6 +283,12 @@ def main(argv=None):
     ap.add_argument("--url", default="", help="Anchor's address (else local Anchor, else the saved mother ship address)")
     ap.add_argument("--setup", action="store_true", help="ask for the address again")
     args = ap.parse_args(argv)
+    import connect
+    if args.url:
+        try:
+            args.url = connect.choose(DATA, args.url)
+        except ValueError as exc:
+            ap.error(str(exc))
 
     mutex = kernel32.CreateMutexW(None, False, "Local\\" + APP_ID + ("." + TEST if TEST else ""))
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
@@ -292,14 +298,13 @@ def main(argv=None):
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     ensure_shortcut()
 
-    import connect
     import webview                                      # the venv's; imported after the single-instance check
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # ms-word:, mailto:, other sites -> Windows
     PROFILE.mkdir(parents=True, exist_ok=True)
 
     host = HostApi()
-    address = "" if args.setup else connect.choose(DATA, args.url.rstrip("/").replace(connect.APP_PATH, ""))
+    address = "" if args.setup else connect.choose(DATA, args.url)
     host._address = address or connect.load_address(DATA)
     if not address:
         host._html = connect.setup_page(host._address) if host._address else connect.first_launch_page()

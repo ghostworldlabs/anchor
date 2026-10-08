@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Provider code landed; seven concerns remain. Plan v2 Refinement 3 awaits John before repair.
+Provider route repairs landed; 237 tests and clean independent review. Activation and laptop account proof remain.
 
 ## Why next
 
-John stopped the unrelated Anchor job and requires a visible plan before implementing.
+The two reproduced entry-point failures are fixed; the running Anchor has not loaded this build.
 
 ## Human wait
 
-Approve proposed provider repair plan v2 Refinement 3.
+
 
 ## Why stakes
 

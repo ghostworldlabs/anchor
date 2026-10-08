@@ -178,3 +178,4 @@ test_tmp*/
 # .foreman-job/wave1-evidence/EVIDENCE.json). The blanket *.pdf rule above would
 # silently drop it from the committed wave; the gate verifies it byte-for-byte.
 !.foreman-job/wave1-evidence/*.pdf
+/.foreman-job/foreman-run.log

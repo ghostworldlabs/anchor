@@ -52,7 +52,7 @@ def normalize(text):
         port = parts.port
     except ValueError:
         return None, "That address is invalid."
-    if parts.username or parts.password:
+    if parts.username is not None or parts.password is not None:
         return None, "Use the mother ship HTTPS address without embedded credentials."
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None, "That doesn't look like an address. Example only: " + EXAMPLE
@@ -77,7 +77,10 @@ def reachable(address, timeout=5.0):
 def choose(data_dir, override=""):
     """The address to open now: an explicit one, local Anchor, else the saved one ('' = ask for an address)."""
     if override:
-        return override
+        address, error = normalize(override)
+        if error:
+            raise ValueError("Invalid --url: " + error)
+        return address
     # First launch must choose this host or its existing mother ship before
     # provider work. A returning client must never drift to a local service.
     return load_address(data_dir)
