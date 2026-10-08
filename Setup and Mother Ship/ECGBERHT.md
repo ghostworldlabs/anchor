@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.
+Provider route repairs landed; 237 tests and clean independent review. Activation and laptop account proof remain.
 
 ## Why next
 
-The landed worker gate did not exercise these real entry points; both new production regressions fail.
+The two reproduced entry-point failures are fixed; the running Anchor has not loaded this build.
 
 ## Human wait
 

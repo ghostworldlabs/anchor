@@ -656,11 +656,26 @@
   "base": "ba89581da3acd2a43aa29807121447fa6c39e970",
   "brief": "# Finish two reproduced account-route blockers under the same provider repair plan\nPlan v2 Refinement 3 remains the scope. Latest recovery landed with 235 worker tests passing, but two independent responses still report the same Grok sign-in blocker under different names and one reports a Gemini warm-cache account boundary. Exact retained reviews: external sibling actual-route-review.json. Controller GO is not a disposition.\nThe steward has ALREADY written tests/test_provider_final_account_routes.py and run it against the landed production code: BOTH tests fail for the actual findings. Do not remove, weaken or replace these tests. One goes through authenticated HTTP POST /api/provider-setup/login, the real asynchronous start_login worker, isolated native account status and browser enrollment, while a second capability probe deterministically fails. Fix capability reuse across the WHOLE service-to-native route, retain the signed-in/expired/in-use safeguards and account-home verification, and complete enrollment/status without a redundant discovery. The other seeds the real Gemini capability cache via an unqualified resolve under inherited chatgpt-default, then selects gemini-default through production resolve_quality WITHOUT clearing the cache or forcing a refresh. Prove selected-account discovery instead of using inherited-account cache content, preserve the ambient environment, credentials and full model strength. Repair the actual model-policy cache boundary and any necessary selected-account callers; do not treat fresh-cache-only tests as proof.\nUse current MAIN; the earlier inner observe fix and account-qualified discovery are already landed. Do not reapply saved patches, rebuild features, repeat campaign history, add planning/reports or modify Foundry engines. Own worktree only. Expected changes are the two service/native interfaces and model_policy account-cache boundary; broader new requirements return to steward. No real login, secret reads, paid probes, installation/restart/reload, unrelated Next steps repair, global preferences or campaign placement. Preserve tracked root Foreman config and historical execution logs; any runner collateral must be reported separately. Complete required regressions and independent review, disposition original serious findings by actual mechanism regardless of labels. No slice close. Provisional duration 30-60 minutes after launch.",
   "check": "python -m pytest -v tests/test_provider_final_account_routes.py tests/test_provider_review_followup.py tests/test_provider_account_refinement.py tests/test_provider_setup.py tests/test_provider_setup_browser.py tests/test_provider_setup_rigor.py tests/test_provider_setup_hardening.py tests/test_setup_first_launch_browser.py tests/test_status_code_job_eta.py tests/test_status_honest_2026_10_05.py tests/test_status_lookthrough_2026_09_04.py",
-  "status": "finishing",
+  "status": "done",
   "started": "2026-10-07 20:54:35",
   "steward_dir": "C:\\dev\\Anchor\\Setup and Mother Ship",
   "steward": "Aladdin",
   "worker": "foreman",
-  "finishing_at": 1791431370.9139235
+  "finishing_at": 1791431370.9139235,
+  "finished": "2026-10-07 21:53:12",
+  "summary": "Foreman DONE: wave 1 GO",
+  "error": "",
+  "check_ok": true,
+  "check_output": "ge-load] cold ?refresh=1 with four native CLIs installed issued 15 hidden native commands on the request thread: {'--version': 4, 'auth login --help': 1, 'auth status': 1, 'app-server --help': 1, '--help': 2, 'models': 1, 'app-server generate-json-schema --out': 1, 'app-server --listen stdio://': 2, 'debug models': 1, 'debug models --bundled': 1}\n    measured(f\"[{required_id}] cold ?refresh=1 with four native CLIs installed issued {len(commands)} hidden native \"\n\ntests/test_provider_setup_rigor.py::test_repeated_cached_page_load[repeated-cached-page-load]\n  C:\\Users\\john\\AppData\\Local\\anchor-code-jobs\\20261007-205432-251d17\\tests\\test_provider_setup_rigor.py:340: MeasurementRecord: [repeated-cached-page-load] 3000 ledger files: loads 1-5 opened [3000, 0, 0, 0, 0] files (page, api seconds: [(0.0, 4.09), (0.0, 0.02), (0.0, 0.02), (0.02, 0.02), (0.02, 0.02)]); a per-call full read (usage_capacity._seen) opened [3000, 3000] per call\n    measured(f\"[{required_id}] {count} ledger files: loads 1-5 opened {[t[2] for t in timings]} files \"\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================= 237 passed, 2 warnings in 104.29s (0:01:44) =================\n",
+  "files": [
+   ".gitignore",
+   "foreman.config.json",
+   "model_policy.py",
+   "provider_native.py",
+   "provider_setup.py"
+  ],
+  "landed": true,
+  "land_note": "landed on c:\\dev\\anchor (5 files; snapshot refs/anchor-snapshots/20261007-215308-ebd339)",
+  "landed_commit": "ed14dc1b0dcdee274174ebd751a6759d23f51395"
  }
 }

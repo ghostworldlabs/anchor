@@ -1,1 +1,1 @@
-{"state": "working", "reason": "Launching Foreman to fix the two reproduced provider-route blockers with mandatory failing tests."}
+{"state": "quiet", "reason": "Provider build has ended; its result is ready for steward inspection."}

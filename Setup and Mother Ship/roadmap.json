@@ -1616,6 +1616,20 @@
       },
       "seq": 101,
       "at": "2026-10-08"
+    },
+    {
+      "kind": "step_set",
+      "step_id": "gwl-access",
+      "fields": {
+        "waiting_on": null,
+        "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close."
+      },
+      "receipt": {
+        "who": "Aladdin",
+        "why": "Job 20261007-205432-251d17 clean landing; record checked code separately from running-client delivery."
+      },
+      "seq": 102,
+      "at": "2026-10-08"
     }
   ],
   "roadmap_projection": [
@@ -1649,7 +1663,7 @@
       "id": "gwl-access",
       "name": "Connect named provider accounts; Google Ultra uses agy",
       "status": "active",
-      "done_when": "Implement the bounded repair in plan v2 Refinement 3 under the reversible silence rule: disposition seven serious findings, pass focused reproductions and provider/account/first-launch/status regressions; report real-flow proof and missing prerequisites. No activation or slice close.",
+      "done_when": "Plan v2 Refinement 3 repair landed in ed14dc1: 237 tests passed including both production-route reproductions; both final reviewers returned no findings. Activation and existing laptop Setup/Cave proof remain; real enrollment, allowance, API execution and installation prerequisites are separately unproved. No activation, acceptance or slice close.",
       "waiting_on": null,
       "commissioned_as": null,
       "part": "integrate",

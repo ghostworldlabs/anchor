@@ -37,3 +37,12 @@ No tests, syntax-check processes or independent reviewer were run by this execut
 ## Retained findings after follow-up landing - October 7
 
 Follow-up 003ee45 landed with 235 worker tests passing, but two substantive final reviewers retain one shared Grok HTTP-sign-in blocker and one Gemini warm-account-cache concern. The steward reproduced both through real production routes; tests/test_provider_final_account_routes.py is a mandatory failing gate before repair. The direct native-login regression was insufficient. Not activated; real subscriptions/API execution/installer delivery remain independently unproved.
+
+
+## Final route repair landing - October 7
+
+Job 20261007-205432-251d17 landed ed14dc1b0dcdee274174ebd751a6759d23f51395 at 21:53 Mountain, snapshot refs/anchor-snapshots/20261007-215308-ebd339. Expanded gate: 237 passed, two measurement warnings, 104.29 seconds. The previously failing authenticated HTTP Grok enrollment and warm Gemini account-cache regressions now pass. Both reviewers completed in both final review rounds; merged and original finding lists are empty. One capability observation now travels through service refresh, asynchronous sign-in and native login; model catalog cache identity includes the selected account marker.
+
+The temporary coding/review settings were restored to Claude/Gemini revision49; root runner configuration was restored. No code job owns Anchor. No additional rebuild or repeated full gate is needed for these settled findings.
+
+This is a checked source landing, not activation or human acceptance. Running Anchor and John's existing laptop window have not been verified with these bytes. Provider enrollment used disposable homes and fake provider responses; real isolated Gemini/Grok enrollment and allowance, explicit API execution and complete executable installation packaging remain unproved as described above. No real login, paid request, restart, executable deployment or slice close was performed. Follow the existing plan's authorized activation boundary before checking Setup and Cave in the persistent client.
