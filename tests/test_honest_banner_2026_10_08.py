@@ -480,3 +480,12 @@ def test_without_its_lock_a_run_never_publishes_the_report(tmp_path, monkeypatch
     hc._publish(hc.Report(), path)
     assert path.read_text(encoding="utf-8") == "Status: ISSUES FOUND\n", "the report another run holds is untouched"
     assert list(tmp_path.glob("unpublished-*.md"))
+
+
+def test_an_issue_path_ends_where_the_sentence_does(tmp_path, monkeypatch):
+    """Caught by the end-to-end proof: 'GET /api/status.' was asked as /api/status. (a 404) and the banner stayed."""
+    import anchor_healthcheck as hc
+    monkeypatch.setattr(hc, "REPORTS_DIR", tmp_path)
+    (tmp_path / "2026-10-07.md").write_text("Status: ISSUES FOUND\n\n## Issues\n- [svc] GET /api/status. answered 500\n"
+                                            "- [x] failures: GET /api/status: HTTP Error 500, GET /high-seat?x=1.\n", encoding="utf-8")
+    assert hc._previous_issue_paths() == ["/api/status", "/high-seat?x=1"]

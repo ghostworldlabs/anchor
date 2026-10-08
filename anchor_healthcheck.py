@@ -6202,7 +6202,9 @@ def _previous_issue_paths():
         return []
     m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)     # the issues only, every target
     issues = m.group(1) if m else ""
-    return sorted(set(p for p in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", issues) if not p.startswith("/api/rnd/term")))
+    # a path ends where the sentence does: "GET /api/status." is /api/status (the end-to-end proof caught the full stop)
+    found = (p.rstrip(".,;:!?)") for p in re.findall(r"GET (/[A-Za-z0-9_./?=&%-]*)", issues))
+    return sorted(set(p for p in found if p and p != "/" * len(p) and not p.startswith("/api/rnd/term")) | ({"/"} if re.search(r"GET /(?:[\s.,;:]|$)", issues) else set()))
 
 
 def check_running_service(report: Report):
