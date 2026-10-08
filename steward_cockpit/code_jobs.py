@@ -65,6 +65,26 @@ def _git(repo, *args, timeout=120):
     return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
 
 
+def _git_raw(repo, *args, timeout=600):
+    """git with its stdout exactly as written (no strip): porcelain status columns start with a space."""
+    try:
+        r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout)
+    except Exception as e:
+        return 1, "", str(e)
+    return r.returncode, r.stdout or "", (r.stderr or "").strip()
+
+
+def porcelain_paths(repo):
+    """Every changed or untracked path of ``repo`` (no renames), parsed from NUL-delimited porcelain v1; None on
+    failure."""
+    code, out, _ = _git_raw(repo, "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                            "--no-renames")
+    if code != 0:
+        return None
+    return [rec[3:] for rec in out.split("\0") if len(rec) > 3]
+
+
 def _path(cdir):
     return Path(cdir) / JOBS_FILE
 
@@ -325,15 +345,11 @@ def dirty_snapshot(repo):
     """{path: content hash} of every uncommitted/untracked file in the source repository right now (its own dirt).
     Compared at finish: a NEW or changed dirty file there means something wrote into the served tree during the job
     (the one-writer rule keeps stewards out, so it points at the job). None when git cannot say."""
-    code, out, _ = _git(repo, "-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all", "--no-renames",
-                        timeout=600)
-    if code != 0:
+    paths = porcelain_paths(repo)
+    if paths is None:
         return None
     snap = {}
-    for line in out.splitlines():
-        path = line[3:].strip().strip('"')
-        if not path:
-            continue
+    for path in paths:
         full = Path(repo) / path
         if full.is_file():
             c, h, _ = _git(repo, "hash-object", "--", path)
@@ -350,7 +366,7 @@ _BOOKKEEPING = re.compile(r"^(?:\.anchor/|\.ecgberht/|\.foreman-job/|\.foreman/|
 def ignored_outputs(tree):
     """Files git ignores in the worktree that are not the job's own bookkeeping - a coder's or a check's outputs
     (a fresh worktree has none), which removing the worktree would destroy."""
-    code, out, _ = _git(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
+    code, out, _ = _git_raw(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
                         timeout=600)
     if code != 0:
         return ["(git could not list ignored files)"]
@@ -360,8 +376,8 @@ def ignored_outputs(tree):
 def changed_paths(tree, base):
     """Every path that differs from ``base`` in the worktree: committed, staged, unstaged and untracked (ignored
     files excepted). None when git cannot say."""
-    code, out, _ = _git(tree, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", base, timeout=600)
-    code2, untracked, _ = _git(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
+    code, out, _ = _git_raw(tree, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", base, timeout=600)
+    code2, untracked, _ = _git_raw(tree, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
                                timeout=600)
     if code != 0 or code2 != 0:
         return None
@@ -498,6 +514,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         if code != 0:
             return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
         served_dirt = dirty_snapshot(root)
+        if served_dirt is None:
+            return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
         job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
                "repo_dirt": served_dirt,
                "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -643,6 +661,12 @@ def _finish(cdir, job_id, job, result):
                     keep = not (landed and extra.get("verified")) or bool(left)
                     if landed and left and left != ["not landed"]:
                         note += "; work the landing did not carry is kept at %s (%s)" % (wt, ", ".join(left[:6]))
+    served = _served_tree_changes(job)              # on every path: did anything write into the source repository?
+    if served:
+        fields["served_tree_changed"] = served
+        if not fields.get("landed"):
+            note += ("; ALSO: %s changed during the job outside any landing (%s) - check those files"
+                     % (job["repo"], ", ".join(served[:8])))
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), **fields)
     if done is None:
@@ -656,11 +680,10 @@ def _unlanded(wt, manifest):
     """What in the worktree would be LOST if it were removed now: any uncommitted or untracked change (a check that
     wrote a file, an edit nobody committed), and any file the coder wrote that git ignores. [] when nothing."""
     left = []
-    code, out, _ = _git(wt, "-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all", "--no-renames",
-                        timeout=600)
-    if code != 0:
+    paths = porcelain_paths(wt)
+    if paths is None:
         return ["git status failed"]
-    left += [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
+    left += paths
     left += [p + " (ignored by git)" for p in ignored_outputs(wt)]
     return left
 
@@ -669,8 +692,10 @@ def _served_tree_changes(job):
     """Dirty files of the source repository that are new or changed since the job started."""
     before = job.get("repo_dirt")
     now = dirty_snapshot(job["repo"])
-    if before is None or now is None:
-        return [] if before is None else ["(git could not list the repository's changes)"]
+    if before is None:
+        return ["(no record of the repository's changes at the start)"]
+    if now is None:
+        return ["(git could not list the repository's changes)"]
     return sorted(p for p, h in now.items() if before.get(p) != h)
 
 
@@ -736,7 +761,7 @@ def land(job, files):
         if why:
             return False, "not landed (after integration): %s; the work is kept at %s" % (why, wt), fields
         cand = merged
-    code2, names, _ = _git(wt, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", head, cand)
+    code2, names, _ = _git_raw(wt, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", head, cand)
     land_files = [n for n in names.split("\0") if n.strip()]
     if code2 != 0 or not land_files:
         return False, "not landed: nothing changed beyond what %s already has" % repo, fields
@@ -751,18 +776,30 @@ def land(job, files):
         if current.get("status") != "finishing":       # a stop released it while it was being reviewed: no landing
             return False, "not landed: the job was stopped (%s) before placement; the work is kept at %s" % (
                 current.get("stopped_by") or current.get("status") or "unknown", wt), fields
+        left = _unlanded(wt, files)                    # a second check after integration made nothing extra
+        if left:
+            fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
+            return False, ("not landed: changes outside the coder's own files appeared before placement (%s); "
+                           "everything is kept at %s" % (", ".join(left[:12]), wt)), fields
+        served_now = _served_tree_changes(job)
+        if served_now:
+            fields["served_tree_changed"] = served_now
+            return False, ("not landed: %s changed during the job outside the landing (%s); the work is kept at %s"
+                           % (repo, ", ".join(served_now[:8]), wt)), fields
         code, now, _ = _git(repo, "rev-parse", "HEAD")
         if code != 0 or now != head:
             return False, "not landed: %s moved during the review; the work is kept at %s - start the landing again" % (
                 repo, wt), fields
         landed, note = _gs.land_locked(repo, cand, land_files, "Code job %s for the steward\n\n%s" % (
             job["id"], job["brief"][:600]), who="code job " + job["id"], expect_head=head)
+        if landed:                                      # recorded before the lock goes: a stop can no longer release it
+            _transition(job.get("steward_dir") or "", job["id"], ("finishing",), placed=True)
     if not landed:
         return False, note + "; the work is kept at %s" % wt, fields
     c, out, _ = _git(repo, "rev-parse", "HEAD")
     fields["landed_commit"] = out.strip() if c == 0 else ""
     # the placed tree is the reviewed one for every path the job touched - additions, edits AND deletions
-    code, diff, _ = _git(repo, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z",
+    code, diff, _ = _git_raw(repo, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z",
                          fields["landed_commit"] or "HEAD", cand, "--", *land_files)
     bad = [n for n in diff.split("\0") if n.strip()] if code == 0 else ["(could not compare)"]
     if bad:
@@ -822,7 +859,7 @@ def _report(cdir, job):
     if job.get("check"):
         lines.append("Check `%s`: %s." % (job["check"], "passed" if job.get("check_ok") else "FAILED") + ((" Output tail: " + job["check_output"][-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
-    if job.get("kept_worktree") and job.get("files") and not job.get("landed"):
+    if job.get("kept_worktree") and (job.get("files") or job.get("unexpected")) and not job.get("landed"):
         links = announce_kept(cdir, job)
         lines.append("Kept (not landed): " + (("readable copies are linked in the dialogue: " + ", ".join(links))
                                                if links else ", ".join(str(Path(job["kept_worktree"]) / f) for f in job["files"][:10])))
@@ -860,7 +897,8 @@ def announce_kept(cdir, job):
         import deliverables_register as _dr
         pid, rel = _dr.project_and_rel(cdir)
         out, links = Path(cdir) / "code-job-outputs" / job["id"], []
-        for f in job.get("files") or []:
+        preserved = list(job.get("files") or []) + [str(u).replace(" (ignored by git)", "") for u in job.get("unexpected") or []]
+        for f in dict.fromkeys(preserved):
             src = Path(job["kept_worktree"]) / f
             if not src.is_file() or not (is_document(f) or os.path.splitext(f)[1].lower() in (".html", ".htm")):
                 continue
@@ -901,6 +939,8 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
         with _gs.repo_lock(job["repo"], wait_s=900, who="stop of code job " + job["id"]) as held:
             if not held:
                 return {"ok": False, "error": "the repository is busy landing; try the stop again in a moment"}
+            if (read_jobs(cdir).get(job["id"]) or {}).get("placed"):
+                return {"ok": False, "error": "it has already landed; its report is on the way"}
             released = _transition(cdir, job["id"], ("finishing",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                                    error="the job's finish never completed", stopped_by=who, kept_worktree=job["worktree"],
                                    land_note="released by %s; the work is kept at %s" % (who, job["worktree"]))

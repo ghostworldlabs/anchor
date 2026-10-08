@@ -1293,6 +1293,12 @@ class Engine:
         if settings.get("provider_preferences", {}).get("family"):
             ladder = [target]  # An explicit account choice never borrows another subscription.
         failed = []
+        if getattr(self, "code_job", None) is not None:   # item 3: a code job never selects an exhausted family
+            try:
+                from steward_cockpit import code_jobs as _cjs
+                excluded = set(excluded) | _cjs.exhausted_families()
+            except Exception:
+                pass
         for family in ladder:
             if family in excluded:
                 continue
@@ -2034,6 +2040,15 @@ class Engine:
         written before it). Clears that display only - never resumes, launches or advances anything; boot never
         calls this."""
         _update_state(self.skey(), {"human_accepted_at": time.time()})
+        if self.general:
+            return
+        try:   # an old "paused for restart" attention flag is history now - cleared, and nothing else is touched
+            from steward_cockpit import steward_campaign as campaign
+            att = self._attention()
+            if att.get("state") in ("needs_you", "blocked") and campaign._RESTART_PAUSE.search(str(att.get("reason") or "")):
+                campaign.write_attention(self.dir, "quiet", "", by="engine")
+        except Exception:
+            pass
 
     def _plan_drift_suffix(self):
         """The PLAN DRIFT line for this campaign dir, or ''. Never raises."""

@@ -1074,7 +1074,7 @@ def status_lookthrough(campaign_dir, now=None):
             "procs": rows.get("procs", ""), "eta": rows.get("eta", ""),
             "todo": rows.get("to_do", ""), "final": head.get("tick") == "final",
             "halt_reason": halt_reason, "limit": limit,
-            "age": _humanize(age), "age_seconds": age, "source": source}
+            "age": _humanize(age), "age_seconds": age, "source": source, "table_at": head.get("at") or ""}
 
 
 def blocker_text(look):
@@ -1788,7 +1788,8 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
     """(who, phase, started_epoch, tests, finish) - John's three lines' first and third, from records only."""
     now = time.time() if now is None else now
     st = engine_state or {}
-    real_tests = evidence_tests if (evidence_tests and not str(evidence_tests).startswith("Unavailable")) else ""
+    real_tests = "; ".join(part for part in str(evidence_tests or "").split("; ")
+                           if part.strip() and not part.strip().startswith("Unavailable"))
     if jobs and (jobs[0].get("native") or {}).get("stopped"):
         j = jobs[0]
         return ("The steward's code job (%s) has stopped - its record still says running; the steward should report "
@@ -1817,14 +1818,16 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
         started = _job_epoch(k.get("started"))
         label = str(k.get("label") or "a skill")
         ident = skill_identity(k)
-        return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), "running", started,
+        phase = str((look or {}).get("status") or (look or {}).get("doing") or "running")[:80] \
+            if look and str(look.get("skill") or "").lower().replace(" ", "") == ident.replace("-", "") else "running"
+        return ("The steward is running %s (%s) and is in charge of it" % (ident or "a skill", label), phase, started,
                 look_tests or real_tests or "tests not run yet",
                 finish_time(started, now, "skill_job", campaign_dir, ident))
     if look and not look.get("final"):
         skill = str(look.get("skill") or "")
         return ("The steward is running %s and is in charge of it" % skill, str(look.get("label") or "running")[:80],
-                slice_started, look_tests or real_tests or "tests not run yet",
-                finish_time(slice_started, now, "skill_job", campaign_dir, skill.lower()))
+                None, look_tests or real_tests or "tests not run yet",
+                finish_time(None, now, "skill_job", campaign_dir, skill.lower()))
     if st.get("busy"):
         started = float(st.get("turn_started") or 0) or None
         what = one_line(st.get("activity") or "") or "your request"
@@ -1979,8 +1982,20 @@ def compose_status(campaign_dir: str, engine_state=None):
         next_text = ""                                   # the old "resume after the restart" is history, not the next step
     # (ChatGPT, items 4-6) the next actions are the CURRENT step's: a Strip line written for another step is not
     hb_step = str(m["heartbeat"].get("current_step_id") or "")
-    if hb_step and active and hb_step != str(active.get("id") or ""):
-        next_text = ""
+    bound = bool(hb_step and active and hb_step == str(active.get("id") or ""))
+    if not bound and not hb_step and active:
+        # no step id on the Strip: its line counts for the focused step only if written after that step began
+        try:
+            strip_raw = json.loads((Path(campaign_dir) / "strip.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            strip_raw = {}
+        written = _job_epoch(strip_raw.get("as_of") or strip_raw.get("active_effort_as_of"))
+        began = _slice_started_epoch(campaign_dir, active.get("id"))
+        bound = not (written and began and written < began)
+    if not bound:
+        # not this step's line - use the step's own stored next actions, else the default line
+        own = (active or {}).get("next") or (active or {}).get("next_actions") or ""
+        next_text = " · ".join(own) if isinstance(own, list) else str(own or "")
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
     if pause_stale and _RESTART_PAUSE.search(waiting):
         waiting = ""                                     # a stale "paused for restart" wait, after his own message
@@ -2063,11 +2078,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         elapsed_line = phase
     next3 = next_bullets(next_text)[:3] or ["Finish the current work, then wait for you."]
     if live_skill and real_forecast(look.get("eta")):
-        src = Path(campaign_dir) / str(look.get("source") or "")
-        try:
-            given = " given " + time.strftime("%H:%M", time.localtime(src.stat().st_mtime))
-        except OSError:
-            given = ""
+        given = (" given " + str(look["table_at"])) if look.get("table_at") else ""   # the table's own stamp, not mtime
         finish = estimate_eta(slice_, look, started) + " (its own estimate%s)" % given   # the skill's own last ETA
     eta = finish                                          # always a clock time (or "nothing running"), never "Unavailable"
     eta_source = dict(eta_source or {}, value=finish, calculated=("estimate" in finish or "provisional" in finish))

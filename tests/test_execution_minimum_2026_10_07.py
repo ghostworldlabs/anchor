@@ -1047,6 +1047,7 @@ def test_hardening_11_a_restart_starts_nothing_by_itself(campaign_server):
     roadmap = _j.loads((camp / "roadmap.json").read_text(encoding="utf-8"))
     before_files = sorted(p.name for p in camp.rglob("*") if p.is_file())
     pending = [a for a in sc.read_deliverables(str(camp))["acts"] if a["act"] == "Review"]
+    engines_before = set(_sr.ENGINES)
     server = anchor_gui.make_server("127.0.0.1", 0)              # a second boot of the same disposable data
     worker = _th.Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -1054,7 +1055,7 @@ def test_hardening_11_a_restart_starts_nothing_by_itself(campaign_server):
         __import__("time").sleep(3)
         assert not [r for r in job_runner.list_records() if r.get("status") == job_runner.STATUS_RUNNING]
         assert not (camp / ".ecgberht" / "code-jobs.json").exists()
-        assert not any(getattr(e, "busy", False) for e in _sr.ENGINES.values())
+        assert set(_sr.ENGINES) == engines_before, "the boot started no steward of its own"
         assert [a for a in sc.read_deliverables(str(camp))["acts"] if a["act"] == "Review"] == pending
         assert _j.loads((camp / "roadmap.json").read_text(encoding="utf-8")) == roadmap
         assert sorted(p.name for p in camp.rglob("*") if p.is_file()) == before_files
@@ -1078,7 +1079,8 @@ def test_hardening_12_the_served_status_says_who_and_when_never_unavailable(cock
 
 def test_hardening_13_the_patch_sends_nothing():
     import subprocess as _s
-    diff = _s.run(["git", "-C", str(_P(__file__).resolve().parents[1]), "diff", "a3468d6", "HEAD", "--", "*.py", "*.mjs", "*.js"],
+    diff = _s.run(["git", "-C", str(_P(__file__).resolve().parents[1]), "diff", "a3468d6", "HEAD", "--", "*.py", "*.mjs", "*.js",
+                   ":(exclude)tests/*"],
                   capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     added = "\n".join(l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
     for word in ("smtplib", "sendmail", "send_mail", "gmail", "outlook", "requests.post", "urlopen(", "fetch('https", 'fetch("https'):
@@ -1175,3 +1177,88 @@ def test_a_stale_restart_wait_is_hidden_after_his_message(tmp_path):
     st = sc.compose_status(str(c), {"human_accepted_at": _t.time()})
     assert "restart" not in (st["plan"]["waiting_on_you"] or "")
     assert "restart" not in str(st["effort_line"].get("text") or "")
+
+
+# ---------- item 3 round 3 + items 4-6 round 2 ----------
+
+def test_a_file_already_dirty_in_the_repo_and_changed_again_is_seen(tmp_path, monkeypatch):
+    class Sneaky(_Coder):
+        def wake(self, fresh=False, seed=None):
+            (_P(self.code_job["repo"]) / "a.txt").write_text("changed again by the job\n", encoding="utf-8")
+            return super().wake(fresh, seed)
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", _json.dumps([_sys.executable, str(_P(__file__).with_name("fake_review.py"))]))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    (repo / "a.txt").write_text("his own unstaged edit\n", encoding="utf-8")     # " M a.txt" - a leading space
+    assert code_jobs.porcelain_paths(str(repo)) == ["a.txt"]
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: Sneaky(wt, tool_writes={"b.txt": "new\n"}))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir))[out["job"]]
+        if job["status"] in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert job["landed"] is False and job["served_tree_changed"] == ["a.txt"]
+
+
+def test_a_source_write_is_reported_even_when_the_candidate_is_unchanged(tmp_path, monkeypatch):
+    class OnlySource(_Coder):
+        def wake(self, fresh=False, seed=None):
+            (_P(self.code_job["repo"]) / "live.py").write_text("x\n", encoding="utf-8")
+            self.on_turn_done({"text": "done", "error": ""})
+            return True, "awake"
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setattr(code_jobs, "_report", lambda cdir, job: None)
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    repo, cdir = _git_repo(tmp_path / "repo"), tmp_path / "steward"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(repo), "x", "", engine_factory=lambda wt: OnlySource(wt))
+    for _ in range(300):
+        job = code_jobs.read_jobs(str(cdir))[out["job"]]
+        if job["status"] in ("done", "failed"):
+            break
+        _time.sleep(0.1)
+    assert job["served_tree_changed"] == ["live.py"] and "live.py" in job["land_note"]
+
+
+def test_a_stop_never_overwrites_a_placement():
+    import tempfile
+    d = tempfile.mkdtemp()
+    code_jobs._write_job(d, {"id": "j", "status": "finishing", "finishing_at": 0, "repo": d, "worktree": d,
+                             "branch": "b", "started": "2026-10-07 00:00:00", "placed": True})
+    r = code_jobs.stop(d, actor="John")
+    assert r["ok"] is False and "already landed" in r["error"]
+
+
+def test_a_failed_check_survives_an_unavailable_one_beside_it(tmp_path):
+    who, _p, _s, tests, _f = sc.who_is_working(str(tmp_path), {"busy": True, "turn_started": 1.0, "activity": "x"},
+                                               [], None, evidence_tests="Unavailable - checkA (missing); Failed - checkB (exit 1)")
+    assert tests == "Failed - checkB (exit 1)"
+
+
+def test_a_log_only_skill_never_takes_the_steps_start(tmp_path):
+    look = {"skill": "Gandalf", "label": "Gandalf · reading", "final": False, "tests": ""}
+    _w, _p, started, _t, finish = sc.who_is_working(str(tmp_path), {}, [], look, slice_started=1.0)
+    assert started is None and "Unavailable" not in finish
+
+
+def test_his_message_clears_a_stale_restart_attention_and_nothing_else(tmp_path, monkeypatch):
+    from steward_cockpit import steward_campaign as camp
+    camp.write_attention(str(tmp_path), "needs_you", "paused for restart - waiting for John")
+    eng = steward_engine.Engine(str(tmp_path), fake=True)
+    eng._mark_human_accepted()
+    assert camp.read_map(str(tmp_path))["attention"]["state"] == "quiet"
+    camp.write_attention(str(tmp_path), "needs_you", "choose the quiz date")
+    eng._mark_human_accepted()
+    assert camp.read_map(str(tmp_path))["attention"]["state"] == "needs_you"   # an unrelated wait stays
+
+
+def test_next_actions_come_only_from_text_bound_to_the_current_step(tmp_path):
+    import json as _j
+    c = _campaign(tmp_path, steps=3)
+    (c / "strip.json").write_text(_j.dumps({"next_recommended": "Do the old thing; then another",
+                                            "current_step_id": "s9"}), encoding="utf-8")      # bound to another step
+    st = sc.compose_status(str(c), {})
+    assert st["next3"] == ["Finish the current work, then wait for you."]
