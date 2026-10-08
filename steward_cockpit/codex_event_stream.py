@@ -25,8 +25,12 @@ def names_served(command, root=None):
         return True
     flat = command.replace("\\\\", "/").replace("\\", "/").lower()
     root = str(root or SERVED_ROOT).replace("\\", "/").lower().rstrip("/")
-    flat = re.sub(_LAUNCH + re.escape(root) + r"/tools/steward_code_job\.py\b", " ", flat)
-    return re.search(re.escape(root) + r"(?:[^a-z0-9_.-]|$)", flat) is not None
+    spellings = [root]
+    if re.match(r"^[a-z]:/", root):                 # Git Bash spells C:/dev/Anchor as /c/dev/anchor (ChatGPT round 4)
+        spellings.append("/" + root[0] + root[2:])
+    for spelling in spellings:
+        flat = re.sub(_LAUNCH + re.escape(spelling) + r"/tools/steward_code_job\.py\b", " ", flat)
+    return any(re.search(re.escape(spelling) + r"(?:[^a-z0-9_.-]|$)", flat) for spelling in spellings)
 
 
 class EventStreamError(ValueError):

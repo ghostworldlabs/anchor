@@ -290,3 +290,15 @@ def test_received_survives_a_failed_question_bookkeeping(tmp_path, monkeypatch):
     assert not out["ok"]                                                  # the bookkeeping failed, and says so
     kinds = [(e.get("t"), e.get("text")) for e in said]
     assert kinds[:2] == [("john", "Chapter two"), ("sys", "Received.")]   # yet his durable words were shown + received
+
+
+# ---------- ChatGPT review round 4 (morning fixes) ----------
+
+def test_a_git_bash_spelling_of_the_served_root_counts():
+    from steward_cockpit.codex_event_stream import names_served
+    root = "C:/dev/Anchor"
+    assert names_served("cp replacement.js /c/dev/Anchor/static/cave-health.js", root)
+    assert names_served("cd /c/dev/anchor && git apply x.patch", root)
+    assert not names_served("python /c/dev/Anchor/tools/steward_code_job.py start --repo r", root)
+    assert not names_served("ls /c/dev/Anchor-other/x", root)
+    assert not names_served("cat /c/dev/Writing/notes.md", root)
