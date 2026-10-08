@@ -1,10 +1,10 @@
 {
-  "at": "2026-10-07 20:38",
-  "status_id": "01791427137925776400",
+  "at": "2026-10-07 21:49",
+  "status_id": "01791431363293403500",
   "effort": "Setup and Mother Ship",
   "latest_event": null,
   "compact": {
-    "activity": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
+    "activity": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
     "latest_event": null,
     "next": [
       "Connect named provider accounts"
@@ -21,7 +21,7 @@
       },
       {
         "label": "Doing",
-        "value": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33\u2026"
+        "value": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)"
       },
       {
         "label": "Status",
@@ -41,7 +41,7 @@
       },
       {
         "label": "Journal",
-        "value": "0032-login-recovery-launch-guard: Login remainder launch stopped before execution"
+        "value": "0033-real-route-blockers-and-failing-gates: Landed follow-up; real enrollment and warm-cache blockers\u2026"
       },
       {
         "label": "ETA",
@@ -53,18 +53,18 @@
       }
     ]
   },
-  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
+  "lead_line": "Next: Connect named provider accounts; Google; then Show authentication and allowance for each named provider account \u2014 Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
   "now": [
-    "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
+    "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
     "landed, waits for a restart \u2014 Recover the preserved provider implementation; include the requested status ETA correction",
     "landed, waits for a restart \u2014 Fix seven retained reviewer concerns before activating the landed provider refinement"
   ],
   "running": {
     "kind": "code_job",
-    "label": "code job running \u2014 Finish the retained Grok sign-in finding and reconcile the final account-binding gate (33 min)",
+    "label": "code job running \u2014 Finish two reproduced account-route blockers under the same provider repair plan (54 min)",
     "skill": "coder",
     "source": ".ecgberht/code-jobs.json",
-    "age": "33 min"
+    "age": "54 min"
   },
   "slice": {
     "n": 2,
@@ -77,7 +77,7 @@
   },
   "eta": "Unavailable \u2014 no current estimate",
   "tests": "Unavailable \u2014 no check receipt for the current work and session",
-  "journal": "0032-login-recovery-launch-guard: Login remainder launch stopped before execution",
+  "journal": "0033-real-route-blockers-and-failing-gates: Landed follow-up; real enrollment and warm-cache blockers reproduced",
   "evidence": {
     "source": {
       "path": "strip.json",
@@ -87,9 +87,9 @@
     "checks": [],
     "journal": {
       "state": "available",
-      "path": "journal/0032-login-recovery-launch-guard.md",
-      "entry_id": "0032-login-recovery-launch-guard",
-      "at": "2026-10-08T02:06:24Z",
+      "path": "journal/0033-real-route-blockers-and-failing-gates.md",
+      "entry_id": "0033-real-route-blockers-and-failing-gates",
+      "at": "2026-10-08T02:55:13Z",
       "step_id": "gwl-access",
       "session_id": "01a11287-5787-7532-af96-84f668e596cb",
       "run_id": null
@@ -113,7 +113,7 @@
   "lookthrough": null,
   "halt": null,
   "effort_line": {
-    "text": "Retrying the same login/account-binding repair after correcting a launch-only checkout reference.",
+    "text": "Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.",
     "as_of": "2026-10-07",
     "newest_work": "2026-10-07",
     "behind_days": 0,
@@ -126,7 +126,7 @@
     "waiting_on_you": "",
     "waiting_since": null,
     "next": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-    "why": "Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
+    "why": "Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
     "attention": "stale",
     "goal_reread": true
   },

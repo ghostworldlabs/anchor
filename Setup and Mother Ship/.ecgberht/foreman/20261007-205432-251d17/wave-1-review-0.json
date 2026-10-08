@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "written_by": "orchestrator",
+  "wave": 1,
+  "iteration": 0,
+  "round_id": "c0d48fee-ba62-4c3d-82ba-384c9699a964",
+  "phase": "complete",
+  "review_status": "completed",
+  "configured_reviewers": 2,
+  "expected_reviewers": [
+    "reviewer-0",
+    "reviewer-1"
+  ],
+  "completed_reviewers": [
+    "reviewer-1",
+    "reviewer-0"
+  ],
+  "failed_reviewers": [],
+  "responses": [
+    {
+      "seat": "reviewer-1",
+      "reviewer": "reviewer-1",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-1",
+        "answerable": "yes",
+        "note": ".foreman-job/IMPLEMENTATION-PLAN.md:11 requires one Grok capability reused across POST /api/provider-setup/login through native login, and a model-policy cache split so resolve_quality discovers gemini-default instead of an inherited chatgpt-default catalog. Done-when is line 15. Both are in the diff: provider_setup.py:368-408 and provider_native.py:563-567 pass the probed cap; model_policy.py:339 keys the cache on ANCHOR_PROVIDER_CONNECTION, which account_env sets (provider_native.py:87) before resolve_quality (provider_setup.py:671).",
+        "findings": []
+      }
+    },
+    {
+      "seat": "reviewer-0",
+      "reviewer": "reviewer-0",
+      "status": "completed",
+      "original": {
+        "reviewer": "reviewer-0",
+        "answerable": "yes",
+        "note": "Frozen plan .foreman-job/IMPLEMENTATION-PLAN.md:7 (body lines 11-13) states both Wave 1 blockers: reuse one Grok capability across HTTP POST /api/provider-setup/login, start_login, isolated status, and browser enrollment when a second probe fails; and make resolve_quality rediscover gemini-default after an unqualified resolve cached under inherited chatgpt-default, without clearing the cache or changing the ambient environment. provider_setup.py:368-408 passes that capability into refresh and NativeProviders.login; provider_native.py:484-567 reuses it in observe/login instead of calling capabilities() again; model_policy.py:339 includes ANCHOR_PROVIDER_CONNECTION in the cache identity and provider_setup.py:671 resolves with native.account_env(connection). The orchestrator gate is 237/237 and both new tests reach those paths.",
+        "findings": []
+      }
+    }
+  ],
+  "merged_findings": [],
+  "decision": {
+    "go": true,
+    "reason": "gate GREEN and no verified blocking finding",
+    "blocking": []
+  }
+}

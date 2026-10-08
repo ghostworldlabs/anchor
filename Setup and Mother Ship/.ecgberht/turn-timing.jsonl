@@ -38,3 +38,4 @@
 {"at": "2026-10-07T18:58:38", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 8.1, "turn_s": 123.6, "tools": 5}
 {"at": "2026-10-07T20:04:25", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 6.1, "turn_s": 356.6, "tools": 10}
 {"at": "2026-10-07T20:06:25", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 9.5, "turn_s": 118.4, "tools": 4}
+{"at": "2026-10-07T20:55:16", "origin": "control", "cli": "chatgpt", "effort": "high", "queued_s": null, "first_word_s": 28.7, "turn_s": 382.9, "tools": 9}
