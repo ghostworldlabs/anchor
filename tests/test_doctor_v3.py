@@ -396,8 +396,8 @@ def test_doctor_same_key_concurrent_start_is_singleflight(denv, monkeypatch):
 
 
 def test_doctor_reuse_key_separates_diagnose_from_resolve(denv, monkeypatch):
-    """Mode and posture are part of reuse identity: read-only Diagnose can
-    never attach to write-enabled Resolve, or the reverse."""
+    """W3 (2026-10-08): read-only Diagnose starts; a write-enabled Resolve is refused (the Doctor's code repair is
+    off) and never attaches to, replaces or starts beside the Diagnose session."""
     _claude_only(monkeypatch)
     code_d, diagnose = _post(
         denv["gui"], "/api/doctor/session_start", {"backend": "claude"})
@@ -408,32 +408,9 @@ def test_doctor_reuse_key_separates_diagnose_from_resolve(denv, monkeypatch):
     code_r, resolve = _post(
         denv["gui"], "/api/doctor/session_start",
         {"backend": "claude", "resolve": True, "issue": issue})
-    assert code_r == 200 and resolve["ok"] is True
-    assert resolve["attached"] is False
-    assert resolve["session"]["session_id"] != diagnose["session"]["session_id"]
-    assert resolve["session"]["mode"] == denv["ts"].DOCTOR_MODE_RESOLVE
-    assert resolve["session"]["posture"] == \
-        denv["ts"].DOCTOR_POSTURE_WRITE_ENABLED
-
-    d_child = denv["pty"]._LIVE[diagnose["session"]["session_id"]]
-    r_child = denv["pty"]._LIVE[resolve["session"]["session_id"]]
-    assert "--permission-mode" in d_child.cmd
-    assert "--permission-mode" not in r_child.cmd
-
-    # Each repeated request returns only its own exact-key session even though
-    # the other posture remains live and the Resolve row is newer.
-    _, diagnose_again = _post(
-        denv["gui"], "/api/doctor/session_start", {"backend": "claude"})
-    _, resolve_again = _post(
-        denv["gui"], "/api/doctor/session_start",
-        {"backend": "claude", "resolve": True, "issue": issue})
-    assert diagnose_again["attached"] is True
-    assert diagnose_again["session"]["session_id"] == \
-        diagnose["session"]["session_id"]
-    assert resolve_again["attached"] is True
-    assert resolve_again["session"]["session_id"] == \
-        resolve["session"]["session_id"]
-
+    assert code_r == 409 and resolve["ok"] is False and resolve["status"] == "repair_off"
+    assert "code repair is off" in resolve["error"]
+    assert len(denv["pty"].live_sessions()) == 1
 
 def test_doctor_reuse_key_checks_backend_and_posture(denv, monkeypatch):
     monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "1")

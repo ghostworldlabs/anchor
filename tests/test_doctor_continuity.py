@@ -144,7 +144,7 @@ def navigate_back(page, origin):
     return frame
 
 
-@pytest.mark.parametrize("resolve", [False, True])
+@pytest.mark.parametrize("resolve", [False])   # W3: a write-enabled Resolve session no longer starts (see below)
 def test_session_survives_frame_recreation(doctor_server, app, resolve):
     page, frame, failures = app
     frame.evaluate("resolve=>runDiagnose({resolve})", resolve)
@@ -249,27 +249,20 @@ def test_discovery_is_unique_and_filters_foreign_and_unkeyed_sessions(doctor_ser
     assert state["gui"]._doctor_restore_session(record["session_id"])["error"] == "unavailable"
 
 
-def test_failed_resolve_keeps_prior_session_and_successful_resolve_replaces_it(doctor_server, app):
+def test_a_refused_resolve_keeps_the_prior_session(doctor_server, app):
+    """W3 (2026-10-08): the Doctor's code repair is off - a Resolve request is refused (it never starts a write
+    session) and the read-only session he had stays his, still connected."""
     page, frame, failures = app
     frame.evaluate('runDiagnose()')
     frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR PROGRESS')")
     prior = doctor_server['starts'][0]['id']
-    doctor_server['fail_start'] = True
     frame.evaluate('runDiagnose({resolve:true})')
-    frame.wait_for_function("document.getElementById('terminal').textContent.includes('Synthetic launch denied')")
+    frame.wait_for_function("document.getElementById('terminal').textContent.includes('code repair is off')")
     assert json.loads(frame.evaluate("sessionStorage.getItem('anchor_doctor_session_v1')"))['session_id'] == prior
     doctor_server['outputs'][prior] += 'PRIOR STILL CONNECTED\r\n'
     frame.wait_for_function("document.getElementById('terminal').textContent.includes('PRIOR STILL CONNECTED')")
-    doctor_server['fail_start'] = False
-    frame.evaluate('runDiagnose({resolve:true})')
-    frame.wait_for_function("document.getElementById('termEngine').textContent.includes('write-enabled')")
-    next_id = doctor_server['starts'][1]['id']
-    frame.wait_for_function("document.getElementById('terminal').textContent.includes('fixture-doctor-2')")
-    doctor_server['outputs'][prior] += 'STALE PRIOR OUTPUT\r\n'
-    doctor_server['outputs'][next_id] += 'CURRENT RESOLVE OUTPUT\r\n'
-    frame.wait_for_function("document.getElementById('terminal').textContent.includes('CURRENT RESOLVE OUTPUT')")
-    assert 'STALE PRIOR OUTPUT' not in frame.locator('#terminal').inner_text()
-    assert len(doctor_server['starts']) == 2 and not doctor_server['inputs'] and not failures
+    assert len(doctor_server['starts']) == 1 and not doctor_server['inputs']
+    assert 'write-enabled' not in frame.locator('#termEngine').inner_text()
 
 
 def test_auth_failure_preserves_pointer_without_a_replacement(doctor_server, app):

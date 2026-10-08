@@ -154,7 +154,7 @@ class ResolveAllRouteTest(unittest.TestCase):
         src = (REPO / "anchor_gui.py").read_text(encoding="utf-8")
         self.assertIn("window.resolveAll = function", src)
         self.assertIn("fetch('/api/doctor/resolve_all'", src)
-        self.assertIn("window.runDiagnose({ fromBanner: true, resolve: true })", src)
+        self.assertIn("window.runDiagnose({ fromBanner: true, resolve: false })", src)
 
 
 class AutoSubmitTest(unittest.TestCase):

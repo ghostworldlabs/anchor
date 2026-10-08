@@ -65,7 +65,12 @@ ANCHOR_DIR = SCRIPT_DIR  # this script must live in the Anchor root (CODE dir)
 import paths as _paths
 DATA_DIR = _paths.data_dir()
 REPORTS_DIR = _paths.health_reports_dir()
-TEST_PORT = 8778
+TEST_PORT = int(os.environ.get("ANCHOR_HEALTHCHECK_PORT") or 8778)   # 0: an OS-assigned free port (a candidate check)
+# W3 (2026-10-08): what this run checks. "running" (default): the code the service runs - the daily self-test and the
+# Doctor's re-run. "candidate": a revision landed on anchor-next, checked from its own throwaway worktree
+# (health_state.check_candidate); its report goes to ANCHOR_HEALTH_REPORT_OUT and never becomes the dated report.
+TARGET = "candidate" if os.environ.get("ANCHOR_HEALTHCHECK_TARGET") == "candidate" else "running"
+REPORT_OUT = os.environ.get("ANCHOR_HEALTH_REPORT_OUT") or ""
 # Readiness deadline for the throwaway server. "Boot" = bind + the FULL boot
 # reconcile (registry PID probes, worktree reap, daemons…) — main() only
 # listen()s once that finishes, and under 5 AM load it has taken 80s+. Per the
@@ -169,6 +174,8 @@ class Report:
             f"# Anchor Health Report â€” {TODAY}",
             "",
             f"Status: {status_line}",
+            f"Target: {TARGET}",
+            f"Revision: {_revision()}",
             f"Run time: {elapsed:.1f}s ({self.started.strftime('%H:%M:%S')})",
             "",
             "## Executive summary",
@@ -451,10 +458,15 @@ def check_server_and_endpoints(report: Report):
     # back to an OS-assigned free port so the boot/endpoint/round-trip checks
     # can still run. check_synthetic_roundtrip reads TEST_PORT too, so updating
     # the global keeps both in sync.
-    if _port_in_use(TEST_PORT):
+    if TEST_PORT == 0:                      # W3: a private, OS-assigned port (a candidate check)
+        TEST_PORT = _find_free_port(8779)
+    elif _port_in_use(TEST_PORT):
         fallback = _find_free_port(TEST_PORT)
         report.fix(f"test port {TEST_PORT} busy; ran on free port {fallback} instead")
         TEST_PORT = fallback
+    if TEST_PORT == 8777:                   # the service's own port is never a test port
+        report.check(name, False, "refused: the test server may never bind 8777")
+        return None
 
     cmd = [sys.executable, str(ANCHOR_DIR / "anchor_gui.py"), "--port", str(TEST_PORT), "--no-browser"]
     try:
@@ -6161,6 +6173,18 @@ def check_onedrive_sync(report: Report):
 
 
 # â”€â”€ Stale-process cleanup (ports 8777, 8778) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _revision():
+    """The git revision this run checks (its own code), with "+dirty" when its served files have uncommitted edits."""
+    try:
+        r = subprocess.run(["git", "-C", str(ANCHOR_DIR), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=20)
+        head = (r.stdout or "").strip()
+        d = subprocess.run(["git", "-C", str(ANCHOR_DIR), "status", "--porcelain", "--untracked-files=no", "--", "*.py", "static"],
+                           capture_output=True, text=True, timeout=60)
+        return head + ("+dirty" if (d.stdout or "").strip() else "") if head else "unknown"
+    except Exception:
+        return "unknown"
+
+
 def cleanup_stale_processes(report: Report):
     """If port 8777 or 8778 is held by a Python process older than 24h, terminate it.
     On Windows, use `tasklist` and `taskkill`. Best-effort: errors are logged but not fatal."""
@@ -6174,16 +6198,26 @@ def cleanup_stale_processes(report: Report):
     except Exception:
         return
 
-    pids = set()
-    targets = {":8777", f":{TEST_PORT}"}
+    # W3 (2026-10-08): the RUNNING service (8777) is never killed by a health check - not the daily run, not a
+    # Doctor re-run, never a candidate check: a service up more than a day is normal, and killing it threw every open
+    # cockpit out. Only an explicit ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE=1 (outside a candidate check) restores it.
+    ports = {str(TEST_PORT)}
+    if os.environ.get("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE") == "1" and TARGET != "candidate":
+        ports.add("8777")
+    pids, test_pids = set(), set()
     for line in out.splitlines():
-        if any(t in line for t in targets) and "LISTENING" in line:
-            parts = line.split()
-            if parts:
-                try:
-                    pids.add(int(parts[-1]))
-                except ValueError:
-                    pass
+        parts = line.split()
+        if len(parts) < 5 or "LISTENING" not in parts:
+            continue
+        port = parts[1].rsplit(":", 1)[-1]   # the LOCAL address's port, exactly
+        if port in ports:
+            try:
+                pid = int(parts[-1])
+            except ValueError:
+                continue
+            pids.add(pid)
+            if port == str(TEST_PORT):
+                test_pids.add(pid)
     if not pids:
         return
 
@@ -6205,11 +6239,7 @@ def cleanup_stale_processes(report: Report):
             # Be more aggressive with the test port (8778) â€” if it's held by python,
             # we likely want it dead so we can run the check, even if it's not 24h old.
             # However, for 8777 (production), we only kill if it's truly stale.
-            is_test_port = False
-            for line in out.splitlines():
-                if f":{TEST_PORT}" in line and str(pid) in line:
-                    is_test_port = True
-                    break
+            is_test_port = pid in test_pids
 
             if age > timedelta(hours=24) or is_test_port:
                 # Kill it
@@ -7007,7 +7037,7 @@ def main():
             except Exception:
                 pass
 
-    report_path = REPORTS_DIR / f"{TODAY}.md"
+    report_path = Path(REPORT_OUT) if REPORT_OUT else REPORTS_DIR / f"{TODAY}.md"
     try:
         report.write(report_path)
     except Exception as e:

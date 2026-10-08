@@ -101,9 +101,12 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
         if health:
             report_date, status = health[0], str(health[1] or "")
             if any(w in status.upper() for w in ("ISSUE", "FAIL", "ERROR")):
+                # W3 (2026-10-08): a fix verified on a candidate says so - and the banner stays until the running
+                # service passes
+                why = (str(health[2]) if len(health) > 2 and health[2] else "%s — Doctor can diagnose it" % report_date)
                 rows.append(_row(
                     "health", "Health check found issues",
-                    "%s — Doctor can diagnose it" % report_date,
+                    why,
                     "/doctor?issueId=ZH_HEALTH_CHECK_ISSUES&diagnose=1", "system"))
     except Exception:
         pass

@@ -187,6 +187,7 @@ def _compute_build_id():
 
 BUILD_ID = _compute_build_id()
 os.environ["ANCHOR_RUNNING_HEAD"] = BUILD_ID.split("+")[0]   # two-lane step 6: what 'live' is checked against
+os.environ.setdefault("ANCHOR_STARTED_AT", str(time.time()))   # W3: a report older than this start predates this build
 
 
 # Self-healing cache-bust client JS. Kept as a plain (non-f) string so it can
@@ -466,25 +467,24 @@ HEALTH_REPORTS_DIR = ANCHOR_DIR / "health_reports"
 
 
 def latest_health_report():
-    """Return (date_str, status, path) for the most recent health report, or None.
+    """Return (date_str, status, path, why) for the newest DATED health report, or None.
 
-    status is "OK" or "ISSUES FOUND" (taken from the second non-blank line of the report).
+    W3 (2026-10-08): ONE store and one reading for every banner (health_state) - the data directory's
+    health_reports/, only YYYY-MM-DD.md (never README.md, a soak ledger or a candidate's report). ``why`` is the
+    banner's second line: a red report whose fix a candidate check verified says "fix verified on <rev>, live after
+    your restart"; it never clears the red.
     """
-    if not HEALTH_REPORTS_DIR or not HEALTH_REPORTS_DIR.exists():
+    import health_state as _hs
+    path, text = _hs.latest()
+    if path is None:
         return None
-    reports = sorted(HEALTH_REPORTS_DIR.glob("*.md"), reverse=True)
-    for r in reports:
-        if r.name.lower() == "readme.md":
-            continue
-        try:
-            text = r.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        m = re.search(r'^Status:\s*(.+)$', text, re.MULTILINE)
-        if m:
-            status = m.group(1).strip()
-            return (r.stem, status, r)
-    return None
+    status = _hs.field(text, "Status")
+    if not status:
+        return None
+    b = _hs.banner()
+    if b:
+        _health_recheck_if_owed()          # after the restart that made a verified fix live: one re-check
+    return (path.stem, status, path, (b or {}).get("why") or "")
 
 
 def _all_md_files():
@@ -7813,7 +7813,7 @@ def _high_seat_context():
         sessions = []
     hr = latest_health_report()
     names = {e.get("id"): e.get("name") or "" for e in entries}
-    rows = _ha.build_attention(tasks=[], sessions=sessions, health=(hr[0], hr[1]) if hr else None,
+    rows = _ha.build_attention(tasks=[], sessions=sessions, health=(hr[0], hr[1], hr[3]) if hr else None,
                                today=today, now=now, project_names=names, projects=facts_list, limit=12)
     try:   # the Cave's Terminal (2026-10-02): the Terminal seat's engine as the default, the plain terminals open now
         default_cli = _aset.get_default_cli()
@@ -8521,7 +8521,7 @@ def generate_html(projects, tasks, inbox):
     health_banner_html = ""
     hr = latest_health_report()
     if hr is not None:
-        report_date, status, _ = hr
+        report_date, status, _, hr_why = hr
         if "ISSUE" in status.upper() or "FAIL" in status.upper() or "ERROR" in status.upper():
             try:
                 _hb_issue = _w9_build_dashboard_health_banner_issue(
@@ -8533,8 +8533,9 @@ def generate_html(projects, tasks, inbox):
                         # Plain words on the home (r3: "Click: Doctor runs
                         # itself"): what a click does, nothing about seeds
                         # or markdown paths.
-                        f'on {html_lib.escape(str(report_date))}. '
-                        f'Click: Doctor reads it, probes the live server, and '
+                        (f'{html_lib.escape(hr_why)}. ' if "fix verified" in hr_why else
+                         f'on {html_lib.escape(str(report_date))}. ')
+                        + f'Click: Doctor reads it, probes the live server, and '
                         f're-runs the check itself when the failure is gone.'
                     ),
                     style_kind="health",
@@ -12031,7 +12032,12 @@ def handle_version(handler, path, body):
 
     Always fetched fresh (no-store) so the client can detect a redeploy.
     """
-    payload = json.dumps({"version": BUILD_ID}).encode()
+    try:   # W3 (2026-10-08): an opaque fingerprint of the banner's facts - a page whose banner is stale places it in place
+        import health_state as _hs
+        health = _hs.signature()
+    except Exception:
+        health = ""
+    payload = json.dumps({"version": BUILD_ID, "health": health}).encode()
     handler.send_response(200)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(payload)))
@@ -17321,8 +17327,8 @@ def _build_doctor_seed():
 
     # 1) The latest health report (graceful when absent/corrupt).
     try:
-        reports = sorted(_paths.health_reports_dir().glob("*.md"),
-                         reverse=True)
+        import health_state as _hs
+        reports = _hs.dated_reports()      # W3: only dated reports, the one store
     except Exception:
         reports = []
     if reports:
@@ -17376,6 +17382,11 @@ def _build_doctor_seed():
 
     text = "\n\n".join(lines)
     return text.encode("ascii", "replace").decode("ascii")
+
+
+REPAIR_OFF = ("The Doctor's code repair is off: it diagnoses and re-checks, it does not edit the running Anchor. A fix "
+              "goes to a code job (it lands on anchor-next); the Doctor then checks that revision, and the banner says "
+              "'fix verified, live after your restart'.")
 
 
 def handle_doctor_session_start(handler, path, body):
@@ -17436,6 +17447,13 @@ def handle_doctor_session_start(handler, path, body):
     # Only the JSON boolean true requests write-enabled Resolve posture. A
     # truthy string such as "false" must not silently turn Diagnose into write.
     resolve = body.get("resolve") is True
+    if resolve:
+        # W3 (2026-10-08): the Doctor's code repair is OFF until it works on its own branch and lands through the
+        # queue (a later night) - a Resolve session edited the running Anchor in place, unreviewed. It diagnoses; a
+        # fix goes to a code job, lands on anchor-next, and the Doctor checks that revision before the restart.
+        handler._send_json({"ok": False, "status": "repair_off", "failureNonBlocking": True,
+                            "error": REPAIR_OFF}, 409)
+        return
     try:
         if resolve and issue and issue.get("all") is True:
             # (2026-09-03, John) RESOLVE ALL: the seed built by
@@ -17544,17 +17562,8 @@ def _doctor_report_status(body):
     unknown= no recognizable status line (corrupt/foreign file) — honest,
              never guessed.
     """
-    if "Status: ISSUES FOUND" in body:
-        return "red"
-    warn_match = re.search(r"^## Warnings[^\n]*\n+(.*?)(?=^## |\Z)",
-                           body, re.S | re.M)
-    if warn_match:
-        content = warn_match.group(1).strip()
-        if content and content != "(none)":
-            return "yellow"
-    if re.search(r"^Status: OK\s*$", body, re.M):
-        return "green"
-    return "unknown"
+    import health_state as _hs
+    return _hs.status_of(body)            # W3 (2026-10-08): the one reading every banner shares
 
 
 def _doctor_stats():
@@ -17564,10 +17573,9 @@ def _doctor_stats():
     ``unknown``, an empty dir yields the honest ``none`` state; never raises.
     """
     try:
-        rd = _paths.health_reports_dir()
-        files = sorted((p for p in rd.glob("*.md") if p.is_file()),
-                       key=lambda p: p.name, reverse=True)
-    except OSError:
+        import health_state as _hs
+        files = _hs.dated_reports()        # W3: never README.md, a soak ledger or a candidate's report
+    except Exception:
         files = []
     reports = []
     newest_body = None
@@ -17769,15 +17777,19 @@ def _doctor_hc_cmd():
 
 
 def _doctor_live_probe(path, timeout=4.0):
-    """GET one path on the LIVE server. ``ok`` means the server ANSWERED (any
-    HTTP status — 401 on a token route is still an answer); a connection
-    error or timeout is the only failure. Read-only."""
+    """GET one path on the LIVE server. ``ok`` means it answered 2xx/3xx (W3, 2026-10-08: it asks with the token, as
+    John's browser does, and a 401, 404 or 500 from the running service is a failure - never "it answered").
+    Read-only."""
     import urllib.request
     import urllib.error
     t0 = time.time()
     url = "http://127.0.0.1:%d%s" % (_doctor_live_port(), path)
+    hdrs = {}
+    tok = (os.environ.get("ANCHOR_TOKEN") or "").strip()
+    if tok:
+        hdrs["Authorization"] = "Bearer " + tok
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, method="GET"),
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET", headers=hdrs),
                                     timeout=timeout) as r:
             code = r.getcode()
     except urllib.error.HTTPError as exc:
@@ -17785,7 +17797,7 @@ def _doctor_live_probe(path, timeout=4.0):
     except Exception as exc:
         return {"path": path, "ok": False, "code": None,
                 "error": type(exc).__name__, "ms": int((time.time() - t0) * 1000)}
-    return {"path": path, "ok": True, "code": code,
+    return {"path": path, "ok": 200 <= int(code or 0) < 400, "code": code,
             "ms": int((time.time() - t0) * 1000)}
 
 
@@ -17852,6 +17864,14 @@ def handle_doctor_resolve_all(handler, path, body):
            "playbook": playbook}
     if decision == "rerun":
         out["rerun"] = _doctor_start_healthcheck_run()
+    try:   # W3: a fix waiting on anchor-next is checked at its own revision, on a private port
+        import anchor_next as _an
+        if _an.waiting():
+            out["candidate"] = _doctor_start_candidate_check()
+    except Exception as exc:
+        out["candidate"] = {"ok": False, "error": str(exc)}
+    if decision == "rerun":
+        pass
     elif decision == "session":
         out["seed_issue"] = {
             "issueId": "resolve-all", "component": "all", "all": True,
@@ -17859,6 +17879,50 @@ def handle_doctor_resolve_all(handler, path, body):
             "suggestedChecks": [],
         }
     handler._send_json(out)
+
+
+_DOCTOR_CAND = {"thread": None}
+
+
+def _doctor_start_candidate_check():
+    """W3 (2026-10-08): one background check of anchor-next's head in a throwaway worktree on a private port
+    (health_state.check_candidate): never 8777, never the process killer, never the lander's or the running checkout.
+    Its pass is what lets the red banner say 'fix verified, live after your restart'."""
+    import health_state as _hs
+    with _DOCTOR_HC_LOCK:
+        t = _DOCTOR_CAND.get("thread")
+        if t is not None and t.is_alive():
+            return {"ok": True, "already_running": True}
+        log_path = _paths.logs_dir() / "doctor-candidate-check.log"
+
+        def run():
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, "wb") as fh:
+                    _hs.check_candidate(log=fh)
+            except Exception:
+                pass
+        t = threading.Thread(target=run, name="doctor-candidate-check", daemon=True)
+        _DOCTOR_CAND["thread"] = t
+        t.start()
+        return {"ok": True, "started": True, "log": str(log_path)}
+
+
+_RECHECK = {"done": False}
+
+
+def _health_recheck_if_owed():
+    """W3: after the restart that made a verified fix live, ONE re-run of the check against the code the service
+    runs - only its pass clears the banner. At most once per server process."""
+    if _RECHECK["done"]:
+        return
+    try:
+        import health_state as _hs
+        if _hs.recheck_needed():
+            _RECHECK["done"] = True
+            _doctor_start_healthcheck_run()
+    except Exception:
+        pass
 
 
 def _doctor_start_healthcheck_run():
@@ -18335,6 +18399,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
         writePlaybook(p);
+        if (p.candidate && p.candidate.ok) term.write('[doctor] A fix waits on anchor-next: checking that revision on a private port. '
+          + 'If it passes, the banner says "fix verified, live after your restart"; it clears only when the running Anchor passes.\r\n');
         if (p.decision === 'rerun') {
           if (!p.rerun || !p.rerun.ok) {
             term.write('[doctor] Verification could not start: ' + ((p.rerun && p.rerun.error) || 'no run receipt') + '\r\n');
@@ -18346,9 +18412,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           if (btn) btn.textContent = 'Re-running…';
           pollTail(0);
         } else if (p.decision === 'session' && p.seed_issue) {
-          term.write('[doctor] ' + (p.issues || []).length + ' issue(s) need work - starting ONE doctor session for all of them.\r\n');
+          term.write('[doctor] ' + (p.issues || []).length + ' issue(s) need work - starting ONE read-only doctor session to diagnose them. '
+            + 'Code repair is off: a fix goes to a code job, lands on anchor-next, and is checked there before your restart.\r\n');
           BANNER_ISSUE = p.seed_issue;
-          window.runDiagnose({ fromBanner: true, resolve: true });
+          window.runDiagnose({ fromBanner: true, resolve: false });
         } else {
           term.write('[doctor] Nothing open to resolve.\r\n');
           refreshStats();
@@ -18365,7 +18432,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       component: it.component || '',
       suggestedChecks: []
     };
-    window.runDiagnose({ fromBanner: true, resolve: true });
+    window.runDiagnose({ fromBanner: true, resolve: false });   // W3: diagnose - the Doctor's code repair is off
   };
   var REQUESTED_DIAGNOSE = false;
   (function parseBannerIssueFromQuery() {
@@ -18425,6 +18492,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
         writePlaybook(p);
+        if (p.candidate && p.candidate.ok) term.write('[doctor] A fix waits on anchor-next: checking that revision on a private port. '
+          + 'If it passes, the banner says "fix verified, live after your restart"; it clears only when the running Anchor passes.\r\n');
         if (p.decision === 'rerun') {
           term.write('[doctor] This looks like a known stale or load result, not live damage. '
             + 'Re-running the health check myself; the red banner clears when the report is clean.\r\n');
