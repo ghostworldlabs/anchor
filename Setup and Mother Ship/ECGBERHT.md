@@ -6,11 +6,11 @@
 
 ## Active effort
 
-Retrying the same login/account-binding repair after correcting a launch-only checkout reference.
+Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.
 
 ## Why next
 
-Dirty-checkout guard stopped before edits or tests; preserve unrelated files and use the same worktree input.
+The landed worker gate did not exercise these real entry points; both new production regressions fail.
 
 ## Human wait
 

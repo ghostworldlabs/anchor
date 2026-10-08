@@ -4,7 +4,7 @@
   "face_path": "ECGBERHT.md",
   "as_of": "2026-10-08",
   "phase": "building",
-  "active_effort": "Retrying the same login/account-binding repair after correcting a launch-only checkout reference.",
+  "active_effort": "Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.",
   "effort_status": "RUNNING",
   "tool_depth_cell": "LITE",
   "human_wait": "",
@@ -23,8 +23,8 @@
       "status": "caught"
     }
   ],
-  "next_recommended": "Connect named provider accounts; Google; then Show authentication and allowance for each named provider account",
-  "why_next": "Launch-only reference corrected; native repair estimate is 30-60 minutes from retry.",
+  "next_recommended": "Fix the real sign-in route and warm account cache, then recheck before activation.",
+  "why_next": "Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
   "uncertainty_flags": [],
   "instruments": [
     {
@@ -1091,6 +1091,21 @@
         "gwl-access",
         "gwl-provider-status"
       ]
+    },
+    {
+      "_kind": "instrument",
+      "kind": "update",
+      "as_of": "2026-10-08",
+      "source": "verb_update",
+      "phase": "building",
+      "wait_ref": "none",
+      "next_recommended": "Fix the real sign-in route and warm account cache, then recheck before activation.",
+      "why_next": "Same plan; both original concerns now have mandatory failing tests. Provisional repair30-60 minutes.",
+      "horizon_source_seq": null,
+      "horizon_focus": null,
+      "active_effort": "Finishing two reproduced provider route blockers; new failing tests cover HTTP login and warm account cache.",
+      "human_wait": "",
+      "current_step_id": "gwl-access"
     }
   ],
   "receipts": [
@@ -1472,8 +1487,8 @@
       "summary": "Login remainder launch stopped before execution"
     }
   ],
-  "horizon_source_seq": 101,
-  "horizon_focus": "gwl-access",
+  "horizon_source_seq": null,
+  "horizon_focus": null,
   "current_step_id": "gwl-access",
   "wait_ref": "none"
 }
