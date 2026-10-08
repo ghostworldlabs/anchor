@@ -6,15 +6,15 @@
 
 ## Active effort
 
-Provider code landed; seven concerns remain. Plan v2 Refinement 3 awaits John before repair.
+Launching focused repair of seven retained provider findings under plan v2 Refinement 3.
 
 ## Why next
 
-John stopped the unrelated Anchor job and requires a visible plan before implementing.
+Reversible decision window elapsed; preserve landed code and test account flows before activation.
 
 ## Human wait
 
-Approve proposed provider repair plan v2 Refinement 3.
+
 
 ## Why stakes
 
