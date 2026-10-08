@@ -4614,8 +4614,9 @@ def check_steward_cockpit_surface(report: Report):
       (2) the mount — ``serve_cockpit_doc`` injects the client shim;
           ``serve_static`` serves only the shipped static set (the deleted
           bake-off shells STAY deleted); ``api_get`` efforts/status round-trip;
-      (3) the engine — wake through the fake, ``say`` round-trip to turn_end
-          events, the turn-boundary ``.ecgberht/status-summary.json`` persist
+      (3) the engine — two human ``say`` round-trips through the fake, each
+          with its own streamed reply and turn_end, plus the turn-boundary
+          ``.ecgberht/status-summary.json`` persist
           (the universal file the dashboard tile reads), then stop.
 
     Env + STATE_FILE restored, temp dirs removed; nothing binds :8777,
@@ -4743,25 +4744,57 @@ def check_steward_cockpit_surface(report: Report):
 
         # (3) the engine, through the fake (zero tokens)
         eng = _se.Engine(str(tmp), fake=True)
-        r = eng.say("hello there")
-        if not r.get("ok"):
-            failures.append(f"say refused: {r}")
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            ends = [e for e in eng.events if e.get("t") == "turn_end"]
-            if len(ends) >= 2:   # stand-up turn + the queued hello turn
+        # A human message can preempt the automatic stand-up: its cancelled
+        # turn owes no turn_end. An unrelated decision-shape retry can also
+        # add an end. Count neither as proof that his message was answered.
+        for message, expected_reply in (
+                ("hello there", "Heard. (Fake steward"),
+                ("grasscatch this healthcheck idea", "Caught it - parked on the Strip")):
+            start = len(eng.events)
+            r = eng.say(message)
+            if not r.get("ok"):
+                failures.append(f"say {message!r} refused: {r}")
                 break
-            time.sleep(0.25)
-        else:
-            failures.append("engine never reached 2 turn_end events "
-                            f"(events: {[e.get('t') for e in eng.events][-8:]})")
-        if not any(e.get("t") == "delta" and e.get("text")
-                   for e in eng.events):
-            failures.append("no streamed delta from the fake engine")
+            deadline = time.monotonic() + 30
+            finished, errors = False, []
+            while time.monotonic() < deadline:
+                events = list(eng.events[start:])
+                reply, completed = "", 0
+                for event in events:
+                    if event.get("t") == "delta":
+                        reply += event.get("text", "")
+                    elif event.get("t") == "turn_end":
+                        if expected_reply in reply:
+                            completed = event["seq"]
+                        reply = ""
+                    elif event.get("t") == "sys" and event.get("text", "").startswith("turn interrupted ("):
+                        reply = ""
+                errors = [e.get("text", "engine error") for e in events
+                          if e.get("t") == "error" or
+                          (e.get("t") == "sys" and e.get("text", "").startswith(
+                              ("MODEL LIMIT:", "the steward's turn ended in an error:")))]
+                if errors:
+                    break
+                accepted = any(e.get("t") == "john" and e.get("text") == message
+                               for e in events)
+                published = any(e.get("t") == "status" and e["seq"] > completed
+                                for e in events) if completed else False
+                if (accepted and completed and published and not eng.busy
+                        and not eng.queue and not eng.broken):
+                    finished = True
+                    break
+                time.sleep(0.25)
+            if not finished:
+                failures.append(f"engine did not complete reply to {message!r} "
+                                f"(errors: {errors}; "
+                                f"events: {[e.get('t') for e in eng.events][-8:]})")
+                break
         st = eng.state()
         for key in ("alive", "busy", "light", "epoch", "open_question"):
             if key not in st:
                 failures.append(f"engine state missing {key}")
+        if not st.get("alive") or st.get("busy") or st.get("queued"):
+            failures.append("engine did not remain alive and idle with an empty queue")
         summary_f = tmp / ".ecgberht" / "status-summary.json"
         if not summary_f.is_file():
             failures.append("turn boundary did not persist status-summary.json")

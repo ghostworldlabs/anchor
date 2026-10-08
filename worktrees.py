@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import paths as _paths
@@ -178,8 +179,8 @@ _START_POINT_FALLBACKS = (
 )
 
 
-def _git_env(repo, args, timeout=_GIT_TIMEOUT, extra_env=None):
-    """Like :func:`_git` but merges ``extra_env`` into the child environment."""
+def _git_env(repo, args, timeout=_GIT_TIMEOUT, extra_env=None, input_text=None):
+    """Like :func:`_git`, with explicit child environment and optional stdin."""
     cmd = ["git", "-C", str(repo)] + [str(a) for a in args]
     env = None
     if extra_env:
@@ -188,7 +189,7 @@ def _git_env(repo, args, timeout=_GIT_TIMEOUT, extra_env=None):
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
-            env=env, creationflags=_paths.NO_WINDOW,
+            env=env, input=input_text, creationflags=_paths.NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, None, "", "git invocation failed: %s" % exc
@@ -197,6 +198,23 @@ def _git_env(repo, args, timeout=_GIT_TIMEOUT, extra_env=None):
 
 
 def _resolve_start_point(folder, start_point=None):
+    """Resolve a commit, retrying transient read failures within a fixed bound.
+
+    Windows sharing denials on a branch ref can appear as ``bad object`` even
+    when its commit is intact. Only ``start-point-unavailable`` is retried: that
+    result precedes all seed writes. Persistent failures stay errors and never
+    authorize replacing a branch or seeding an unreadable repository.
+    """
+    for delay in (0, 0.1, 0.3, 0.6):
+        if delay:
+            time.sleep(delay)
+        result = _resolve_start_point_once(folder, start_point)
+        if result[0] or result[2].get("reason") != "start-point-unavailable":
+            return result
+    return result
+
+
+def _resolve_start_point_once(folder, start_point=None):
     """Resolve a commit-ish that ``git worktree add`` can attach to.
 
     Returns ``(ok, start_point_or_none, meta)`` where ``meta`` may include
@@ -206,7 +224,7 @@ def _resolve_start_point(folder, start_point=None):
     meta = {}
     if start_point is not None and str(start_point).strip():
         sp = str(start_point).strip()
-        ok, _rc, out, err = _git(folder, ["rev-parse", "--verify", sp])
+        ok, _rc, out, err = _git(folder, ["rev-parse", "--verify", sp + "^{commit}"])
         if ok and (out or "").strip():
             return True, (out or "").strip(), meta
         return False, None, {
@@ -214,7 +232,7 @@ def _resolve_start_point(folder, start_point=None):
             "detail": (err or out or ("unresolvable start_point %r" % sp)).strip(),
         }
 
-    ok_h, _rc_h, out_h, _err_h = _git(folder, ["rev-parse", "--verify", "HEAD"])
+    ok_h, _rc_h, out_h, err_h = _git(folder, ["rev-parse", "--verify", "HEAD^{commit}"])
     if ok_h and (out_h or "").strip():
         return True, (out_h or "").strip(), meta
 
@@ -222,45 +240,84 @@ def _resolve_start_point(folder, start_point=None):
         if ref == "HEAD":
             continue
         ok_r, _rc_r, out_r, _err_r = _git(
-            folder, ["rev-parse", "--verify", ref])
+            folder, ["rev-parse", "--verify", ref + "^{commit}"])
         if ok_r and (out_r or "").strip():
             meta["resolved_via"] = ref
             return True, (out_r or "").strip(), meta
 
-    ok_a, _rc_a, out_a, _err_a = _git(
+    ok_a, rc_a, out_a, err_a = _git(
         folder, ["rev-list", "--max-count=1", "--all"])
     if ok_a and (out_a or "").strip():
         meta["resolved_via"] = "rev-list-all"
         return True, (out_a or "").strip(), meta
 
-    # Empty / unborn repo: seed one empty commit so worktree isolation works.
+    # Failed reads do not establish an empty repository. Only seed when HEAD
+    # names an absent branch and enumerating existing commits succeeded.
+    ok_s, rc_s, out_s, err_s = _git(folder, ["symbolic-ref", "-q", "HEAD"])
+    head_ref = (out_s or "").strip()
+    if not ok_a or not ok_s or not head_ref.startswith("refs/heads/"):
+        return False, None, {
+            "reason": "start-point-unavailable",
+            "detail": (err_a or err_s or err_h
+                       or "cannot verify an unborn repository").strip(),
+            "returncode": rc_a if not ok_a else rc_s,
+        }
+    _ok_ref, rc_ref, out_ref, err_ref = _git(
+        folder, ["show-ref", "--verify", "--quiet", head_ref])
+    if rc_ref != 1:
+        return False, None, {
+            "reason": "start-point-unavailable",
+            "detail": (err_ref or out_ref or err_h
+                       or "HEAD branch exists but is unreadable").strip(),
+            "returncode": rc_ref,
+        }
+
+    # Create an empty root commit without opening the owner's index. Porcelain
+    # `commit --allow-empty` both needs that index and consumes staged drafts.
+    # Plumbing also avoids running the owner's commit hooks or signing setup
+    # for this infrastructure-only seed.
     seed_env = {
         "GIT_AUTHOR_NAME": "Anchor",
         "GIT_AUTHOR_EMAIL": "anchor@localhost",
         "GIT_COMMITTER_NAME": "Anchor",
         "GIT_COMMITTER_EMAIL": "anchor@localhost",
     }
-    ok_c, rc_c, out_c, err_c = _git_env(
-        folder,
-        ["commit", "--allow-empty", "-m", SEED_EMPTY_COMMIT_MSG],
-        extra_env=seed_env,
-    )
-    if not ok_c:
+    ok_t, rc_t, out_t, err_t = _git_env(folder, ["mktree"], input_text="")
+    if not ok_t or not (out_t or "").strip():
         return False, None, {
             "reason": "empty-repo-seed-failed",
-            "detail": (err_c or out_c or "git commit --allow-empty failed").strip(),
+            "detail": (err_t or out_t or "git mktree failed").strip(),
+            "returncode": rc_t,
+        }
+    ok_c, rc_c, out_c, err_c = _git_env(
+        folder, ["commit-tree", (out_t or "").strip(), "--no-gpg-sign",
+                 "-m", SEED_EMPTY_COMMIT_MSG], extra_env=seed_env)
+    if not ok_c or not (out_c or "").strip():
+        return False, None, {
+            "reason": "empty-repo-seed-failed",
+            "detail": (err_c or out_c or "git commit-tree failed").strip(),
             "returncode": rc_c,
         }
+    seed_commit = (out_c or "").strip()
+    ok_u, rc_u, out_u, err_u = _git(
+        folder, ["update-ref", "-m", SEED_EMPTY_COMMIT_MSG,
+                 head_ref, seed_commit, ""])
     ok_h2, _rc_h2, out_h2, err_h2 = _git(
-        folder, ["rev-parse", "--verify", "HEAD"])
+        folder, ["rev-parse", "--verify", "HEAD^{commit}"])
     if ok_h2 and (out_h2 or "").strip():
-        meta["seeded_empty_commit"] = True
-        meta["seed_message"] = SEED_EMPTY_COMMIT_MSG
+        # A competing first commit wins rather than being overwritten. Both
+        # callers can then attach to the published HEAD, retaining its content.
+        if ok_u and (out_h2 or "").strip() == seed_commit:
+            meta["seeded_empty_commit"] = True
+            meta["seed_message"] = SEED_EMPTY_COMMIT_MSG
+        else:
+            meta["resolved_via"] = "concurrent-head"
         return True, (out_h2 or "").strip(), meta
     return False, None, {
         "reason": "empty-repo-seed-failed",
-        "detail": (err_h2 or out_h2
+        "detail": (err_u or out_u or err_h2 or out_h2
                    or "seed commit succeeded but HEAD still unreadable").strip(),
+        "returncode": rc_u if not ok_u else _rc_h2,
     }
 
 

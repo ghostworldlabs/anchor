@@ -144,6 +144,248 @@ def test_empty_unborn_repo_seeds_and_opens_worktree(env, tmp_path):
     assert res2.get("seeded_empty_commit") in (None, False)
 
 
+def test_empty_repo_seed_preserves_staged_files(env, tmp_path):
+    """Opening a session must not commit the owner's staged first draft."""
+    from pathlib import Path
+    wt, rnd = env["wt"], env["rnd"]
+    repo = tmp_path / "staged-unborn"
+    repo.mkdir()
+    assert _git(repo, "init", "-b", "main").returncode == 0
+    draft = repo / "draft.txt"
+    draft.write_text("Owner's uncommitted draft\n", encoding="utf-8")
+    assert _git(repo, "add", "draft.txt").returncode == 0
+    index = repo / ".git" / "index"
+    original_index = index.read_bytes()
+    project = rnd.add_project("Staged unborn", str(repo), scaffold=False)
+
+    result = wt.create_worktree(project["id"], "staged-unborn-session")
+
+    assert result["ok"], result
+    assert index.read_bytes() == original_index
+    assert _git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout == ""
+    assert _git(repo, "diff", "--cached", "--name-only").stdout.strip() == "draft.txt"
+    assert draft.read_text(encoding="utf-8") == "Owner's uncommitted draft\n"
+    assert not (Path(result["path"]) / "draft.txt").exists()
+
+
+def test_empty_repo_seed_opens_worktree_with_locked_source_index(env, tmp_path):
+    """Real Windows sharing denial reproduces Doctor's .git/index failure."""
+    import ctypes
+    import os
+    from ctypes import wintypes
+    from pathlib import Path
+    if os.name != "nt":
+        pytest.skip("Windows index sharing semantics")
+    wt, rnd = env["wt"], env["rnd"]
+    repo = tmp_path / "locked-unborn"
+    repo.mkdir()
+    assert _git(repo, "init", "-b", "main").returncode == 0
+    (repo / "draft.txt").write_text("Keep this staged\n", encoding="utf-8")
+    assert _git(repo, "add", "draft.txt").returncode == 0
+    index = repo / ".git" / "index"
+    original_index = index.read_bytes()
+    project = rnd.add_project("Locked unborn", str(repo), scaffold=False)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                  wintypes.DWORD, wintypes.LPVOID,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(index), 0x80000000, 0, None, 3, 0x80, None)
+    assert handle != wintypes.HANDLE(-1).value, ctypes.get_last_error()
+    try:
+        result = wt.create_worktree(project["id"], "locked-unborn-session")
+        assert result["ok"], result
+        assert Path(result["path"]).is_dir()
+    finally:
+        kernel.CloseHandle(handle)
+    assert index.read_bytes() == original_index
+    assert _git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout == ""
+
+
+def test_empty_repo_seed_preserves_concurrent_first_commit(env, tmp_path, monkeypatch):
+    from pathlib import Path
+    wt, rnd = env["wt"], env["rnd"]
+    repo = tmp_path / "concurrent-unborn"
+    repo.mkdir()
+    assert _git(repo, "init", "-b", "main").returncode == 0
+    (repo / "draft.txt").write_text("Owner's first commit\n", encoding="utf-8")
+    assert _git(repo, "add", "draft.txt").returncode == 0
+    tree = _git(repo, "write-tree").stdout.strip()
+    owner_commit = _git(repo, "-c", "user.name=Owner", "-c",
+                        "user.email=owner@localhost", "commit-tree", tree,
+                        "--no-gpg-sign", "-m", "Owner's first commit").stdout.strip()
+    assert owner_commit
+    project = rnd.add_project("Concurrent unborn", str(repo), scaffold=False)
+    original_git = wt._git
+
+    def competing_git(folder, args, **kwargs):
+        if args[0] == "update-ref":
+            publication = original_git(folder, ["update-ref", "refs/heads/main",
+                                                 owner_commit, ""])
+            assert publication[0], publication
+        return original_git(folder, args, **kwargs)
+
+    monkeypatch.setattr(wt, "_git", competing_git)
+    result = wt.create_worktree(project["id"], "concurrent-unborn-session")
+    assert result["ok"], result
+    assert result.get("resolved_via") == "concurrent-head"
+    assert not result.get("seeded_empty_commit")
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == owner_commit
+    assert (Path(result["path"]) / "draft.txt").read_text() == "Owner's first commit\n"
+
+
+@pytest.mark.parametrize("command", ["mktree", "commit-tree", "update-ref"])
+def test_empty_repo_seed_reports_real_publication_failure(env, tmp_path, monkeypatch,
+                                                         command):
+    wt, rnd = env["wt"], env["rnd"]
+    repo = tmp_path / "failed-unborn"
+    repo.mkdir()
+    assert _git(repo, "init", "-b", "main").returncode == 0
+    project = rnd.add_project("Failed unborn", str(repo), scaffold=False)
+    original_git, original_git_env = wt._git, wt._git_env
+
+    def failed_git(folder, args, **kwargs):
+        if args[0] == command:
+            return False, 128, "", "test: object or ref storage permission denied"
+        return original_git(folder, args, **kwargs)
+
+    def failed_git_env(folder, args, **kwargs):
+        if args[0] == command:
+            return False, 128, "", "test: object or ref storage permission denied"
+        return original_git_env(folder, args, **kwargs)
+
+    monkeypatch.setattr(wt, "_git", failed_git)
+    monkeypatch.setattr(wt, "_git_env", failed_git_env)
+    result = wt.create_worktree(project["id"], "failed-unborn-session")
+    assert not result["ok"]
+    assert result["reason"] == "empty-repo-seed-failed"
+    assert result["returncode"] == 128
+    assert "storage permission denied" in result["detail"]
+    assert _git(repo, "rev-parse", "--verify", "HEAD").returncode != 0
+    assert not wt.worktree_path_for("failed-unborn-session").exists()
+
+
+def test_unreadable_existing_repository_is_not_seeded(env, monkeypatch):
+    wt, repo = env["wt"], env["repo"]
+    original_head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    original_git = wt._git
+
+    def unreadable_git(folder, args, **kwargs):
+        if args[0] in ("rev-parse", "rev-list"):
+            return False, 128, "", "test: repository read permission denied"
+        return original_git(folder, args, **kwargs)
+
+    def unexpected_seed(*args, **kwargs):
+        pytest.fail("Failed reads must not trigger creation of a seed commit")
+
+    monkeypatch.setattr(wt, "_git", unreadable_git)
+    monkeypatch.setattr(wt, "_git_env", unexpected_seed)
+    result = wt.create_worktree(env["pid"], "unreadable-session")
+    assert not result["ok"]
+    assert result["reason"] == "start-point-unavailable"
+    assert "read permission denied" in result["detail"]
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == original_head
+    assert not wt.worktree_path_for("unreadable-session").exists()
+
+
+def test_empty_sha256_repository_seeds_worktree(env, tmp_path):
+    wt, rnd = env["wt"], env["rnd"]
+    repo = tmp_path / "sha256-unborn"
+    repo.mkdir()
+    initialized = _git(repo, "init", "--object-format=sha256", "-b", "main")
+    if initialized.returncode != 0:
+        pytest.skip("Git does not support SHA-256 repositories")
+    project = rnd.add_project("SHA-256 unborn", str(repo), scaffold=False)
+    result = wt.create_worktree(project["id"], "sha256-unborn-session")
+    assert result["ok"], result
+    assert result.get("seeded_empty_commit")
+    assert len(_git(repo, "rev-parse", "HEAD").stdout.strip()) == 64
+    assert _git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout == ""
+
+
+@pytest.mark.parametrize("release_after_failure", [True, False])
+def test_branch_ref_read_denial_is_retried_without_seeding(env, monkeypatch,
+                                                         release_after_failure):
+    """A Windows sharing denial produces Doctor's exact bad-object error."""
+    import ctypes
+    import os
+    from ctypes import wintypes
+    from pathlib import Path
+    if os.name != "nt":
+        pytest.skip("Windows ref sharing semantics")
+    wt, repo = env["wt"], env["repo"]
+    ref = repo / ".git" / "refs" / "heads" / "main"
+    original_ref = ref.read_bytes()
+    original_head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                  wintypes.DWORD, wintypes.LPVOID,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(ref), 0x80000000, 0, None, 3, 0x80, None)
+    assert handle != wintypes.HANDLE(-1).value, ctypes.get_last_error()
+    original_git = wt._git
+    failures = []
+
+    def observed_git(folder, args, **kwargs):
+        nonlocal handle
+        result = original_git(folder, args, **kwargs)
+        if args[0] == "rev-list" and not result[0]:
+            failures.append(result)
+            if release_after_failure and handle is not None:
+                kernel.CloseHandle(handle)
+                handle = None
+        return result
+
+    def unexpected_seed(*args, **kwargs):
+        pytest.fail("An unreadable existing branch must not be seeded")
+
+    monkeypatch.setattr(wt, "_git", observed_git)
+    monkeypatch.setattr(wt, "_git_env", unexpected_seed)
+    try:
+        result = wt.create_worktree(env["pid"], "ref-denial-session")
+    finally:
+        if handle is not None:
+            kernel.CloseHandle(handle)
+    assert failures and "fatal: bad object refs/heads/main" in failures[0][3]
+    assert ref.read_bytes() == original_ref
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == original_head
+    assert not result.get("seeded_empty_commit")
+    if release_after_failure:
+        assert result["ok"], result
+        assert result["start_point"] == original_head
+        assert Path(result["path"]).is_dir()
+    else:
+        assert not result["ok"]
+        assert result["reason"] == "start-point-unavailable"
+        assert "bad object refs/heads/main" in result["detail"]
+        assert not wt.worktree_path_for("ref-denial-session").exists()
+
+
+def test_missing_commit_object_is_rejected_without_changing_ref(env, monkeypatch):
+    """Resolving a ref's OID is insufficient if its commit does not exist."""
+    wt, repo = env["wt"], env["repo"]
+    ref = repo / ".git" / "refs" / "heads" / "main"
+    missing_oid = "0" * 39 + "1"
+    ref.write_text(missing_oid + "\n", encoding="ascii")
+    original_ref = ref.read_bytes()
+
+    def unexpected_seed(*args, **kwargs):
+        pytest.fail("A missing commit object must not authorize a seed")
+
+    monkeypatch.setattr(wt, "_git_env", unexpected_seed)
+    result = wt.create_worktree(env["pid"], "missing-object-session")
+    assert not result["ok"]
+    assert result["reason"] == "start-point-unavailable"
+    assert "bad object refs/heads/main" in result["detail"]
+    assert ref.read_bytes() == original_ref
+    assert not wt.worktree_path_for("missing-object-session").exists()
+
+
 # ── isolation: a dirty file in A is invisible in B and the main tree ──────
 
 def test_worktrees_are_isolated(env):
