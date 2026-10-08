@@ -1606,6 +1606,22 @@
       "wait_ref": "none",
       "human_wait": "",
       "_kind": "receipt"
+    },
+    {
+      "schema": "ecgberht-receipt-v0",
+      "kind": "leave",
+      "as_of": "2026-10-08",
+      "at": "2026-10-08T15:10:19Z",
+      "current_step_id": "gwl-access",
+      "last_event_seq": 103,
+      "last_event_at": "2026-10-08",
+      "last_event_kind": "step_set",
+      "last_event_step_id": "gwl-access",
+      "presentation_id": null,
+      "active_effort": "Provider repairs are in the running service; Claude/ChatGPT enrollment supported. Gemini/Grok and laptop delivery remain incomplete.",
+      "wait_ref": "none",
+      "human_wait": "",
+      "_kind": "receipt"
     }
   ],
   "horizon_source_seq": 103,
