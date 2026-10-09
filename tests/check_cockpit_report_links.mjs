@@ -15,7 +15,8 @@ for(const input of ['/artifact/p?path=a%20b.pdf','http://127.0.0.1:8777/artifact
 assert.equal(new URL(f('/artifact/p?path=a%26b%23c.pdf&token=stale#page=2'),'https://anchor.example').hash,'#page=2');
 for(const url of ['https://paper.example/paper.pdf','https://external.example/artifact/p?path=x','http://127.0.0.1.evil.example:8777/artifact/p?path=x','http://127.0.0.1:8888/artifact/p?path=x','http://user@127.0.0.1:8777/artifact/p?path=x'])assert.equal(f(url),url);
 // W3 (2026-10-10): localhost, the path form, /report and the tailnet name open on the reader's own origin
-for(const input of ['http://localhost:8777/artifact/p/docs/a%20b.pdf','https://gwl-server.tail1234.ts.net/artifact/p/docs/a%20b.pdf','/artifact/p/docs/a%20b.pdf']){
+assert.equal(f('https://other-box.tail1234.ts.net/artifact/p?path=x'),'https://other-box.tail1234.ts.net/artifact/p?path=x');   // another machine stays external
+for(const input of ['http://localhost:8777/artifact/p/docs/a%20b.pdf','http://anchor.example:8777/artifact/p/docs/a%20b.pdf','/artifact/p/docs/a%20b.pdf']){
  const u=new URL(f(input),'https://anchor.example');
  assert.equal(u.origin,'https://anchor.example');assert.equal(u.pathname,'/artifact/p/docs/a%20b.pdf');
  assert.equal(u.searchParams.get('token'),'synthetic-test-token');

@@ -17,8 +17,8 @@ function mdReportHref(raw) {
   const internal = /^\/artifact\/[^/]+(\/.+)?$/.test(dest.pathname) || /^\/report\//.test(dest.pathname) ||
     dest.pathname === "/api/steward/deliverable-file";
   const loop = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(dest.hostname) && (dest.port === "8777" || dest.port === "");
-  const legacy = dest.origin === "http://127.0.0.1:8777" || loop ||
-    dest.hostname === current.hostname || /\.ts\.net$/i.test(dest.hostname);
+  // review r1: only loopback or THIS page's own host name - never any *.ts.net machine or a look-alike
+  const legacy = dest.origin === "http://127.0.0.1:8777" || loop || dest.hostname === current.hostname;
   if (internal && !dest.username && !dest.password &&
       (dest.origin === current.origin || legacy)) {
     dest.searchParams.delete("token");

@@ -464,13 +464,12 @@ const Proto = (() => {
     s.appendChild(el("div", "blk " + cls, text));
     pin(s, stick);
   }
-  let lastReplyBlock = null;   // W3 (2026-10-10): the reply a "reply_links" correction re-renders
+  let turnReplyBlocks = [];   // W3 (2026-10-10): this turn's reply blocks, which a "reply_links" correction replaces
   function closeCurrent() {
     if (currentBlock) {
       const s = currentBlock.parentElement;
       const stick = s && atBottom(s);
       const body = currentBlock.querySelector(".body");
-      if (!currentBlock._tick) lastReplyBlock = currentBlock;
       renderRich(body, currentBlock._raw || body.textContent);
       tileSay("turn", { who: "steward", text: String(currentBlock._raw || body.textContent || "").slice(-600) });
       currentBlock = null;
@@ -1807,12 +1806,14 @@ const Proto = (() => {
                                 "", "", ev);
         currentBlock._raw = "";
         currentBlock._tick = !!ev.tick;
+        if (!ev.tick) turnReplyBlocks.push(currentBlock);
       }
       currentBlock._raw += ev.text;
       currentBlock.querySelector(".body").textContent = currentBlock._raw;
       if (stick) pin(s, true);
     } else if (ev.t === "john") {
       closeCurrent();
+      turnReplyBlocks = [];
       addBlock("john", opts.johnLabel || "JOHN", ev.text);
       tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();
@@ -1826,6 +1827,7 @@ const Proto = (() => {
       activity(ev);
     } else if (ev.t === "turn_end") {
       closeCurrent();
+      turnReplyBlocks = [];
       busySince = null;
       endActivity(ev);
       const hasReportedTurnCost = typeof ev.cost_usd === "number" && Number.isFinite(ev.cost_usd) && ev.cost_usd >= 0
@@ -1849,11 +1851,16 @@ const Proto = (() => {
       closeCurrent();
       renderStatus(ev.status);
     } else if (ev.t === "reply_links") {
-      // W3: Anchor checked the reply's links and corrected some to the registered copy - show the reply as recorded
-      if (currentBlock && !currentBlock._tick) { currentBlock._raw = String(ev.text || ""); }
-      else if (lastReplyBlock && lastReplyBlock.isConnected) {
-        lastReplyBlock._raw = String(ev.text || "");
-        renderRich(lastReplyBlock.querySelector(".body"), lastReplyBlock._raw);
+      // W3: Anchor checked the reply's links and corrected some - the WHOLE turn's reply (its text may have been
+      // split into several blocks by tool steps) is shown once, as recorded (review r1)
+      closeCurrent();
+      const blocks = turnReplyBlocks.filter(b => b.isConnected);
+      if (blocks.length) {
+        const first = blocks[0];
+        blocks.slice(1).forEach(b => b.remove());
+        first._raw = String(ev.text || "");
+        renderRich(first.querySelector(".body"), first._raw);
+        turnReplyBlocks = [first];
       }
     } else if (ev.t === "receipt") {
       // the engine's delivery receipt (item 2): one line, the Read link the Deliverables tile also carries
