@@ -482,3 +482,50 @@ def test_the_new_file_list_comes_from_the_candidate_with_what_the_check_added(en
     review = json.loads((tmp / "review.log").read_text(encoding="utf-8").splitlines()[0])
     brief = Path(review[review.index("--brief-file") + 1]).read_text(encoding="utf-8")
     assert "report.json" in brief.split("BRIEF:")[0]
+
+
+# ---- fcj review r5 ----
+
+def test_a_foreman_that_may_run_uncontained_stays_counted_and_stop_ends_it(env, monkeypatch):
+    # MAJOR 1: never dropped - registered, counted, its worktree kept, and Stop ends it
+    repo, cdir, _ = env
+    held = {}
+
+    def uncontained(argv, cwd, env_, out):
+        proc = subprocess.Popen(["node", "-e", "setTimeout(()=>{},600000)"], stdout=subprocess.DEVNULL)
+        held["run"] = code_jobs._Run(proc, None)
+        raise code_jobs._Uncontained(held["run"], "Foreman could not be contained (test)")
+    monkeypatch.setattr(code_jobs, "_popen_contained", uncontained)
+    out = _start(repo, cdir)
+    assert not out["ok"] and "keeps its place" in out["error"]
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]
+    assert job["status"] == "running" and job.get("stuck") and Path(job["worktree"]).is_dir()
+    assert code_jobs._FOREMAN_PROCS[out["job"]] is held["run"] and code_jobs._norm(str(repo)) in code_jobs.busy_repos()
+    from steward_cockpit import steward_routes
+    assert "foreman:" + out["job"] in steward_routes._running_job_ids()
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"]
+    assert held["run"].proc.poll() is not None
+    code_jobs._FOREMAN_PROCS.pop(out["job"], None)
+
+
+def test_a_record_that_cannot_be_written_leaves_no_reservation_and_no_worktree(env, monkeypatch):
+    # MAJOR 2
+    repo, cdir, tmp = env
+
+    def broken(cdir_, job):
+        raise OSError("the steward's folder is read-only")
+    monkeypatch.setattr(code_jobs, "_write_job", broken)
+    out = _start(repo, cdir)
+    assert not out["ok"] and "record could not be written" in out["error"]
+    assert not [k for k, v in code_jobs._FOREMAN_PROCS.items() if isinstance(v, code_jobs._Starting)]
+    assert not [p for p in (tmp / "jobs").iterdir() if p.name not in ("checks", "busy.json", "locks")]
+
+
+def test_the_brief_is_written_exactly_and_the_adapter_never_slices_it(tmp_path, monkeypatch):
+    # MAJOR 3: no newline translation, and the adapter refuses a long brief instead of cutting it
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", json.dumps([sys.executable, "-c", "print('{}')"]))
+    code_jobs.run_review({"id": "nl", "base": "HEAD", "brief": "a\nb\n"}, str(tmp_path), "HEAD")
+    assert (tmp_path / "jobs" / "checks" / "nl-brief.md").read_bytes() == b"a\nb\n"
+    src = (ROOT / "tools" / "steward_review.mjs").read_text(encoding="utf-8")
+    assert ".slice(0, 16000)" not in src and "longer than the reviewer reads whole" in src

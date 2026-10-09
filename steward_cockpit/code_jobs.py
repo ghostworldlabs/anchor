@@ -298,6 +298,19 @@ def foreman_settings(job):
     return d, None
 
 
+class _Uncontained(Exception):
+    """A Foreman process that may be running outside its containment: the run is kept so it stays counted and Stop
+    can still end it (fcj review r5)."""
+
+    def __init__(self, run, why):
+        super().__init__(why)
+        self.run = run
+
+
+class _ForemanStuck(Exception):
+    """Foreman's start failed and its process could not be seen to end: the job stays running and registered."""
+
+
 class _ForemanRan(Exception):
     """Foreman began and its start failed afterwards; it was ended and seen gone - its worktree is kept, not removed."""
 
@@ -332,14 +345,25 @@ class _Run:
             return self.ended
 
     def _end(self, wait_s):
+        if self.wjob is not None and not self.wjob.assigned:      # never contained: end the process itself
+            try:
+                self.proc.kill()
+                self.proc.wait(timeout=wait_s)
+                self.wjob.close()
+                return True
+            except Exception:
+                return False
         if self.wjob is not None:
             if not self.wjob.terminate_verified(self.proc, timeout_seconds=wait_s):
                 return False
             self.wjob.close()
             return True
-        try:                                            # elsewhere: the process group
-            import signal
-            os.killpg(self.proc.pid, signal.SIGKILL)
+        try:                                            # elsewhere: the process group (Windows without a Job: itself)
+            if os.name == "nt":
+                self.proc.kill()
+            else:
+                import signal
+                os.killpg(self.proc.pid, signal.SIGKILL)
         except Exception:
             pass
         try:
@@ -367,9 +391,10 @@ def _popen_contained(argv, cwd, env, out):
     try:
         if not wjob.assign_and_resume(proc):
             raise OSError("Foreman was not resumed")
-    except BaseException:
-        if not wjob.abort_suspended(proc):
-            raise OSError("Foreman could not be contained, and its end could not be seen (pid %s)" % proc.pid)
+    except BaseException as e:
+        if not wjob.abort_suspended(proc):            # it may run: never dropped - the caller keeps it accounted for
+            raise _Uncontained(_Run(proc, wjob), "Foreman could not be contained (%s), and its end could not be seen "
+                               "(pid %s)" % (e, proc.pid))
         wjob.close()
         raise
     return _Run(proc, wjob)
@@ -469,8 +494,15 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
                 _remove_foreman_config(wt)
                 _FOREMAN_PROCS.pop(jid, None)
                 return
-            run = _popen_contained(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], str(wt), env, out)
+            try:
+                run = _popen_contained(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], str(wt), env, out)
+            except _Uncontained as u:
+                _FOREMAN_PROCS[jid] = u.run              # still counted by the restart check; Stop ends it
+                _transition(cdir, jid, ("running",), stuck=str(u) + "; Stop ends it and releases the job")
+                raise _ForemanStuck(str(u))
             _FOREMAN_PROCS[jid] = run
+    except _ForemanStuck:
+        raise                                       # out stays open: the process may still write to it
     except BaseException:
         out.close()
         raise
@@ -489,6 +521,7 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
             raise _ForemanRan(str(e))
         _transition(cdir, jid, ("running",), stuck="Foreman's start failed after launch (%s) and its processes could "
                     "not be seen to end; Stop ends them and releases the job" % e)
+        raise _ForemanStuck("Foreman's start failed after launch (%s) and it could not be seen to end" % e)
 
 
 def _wait_foreman(cdir, job, wt, run, out):
@@ -895,7 +928,8 @@ def run_review(job, tree, head, delta_from=""):
                                       "%d at most); the work is kept for a look" % (len(text), REVIEW_BRIEF_READ)}
     try:
         brief.parent.mkdir(parents=True, exist_ok=True)
-        brief.write_text(text, encoding="utf-8")
+        with open(brief, "w", encoding="utf-8", newline="") as fh:   # exactly the characters counted above
+            fh.write(text)
     except OSError as e:                              # fcj r4: a reviewer given no brief is never asked
         return {"ok": False, "error": "the review's brief could not be written (%s)" % e}
     seam = os.environ.get("ANCHOR_REVIEW_CMD")
@@ -1107,10 +1141,25 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             if worker == "foreman":
                 job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
                 _FOREMAN_PROCS[job_id] = _Starting()     # registered with the record: never taken for a lost Foreman
-            _write_job(cdir, job)
-            b = _busy_read()
-            b[job_id] = {"job": job_id, "cdir": str(cdir), "repo": _norm(root)}
-            _busy_write(b)
+            try:
+                _write_job(cdir, job)
+                b = _busy_read()
+                b[job_id] = {"job": job_id, "cdir": str(cdir), "repo": _norm(root)}
+                _busy_write(b)
+            except Exception as e:                    # fcj r5: never a reservation without a record nobody can stop
+                _FOREMAN_PROCS.pop(job_id, None)
+                try:
+                    d = read_jobs(cdir)
+                    if job_id in d:
+                        d.pop(job_id)
+                        p_ = _path(cdir)
+                        tmp_ = p_.with_suffix(".json.tmp")
+                        tmp_.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8")
+                        _replace(str(tmp_), str(p_))
+                except Exception:
+                    pass
+                _cleanup(job, keep_branch=False)
+                return {"ok": False, "error": "no job started: its record could not be written (%s)" % e}
     def abandon(why):                                 # nothing ran in the worktree: it goes, and so does the reservation
         _FOREMAN_PROCS.pop(job_id, None)
         j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error=why)
@@ -1136,6 +1185,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     if worker == "foreman":
         try:
             _start_foreman(cdir, job, wt, plan, profile, settings_dir)
+        except _ForemanStuck as e:                    # it may be running: the job stays running, registered and counted
+            return {"ok": False, "error": "%s; the job keeps its place until Stop ends it" % e, "job": job_id}
         except _ForemanRan as e:                      # it ran, and was ended and seen gone: its work is kept
             _FOREMAN_PROCS.pop(job_id, None)
             _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
