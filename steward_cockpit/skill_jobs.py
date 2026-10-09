@@ -77,10 +77,24 @@ def running(cdir):
     return [j for j in read_jobs(cdir).values() if j.get("status") == "running"]
 
 
+def with_profile(argv):
+    """S7 (night 2026-10-10): Foreman started from Anchor runs SLIM unless the steward named a profile (John's word
+    for a multi-part project: --profile standard)."""
+    try:
+        script = Path(argv[1])
+    except (IndexError, TypeError):
+        return argv
+    if (script.name.lower() == "run-live.mjs" and "foreman" in (p.lower() for p in script.parts)
+            and "--profile" not in argv):
+        return list(argv) + ["--profile", "slim"]
+    return argv
+
+
 def start(cdir, argv, label=""):
     ok, why = validate(argv)
     if not ok:
         return {"ok": False, "error": why}
+    argv = with_profile(argv)
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     log_rel = "%s/%s.log" % (LOG_DIR, job_id)
     log_path = Path(cdir) / log_rel

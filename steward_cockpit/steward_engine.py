@@ -150,6 +150,26 @@ RESUME_QUIET = (
 JOIN_PICKUP = "\n\nJOHN SAYS (give the short pickup first, then answer this):\n"
 JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\n"
 
+# S7 (night 2026-10-10, John's Q3 slim design approved 10-09: "go ahead ... include the crucible/foreman plan"): the
+# steward SIZES the work; Foreman and Crucible run slim from Anchor. ANCHOR_FOREMAN_CRUCIBLE_HOLD=1 puts the hold back.
+def _size_or_hold():
+    if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0").strip() == "1":
+        return "Foreman and Crucible are on hold. "
+    return (
+        "SIZE THE WORK first and say the size in one line with why: SMALL (reversible, about three files or fewer) is a "
+        "code job - its coder writes, one reviewer of another family checks it with a simple elegance check, and it "
+        "lands when that passes; never Crucible or Foreman for it. A FEATURE is Crucible slim, then Foreman slim, each "
+        "a skill job: `python C:/dev/Anchor/tools/steward_skill.py start --label \"plan: <what>\" -- node "
+        "C:/dev/trio/crucible/bin/slim.mjs <a folder for the plan> --task \"<the work>\"`; show John the plan and its "
+        "one review, change it on his word, and only on his approval build it: `python "
+        "C:/dev/Anchor/tools/steward_skill.py start --label \"build: <what>\" -- node "
+        "C:/dev/trio/foreman/bin/run-live.mjs <the project> --git` (Anchor runs Foreman slim). A MULTI-PART project "
+        "(several features, high stakes) uses Crucible and Foreman standard (--profile standard) - only on John's word. "
+    )
+
+
+SIZE_OR_HOLD = _size_or_hold()
+
 # R2 (steward responsiveness, Ecgberht journals 2069/2070, John 2026-10-04): the duty that comes first. In the Cave's
 # 51-minute turn about 5 of 56 steps changed code; the rest was ceremony. Small is the default.
 SMALL_DUTY = (
@@ -165,8 +185,7 @@ SMALL_DUTY = (
     "you name up front can land. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
     "lands only when that review passes; it wakes you with the result - report it in two or three sentences. While "
     "a code job runs on a repository, do not write there yourself. When John says stop, run `python "
-    "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator, a verify script or a Foreman run; "
-    "Foreman and Crucible are on hold. A swarm only when he asks for one. A long turn is fine when the work is "
+    "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator or a verify script. " + SIZE_OR_HOLD + "A swarm only when he asks for one. A long turn is fine when the work is "
     "his and in hand: the engine adds a progress line, and you keep going. "
 )
 
@@ -176,7 +195,7 @@ EFFORT_DUTY = (
     "(`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file <brief.md> [--check "
     "\"<cmd>\"] [--output <path> ...]`, naming every file a command will produce; another family reviews it before "
     "it lands) and you tell John in one line; do not write in a "
-    "repository while a code job owns it. Foreman and Crucible are on hold. "
+    "repository while a code job owns it. " + SIZE_OR_HOLD
 )
 
 # the coder of a code job: no steward duties, the work itself
@@ -216,8 +235,7 @@ _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to 
 CONTRACT = (
     "CODE (John, 2026-10-07; every mode): any change to an Anchor application file or any program's code goes to "
     "a code job in its own worktree, never into the served tree; say the plan in a few lines first, and for a major "
-    "coding effort wait for John's approval before starting it. Do not invent a validator, a verify script or a "
-    "Foreman run; Foreman and Crucible are on hold. "
+    "coding effort wait for John's approval before starting it. Do not invent a validator or a verify script. " + SIZE_OR_HOLD +
     "A background job that runs a SKILL (Chekhov, a review, research) uses the same launcher with --skill <its "
     "name> (John, 2026-10-08), so his status names the skill and its models - never 'code job'. "
     "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
@@ -289,8 +307,7 @@ EFFORT_RULES = (
     "step with part=research|slice|rigor|integrate|harden (the product map is "
     "those tags, not a second file). Pass 1 of a new effort: a substantial draft "
     "covering the whole map; later passes: small slices in this session. You have "
-    "NO Shark swarm. Crucible and Foreman are on hold in Anchor (John, 2026-10-07) "
-    "until their best-in-class review; code goes to a code job. After EVERY close including research, re-read the North "
+    "NO Shark swarm. " + SIZE_OR_HOLD + "After EVERY close including research, re-read the North "
     "Star and append a goal_flip event {verdict: reaffirmed|rewritten, goal_from, "
     "goal_to, step_id, goal_revision (the cockpit state's goal_revision - the hash of "
     "the North Star you re-read), scope (the closed step id), receipt}; if rewritten, "
