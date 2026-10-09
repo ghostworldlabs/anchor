@@ -111,6 +111,9 @@ def app(doctor_server):
         # A inert Cave avoids waking or modifying any steward conversation.
         ctx.route(origin + "/", lambda r: r.fulfill(body="<title>Cave</title><p>Navigation check</p>", content_type="text/html"))
         ctx.route("**/api/steward/**", lambda r: r.fulfill(json={"ok": True, "state": "quiet"}))
+        # these tests prove a page comes back right after the app drops its frame (past the keep-alive cap):
+        # cap 0 makes every hidden tile drop, as all of them did before 2026-10-08
+        ctx.add_init_script("if(window===window.top)window.ANCHOR_KEEP_LIVE=0;")
         ctx.add_init_script("if(location.pathname==='/doctor')window.__instance=crypto.randomUUID();")
         page = ctx.new_page()
         failures = []

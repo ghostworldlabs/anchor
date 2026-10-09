@@ -8,8 +8,10 @@
  * right - opening the second pane if there was one, and the cockpit keeps the focus so he can dictate.
  *
  * Frames: the Cave's frame lives for the whole session. A tile shown in a pane has a live frame; a tile that
- * leaves the panes drops its frame once the panes' new frames have loaded (never inside the caller's own
- * window.open call), and comes back from its last address on a click. The tile list lives in memory.
+ * leaves the panes KEEPS its frame, hidden, so switching back shows it exactly as he left it - conversation,
+ * draft, scroll (his rule, 2026-10-08: "once opened ... keep the content in them"). Only past KEEP_LIVE hidden
+ * tiles does the least recently shown one drop its frame (once the panes' new frames have loaded, never inside
+ * the caller's own window.open call); it comes back from its last address on a click. The tile list lives in memory.
  */
 (function () {
   "use strict";
@@ -18,6 +20,9 @@
   var COCKPIT = " \u2014 AI Cockpit";
   var FRAME_SCRIPT = "/static/app-frame.js";
   var DROP_AFTER_MS = 15000;
+  var KEEP_LIVE = 6, KEEP_LIVE_NARROW = 3;    // hidden tiles that keep their page (a phone keeps fewer)
+  if (typeof window.ANCHOR_KEEP_LIVE === "number" && window.ANCHOR_KEEP_LIVE >= 0)   // tests of the drop path
+    KEEP_LIVE = KEEP_LIVE_NARROW = window.ANCHOR_KEEP_LIVE;
 
   var strip = document.getElementById("strip");
   var rowButton = document.getElementById("rows"), rowsExpanded = false, rowTick = null;
@@ -30,6 +35,7 @@
   var pendingDrop = [], dropTimer = null;
   var narrowMq = window.matchMedia("(max-width: 760px)");
   var narrow = { get matches() { return narrowMq.matches && !document.body.classList.contains("hosted"); } };
+  try { narrowMq.addEventListener("change", function () { settle(); }); } catch (e) { /* older engines: next settle */ }
 
   // ---------- frames ----------
   function newFrame(src) {
@@ -69,6 +75,7 @@
     var t = tileOfFrame(f);
     if (!t) return;
     arm(f.contentWindow);
+    if (shownIn(t.id) < 0) { t.hiddenSaid = true; tellVisibility(f, true); }
     var url = addressOf(f.contentWindow);
     if (url) t.url = url;
     var route = resolve(url);
@@ -289,6 +296,7 @@
     var prev = panes[k];
     if (other >= 0 && other !== k) panes[other] = prev;       // already on the other side: the two swap
     panes[k] = id;
+    t.seen = ++seq;                                            // least recently shown drops first, past KEEP_LIVE
     if (prev && prev !== id) { hist[k] = hist[k].filter(function (x) { return x !== prev; }); hist[k].push(prev); }
     if (prev && prev !== id && shownIn(prev) < 0) leave(prev);
     if (!t.frame) t.frame = newFrame(t.url || CAVE_URL);
@@ -314,11 +322,18 @@
   }
 
   function settle() {
-    pendingDrop = pendingDrop.filter(function (id) {
+    pendingDrop = pendingDrop.filter(function (id) {        // a tile that left keeps its page: remember where it is
       var t = byId(id);
-      if (!t || shownIn(id) >= 0) return false;
-      if (t.frame) { t.url = addressOf(t.frame.contentWindow) || t.url; if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title); t.frame.remove(); t.frame = null; }
+      if (t && t.frame && shownIn(id) < 0) { t.url = addressOf(t.frame.contentWindow) || t.url; if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title); }
       return false;
+    });
+    var cap = narrowMq.matches ? KEEP_LIVE_NARROW : KEEP_LIVE;
+    var hiddenLive = tiles.filter(function (t) { return t.kind !== "cave" && t.frame && shownIn(t.id) < 0; })
+                          .sort(function (a, b) { return (a.seen || 0) - (b.seen || 0); });
+    hiddenLive.slice(0, Math.max(0, hiddenLive.length - cap)).forEach(function (t) {
+      t.url = addressOf(t.frame.contentWindow) || t.url;
+      if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title);
+      t.frame.remove(); t.frame = null;
     });
   }
 
@@ -368,6 +383,7 @@
         panes[0] = back || (op ? op.id : null) || (tiles[i - 1] || tiles[0]).id;
       }
       var s = byId(panes[0]);
+      if (s) s.seen = ++seq;                                   // restored: the most recently shown (the keep-alive order)
       if (s && !s.frame) s.frame = newFrame(s.url || CAVE_URL);
     }
     layout(); render();
@@ -377,12 +393,27 @@
     }
   }
 
+  // A hidden tile keeps its page (keep-alive) but must not keep working the network or reload under a draft:
+  // every window in the tile (the page and the frames inside it, e.g. a cockpit's chamber) gets
+  // window.__anchorHidden and an "anchor-app-visibility" event. A cockpit parks its event poll on it (the same
+  // park the Cave's preloaded cards use) and its build self-reload waits until it is shown again.
+  function tellVisibility(f, hidden) {
+    (function walk(w, depth) {
+      try {
+        w.__anchorHidden = hidden;
+        w.dispatchEvent(new w.CustomEvent("anchor-app-visibility", { detail: { hidden: hidden } }));
+        for (var i = 0; depth < 4 && i < w.frames.length; i++) walk(w.frames[i], depth + 1);
+      } catch (e) { /* not ours */ }
+    })(f.contentWindow, 0);
+  }
+
   function layout() {
     document.body.classList.toggle("two", two);
     tiles.forEach(function (t) {
       if (!t.frame) return;
       var k = shownIn(t.id);
       t.frame.hidden = k < 0;
+      if (t.hiddenSaid !== (k < 0)) { t.hiddenSaid = k < 0; tellVisibility(t.frame, k < 0); }
       t.frame.dataset.pane = k < 0 ? "" : String(k);
       t.frame.classList.toggle("active", two && k === active);
     });

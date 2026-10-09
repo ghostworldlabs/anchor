@@ -199,18 +199,60 @@ def _open_p1(page):
 
 
 
-def test_cockpit_to_cockpit_keeps_the_caller_until_the_new_one_loads_then_comes_back_from_its_address(page):
+def test_cockpit_to_cockpit_keeps_the_caller_alive_hidden_and_switching_back_shows_it_as_he_left_it(page):
+    # his rule (2026-10-08): a tile once opened keeps its content - no reload when he switches back
     p1 = _open_p1(page)
+    p1.evaluate("window.__alive = 'same page'; document.getElementById('say').focus()")
     p1.locator("#say").fill("half a sentence")
+    p1.evaluate("window.scrollTo(0, 0)")
     p1.locator("#p3").click()
     page.wait_for_function("() => [...document.querySelectorAll('#strip .tile .name')].some(n => n.textContent === 'DARPA proposal')")
-    _settle(page)
+    _settle(page, 900)
     assert _painted_frames(page) == ["/project/p3"]
-    # the old cockpit's frame was dropped once DARPA loaded; a click brings it back from its address
-    assert page.evaluate("document.querySelectorAll('#stage > iframe').length") == 2     # the Cave + the focus
+    # the MBA cockpit's frame is still there, hidden (not painted), with its page untouched
+    assert page.evaluate("document.querySelectorAll('#stage > iframe').length") == 3     # the Cave + DARPA + MBA kept
+    page.wait_for_timeout(16000)                                                         # past the old drop timer
+    assert page.evaluate("document.querySelectorAll('#stage > iframe').length") == 3
     page.locator("#strip .tile", has_text="MBA Teaching AI").click()
     page.wait_for_function("() => [...document.querySelectorAll('#stage > iframe')].some(f => { try { return f.contentWindow.location.pathname === '/project/p1' && getComputedStyle(f).display !== 'none'; } catch (e) { return false; } })")
+    back = _focus_frame(page, "/project/p1")
+    assert back.evaluate("window.__alive") == "same page"                                # the same page, not a reload
+    assert back.locator("#say").input_value() == "half a sentence"
+    assert _painted_frames(page) == ["/project/p1"]
     assert page.locator("#strip .tile.focus .name").text_content() == "MBA Teaching AI"
+
+
+def test_a_hidden_tile_and_the_frames_inside_it_are_told_so_and_told_again_when_shown(page):
+    p1 = _open_p1(page)
+    rec = "window.__vis=[];addEventListener('anchor-app-visibility',e=>__vis.push(e.detail.hidden))"
+    p1.evaluate(rec)
+    nested = _focus_frame(page, "/steward/v1")
+    nested.evaluate(rec)
+    p1.locator("#p3").click()
+    page.wait_for_function("() => [...document.querySelectorAll('#strip .tile .name')].some(n => n.textContent === 'DARPA proposal')")
+    _settle(page, 900)
+    assert p1.evaluate("[window.__anchorHidden, window.__vis]") == [True, [True]]
+    assert nested.evaluate("[window.__anchorHidden, window.__vis]") == [True, [True]]
+    page.locator("#strip .tile", has_text="MBA Teaching AI").click()
+    _settle(page)
+    assert p1.evaluate("[window.__anchorHidden, window.__vis]") == [False, [True, False]]
+    assert nested.evaluate("window.__vis") == [True, False]
+
+
+def test_past_six_hidden_tiles_the_least_recently_shown_drops_and_comes_back_from_its_address(page):
+    p1 = _open_p1(page)
+    for i in range(9):                                         # nine documents opened one after another
+        p1.evaluate("i => window.open('/artifact/p1?path=f' + i + '.html')", i)
+        page.wait_for_function("n => document.querySelectorAll('#strip .tile').length === n", arg=3 + i)
+    _settle(page, 900)
+    live = page.evaluate("""() => [...document.querySelectorAll('#stage > iframe')].map(f => {
+        try { return f.contentWindow.location.pathname + f.contentWindow.location.search; } catch (e) { return '?'; } })""")
+    # the Cave + the two shown panes (the cockpit and f8) + six hidden kept; f0 and f1 (least recently shown) dropped
+    assert len(live) == 1 + 2 + 6, live
+    assert not any("f0.html" in u or "f1.html" in u for u in live), live
+    assert all(any(("f%d.html" % i) in u for u in live) for i in range(2, 9)), live
+    page.locator("#strip .tile", has_text="f0.html").click()                            # it comes back from its address
+    page.wait_for_function("() => [...document.querySelectorAll('#stage > iframe')].some(f => { try { return f.contentWindow.location.search.indexOf('f0.html') >= 0 && getComputedStyle(f).display !== 'none'; } catch (e) { return false; } })")
 
 
 def test_close_returns_focus_and_drag_reorders_but_never_past_the_cave(page):

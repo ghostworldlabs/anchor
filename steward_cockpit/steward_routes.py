@@ -248,7 +248,10 @@ window.STEWARD_MODE = %s;
   // The say box lives in the chamber (v1/v3), a frame inside the cockpit: a focused frame asks its own guard.
   var _lastIn=0;document.addEventListener('input',function(){_lastIn=Date.now();},true);
   function _busy(){var ae=document.activeElement;
+    try{var w=window;for(var k=0;k<6;k++){if(w.__anchorHidden)return true;if(w===w.parent)break;w=w.parent;}}catch(_){}   // a tile the app keeps hidden (this frame or one around it) reloads when he can see it, never under him
     if(Date.now()-_lastIn<10000)return true;
+    var tas=document.querySelectorAll('textarea');for(var i=0;i<tas.length;i++){if(tas[i].value&&tas[i].value.trim())return true;}
+    var frs=document.querySelectorAll('iframe');for(var j=0;j<frs.length;j++){try{var fb=frs[j].contentWindow.__stewardBusy;if(fb&&fb())return true;}catch(_){}}
     if(!ae)return false;
     if(ae.tagName==='IFRAME'){try{var b=ae.contentWindow.__stewardBusy;return !!(b&&b());}catch(_){return false;}}
     return !!((ae.tagName==='TEXTAREA'||(ae.tagName==='INPUT'&&/^(text|search|)$/i.test(ae.type||'')))&&ae.value);}
