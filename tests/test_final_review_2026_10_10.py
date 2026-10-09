@@ -68,3 +68,46 @@ def test_the_serving_size_limit_is_respected(tmp_path, monkeypatch):
         return st
     monkeypatch.setattr(Path, "stat", fake_stat)
     assert link_check.check_route("/api/steward/deliverable-file?pid=p&dir=E&path=big.pdf") == "unavailable now"
+
+
+def test_r2_a_start_is_counted_before_the_drain_question_and_a_refused_one_leaves_no_trace(monkeypatch, tmp_path):
+    from steward_cockpit import maintenance
+    seen = {}
+
+    def active():
+        seen["registered"] = any(isinstance(p, skill_jobs._Reserved) for p in skill_jobs._PROCS.values())
+        return True
+    monkeypatch.setattr(maintenance, "is_active", active)
+    monkeypatch.setattr(skill_jobs, "validate", lambda argv: (True, ""))
+    out = skill_jobs.start(str(tmp_path), ["node", "x.mjs"])
+    assert out["ok"] is False and seen["registered"] is True
+    assert not any(isinstance(p, skill_jobs._Reserved) for p in skill_jobs._PROCS.values())
+
+
+def test_r2_a_stopped_skill_stays_registered_until_its_process_ends(monkeypatch, tmp_path):
+    killed = []
+
+    class Proc:
+        pid = 4242
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(skill_jobs, "running", lambda cdir: [{"id": "k9", "started": "2026-10-10 10:00:00"}])
+    monkeypatch.setattr(skill_jobs, "_write_job", lambda cdir, job: None)
+    monkeypatch.setattr(skill_jobs, "_kill_tree", lambda p: killed.append(p.pid))
+    monkeypatch.setitem(skill_jobs._PROCS, "k9", Proc())
+    try:
+        assert skill_jobs.stop(str(tmp_path), "k9")["ok"] and killed == [4242]
+        assert "k9" in skill_jobs._PROCS, "still counted by the restart check until wait() sees it end"
+    finally:
+        skill_jobs._PROCS.pop("k9", None)
+
+
+def test_r2_an_encoded_credential_name_is_removed_from_a_malformed_link():
+    out, _ = link_check.check_reply("[bad](http://localhost:99999/x?a=1&%74oken=SECRET3#f)", ".", hosts={"localhost"})
+    assert "SECRET3" not in out and "a=1" in out
+
+
+def test_r2_an_interrupted_turn_releases_its_reply_blocks():
+    js = (ROOT / "steward_cockpit" / "static" / "shared.js").read_text(encoding="utf-8")
+    assert '/turn interrupted|session ended|asleep|steward stopped/i.test(ev.text || "")) turnReplyBlocks = [];' in js

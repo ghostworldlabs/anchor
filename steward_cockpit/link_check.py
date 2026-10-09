@@ -315,8 +315,9 @@ def _check_reply(text, cdir, hosts):
                 host = (urlsplit(str(url)).hostname or "").lower()
             except ValueError:
                 host = ""
-            if host in hosts and _SECRET_IN_TEXT.search(str(url)):
-                return _SECRET_IN_TEXT.sub(r"\1", str(url))
+            if host in hosts:
+                red = _redact_raw(str(url))
+                return red if red != str(url) else None
             return None
         clean = scrub(route)
         verdict = check_route(clean)
@@ -387,6 +388,17 @@ def report_line(report):
 
 
 _SECRET_IN_TEXT = re.compile(r"([?&](?:token|access_token|auth|key|anchor_token)=)[^&\s)\]]*", re.I)
+
+
+def _redact_raw(url):
+    """The URL with every sign-in parameter dropped, judged by its DECODED name, without parsing the rest (a bad port
+    or host must not stop the redaction)."""
+    head, sep, rest = url.partition("?")
+    if not sep:
+        return url
+    query, hsep, frag = rest.partition("#")
+    kept = [p for p in query.split("&") if unquote(p.split("=", 1)[0]).lower() not in _SECRET_KEYS]
+    return head + ("?" + "&".join(kept) if kept else "") + (hsep + frag if hsep else "")
 
 
 def _plain_label(s):

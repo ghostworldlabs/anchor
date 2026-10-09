@@ -1872,6 +1872,9 @@ const Proto = (() => {
       // turn appends into a dead turn's counter
       if (/session ended|asleep|could not start|CLI not found/i.test(ev.text || ""))
         endActivity(null);
+      // final review r2: an interrupted or ended turn sends no turn_end - its reply blocks are released here, so the
+      // next turn's link correction can never reach back into them
+      if (/turn interrupted|session ended|asleep|steward stopped/i.test(ev.text || "")) turnReplyBlocks = [];
       // tick-tagged housekeeping (drive continues, cadence commits) rides
       // the status pane; plain sys lines stay in the conversation
       addLine("sys", ev.text, ev.tick ? ev : undefined);
