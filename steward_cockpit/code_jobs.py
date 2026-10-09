@@ -86,6 +86,19 @@ def porcelain_paths(repo):
     return [rec[3:] for rec in out.split("\0") if len(rec) > 3]
 
 
+def _replace(src, dst):
+    """os.replace, retried briefly: on Windows a reader holding the record open (a page polling the jobs) makes the
+    replace fail for a moment (WinError 5); a record write must not fail a job for that."""
+    for attempt in range(40):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 39:
+                raise
+            time.sleep(0.05)
+
+
 def _path(cdir):
     return Path(cdir) / JOBS_FILE
 
@@ -106,7 +119,7 @@ def _write_job(cdir, job):
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.replace(str(tmp), str(p))
+        _replace(str(tmp), str(p))
 
 
 LIVE = ("running", "finishing")
@@ -128,7 +141,7 @@ def _busy_write(d):
     p = _busy_path()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
-    os.replace(str(tmp), str(p))
+    _replace(str(tmp), str(p))
 
 
 def _norm(path):
@@ -174,7 +187,7 @@ def _transition(cdir, job_id, expect, **updates):
         p = _path(cdir)
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.replace(str(tmp), str(p))
+        _replace(str(tmp), str(p))
         if j.get("status") not in LIVE:
             b = _busy_read()
             mine = [k for k, v in b.items() if isinstance(v, dict) and v.get("job") == job_id]
@@ -397,14 +410,17 @@ def foreman_manifest(job):
     return [p for p in (changed_paths(job["worktree"], job["base"]) or []) if not never_lands(p) and not _runtime(p)]
 
 
-def foreman_review_note(job, files):
-    code, out, _ = _git_raw(job["worktree"], "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard",
-                            "-z", timeout=600)
-    new = [p for p in (out.split("\0") if code == 0 else []) if p.strip() and p in set(files)]
+REVIEW_NOTE_MAX = 6000      # steward_review.mjs reads the first 8000 characters of the brief file; the note goes first
+
+
+def foreman_review_note(new):
+    """What the landing reviewer must be told, before the brief: Foreman keeps no per-file write record, so every
+    new file is named for the reviewer to block a byproduct (John's call, 2026-10-09)."""
     return ("FOREMAN BUILT THIS (several sub-agents), so there is no per-file write record: every file in the diff "
-            "changed in its worktree. NEW files: %s. Check each new file is intended work (source, test, document), not "
-            "a byproduct of running the tests or the build (a report, a cache, a log, an output); a byproduct that "
-            "would land is a MAJOR finding.") % (", ".join(new) or "none")
+            "changed in its worktree. NEW files (added since the job's base - committed, staged or untracked): %s. "
+            "Check each new file is intended work (source, test, document), not a byproduct of running the tests or "
+            "the build (a report, a cache, a log, an output); a byproduct that would land is a MAJOR finding."
+            ) % (", ".join(new) or "none")
 
 
 def _remove_foreman_config(wt):
@@ -441,41 +457,76 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
                 return
             run = _popen_contained(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], str(wt), env, out)
             _FOREMAN_PROCS[jid] = run
-            _transition(cdir, jid, ("running",), foreman_pid=run.pid)
     except BaseException:
         out.close()
         raise
-
-    def wait():
-        timed_out = False
-        try:
-            try:
-                run.proc.wait(timeout=FOREMAN_TIMEOUT_S)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-            ended = run.end(60)                     # what Foreman left running goes too, and is SEEN gone
-        finally:
+    # fcj review r3: from here Foreman runs - nothing below may abandon it. A failure ends it and SEES it gone before
+    # start() records the failure; if it cannot be seen gone, the job keeps running and registered (its claim holds)
+    try:
+        try:                                        # informational: never a reason to end a running Foreman
+            _transition(cdir, jid, ("running",), foreman_pid=run.pid)
+        except Exception:
+            pass
+        threading.Thread(target=lambda: _wait_foreman(cdir, job, wt, run, out), name="foreman-job-" + jid,
+                         daemon=True).start()
+    except BaseException as e:
+        if run.end(60):
             out.close()
-        _remove_foreman_config(wt)                  # gone before the inventory
-        if jid in _FOREMAN_STOPPING:                # Stop ended it: Stop records the job
             _FOREMAN_PROCS.pop(jid, None)
-            return
-        if not ended:                               # never land while any of its processes may still write: the job
-            _transition(cdir, jid, ("running",),    # stays running and registered (its claim holds); Stop retries
-                        stuck="Foreman's processes could not be seen to end; Stop ends them and releases the job")
-            return
-        result = foreman_result(job)
-        if timed_out:
-            result.setdefault("error", "Foreman ran longer than %ss and was ended" % FOREMAN_TIMEOUT_S)
-        elif result.get("error") is None and run.proc.returncode != 0:
-            result["error"] = "Foreman exited %s" % run.proc.returncode
-        result["manifest"] = foreman_manifest(job)
-        _transition(cdir, jid, ("running",), review_note=foreman_review_note(job, result["manifest"]))
+            raise
+        _transition(cdir, jid, ("running",), stuck="Foreman's start failed after launch (%s) and its processes could "
+                    "not be seen to end; Stop ends them and releases the job" % e)
+
+
+def foreman_new_files(job):
+    """Every path ADDED relative to the job's base - committed, staged or untracked - or None when git cannot say."""
+    wt, base = job["worktree"], job["base"]
+    c1, added, _ = _git_raw(wt, "-c", "core.quotepath=false", "diff", "--no-renames", "--diff-filter=A", "--name-only",
+                            "-z", base, timeout=600)
+    c2, untracked, _ = _git_raw(wt, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
+                                timeout=600)
+    if c1 != 0 or c2 != 0:
+        return None
+    return sorted({p for p in (added + "\0" + untracked).split("\0") if p.strip()})
+
+
+def _wait_foreman(cdir, job, wt, run, out):
+    """Foreman ended (or ran out of time): end what it left running and SEE it gone, then - unless Stop ended it -
+    hand its whole change to the code job's finish. A tree that cannot be seen gone keeps the job running and
+    registered, whoever asked (fcj review r3: never released on a failed end)."""
+    jid = job["id"]
+    timed_out = False
+    try:
         try:
-            finish(cdir, jid, result)
-        finally:
-            _FOREMAN_PROCS.pop(jid, None)
-    threading.Thread(target=wait, name="foreman-job-" + jid, daemon=True).start()
+            run.proc.wait(timeout=FOREMAN_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        ended = run.end(60)
+    finally:
+        out.close()
+    if not ended:
+        _transition(cdir, jid, ("running",),
+                    stuck="Foreman's processes could not be seen to end; Stop ends them and releases the job")
+        return
+    _remove_foreman_config(wt)                      # gone before the inventory
+    if jid in _FOREMAN_STOPPING:                    # Stop ended it: Stop records the job
+        _FOREMAN_PROCS.pop(jid, None)
+        return
+    result = foreman_result(job)
+    if timed_out:
+        result.setdefault("error", "Foreman ran longer than %ss and was ended" % FOREMAN_TIMEOUT_S)
+    elif result.get("error") is None and run.proc.returncode != 0:
+        result["error"] = "Foreman exited %s" % run.proc.returncode
+    result["manifest"] = foreman_manifest(job)
+    new = foreman_new_files(job)
+    if new is None:                                 # the reviewer must see every new file, or nothing lands
+        result.setdefault("error", "the list of files Foreman added could not be read, so it cannot be reviewed")
+    else:
+        _transition(cdir, jid, ("running",), review_note=foreman_review_note(new))
+    try:
+        finish(cdir, jid, result)
+    finally:
+        _FOREMAN_PROCS.pop(jid, None)
 
 
 def foreman_result(job):
@@ -527,7 +578,7 @@ def mark_exhausted(family):
     d[family] = time.time() + EXHAUSTED_FOR_S
     tmp = _exhausted_path().with_suffix(".json.%s.tmp" % uuid.uuid4().hex[:6])
     tmp.write_text(json.dumps(d), encoding="utf-8")
-    os.replace(str(tmp), str(_exhausted_path()))
+    _replace(str(tmp), str(_exhausted_path()))
 
 
 # consensus C3: a coder family must report its completed file writes (the manifest) - Claude and Codex do; the Grok
@@ -674,7 +725,7 @@ def record_landed_commit(commit):
             d = (d + [commit])[-2000:]
             tmp = _landed_path().with_suffix(".json.%s.tmp" % uuid.uuid4().hex[:6])
             tmp.write_text(json.dumps(d), encoding="utf-8")
-            os.replace(str(tmp), str(_landed_path()))
+            _replace(str(tmp), str(_landed_path()))
 
 
 def landed_commits():
@@ -839,7 +890,12 @@ def run_review(job, tree, head, delta_from=""):
     try:
         brief.parent.mkdir(parents=True, exist_ok=True)
         note = job.get("review_note") or ""
-        brief.write_text((job.get("brief") or "") + ("\n\n" + note if note else ""), encoding="utf-8")
+        # fcj review r3: the reviewer's mandatory disclosure goes FIRST (the adapter reads the brief's first 8000
+        # characters); one too long to be read whole is never sent cut short - the review fails closed instead
+        if len(note) > REVIEW_NOTE_MAX:
+            return {"ok": False, "error": "the list of new files is too long to put before the reviewer whole "
+                                          "(%d characters); the work is kept for a look" % len(note)}
+        brief.write_text((note + "\n\nBRIEF:\n" if note else "") + (job.get("brief") or ""), encoding="utf-8")
     except OSError:
         pass
     seam = os.environ.get("ANCHOR_REVIEW_CMD")
@@ -1193,7 +1249,7 @@ def _finish(cdir, job_id, job, result):
                 fields["files"] = files
                 late = [x for x in late if x not in made]
             late += [p + " (ignored by git)" for p in _not_runtime(ignored_outputs(wt))]
-            served = _served_tree_changes(job)
+            served = _locked_served_changes(job)
             if late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
             if fields["check_ok"] is None:       # W1a (2026-10-08): every landing needs an explicit passing check
@@ -1229,7 +1285,7 @@ def _finish(cdir, job_id, job, result):
     if not fields.get("landed"):                     # the complete preserved inventory, whatever check failed
         fields["unexpected"] = sorted(set(fields.get("unexpected") or [])
                                       | {p + " (ignored by git)" for p in ignored_outputs(wt)})
-    served = _served_tree_changes(job)              # on every path: did anything write into the source repository?
+    served = _locked_served_changes(job)              # on every path: did anything write into the source repository?
     if served:
         fields["served_tree_changed"] = served
         if not fields.get("landed"):
@@ -1254,6 +1310,17 @@ def _unlanded(wt, manifest):
     left += paths
     left += [p + " (ignored by git)" for p in ignored_outputs(wt)]
     return left
+
+
+def _locked_served_changes(job):
+    """_served_tree_changes read under the repository's commit lock (2026-10-09, several jobs per repository; fcj r3):
+    another job's landing is never seen half-placed. A lock that stays busy is a doubt, so it is reported, never
+    passed."""
+    import git_safety as _gs
+    with _gs.repo_lock(job.get("land_to") or job["repo"], wait_s=600, who="audit for code job " + job["id"]) as held:
+        if not held:
+            return ["(the repository's commit lock stayed busy, so its changes could not be read cleanly)"]
+        return _served_tree_changes(job)
 
 
 def _served_tree_changes(job):
@@ -1654,7 +1721,7 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
                                    land_note="released by %s; the work is kept at %s" % (who, job["worktree"]))
         if released is None:
             return {"ok": False, "error": "the code job finished while the stop waited; see its result"}
-        served = _served_tree_changes(job)
+        served = _locked_served_changes(job)
         if served:
             _transition(cdir, job["id"], ("failed",), served_tree_changed=served,
                         land_note=released["land_note"] + ("; ALSO: %s changed during the job outside any landing (%s) "
@@ -1679,7 +1746,7 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
             eng.stop()
     except Exception:
         pass
-    served = _served_tree_changes(job)              # the finish will not run: audit the source repository here
+    served = _locked_served_changes(job)              # the finish will not run: audit the source repository here
     if served:
         _transition(cdir, job["id"], ("stopped",), served_tree_changed=served,
                     land_note=stopped["land_note"] + ("; ALSO: %s changed during the job outside any landing (%s) - "

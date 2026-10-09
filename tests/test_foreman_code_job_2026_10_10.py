@@ -138,7 +138,7 @@ def test_the_reviewer_is_told_every_new_file_foreman_added(env, monkeypatch):
     assert job["landed"] is True and sorted(job["files"]) == ["a.txt", "b.py"], job["land_note"]
     review = json.loads((tmp / "review.log").read_text(encoding="utf-8").splitlines()[0])
     brief = Path(review[review.index("--brief-file") + 1]).read_text(encoding="utf-8")
-    assert "NEW files: b.py." in brief and "byproduct" in brief
+    assert "untracked): b.py." in brief and "byproduct" in brief
 
 
 def test_an_approved_plan_is_used_as_written_with_the_check_as_its_gate(env):
@@ -366,3 +366,71 @@ def test_the_steward_sizes_the_work_and_starts_foreman_as_a_code_job(monkeypatch
     finally:
         monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", raising=False)
         importlib.reload(se)
+
+
+# ---- fcj review r3 ----
+
+def test_the_reviewer_reads_the_new_file_list_first_and_staged_additions_are_on_it(env, monkeypatch):
+    # MAJOR 3 and 5: the disclosure goes before the brief (the adapter reads its first 8000 characters), and an
+    # addition a script staged is a new file too
+    repo, cdir, tmp = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "staged")
+    job = _wait(cdir, _start(repo, cdir)["job"])
+    review = json.loads((tmp / "review.log").read_text(encoding="utf-8").splitlines()[0])
+    brief = Path(review[review.index("--brief-file") + 1]).read_text(encoding="utf-8")
+    assert brief.startswith("FOREMAN BUILT THIS") and "report.json" in brief.split("BRIEF:")[0]
+    assert "report.json" in job["files"]
+
+
+def test_a_disclosure_too_long_to_be_read_whole_fails_the_review_closed(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    note = code_jobs.foreman_review_note(["f%04d.py" % i for i in range(900)])
+    rec = code_jobs.run_review({"id": "x", "base": "HEAD", "brief": "b", "review_note": note}, str(tmp_path), "HEAD")
+    assert rec["ok"] is False and "too long" in rec["error"]
+    assert code_jobs.review_blocks({}, rec, str(tmp_path), "HEAD").startswith("the review failed")
+
+
+def test_an_end_that_cannot_be_seen_keeps_the_job_running_and_registered(env, monkeypatch):
+    # MAJOR 2: never released on a failed end - whoever asked
+    repo, cdir, _ = env
+    monkeypatch.setattr(code_jobs._Run, "end", lambda self, wait_s=60: False)
+    out = _start(repo, cdir)
+    assert _until(lambda: (code_jobs.read_jobs(str(cdir))[out["job"]]).get("stuck"))
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]
+    assert job["status"] == "running" and out["job"] in code_jobs._FOREMAN_PROCS
+    assert code_jobs._norm(str(repo)) in code_jobs.busy_repos()                     # the reconcile leaves it alone
+    res = code_jobs.stop(str(cdir), out["job"], actor="John")
+    assert not res["ok"] and code_jobs.read_jobs(str(cdir))[out["job"]]["status"] == "running"
+    monkeypatch.undo()
+    code_jobs._FOREMAN_PROCS.pop(out["job"], None)
+
+
+@WINDOWS
+def test_a_failure_after_the_launch_ends_foreman_before_anything_is_released(env, monkeypatch):
+    # BLOCKER 1
+    repo, cdir, _ = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "sleep")
+    seen = {}
+    real_thread = code_jobs.threading.Thread
+
+    class Boom(real_thread):
+        def start(self):
+            if self.name.startswith("foreman-job-"):
+                seen["run"] = next(r for r in code_jobs._FOREMAN_PROCS.values() if isinstance(r, code_jobs._Run))
+                raise RuntimeError("no thread")
+            return super().start()
+    monkeypatch.setattr(code_jobs.threading, "Thread", Boom)
+    out = _start(repo, cdir)
+    assert not out["ok"] and "no thread" in out["error"]
+    assert seen["run"].proc.poll() is not None and seen["run"].ended                  # ended, and seen gone
+    assert code_jobs._norm(str(repo)) not in code_jobs.busy_repos()
+
+
+def test_the_source_audit_reads_under_the_repository_lock(env, monkeypatch):
+    # MAJOR 4: another job's landing is never seen half-placed
+    repo, cdir, _ = env
+    import git_safety
+    held = []
+    monkeypatch.setattr(code_jobs, "_served_tree_changes",
+                        lambda job: held.append(git_safety._lock_path(str(repo)).exists()) or [])
+    assert code_jobs._locked_served_changes({"id": "x", "repo": str(repo)}) == [] and held == [True]

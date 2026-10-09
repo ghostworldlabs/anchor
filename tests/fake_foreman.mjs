@@ -2,6 +2,7 @@
 // through code_jobs.FOREMAN_RUN_LIVE. It writes what the real run leaves behind - the project's edited file and
 // .foreman/run-record.json - as FAKE_FOREMAN_MODE chooses:
 //   done (default) | halt | stray (also writes FAKE_FOREMAN_STRAY, outside the project) | new-file (also adds b.py)
+//   | staged (also adds report.json and stages it with git)
 //   | own (writes a file named for its worktree, so parallel jobs touch different files)
 //   | sleep (starts a child that keeps writing .foreman/child.pid, then waits)
 //   | straggler (starts a detached child that outlives it, then finishes DONE)
@@ -9,7 +10,7 @@
 // Anchor gave it (ANCHOR_DATA_DIR/settings.json).
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const project = path.resolve(process.argv[2]);
 const mode = process.env.FAKE_FOREMAN_MODE || 'done';
@@ -40,6 +41,10 @@ if (mode === 'sleep') {
   if (mode === 'straggler') child(true);
   write(mode === 'own' ? `out-${path.basename(project)}.txt` : 'a.txt', 'two\n');
   if (mode === 'new-file') write('b.py', 'x = 1\n');
+  if (mode === 'staged') {                    // a new file a script STAGED (not untracked any more)
+    write('report.json', '{}\n');
+    spawnSync('git', ['add', 'report.json'], { cwd: project });
+  }
   if (mode === 'stray') fs.writeFileSync(process.env.FAKE_FOREMAN_STRAY, 'written outside the worktree\n', 'utf8');
   const status = mode === 'halt' ? 'HALT' : 'DONE';
   write('.foreman/run-record.json', JSON.stringify({ schema: 'foreman-run-record/v1', status,
