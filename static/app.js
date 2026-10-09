@@ -35,6 +35,7 @@
   var pendingDrop = [], dropTimer = null;
   var narrowMq = window.matchMedia("(max-width: 760px)");
   var narrow = { get matches() { return narrowMq.matches && !document.body.classList.contains("hosted"); } };
+  try { narrowMq.addEventListener("change", function () { settle(); }); } catch (e) { /* older engines: next settle */ }
 
   // ---------- frames ----------
   function newFrame(src) {
@@ -74,6 +75,7 @@
     var t = tileOfFrame(f);
     if (!t) return;
     arm(f.contentWindow);
+    if (shownIn(t.id) < 0) { t.hiddenSaid = true; tellVisibility(f, true); }
     var url = addressOf(f.contentWindow);
     if (url) t.url = url;
     var route = resolve(url);
@@ -381,6 +383,7 @@
         panes[0] = back || (op ? op.id : null) || (tiles[i - 1] || tiles[0]).id;
       }
       var s = byId(panes[0]);
+      if (s) s.seen = ++seq;                                   // restored: the most recently shown (the keep-alive order)
       if (s && !s.frame) s.frame = newFrame(s.url || CAVE_URL);
     }
     layout(); render();
@@ -390,12 +393,27 @@
     }
   }
 
+  // A hidden tile keeps its page (keep-alive) but must not keep working the network or reload under a draft:
+  // every window in the tile (the page and the frames inside it, e.g. a cockpit's chamber) gets
+  // window.__anchorHidden and an "anchor-app-visibility" event. A cockpit parks its event poll on it (the same
+  // park the Cave's preloaded cards use) and its build self-reload waits until it is shown again.
+  function tellVisibility(f, hidden) {
+    (function walk(w, depth) {
+      try {
+        w.__anchorHidden = hidden;
+        w.dispatchEvent(new w.CustomEvent("anchor-app-visibility", { detail: { hidden: hidden } }));
+        for (var i = 0; depth < 4 && i < w.frames.length; i++) walk(w.frames[i], depth + 1);
+      } catch (e) { /* not ours */ }
+    })(f.contentWindow, 0);
+  }
+
   function layout() {
     document.body.classList.toggle("two", two);
     tiles.forEach(function (t) {
       if (!t.frame) return;
       var k = shownIn(t.id);
       t.frame.hidden = k < 0;
+      if (t.hiddenSaid !== (k < 0)) { t.hiddenSaid = k < 0; tellVisibility(t.frame, k < 0); }
       t.frame.dataset.pane = k < 0 ? "" : String(k);
       t.frame.classList.toggle("active", two && k === active);
     });

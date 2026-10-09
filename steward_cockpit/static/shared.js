@@ -34,6 +34,9 @@ const Proto = (() => {
     const ta = document.querySelector("[data-say]");
     if (ta && ta.value) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; }
   }
+  // the Anchor app hides a tile it keeps alive (2026-10-08): park like a preloaded card, resume when shown
+  window.addEventListener("anchor-app-visibility", (ev) => setParked(!!(ev.detail && ev.detail.hidden)));
+  if (window.__anchorHidden) parked = true;
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
       opts = {}, map = null, lastState = null, latestStatusId = "", latestStatusRun = null;
 

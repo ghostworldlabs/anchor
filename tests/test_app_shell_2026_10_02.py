@@ -222,6 +222,23 @@ def test_cockpit_to_cockpit_keeps_the_caller_alive_hidden_and_switching_back_sho
     assert page.locator("#strip .tile.focus .name").text_content() == "MBA Teaching AI"
 
 
+def test_a_hidden_tile_and_the_frames_inside_it_are_told_so_and_told_again_when_shown(page):
+    p1 = _open_p1(page)
+    rec = "window.__vis=[];addEventListener('anchor-app-visibility',e=>__vis.push(e.detail.hidden))"
+    p1.evaluate(rec)
+    nested = _focus_frame(page, "/steward/v1")
+    nested.evaluate(rec)
+    p1.locator("#p3").click()
+    page.wait_for_function("() => [...document.querySelectorAll('#strip .tile .name')].some(n => n.textContent === 'DARPA proposal')")
+    _settle(page, 900)
+    assert p1.evaluate("[window.__anchorHidden, window.__vis]") == [True, [True]]
+    assert nested.evaluate("[window.__anchorHidden, window.__vis]") == [True, [True]]
+    page.locator("#strip .tile", has_text="MBA Teaching AI").click()
+    _settle(page)
+    assert p1.evaluate("[window.__anchorHidden, window.__vis]") == [False, [True, False]]
+    assert nested.evaluate("window.__vis") == [True, False]
+
+
 def test_past_six_hidden_tiles_the_least_recently_shown_drops_and_comes_back_from_its_address(page):
     p1 = _open_p1(page)
     for i in range(9):                                         # nine documents opened one after another
