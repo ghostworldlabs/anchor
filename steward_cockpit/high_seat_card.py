@@ -14,7 +14,9 @@ effort without a steward record yields an honest line, never a blank.
 from __future__ import annotations
 
 import html
+import os
 import re
+import time
 from urllib.parse import quote as _quote
 from pathlib import Path
 
@@ -290,6 +292,53 @@ def status_html(cdir, pid, rel=""):
                repairs_html(cdir, pid, rel), esc(pid)))
 
 
+_EFFORT_DIRS = {}
+
+
+def _effort_dir_of(pid, rel):
+    """(effort dir or None, its registered paths/routes) - the same `registered` set the cockpit passes."""
+    key = (pid, rel)
+    hit = _EFFORT_DIRS.get(key)
+    if hit and time.monotonic() - hit[2] < 30:
+        return hit[0], hit[1]
+    try:
+        import rnd_registry
+        folder = (rnd_registry.get_project(pid) or {}).get("folder_path") or ""
+    except Exception:
+        folder = ""
+    d = os.path.join(folder, rel) if folder else None
+    reg = set()
+    if d:
+        try:
+            import deliverables_register as dr
+            items = campaign.read_deliverables(d).get("items") or []
+            reg = {str(i.get("path") or "").replace(chr(92), "/").lower() for i in items if isinstance(i, dict)}
+            reg |= {(dr._canonical_route(i["route"]) or "").lower() for i in items if isinstance(i, dict) and i.get("route")}
+        except Exception:
+            reg = set()
+    if len(_EFFORT_DIRS) > 256:
+        _EFFORT_DIRS.clear()
+    _EFFORT_DIRS[key] = (d, reg, time.monotonic())
+    return d, reg
+
+
+def _reading_href(it, pid, rel):
+    """The register's reading URL for a card item: a URL, "" when the item has no reading copy (missing, outside,
+    private, a deck still preparing), or None when it cannot be judged (no project folder) - then the caller's own
+    link stands."""
+    if not pid or not isinstance(it, dict) or not (it.get("path") or it.get("route")):
+        return None
+    edir, registered = _effort_dir_of(pid, str(rel or ""))
+    if not edir:
+        return None
+    try:
+        import deliverables_register as dr
+        t = dr.reading_target(it, pid=pid, effort_rel=str(rel or ""), effort_dir=edir, registered=registered)
+    except Exception:
+        return None
+    return t.get("read") or ""
+
+
 def _item_link(it, pid, rel=""):
     """The cockpit's own link for a register row: a route stays a route; an openable path goes through the
     deliverable-file route IN THE EFFORT'S OWN DIRECTORY (2026-10-01, his "start here" and "review" errors: an effort
@@ -299,6 +348,12 @@ def _item_link(it, pid, rel=""):
     what = esc(it.get("what") or it.get("path") or "")
     route = str(it.get("route") or "")
     path = str(it.get("path") or "")
+    # W3 (2026-10-10): the card reads a product the way the cockpit does - its ONE reading target from the register
+    # (a deck through its bound PDF, a managed item with its hash, a missing or private file with no link) - before
+    # the older hand-built link below
+    read = _reading_href(it, pid, rel)
+    if read is not None:
+        return ('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(read), what)) if read else what
     if route.startswith("/"):
         return '<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(route), what)
     if path and it.get("openable", True) and not path.startswith(("http://", "https://")):

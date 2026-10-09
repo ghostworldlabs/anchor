@@ -464,11 +464,13 @@ const Proto = (() => {
     s.appendChild(el("div", "blk " + cls, text));
     pin(s, stick);
   }
+  let lastReplyBlock = null;   // W3 (2026-10-10): the reply a "reply_links" correction re-renders
   function closeCurrent() {
     if (currentBlock) {
       const s = currentBlock.parentElement;
       const stick = s && atBottom(s);
       const body = currentBlock.querySelector(".body");
+      if (!currentBlock._tick) lastReplyBlock = currentBlock;
       renderRich(body, currentBlock._raw || body.textContent);
       tileSay("turn", { who: "steward", text: String(currentBlock._raw || body.textContent || "").slice(-600) });
       currentBlock = null;
@@ -1846,6 +1848,13 @@ const Proto = (() => {
       // state, zero-model) — pane only, never the conversation
       closeCurrent();
       renderStatus(ev.status);
+    } else if (ev.t === "reply_links") {
+      // W3: Anchor checked the reply's links and corrected some to the registered copy - show the reply as recorded
+      if (currentBlock && !currentBlock._tick) { currentBlock._raw = String(ev.text || ""); }
+      else if (lastReplyBlock && lastReplyBlock.isConnected) {
+        lastReplyBlock._raw = String(ev.text || "");
+        renderRich(lastReplyBlock.querySelector(".body"), lastReplyBlock._raw);
+      }
     } else if (ev.t === "receipt") {
       // the engine's delivery receipt (item 2): one line, the Read link the Deliverables tile also carries
       closeCurrent();

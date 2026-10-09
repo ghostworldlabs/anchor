@@ -11,9 +11,14 @@ function mdReportHref(raw) {
   let dest;
   try { dest = new URL(raw, current.origin); }
   catch (_) { return raw; } // An invalid document link must not erase the turn.
-  const internal = /^\/artifact\/[^/]+$/.test(dest.pathname) ||
+  // W3 (2026-10-10): both /artifact forms (?path= and /artifact/<pid>/<rel>) and /report are Anchor's own, and an
+  // ABSOLUTE Anchor URL - loopback, this page's own host on another port or scheme, or the tailnet name - is opened
+  // on the origin the reader is using (a reply written at the desk opens on the iPad)
+  const internal = /^\/artifact\/[^/]+(\/.+)?$/.test(dest.pathname) || /^\/report\//.test(dest.pathname) ||
     dest.pathname === "/api/steward/deliverable-file";
-  const legacy = dest.origin === "http://127.0.0.1:8777";
+  const loop = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(dest.hostname) && (dest.port === "8777" || dest.port === "");
+  const legacy = dest.origin === "http://127.0.0.1:8777" || loop ||
+    dest.hostname === current.hostname || /\.ts\.net$/i.test(dest.hostname);
   if (internal && !dest.username && !dest.password &&
       (dest.origin === current.origin || legacy)) {
     dest.searchParams.delete("token");

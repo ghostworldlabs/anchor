@@ -969,6 +969,21 @@ class Engine:
             record=lambda line, rid: self._record_conversation("steward", line, turn_id=rid), emit=self.emit_receipt)
         self._replay_saved_receipts()
 
+    def _publish_link_report(self, turn_id, report):
+        """W3 (2026-10-10): one Anchor line under the reply - which links now open the registered copy, which still
+        fail and why - saved with the conversation like a receipt, then shown once."""
+        try:
+            from steward_cockpit import link_check
+            import hashlib
+            line = link_check.report_line(report)
+            if not line:
+                return
+            rid = "links:" + hashlib.sha1((str(turn_id) + "\n" + line).encode("utf-8")).hexdigest()[:20]
+            if self._record_conversation("steward", line, turn_id=rid):
+                self.emit_receipt({"t": "receipt", "text": line, "id": rid})
+        except Exception:
+            pass
+
     def emit_receipt(self, ev):
         """THE one way a receipt reaches the open page: each receipt id is shown once, whether it was published here
         or saved by another process and replayed."""
@@ -3304,6 +3319,18 @@ class Engine:
             # question-bearing sentence (not just a trailing "?"), so a
             # question mid-paragraph still pins. Tick turns never pin.
             txt = self.turn_text.strip()
+            # W3 (2026-10-10): the reply's links are checked and, once, corrected to the registered copy before the
+            # reply is recorded; the page swaps in the corrected text; what was fixed or still fails is said below it
+            link_report = []
+            if txt and not self.in_tick:
+                try:
+                    from steward_cockpit import link_check
+                    fixed_txt, link_report = link_check.check_reply(txt, self.dir)
+                    if fixed_txt != txt:
+                        txt = fixed_txt
+                        self._emit({"t": "reply_links", "text": txt})
+                except Exception:
+                    link_report = []
 
             was_tick = self.in_tick
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
@@ -3334,6 +3361,8 @@ class Engine:
             if history_saved and not err_text:
                 self._publish_delivery_receipt(completed_turn_id, reply=txt,
                                                written=list(getattr(self, "_turn_output_refs", []) or []))
+            if history_saved and link_report:
+                self._publish_link_report(completed_turn_id, link_report)
             self._finish_served_audit()
 
             # The complete result boundary is one arbitration transaction.
