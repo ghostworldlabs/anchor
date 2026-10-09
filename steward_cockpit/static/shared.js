@@ -25,18 +25,36 @@ const Proto = (() => {
   // a tile view the Cave preloads hidden for an Active card (2026-10-06, his word: "keep the memory open ... so that it
   // loads instantly when I click on the tile"): parked, it holds no long-poll (the browser's few connections per host
   // stay free for the page); shown, it catches up from its seq at once and lays itself out
-  let parked = TILE && PARAMS.get("parked") === "1", _pollAbort = null, _unpark = null;
-  function setParked(p) {
-    parked = !!p;
+  // Two inputs park it (tiles review r2): the Cave's own park/show for a preloaded card (localParked), and the Anchor
+  // app hiding the tile this frame sits in (shellHidden). Either one parks; showing the tile never un-parks a card
+  // the Cave keeps collapsed. A frame born inside an already-hidden tile (e.g. a chamber made after a slow fetch)
+  // reads its ancestors at boot, before any poll or reload guard starts.
+  function ancestorHidden() {
+    try { let w = window; for (let i = 0; i < 6; i++) { if (w.__anchorHidden) return true; if (w === w.parent) break; w = w.parent; } } catch (e) {}
+    return false;
+  }
+  let localParked = TILE && PARAMS.get("parked") === "1", shellHidden = ancestorHidden();
+  if (shellHidden) window.__anchorHidden = true;
+  let parked = localParked || shellHidden, _pollAbort = null, _unpark = null;
+  // the Status pane keeps his reading place across a hide: remembered from his own scrolling while it has a size
+  document.addEventListener("scroll", (ev) => {
+    const s = paneEl();
+    if (s && ev.target === s && s.clientHeight) { s._atBot = atBottom(s); s._top = s.scrollTop; }
+  }, true);
+  function applyParked() {
+    const was = parked;
+    parked = localParked || shellHidden;
     if (parked) { try { if (_pollAbort) _pollAbort.abort(); } catch (e) {} return; }
+    if (!was) return;
     const go = _unpark; _unpark = null; if (go) go();
-    { const d = scrollEl(); pin(d, !!d && d._follow !== false); } pin(paneEl(), true);   // a hidden frame had no size to scroll by; the dialogue keeps his place
+    { const d = scrollEl(); pin(d, !!d && d._follow !== false); }   // a hidden frame had no size to scroll by; the dialogue keeps his place
+    { const s = paneEl(); if (s) { if (s._atBot === false) s.scrollTop = s._top; else pin(s, true); } }
     const ta = document.querySelector("[data-say]");
     if (ta && ta.value) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; }
   }
+  function setParked(p) { localParked = !!p; applyParked(); }
   // the Anchor app hides a tile it keeps alive (2026-10-08): park like a preloaded card, resume when shown
-  window.addEventListener("anchor-app-visibility", (ev) => setParked(!!(ev.detail && ev.detail.hidden)));
-  if (window.__anchorHidden) parked = true;
+  window.addEventListener("anchor-app-visibility", (ev) => { shellHidden = !!(ev.detail && ev.detail.hidden); applyParked(); });
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
       opts = {}, map = null, lastState = null, latestStatusId = "", latestStatusRun = null;
 
