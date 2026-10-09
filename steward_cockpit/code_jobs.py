@@ -467,7 +467,7 @@ def declare_hint(path):
     return ("declare it: --output %s" % ok[0]) if ok else ("cannot be declared: %s" % why)
 
 
-def refusal_detail(paths, limit=12):
+def refusal_detail(paths, limit=MAX_OUTPUTS):
     shown = ["%s [%s]" % (p, declare_hint(p)) for p in paths[:limit]]
     return "; ".join(shown) + (" ..." if len(paths) > limit else "")
 
@@ -860,6 +860,8 @@ def _finish(cdir, job_id, job, result):
                     fields.update(extra)
                     fields["landed"] = landed
                     left = _unlanded(wt, manifest) if landed else ["not landed"]
+                    if landed:                   # a runtime record held back from the commit is kept, never removed
+                        left += [p for p in job.get("held_runtime") or [] if (Path(wt) / p).exists() and p not in left]
                     keep = not (landed and extra.get("verified")) or bool(left)
                     if landed and left and left != ["not landed"]:
                         note += "; work the landing did not carry is kept at %s (%s)" % (wt, ", ".join(left[:6]))
@@ -950,17 +952,24 @@ def _commit_manifest(wt, job, files):
         code, _, err = _git(wt, "--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", *gone, timeout=600)
         if code != 0:
             return "git rm failed: " + err[:250]
-    code, staged, err = _git(wt, "-c", "core.quotepath=false", "diff", "--cached", "--name-only", timeout=600)
-    if code != 0:
+    def _staged():
+        c, out, e = _git_raw(wt, "-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--no-renames", "-z",
+                             timeout=600)
+        return (None, e) if c != 0 else ([s for s in out.split("\0") if s.strip()], "")
+    staged, err = _staged()
+    if staged is None:
         return "git diff failed: " + err[:250]
-    held = [s for s in staged.splitlines() if s.strip() and _runtime(s)]
+    held = [s for s in staged if _runtime(s)]
     if held:                                             # W1: kept in the worktree, absent from the commit
         code, _, err = _git(wt, "--literal-pathspecs", "reset", "-q", "--", *held, timeout=600)
         if code != 0:
             return "git reset of runtime records failed: " + err[:250]
-        code, staged, err = _git(wt, "diff", "--cached", "--name-only", timeout=600)
-        if code != 0:
+        job["held_runtime"] = sorted(set(job.get("held_runtime") or []) | set(held))
+        staged, err = _staged()
+        if staged is None:
             return "git diff failed: " + err[:250]
+        if [s for s in staged if _runtime(s)]:
+            return "runtime records are still staged after the reset"
     if staged:
         code, out, err = _git(wt, "commit", "-q", "-m", "Code job %s for the steward\n\n%s" % (job["id"], job["brief"][:600]),
                               timeout=600)

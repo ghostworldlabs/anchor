@@ -226,14 +226,19 @@ def drain(project_id=None, dry_run=False, summary_timeout=None) -> dict:
             continue
         try:
             closed = ts.close_session(sid, project_id=pid)
-            entry["parked"] = bool(closed.get("ok"))
+            # final r1 (2026-10-09): this is a separate process - a terminal the SERVICE owns is not stopped here
+            # (pty_killed False); its record is parked, its docs persisted and its summary cached, and its process ends
+            # with the service's stop. Reported as that, never as "parked"; a failed close is a failure.
+            entry["recorded"] = bool(closed.get("ok"))
+            entry["parked"] = bool(closed.get("ok")) and bool(closed.get("pty_killed"))
+            entry["ends_with_stop"] = bool(closed.get("ok")) and not closed.get("pty_killed")
             entry["status"] = closed.get("status")
             docs = closed.get("docs") or {}
             entry["docs_persisted"] = list(docs.get("persisted") or [])
             entry["seed"] = ensure_warm_seed(pid, lane, sid,
                                              timeout=summary_timeout)
         except Exception as e:                      # never blocks the rest
-            entry["parked"] = False
+            entry["parked"] = entry["recorded"] = False
             entry["error"] = f"{type(e).__name__}: {e}"
         drained.append(entry)
 
@@ -250,9 +255,10 @@ def drain(project_id=None, dry_run=False, summary_timeout=None) -> dict:
         cockpit = service_drain()
 
     # W5 (2026-10-09): fail closed - the restart stops before shutdown unless every engine and session parked
-    failed = [d.get("session_id") for d in drained if not dry_run and not d.get("parked")]
+    failed = [d.get("session_id") for d in drained if not dry_run and not d.get("recorded")]
     ok = bool(dry_run) or (not failed and not cockpit.get("note"))
     return {"ok": ok, "dry_run": bool(dry_run), "count": len(drained), "failed_sessions": failed,
+            "terminals_end_with_stop": [d.get("session_id") for d in drained if d.get("ends_with_stop")],
             "drained": drained, "cockpit": cockpit}
 
 

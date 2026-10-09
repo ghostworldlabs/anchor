@@ -260,6 +260,7 @@ window.STEWARD_MODE = %s;
   // build - the Cave owns that reload and makes it only when no card is open (renewBuild)
   var _tile=false;try{_tile=new URLSearchParams(location.search).get('view')==='tile'&&window.parent!==window;}catch(_){}
   if (window.STEWARD_BUILD && !_tile) setInterval(function(){
+    try{var hw=window;for(var hk=0;hk<6;hk++){if(hw.__anchorHidden)return;if(hw===hw.parent)break;hw=hw.parent;}}catch(_){}
     _f('/api/version', {cache:'no-store'}).then(function(r){return r.json();})
       .then(function(j){
         var v = j && j.version;

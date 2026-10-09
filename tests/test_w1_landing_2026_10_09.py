@@ -66,7 +66,7 @@ def test_a_script_made_pdf_lands_with_staged_runtime_records_and_an_ignored_stri
     factory = lambda wt: _StagingCoder(wt, staged={".ecgberht/delivery.json": "{}\n", "conversation-log.json": "[]\n"},
                                        tool_writes={"a.txt": "two\n"},
                                        stray={"out/report.pdf": "%PDF-1.4", "strip.json": "{\"as_of\": \"x\"}"})
-    repo, job = _run(tmp_path, monkeypatch, factory, outputs=["out/report.pdf"], gitignore="strip.json\n")
+    repo, job = _run(tmp_path, monkeypatch, factory, outputs=["out/report.pdf"], gitignore="strip.json\n.ecgberht/\n")
     assert job["landed"] is True, job["land_note"]
     assert job["review"]["verdict"] == "PASS"
     assert sorted(job["files"]) == ["a.txt", "out/report.pdf"]

@@ -127,3 +127,17 @@ def test_the_restart_script_fails_closed_and_reads_the_service_token():
     assert "RESULT: RESTART STOPPED BEFORE ANY CHANGE" in ps and "param([switch]$Cold)" in ps
     i_drain, i_stop = ps.index("pre_restart_drain.py"), ps.index("& $Nssm stop anchor")
     assert i_drain < i_stop
+
+
+def test_a_terminal_the_service_owns_is_never_reported_parked(monkeypatch):
+    """final r1: close_session in this separate process cannot stop a service-owned PTY (pty_killed False)."""
+    import terminal_session as ts
+    monkeypatch.setattr(drain, "_live_pty_records", lambda project_id=None: [{"session_id": "s1", "project_id": "p", "lane": "plan"}])
+    monkeypatch.setattr(ts, "close_session", lambda sid, project_id=None: {"ok": True, "pty_killed": False, "status": "idle"})
+    monkeypatch.setattr(drain, "ensure_warm_seed", lambda *a, **k: "cached")
+    monkeypatch.setattr(drain, "service_drain", lambda: {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None})
+    rep = drain.drain()
+    e = rep["drained"][0]
+    assert e["parked"] is False and e["recorded"] is True and rep["terminals_end_with_stop"] == ["s1"]
+    monkeypatch.setattr(ts, "close_session", lambda sid, project_id=None: {"ok": False})
+    assert drain.drain()["ok"] is False
