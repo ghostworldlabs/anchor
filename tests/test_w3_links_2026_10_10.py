@@ -65,11 +65,13 @@ def test_an_absolute_anchor_url_opens_relatively_and_others_stay_external(tmp_pa
     assert report == []
 
 
-def test_this_machines_own_tailnet_name_is_anchor(tmp_path, monkeypatch):
+def test_a_tailnet_name_is_anchor_only_when_listed_whole(tmp_path, monkeypatch):
     _proj, eff = _effort(tmp_path, monkeypatch)
-    out, _ = link_check.check_reply("[n](https://puter.tail1234.ts.net/artifact/%s/Effort/notes.md)" % PID, str(eff),
-                                    hosts={"localhost", "puter"})
+    link = "[n](https://puter.tail1234.ts.net/artifact/%s/Effort/notes.md)" % PID
+    out, _ = link_check.check_reply(link, str(eff), hosts={"localhost", "puter", "puter.tail1234.ts.net"})
     assert "](/artifact/%s/Effort/notes.md)" % PID in out
+    other = "[n](https://puter.another-tailnet.ts.net/artifact/%s/Effort/notes.md)" % PID
+    assert link_check.check_reply(other, str(eff), hosts={"localhost", "puter", "puter.tail1234.ts.net"})[0] == other
 
 
 def test_no_credential_is_ever_recorded(tmp_path, monkeypatch):
@@ -107,12 +109,34 @@ def test_other_bytes_say_changed_an_unknown_project_or_escaping_effort_is_unavai
     assert verdicts == {"old notes": "changed since it was registered", "lost": "unavailable now", "esc": "unavailable now"}
 
 
-def test_a_link_that_left_out_the_effort_folder_is_repaired_to_the_same_registered_file(tmp_path, monkeypatch):
+def test_a_link_into_another_effort_or_the_project_root_is_never_repaired_to_this_efforts_file(tmp_path, monkeypatch):
     _proj, eff = _effort(tmp_path, monkeypatch)
-    text = "[the pdf](/artifact/%s?path=out/report.pdf)" % PID        # the project root, not the effort
+    for text in ("[the pdf](/artifact/%s?path=out/report.pdf)" % PID, "[the pdf](%s)" % _file_url("out/report.pdf", d="E1")):
+        out, report = link_check.check_reply(text, str(eff))
+        assert out == text and report and report[0]["fixed_to"] is None, (text, report)
+
+
+def test_a_broken_link_to_this_efforts_registered_file_is_repaired_to_its_own_route(tmp_path, monkeypatch):
+    _proj, eff = _effort(tmp_path, monkeypatch)
+    text = "[the pdf](%s)" % _file_url("out/report.pdf", hash="0" * 64)   # stale hash: changed, never re-pointed
     out, report = link_check.check_reply(text, str(eff))
-    assert report and report[0]["verdict"] == "not found" and report[0]["fixed_to"]
-    assert "deliverable-file" in out and "out%2Freport.pdf" in out.replace("/", "%2F") or "report.pdf" in out
+    assert out == text and report[0]["verdict"] == "changed since it was registered"
+
+
+def test_first_value_query_semantics_and_one_decode(tmp_path, monkeypatch):
+    _proj, eff = _effort(tmp_path, monkeypatch)
+    (eff / "a%20b.pdf").write_bytes(b"%PDF literal percent name")
+    _out, report = link_check.check_reply(
+        "[dup](/artifact/%s?path=Effort/missing.pdf&path=Effort/notes.md) [pct](/artifact/%s/Effort/a%%2520b.pdf)" % (PID, PID), str(eff))
+    assert [(r["label"], r["verdict"]) for r in report] == [("dup", "not found")]
+
+
+def test_a_token_in_a_label_and_a_bad_port_never_leak_or_undo_the_rest(tmp_path, monkeypatch):
+    _proj, eff = _effort(tmp_path, monkeypatch)
+    url = "http://localhost:8777/artifact/%s?path=Effort/notes.md&token=SECRET" % PID
+    text = "[%s](%s) and [bad](http://localhost:99999/x?token=SECRET2)" % (url, url)
+    out, _ = link_check.check_reply(text, str(eff), hosts={"localhost"})
+    assert "SECRET" not in out.replace("SECRET2", "") and "](/artifact/" in out
 
 
 def test_links_are_found_as_the_renderer_finds_them(tmp_path, monkeypatch):
@@ -122,9 +146,12 @@ def test_links_are_found_as_the_renderer_finds_them(tmp_path, monkeypatch):
     assert [(r["label"], r["verdict"]) for r in report] == [("spaced", "not found")]
 
 
-def test_report_links_are_left_to_their_own_route(tmp_path, monkeypatch):
+def test_report_links_are_checked_through_the_report_viewer(tmp_path, monkeypatch):
     _proj, eff = _effort(tmp_path, monkeypatch)
-    assert link_check.check_reply("[r](/report/%s/research/j1)" % PID, str(eff)) == ("[r](/report/%s/research/j1)" % PID, [])
+    import report_viewer
+    monkeypatch.setattr(report_viewer, "resolve_artifact", lambda f, p, lane, job=None: {"mode": "pdf" if job == "j1" else "missing"})
+    _out, report = link_check.check_reply("[r](/report/%s/research/j1) [gone](/report/%s/research/j2)" % (PID, PID), str(eff))
+    assert [(r["label"], r["verdict"]) for r in report] == [("gone", "not found")]
 
 
 def test_a_reply_without_links_is_untouched_and_a_failure_inside_never_raises(tmp_path, monkeypatch):

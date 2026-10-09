@@ -98,11 +98,8 @@ def anchor_hosts():
 
 
 def _is_anchor_host(host, hosts):
-    host = (host or "").lower().strip("[]")
-    if host in hosts:
-        return True
-    m = re.match(r"^([a-z0-9-]+)\.[a-z0-9-]+\.ts\.net$", host)   # THIS machine's tailnet name only
-    return bool(m and m.group(1) in hosts and m.group(1) not in ("localhost",))
+    # review r2: the EXACT names only - a tailnet name counts when it is listed whole in ANCHOR_PUBLIC_HOSTS
+    return (host or "").lower().strip("[]") in hosts
 
 
 def classify(url, hosts=None):
@@ -114,7 +111,11 @@ def classify(url, hosts=None):
     if parts.scheme in ("http", "https"):
         if parts.username or parts.password:
             return "external", None
-        if _is_anchor_host(parts.hostname, hosts or anchor_hosts()) and parts.port in (None, 80, 443, 8777):
+        try:
+            port = parts.port
+        except ValueError:
+            return "other", None
+        if _is_anchor_host(parts.hostname, hosts or anchor_hosts()) and port in (None, 80, 443, 8777):
             return "anchor", urlunsplit(("", "", parts.path, parts.query, parts.fragment))
         return "external", None
     if parts.scheme:
@@ -164,7 +165,7 @@ def _inside(root, rel):
     """(state, Path|None): 'ok' with the file, NOT_FOUND for a contained file that is missing, UNAVAILABLE otherwise."""
     try:
         base = Path(root).resolve()
-        fp = (base / unquote(rel)).resolve()
+        fp = (base / rel).resolve()             # rel arrives decoded once (review r2: never twice)
     except (OSError, ValueError):
         return UNAVAILABLE, None
     if fp != base and base not in fp.parents:
@@ -185,7 +186,7 @@ def _inside(root, rel):
 def check_route(route):
     """The verdict for one Anchor route: "ok", "unchecked", or one of the three failure words."""
     parts = urlsplit(route)
-    path, qs = parts.path, dict(parse_qsl(parts.query, keep_blank_values=True))
+    path, qs = parts.path, _first(parts.query)
     m = re.match(r"^/artifact/([^/?#]+)(?:/(.+))?$", path)
     if m:
         folder = _project_folder(unquote(m.group(1)))
@@ -208,7 +209,19 @@ def check_route(route):
             except OSError:
                 return UNAVAILABLE
         return "ok"
-    return "unchecked"                    # /report, /project, /foundry ...: their own routes decide
+    m = re.match(r"^/report/([^/?#]+)/([^/?#]+)(?:/([^/?#]+))?/?$", path)
+    if m:
+        folder = _project_folder(unquote(m.group(1)))
+        if not folder:
+            return UNAVAILABLE
+        try:
+            import report_viewer
+            got = report_viewer.resolve_artifact(folder, unquote(m.group(1)), unquote(m.group(2)),
+                                                 unquote(m.group(3)) if m.group(3) else None)
+        except Exception:
+            return UNAVAILABLE
+        return NOT_FOUND if got.get("mode") == "missing" else "ok"
+    return "unchecked"                    # /project, /foundry ...: their own routes decide
 
 
 def _effort_relative(route, cdir):
@@ -216,7 +229,7 @@ def _effort_relative(route, cdir):
     the effort's folder (the project-relative path read as effort-relative) - good enough to repair a BROKEN link to
     the very same registered path, never enough to re-point a working one."""
     parts = urlsplit(route)
-    qs = dict(parse_qsl(parts.query, keep_blank_values=True))
+    qs = _first(parts.query)
     try:
         import deliverables_register as dr
         pid, erel = dr.project_and_rel(cdir)
@@ -241,8 +254,16 @@ def _effort_relative(route, cdir):
     return None, False
 
 
+def _first(query):
+    """The query's FIRST value per key - the serving routes' own semantics (review r2)."""
+    out = {}
+    for k, v in parse_qsl(query, keep_blank_values=True):
+        out.setdefault(k, v)
+    return out
+
+
 def _registered(cdir):
-    """{lowercase in-effort path: reading URL} for the effort's registered path items (their own targets)."""
+    """{lowercase in-effort path: (reading URL, product key)} for the effort's registered path items."""
     try:
         from steward_cockpit import steward_campaign as campaign
         import deliverables_register as dr
@@ -252,11 +273,12 @@ def _registered(cdir):
         if not pid:
             return {}
         registered = {str(i["path"]).replace("\\", "/").lower() for i in items}
+        steps = (campaign.read_map(cdir) or {}).get("steps")
         out = {}
         for it in items:
             t = dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=cdir, registered=registered)
             if t.get("read"):
-                out.setdefault(str(it["path"]).replace("\\", "/").lower(), t["read"])
+                out.setdefault(str(it["path"]).replace("\\", "/").lower(), (t["read"], campaign._product_key(it, steps)))
         return out
     except Exception:
         return {}
@@ -293,10 +315,12 @@ def _check_reply(text, cdir, hosts):
         if rel is not None:
             low = rel.lower()
             stem, ext = os.path.splitext(low)
-            if verdict in (NOT_FOUND, UNAVAILABLE) and low in reg:
-                candidate, why = reg[low], verdict             # the same registered path, through its own route
-            elif exact and verdict == "ok" and ext in (".html", ".htm", ".md") and low in reg and (stem + ".pdf") in reg:
-                candidate, why = reg[stem + ".pdf"], "the registered PDF"   # same folder, same name, both registered
+            if exact and verdict in (NOT_FOUND, UNAVAILABLE) and low in reg:
+                candidate, why = reg[low][0], verdict          # this effort's same registered path, its own route
+            elif (exact and verdict == "ok" and ext in (".html", ".htm", ".md") and low in reg and (stem + ".pdf") in reg
+                  and reg[low][1] == reg[stem + ".pdf"][1]):
+                # same folder, same name, both registered AS ONE PRODUCT (the register's own product grouping)
+                candidate, why = reg[stem + ".pdf"][0], "the registered PDF"
         if candidate and scrub(candidate) != clean:
             if check_route(scrub(candidate)) in ("ok", "unchecked"):
                 report.append({"label": _plain(label), "verdict": why, "fixed_to": scrub(candidate)})
@@ -306,16 +330,26 @@ def _check_reply(text, cdir, hosts):
             return clean if clean != url else None
         return clean if clean != url else None
 
+    def safe_fix(label, url):
+        try:
+            return fix(label, url)
+        except Exception:
+            return None
+
     parts = []
     for p in split_links(text):
         if isinstance(p, dict):
-            new = fix(p["label"], p["target"])
-            parts.append("[%s](%s)" % (p["label"], _md_target(new)) if new else p["raw"])
+            new = safe_fix(p["label"], p["target"])
+            label = _plain_label(p["label"])
+            if new or label != p["label"]:
+                parts.append("[%s](%s)" % (label, _md_target(new or p["target"])))
+            else:
+                parts.append(p["raw"])
         else:
             def bare(m):
                 url = m.group(1).rstrip(".,;:")
                 tail = m.group(1)[len(url):]
-                new = fix(url, url)
+                new = safe_fix(url, url)
                 return (new + tail) if new else m.group(0)
             parts.append(_BARE.sub(bare, p))
     return "".join(parts), report
@@ -338,6 +372,14 @@ def report_line(report):
         else:
             bits.append("`%s`: %s" % (r["label"][:120], r["verdict"]))
     return "**Anchor** · links: " + " · ".join(bits)
+
+
+_SECRET_IN_TEXT = re.compile(r"([?&](?:token|access_token|auth|key|anchor_token)=)[^&\s)\]]*", re.I)
+
+
+def _plain_label(s):
+    """A link's own label with any credential value removed (review r2: a URL used as its own label)."""
+    return _SECRET_IN_TEXT.sub(r"\1", str(s or ""))
 
 
 def _plain(s):
