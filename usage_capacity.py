@@ -178,11 +178,12 @@ def _seen(directory, now):
     try:
         # scandir carries each file's times on Windows: no stat per file (15k ledger files, 2026-10-10)
         with os.scandir(directory) as it:
-            paths = sorted(e.path for e in it if e.name.endswith(".json") and e.is_file() and e.stat().st_mtime >= cut)
+            sigs = {e.path: (e.stat().st_mtime_ns, e.stat().st_size) for e in it if e.name.endswith(".json") and e.is_file()}
+        paths = sorted(p for p, s in sigs.items() if s[0] / 1e9 >= cut)
     except Exception:
-        paths = []
+        paths, sigs = [], {}
     for p in paths:
-        rows = _ledger_rows(p)
+        rows = _ledger_rows(p, sigs.get(p))
         if rows is None:
             continue
         docs += 1
@@ -204,13 +205,14 @@ def _seen(directory, now):
 _ROWS = {}   # path -> ((mtime_ns, size), rows): W7 (2026-10-10) a ledger file is parsed once, not on every refresh
 
 
-def _ledger_rows(p):
+def _ledger_rows(p, sig=None):
     """``[(cli, when, tokens, minutes)]`` of one ledger file, reparsed only when it changed; None when unreadable."""
-    try:
-        st = os.stat(p)
-        sig = (st.st_mtime_ns, st.st_size)
-    except OSError:
-        return None
+    if sig is None:
+        try:
+            st = os.stat(p)
+            sig = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
     hit = _ROWS.get(p)
     if hit and hit[0] == sig:
         return hit[1]

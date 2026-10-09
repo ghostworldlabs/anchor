@@ -50,11 +50,73 @@ ENGINES_LOCK = threading.Lock()
 TERMS_LOCK = threading.Lock()
 UPLOAD_LOCK = threading.Lock()
 
-# W7 (2026-10-10): the deliverables answer per (effort, pid, dir), reused while its stamp holds and for at most
-# _DELIV_TTL seconds (a file that appears without touching the register is seen within that)
-_DELIV_CACHE = {}
+# W7 (2026-10-10): the deliverables answer per (effort, pid, dir), reused while what it was built from is unchanged,
+# for at most _DELIV_TTL seconds from the moment its build began. "Unchanged" covers the map's files, the ledger
+# folder AND the identity of every file the answer offers (an lstat each: mode, inode, size, mtime - so a deliverable
+# swapped for a link to something private is rebuilt and re-checked, never re-offered). Misses on one key build once
+# (the others wait for it); the cache is bounded and drops expired entries.
+_DELIV_CACHE = {}           # key -> (stamp, built_at, data, offered)
 _DELIV_LOCK = threading.Lock()
+_DELIV_KEY_LOCKS = {}
 _DELIV_TTL = 20.0
+_DELIV_MAX = 128
+
+
+def _offered_paths(data):
+    """Every in-effort path the answer offers (items, approved, their history, acts and companions)."""
+    out = set()
+
+    def take(it):
+        if isinstance(it, dict) and it.get("path"):
+            out.add(str(it["path"]))
+            for old in it.get("history") or []:
+                if isinstance(old, dict) and old.get("path"):
+                    out.add(str(old["path"]))
+    for coll in (data.get("items") or [], data.get("approved") or []):
+        for it in coll:
+            take(it)
+    for a in data.get("acts") or []:
+        take(a.get("item"))
+        for c in a.get("companions") or []:
+            take(c.get("item"))
+    return sorted(out)
+
+
+def _identity(cdir, rels):
+    sig = []
+    for rel in rels:
+        try:
+            st = os.lstat(os.path.join(cdir, rel))
+            sig.append((rel, st.st_mode, st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            sig.append((rel, None))
+    return tuple(sig)
+
+
+def _deliverables_cached(cdir, qs, build):
+    key = (os.path.normcase(os.path.abspath(cdir)), str(qs.get("pid", "")).strip(), str(qs.get("dir", "")).strip())
+    with _DELIV_LOCK:
+        klock = _DELIV_KEY_LOCKS.setdefault(key, threading.Lock())
+    with klock:
+        stamp = _deliv_stamp(cdir)
+        hit = _DELIV_CACHE.get(key)
+        if (hit and hit[0] == stamp and time.monotonic() - hit[1] < _DELIV_TTL
+                and _identity(cdir, [e[0] for e in hit[3]]) == hit[3]):
+            return copy.deepcopy(hit[2])
+        began = time.monotonic()
+        data = build()
+        offered = _identity(cdir, _offered_paths(data))
+        with _DELIV_LOCK:
+            now = time.monotonic()
+            for k in [k for k, v in _DELIV_CACHE.items() if now - v[1] >= _DELIV_TTL]:
+                _DELIV_CACHE.pop(k, None)
+            while len(_DELIV_CACHE) >= _DELIV_MAX:
+                _DELIV_CACHE.pop(min(_DELIV_CACHE, key=lambda k: _DELIV_CACHE[k][1]), None)
+            _DELIV_CACHE[key] = (stamp, began, copy.deepcopy(data), offered)
+            if len(_DELIV_KEY_LOCKS) > 4 * _DELIV_MAX:
+                for k in [k for k in _DELIV_KEY_LOCKS if k not in _DELIV_CACHE and k != key]:
+                    _DELIV_KEY_LOCKS.pop(k, None)
+        return data
 
 
 def _deliv_stamp(cdir):
@@ -1058,37 +1120,33 @@ def handle_get(cdir, verb, qs):
         # source the tile, the map links, and the steward's own answer all read.
         # W7 (2026-10-10): every open cockpit polls this; the answer is reused while the effort's files are unchanged
         # (and for at most _DELIV_TTL s, so a file that appears is seen) - rebuilt per poll it queued the whole server
-        ckey, cstamp = (cdir, str(qs.get("pid", "")), str(qs.get("dir", ""))), _deliv_stamp(cdir)
-        hit = _DELIV_CACHE.get(ckey)
-        if hit and hit[0] == cstamp and time.monotonic() - hit[1] < _DELIV_TTL:
-            return copy.deepcopy(hit[2]), 200
-        data = campaign.read_deliverables(cdir)
-        # 2026-10-07 (item 2): every item carries its ONE reading target - the URL the dialogue's receipt also uses
-        try:
-            import deliverables_register as _dr
-            pid_q, dir_q = str(qs.get("pid", "")), str(qs.get("dir", ""))
-            reg = {str(i.get("path") or "").replace(chr(92), "/").lower() for i in (data.get("items") or [])
-                   if isinstance(i, dict)}
-            reg |= {(_dr._canonical_route(i["route"]) or "").lower() for i in (data.get("items") or [])
-                    if isinstance(i, dict) and i.get("route")}
-            for coll in (data.get("items") or [], data.get("approved") or []):
-                for it in coll:
-                    if isinstance(it, dict):
-                        it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
-                        for old in it.get("history") or []:          # earlier versions read the same way
-                            if isinstance(old, dict):
-                                old["reading"] = _dr.reading_target(old, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
-            for a in data.get("acts") or []:
-                if isinstance(a.get("item"), dict):
-                    a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
-                for c in a.get("companions") or []:
-                    if isinstance(c.get("item"), dict):
-                        c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
-        except Exception:
-            pass   # the tile still builds its own link from the path
-        with _DELIV_LOCK:
-            _DELIV_CACHE[ckey] = (cstamp, time.monotonic(), copy.deepcopy(data))
-        return data, 200
+        def _build():
+            data = campaign.read_deliverables(cdir)
+            # 2026-10-07 (item 2): every item carries its ONE reading target - the URL the dialogue's receipt also uses
+            try:
+                import deliverables_register as _dr
+                pid_q, dir_q = str(qs.get("pid", "")), str(qs.get("dir", ""))
+                reg = {str(i.get("path") or "").replace(chr(92), "/").lower() for i in (data.get("items") or [])
+                       if isinstance(i, dict)}
+                reg |= {(_dr._canonical_route(i["route"]) or "").lower() for i in (data.get("items") or [])
+                        if isinstance(i, dict) and i.get("route")}
+                for coll in (data.get("items") or [], data.get("approved") or []):
+                    for it in coll:
+                        if isinstance(it, dict):
+                            it["reading"] = _dr.reading_target(it, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
+                            for old in it.get("history") or []:          # earlier versions read the same way
+                                if isinstance(old, dict):
+                                    old["reading"] = _dr.reading_target(old, pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
+                for a in data.get("acts") or []:
+                    if isinstance(a.get("item"), dict):
+                        a["item"]["reading"] = _dr.reading_target(a["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
+                    for c in a.get("companions") or []:
+                        if isinstance(c.get("item"), dict):
+                            c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
+            except Exception:
+                pass   # the tile still builds its own link from the path
+            return data
+        return _deliverables_cached(cdir, qs, _build), 200
     if verb == "deliverable-file":
         # Serve ONE deliverable's bytes, HARD-CONTAINED to the effort dir (realpath
         # prefix check — ../ or symlink escapes 404; active content served inert).

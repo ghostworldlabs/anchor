@@ -16,19 +16,10 @@ import usage_capacity  # noqa: E402
 from steward_cockpit import steward_routes as sr  # noqa: E402
 
 
-def test_private_homes_are_resolved_once_and_still_guard(monkeypatch, tmp_path):
+def test_the_private_guard_is_not_cached(monkeypatch, tmp_path):
+    """review r1 BLOCKER: a cached home could miss a junction retargeted since - the guard resolves every call."""
+    assert not hasattr(provider_native, "_HOMES_CACHE")
     monkeypatch.setenv("HOME", str(tmp_path)); monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    provider_native._HOMES_CACHE.update(key=None, homes=(), at=0.0)
-    calls = {"n": 0}
-    real = Path.resolve
-
-    def counting(self, *a, **k):
-        calls["n"] += 1
-        return real(self, *a, **k)
-    monkeypatch.setattr(Path, "resolve", counting)
-    for i in range(20):
-        provider_native.private_account_path(str(tmp_path / "proj" / ("f%d.md" % i)))
-    assert calls["n"] < 20 + 12, calls          # one resolve per target, the homes once
     assert provider_native.private_account_path(str(tmp_path / ".claude" / "credentials.json"))
     assert not provider_native.private_account_path(str(tmp_path / "proj" / "notes.md"))
 
@@ -113,6 +104,47 @@ def test_the_deliverables_answer_is_reused_until_the_register_changes(monkeypatc
     monkeypatch.setattr(sr, "_DELIV_TTL", 0.0)
     sr.handle_get(str(cdir), "deliverables", qs)
     assert len(builds) == 3, "past the time limit it is rebuilt even unchanged"
+
+
+def _effort_with_a_deliverable(tmp_path):
+    cdir = tmp_path / "Effort"
+    cdir.mkdir()
+    (cdir / "ECGBERHT.md").write_text("# x\n", encoding="utf-8")
+    (cdir / "report.md").write_text("# report\n", encoding="utf-8")
+    (cdir / "DELIVERABLES.md").write_text("| What | Where | Date | Step |\n|---|---|---|---|\n"
+                                          "| Report | `report.md` | 2026-10-10 | 1 |\n", encoding="utf-8")
+    return cdir
+
+
+def test_a_swapped_deliverable_is_rebuilt_and_rechecked_not_reoffered(monkeypatch, tmp_path):
+    """review r1 MAJOR: an offered file replaced (same register, same map) must not be served from the cache."""
+    cdir = _effort_with_a_deliverable(tmp_path)
+    sr._DELIV_CACHE.clear()
+    builds = []
+    real = sr.campaign.read_deliverables
+    monkeypatch.setattr(sr.campaign, "read_deliverables", lambda d: (builds.append(d), real(d))[1])
+    qs = {"pid": "p", "dir": "Effort"}
+    first, _ = sr.handle_get(str(cdir), "deliverables", qs)
+    assert any(i.get("path") == "report.md" for i in first.get("items") or []), first
+    sr.handle_get(str(cdir), "deliverables", qs)
+    assert len(builds) == 1
+    (cdir / "report.md").unlink()                                   # the file is replaced (here: removed and
+    (cdir / "report.md").write_text("# a different file entirely\n", encoding="utf-8")   # written anew, new size)
+    sr.handle_get(str(cdir), "deliverables", qs)
+    assert len(builds) == 2, "a changed offered file forces a rebuild (its link is re-checked)"
+
+
+def test_the_cache_key_is_canonical_and_bounded(monkeypatch, tmp_path):
+    """review r1 MAJOR: whitespace variants share one entry; the cache never grows past its bound."""
+    cdir = _effort_with_a_deliverable(tmp_path)
+    sr._DELIV_CACHE.clear()
+    for d in ("Effort", " Effort", "Effort  "):
+        sr.handle_get(str(cdir), "deliverables", {"pid": "p", "dir": d})
+    assert len(sr._DELIV_CACHE) == 1
+    monkeypatch.setattr(sr, "_DELIV_MAX", 3)
+    for i in range(10):
+        sr.handle_get(str(cdir), "deliverables", {"pid": "p%d" % i, "dir": "Effort"})
+    assert len(sr._DELIV_CACHE) <= 3
 
 
 def test_the_service_warms_the_job_status_at_start():
