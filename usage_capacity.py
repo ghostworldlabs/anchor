@@ -176,38 +176,64 @@ def _seen(directory, now):
     docs = 0
     cut = (now - WEEK).timestamp()
     try:
-        paths = [p for p in glob.glob(os.path.join(directory, "*.json")) if os.path.getmtime(p) >= cut]
+        # scandir carries each file's times on Windows: no stat per file (15k ledger files, 2026-10-10)
+        with os.scandir(directory) as it:
+            paths = sorted(e.path for e in it if e.name.endswith(".json") and e.is_file() and e.stat().st_mtime >= cut)
     except Exception:
         paths = []
     for p in paths:
-        try:
-            doc = json.loads(open(p, encoding="utf-8").read())
-        except Exception:
+        rows = _ledger_rows(p)
+        if rows is None:
             continue
         docs += 1
-        entries = doc.get("entries") if isinstance(doc, dict) else None
-        for e in (entries.values() if isinstance(entries, dict) else []):
-            if not isinstance(e, dict):
-                continue
-            cli = str(e.get("cli") or "").lower()
-            when = _when(e.get("recorded_at"))
+        for cli, when, tokens, minutes in rows:
             if cli not in sums or when is None or when < now - WEEK or when > now + timedelta(minutes=5):
                 continue
             s = sums[cli]
-            try:
-                tokens = int(e.get("tokens") or 0)
-            except Exception:
-                tokens = 0
             s["week_tokens"] += tokens
             s["week_turns"] += 1
-            try:
-                s["week_minutes"] += float(e.get("duration_ms") or 0) / 60000.0
-            except Exception:
-                pass
+            s["week_minutes"] += minutes
             if when >= now - WINDOW:
                 s["window_tokens"] += tokens
                 s["window_turns"] += 1
+    for gone in set(_ROWS) - set(paths):
+        _ROWS.pop(gone, None)
     return sums, docs
+
+
+_ROWS = {}   # path -> ((mtime_ns, size), rows): W7 (2026-10-10) a ledger file is parsed once, not on every refresh
+
+
+def _ledger_rows(p):
+    """``[(cli, when, tokens, minutes)]`` of one ledger file, reparsed only when it changed; None when unreadable."""
+    try:
+        st = os.stat(p)
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+    hit = _ROWS.get(p)
+    if hit and hit[0] == sig:
+        return hit[1]
+    try:
+        doc = json.loads(open(p, encoding="utf-8").read())
+    except Exception:
+        return None
+    rows = []
+    entries = doc.get("entries") if isinstance(doc, dict) else None
+    for e in (entries.values() if isinstance(entries, dict) else []):
+        if not isinstance(e, dict):
+            continue
+        try:
+            tokens = int(e.get("tokens") or 0)
+        except Exception:
+            tokens = 0
+        try:
+            minutes = float(e.get("duration_ms") or 0) / 60000.0
+        except Exception:
+            minutes = 0.0
+        rows.append((str(e.get("cli") or "").lower(), _when(e.get("recorded_at")), tokens, minutes))
+    _ROWS[p] = (sig, rows)
+    return rows
 
 
 # ── the rows ───────────────────────────────────────────────────────────────────────────────────

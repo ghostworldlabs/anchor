@@ -17,6 +17,7 @@ refusal, upload deny-list, link re-assertion). Anchor's token gate is the
 primary auth; these handlers assume an authorized caller.
 """
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -48,6 +49,22 @@ ENGINES = {}
 ENGINES_LOCK = threading.Lock()
 TERMS_LOCK = threading.Lock()
 UPLOAD_LOCK = threading.Lock()
+
+# W7 (2026-10-10): the deliverables answer per (effort, pid, dir), reused while its stamp holds and for at most
+# _DELIV_TTL seconds (a file that appears without touching the register is seen within that)
+_DELIV_CACHE = {}
+_DELIV_LOCK = threading.Lock()
+_DELIV_TTL = 20.0
+
+
+def _deliv_stamp(cdir):
+    """What the deliverables answer is built from: the map's files (DELIVERABLES.md, roadmap.json among them) and
+    the steward's ledger folder."""
+    try:
+        led = (Path(cdir) / ".ecgberht").stat().st_mtime_ns
+    except OSError:
+        led = 0
+    return "%s-%s" % (campaign.map_stamp(cdir), led)
 
 _UPLOAD_MODES = frozenset(("new", "replace", "keepboth"))
 _UPLOAD_TEMP_PREFIX = ".anchor-upload-"
@@ -386,8 +403,7 @@ def _busy_engine_keys():
 
 def _running_job_ids():
     import job_runner as _jr
-    ids = [str(r.get("job_id") or "?") for r in _jr.list_records()
-           if r.get("status") == _jr.STATUS_RUNNING]
+    ids = _running_record_ids(_jr)
     # 2026-10-07: a steward code job (Foreman in its own worktree) is a child of this server too; the drained
     # restart once fired mid-job because only job_runner records counted. The busy ledger names every live one.
     try:
@@ -396,6 +412,50 @@ def _running_job_ids():
     except Exception:
         ids.append("code:unreadable")   # cannot prove none are running: never restart over one
     return ids
+
+
+_JOB_STATUS = {}   # record path -> ((mtime_ns, size), status, job_id)
+_JOB_STATUS_LOCK = threading.Lock()   # the boot warm-up and a request never fill it at once
+
+
+def _running_record_ids(jr):
+    """The running job records' ids, as ``job_runner.list_records`` would find them, but each record is re-read only
+    when its file changed (W7, 2026-10-10: 20,000 records were re-read on every maintenance status - 300 s live)."""
+    with _JOB_STATUS_LOCK:
+        return _running_record_ids_locked(jr)
+
+
+def _running_record_ids_locked(jr):
+    d = jr.jobs_dir()
+    seen, out = set(), []
+    try:
+        with os.scandir(d) as it:
+            files = sorted((e for e in it if e.name.endswith(".json") and e.is_file()), key=lambda e: e.name)
+            for e in files:
+                if e.name.endswith((".gate.json", ".cursor.json")):
+                    continue
+                seen.add(e.path)
+                try:
+                    st = e.stat()
+                    sig = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    continue
+                hit = _JOB_STATUS.get(e.path)
+                if not hit or hit[0] != sig:
+                    try:
+                        rec = json.loads(Path(e.path).read_text(encoding="utf-8"))
+                    except (json.JSONDecodeError, OSError):
+                        continue
+                    hit = (sig, rec.get("status") if isinstance(rec, dict) else None,
+                           str((rec.get("job_id") if isinstance(rec, dict) else None) or "?"))
+                    _JOB_STATUS[e.path] = hit
+                if hit[1] == jr.STATUS_RUNNING:
+                    out.append(hit[2])
+    except FileNotFoundError:
+        return []
+    for gone in set(_JOB_STATUS) - seen:
+        _JOB_STATUS.pop(gone, None)
+    return out
 
 
 def api_post(proot, verb, body):
@@ -996,6 +1056,12 @@ def handle_get(cdir, verb, qs):
         # 2026-08-25 (John's ask; campaign journal 0010 "where is the thing I paid
         # for?"): the effort's DELIVERABLES.md register, parsed disk-true — the ONE
         # source the tile, the map links, and the steward's own answer all read.
+        # W7 (2026-10-10): every open cockpit polls this; the answer is reused while the effort's files are unchanged
+        # (and for at most _DELIV_TTL s, so a file that appears is seen) - rebuilt per poll it queued the whole server
+        ckey, cstamp = (cdir, str(qs.get("pid", "")), str(qs.get("dir", ""))), _deliv_stamp(cdir)
+        hit = _DELIV_CACHE.get(ckey)
+        if hit and hit[0] == cstamp and time.monotonic() - hit[1] < _DELIV_TTL:
+            return copy.deepcopy(hit[2]), 200
         data = campaign.read_deliverables(cdir)
         # 2026-10-07 (item 2): every item carries its ONE reading target - the URL the dialogue's receipt also uses
         try:
@@ -1020,6 +1086,8 @@ def handle_get(cdir, verb, qs):
                         c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
         except Exception:
             pass   # the tile still builds its own link from the path
+        with _DELIV_LOCK:
+            _DELIV_CACHE[ckey] = (cstamp, time.monotonic(), copy.deepcopy(data))
         return data, 200
     if verb == "deliverable-file":
         # Serve ONE deliverable's bytes, HARD-CONTAINED to the effort dir (realpath

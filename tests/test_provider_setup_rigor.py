@@ -328,15 +328,16 @@ def test_repeated_cached_page_load(server, monkeypatch, required_id):
     assert figures[0]["claude-default"]["tokens"] == count
     assert figures[0]["grok-default"] == {"state": "unknown", "tokens": None, "source": "Anchor account-qualified usage ledger",
                                           "observed_at": None, "period": "Recorded Anchor work only; other native work is outside this total"}
-    # (b) The pre-repair cost class, shown on the mechanism: a reader that
-    # parses every document on every call pays one open per file per load.
+    # (b) The capacity rail's reader, which paid one open per file per load until W7 (2026-10-10, the live home
+    # page took 35-170 s): it now opens each unchanged file once, like the account reader above.
     import usage_capacity
+    usage_capacity._ROWS.clear()
     per_call = []
     for _ in range(2):
         before_call = len(opens)
         usage_capacity._seen(str(ledger), datetime.now(timezone.utc))
         per_call.append(len(opens) - before_call)
-    assert per_call == [count, count]
+    assert per_call == [count, 0]
     measured(f"[{required_id}] {count} ledger files: loads 1-5 opened {[t[2] for t in timings]} files "
              f"(page, api seconds: {[(round(p, 2), round(a, 2)) for p, a, _ in timings]}); "
              f"a per-call full read (usage_capacity._seen) opened {per_call} per call")

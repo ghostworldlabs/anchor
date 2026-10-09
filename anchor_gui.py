@@ -24380,6 +24380,13 @@ def main():
             _start_reconcile_ticker()
         except Exception:
             pass
+        # W7 (2026-10-10): read every job record's status once, off the request path, so the first maintenance
+        # status after a start answers from memory (it took 300 s inside the service)
+        try:
+            from steward_cockpit import steward_routes as _sr_warm
+            threading.Thread(target=_sr_warm._running_job_ids, name="anchor-warm-job-status", daemon=True).start()
+        except Exception:
+            pass
         if _ts_auto.start_autosave_daemon():
             _logger.info("session autosave heartbeat started (interval %ss)",
                          int(_ts_auto._autosave_interval()))

@@ -67,12 +67,27 @@ def private_account_path(path):
     """
     try:
         target = Path(path).resolve()
-        homes = [paths.data_dir() / ".anchor" / "provider-accounts"]
-        homes += [Path.home() / name for name in NATIVE_HOME_DIRS.values()]
-        homes += [Path(os.environ[key]) for key in NATIVE_HOME_ENV.values() if os.environ.get(key)]
-        return any(target.is_relative_to(home.resolve()) for home in homes)
+        return any(target.is_relative_to(home) for home in _private_homes())
     except (OSError, RuntimeError, ValueError):
         return True
+
+
+_HOMES_CACHE = {"key": None, "homes": (), "at": 0.0}
+_HOMES_TTL = 30.0
+
+
+def _private_homes():
+    """The private homes, resolved - reused while their inputs are unchanged (W7, 2026-10-10: every deliverables poll
+    resolved all six homes for every listed file; under the service's polling load that queued the whole server).
+    Re-resolved every 30 s too, so a junction placed later is seen."""
+    homes = [paths.data_dir() / ".anchor" / "provider-accounts"]
+    homes += [Path.home() / name for name in NATIVE_HOME_DIRS.values()]
+    homes += [Path(os.environ[key]) for key in NATIVE_HOME_ENV.values() if os.environ.get(key)]
+    key = tuple(str(h) for h in homes)
+    c = _HOMES_CACHE
+    if c["key"] != key or time.monotonic() - c["at"] > _HOMES_TTL:
+        c.update(key=key, homes=tuple(h.resolve() for h in homes), at=time.monotonic())
+    return c["homes"]
 
 
 def account_env(connection):
