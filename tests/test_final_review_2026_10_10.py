@@ -111,3 +111,20 @@ def test_r2_an_encoded_credential_name_is_removed_from_a_malformed_link():
 def test_r2_an_interrupted_turn_releases_its_reply_blocks():
     js = (ROOT / "steward_cockpit" / "static" / "shared.js").read_text(encoding="utf-8")
     assert '/turn interrupted|session ended|asleep|steward stopped/i.test(ev.text || "")) turnReplyBlocks = [];' in js
+
+
+def test_r3_a_start_that_fails_after_its_reservation_gives_the_reservation_back(monkeypatch, tmp_path):
+    from steward_cockpit import maintenance
+    monkeypatch.setattr(maintenance, "is_active", lambda: False)
+    monkeypatch.setattr(skill_jobs, "validate", lambda argv: (True, ""))
+    import builtins
+    real_open = builtins.open
+
+    def failing_open(p, *a, **k):
+        if str(p).endswith(".log"):
+            raise PermissionError("denied")
+        return real_open(p, *a, **k)
+    monkeypatch.setattr(builtins, "open", failing_open)
+    before = set(skill_jobs._PROCS)
+    out = skill_jobs.start(str(tmp_path), ["node", "x.mjs"])
+    assert out["ok"] is False and set(skill_jobs._PROCS) == before

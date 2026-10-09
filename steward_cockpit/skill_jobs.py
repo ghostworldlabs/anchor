@@ -115,22 +115,36 @@ def start(cdir, argv, label=""):
         pass
     log_rel = "%s/%s.log" % (LOG_DIR, job_id)
     log_path = Path(cdir) / log_rel
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     job = {"id": job_id, "label": (label or Path(argv[1]).stem)[:120], "argv": argv, "status": "running",
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "log": log_rel}
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)          # subscription billing, as every skill launcher does
     env["CRUCIBLE_AGENT_LIVE"] = "1"
-    out = open(log_path, "w", encoding="utf-8")
+    # final review r3: every step after the reservation either succeeds or gives the reservation back - a failed
+    # start never leaves a phantom "running" skill holding off every graceful restart
+    out = None
     try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        out = open(log_path, "w", encoding="utf-8")
         proc = subprocess.Popen(argv, cwd=str(cdir), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                                 env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
     except Exception as e:
-        out.close()
+        if out is not None:
+            out.close()
         _PROCS.pop(job_id, None)
         return {"ok": False, "error": "could not start: %s" % e}
     job["pid"] = proc.pid
-    _write_job(cdir, job)
+    try:
+        _write_job(cdir, job)
+    except Exception as e:                      # spawned but unrecorded: end it, so nothing runs that nobody owns
+        _kill_tree(proc)
+        try:
+            proc.wait(timeout=30)
+        except Exception:
+            pass
+        out.close()
+        _PROCS.pop(job_id, None)
+        return {"ok": False, "error": "could not record the skill job, so it was stopped: %s" % e}
     _PROCS[job_id] = proc
 
     def wait():
