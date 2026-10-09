@@ -1114,6 +1114,39 @@ def live_state(job):
     return "live" if c == 0 else "waits for a restart"
 
 
+def stage_line(job):
+    """W4 (2026-10-10): what John reads about a code job - the stages it reached, in order, stopping at the first
+    one it did not: made, checked, reviewed, landed, then waits for restart or live. The stored status stays
+    done/failed (the one-writer lock depends on it); this line is derived from the record's own evidence."""
+    if not isinstance(job, dict):
+        return ""
+    out = []
+    if not (job.get("files") or job.get("manifest")):
+        return "nothing made"
+    out.append("made")
+    if job.get("check"):
+        if job.get("check_ok") is True:
+            out.append("checked")
+        else:
+            return " → ".join(out + ["check failed" if job.get("check_ok") is False else "not checked"])
+    else:
+        out.append("no check")
+    review = job.get("review") if isinstance(job.get("review"), dict) else {}
+    verdict = str(review.get("verdict") or "").upper()
+    if verdict:
+        if verdict.startswith("PASS"):
+            out.append("reviewed")
+        else:
+            return " → ".join(out + ["review blocked (%s)" % verdict.lower()])
+    if not job.get("landed"):
+        return " → ".join(out + ["not landed"])
+    out.append("landed")
+    state = live_state(job)
+    if state:
+        out.append("waits for restart" if state.startswith("waits") else state)
+    return " → ".join(out)
+
+
 def live_note(job):
     """Landed is not live (his word, 2026-10-05: a tile repair 'landed with all 20 checks passing' and nothing on his
     screen changed - the running Anchor still had the old code and his page the old stylesheet). For a job landed in the
@@ -1136,6 +1169,7 @@ def _report(cdir, job):
     if job.get("check"):
         lines.append("Check `%s`: %s." % (job["check"], "passed" if job.get("check_ok") else "FAILED") + ((" Output tail: " + job["check_output"][-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
+    lines.append("Stage: " + stage_line(job) + " (say the job's state in these words)")
     if job.get("kept_worktree") and (job.get("files") or job.get("unexpected")) and not job.get("landed"):
         links = announce_kept(cdir, job)
         lines.append("Kept (not landed): " + (("readable copies are linked in the dialogue: " + ", ".join(links))
@@ -1150,10 +1184,9 @@ def _report(cdir, job):
         eng = _sr.get_engine(str(cdir))
         if eng is not None:
             try:   # two-lane step 5 (2026-10-05): he sees the result at once, in the engine's own words
-                state = live_state(job)
-                eng._emit({"t": "sys", "text": "code job %s %s%s%s" % (
-                    job["id"], "finished" if job.get("status") == "done" else "failed",
-                    (" \u2014 landed" + ((", " + state) if state else "")) if job.get("landed") else "",
+                # W4: the stage line, not the stored status, is what he reads
+                eng._emit({"t": "sys", "text": "code job %s: %s%s" % (
+                    job["id"], stage_line(job),
                     (" \u2014 " + job.get("land_note")) if (job.get("land_note") and not job.get("landed")) else "")})
             except Exception:
                 pass

@@ -942,8 +942,9 @@ def _halt_reason(text):
     return m.group(1).strip()
 
 
-def write_attention(campaign_dir, state, reason, failure_code=None, by="engine"):
-    """Atomic write of the ONE attention flag (the same shape the steward writes)."""
+def write_attention(campaign_dir, state, reason, failure_code=None, by="engine", job=None):
+    """Atomic write of the ONE attention flag (the same shape the steward writes). ``job`` names the job a working
+    or paused flag is about (W4, 2026-10-10) - the only kind of flag Anchor ever clears by itself."""
     f = Path(campaign_dir) / ".ecgberht" / "attention.json"
     f.parent.mkdir(parents=True, exist_ok=True)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -955,10 +956,60 @@ def write_attention(campaign_dir, state, reason, failure_code=None, by="engine")
            "failure_code": failure_code,
            "provenance": ((prev.get("provenance") if isinstance(prev.get("provenance"), list)
                            else []) + [{"by": by, "at": now, "state": state}])[-8:]}
+    if job:
+        rec["job"] = str(job)
     tmp = f.with_name(f.name + ".%s.tmp" % os.getpid())
     tmp.write_text(json.dumps(rec, indent=2), encoding="utf-8")
     os.replace(tmp, f)
     return rec
+
+
+def clear_stale_job_flag(campaign_dir, now=None):
+    """W4 (2026-10-10): a "working" or "paused" flag is cleared ONLY when it names its job and that job is not
+    running (no running code job with that id; no running skill job with that id whose process is alive). A flag
+    that names no job is never cleared here - it stays the steward's to change, and the pane already says when
+    nothing is running. Returns the new flag, or None (no change). Never raises."""
+    try:
+        att, _err = _read_json(Path(campaign_dir) / ".ecgberht" / "attention.json")
+        if not isinstance(att, dict):
+            return None
+        state = str(att.get("state") or "").lower()
+        job = str(att.get("job") or "").strip()
+        if state not in ("working", "paused") or not job:
+            return None
+        if any(str(j.get("id")) == job for j in running_code_jobs(campaign_dir)):
+            return None
+        for k in running_skill_jobs(campaign_dir):
+            if str(k.get("id")) == job and _pid_alive(k.get("pid")):
+                return None
+        return write_attention(campaign_dir, "quiet", "", by="anchor: job %s is no longer running" % job)
+    except Exception:
+        return None
+
+
+def _pid_alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            return bool(ok) and code.value == 259                    # STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def raise_halt_attention(campaign_dir, status):
@@ -2000,6 +2051,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     ``status`` event / verb), the universal file
     ``<cdir>/.ecgberht/status-summary.json``, and the main-dashboard tile.
     """
+    clear_stale_job_flag(campaign_dir)          # W4: only a flag that names its job, and only when that job stopped
     m = read_map(campaign_dir)
     st = engine_state or {}
     active, focus_warning = _focused_step(m)
@@ -2240,6 +2292,21 @@ def compose_status(campaign_dir: str, engine_state=None):
         given = (" given " + str(look["table_at"])) if look.get("table_at") else ""   # the table's own stamp, not mtime
         finish = estimate_eta(slice_, look, started) + " (its own estimate%s)" % given   # the skill's own last ETA
     eta = finish                                          # always a clock time (or "nothing running"), never "Unavailable"
+    # W4 (2026-10-10): the forecast shown for a running job or skill is kept with its milestone; a finished one's
+    # actual time is recorded beside it (only when the forecast changed - this recomposes every few seconds)
+    try:
+        from steward_cockpit import forecasts as _fc
+        if jobs:
+            _fc.note(campaign_dir, "code:" + str(jobs[0].get("id")), "code_job", finish,
+                     basis="own" if "its own estimate" in finish else ("typical" if "typical" in finish else "none"))
+        else:
+            _sk = running_skill_jobs(campaign_dir)
+            if _sk:
+                _fc.note(campaign_dir, "skill:" + str(_sk[-1].get("id")), "skill_job", finish,
+                         basis="own" if "its own estimate" in finish else ("typical" if "typical" in finish else "none"))
+        _fc.observe_finished(campaign_dir, _job_epoch)
+    except Exception:
+        pass
     eta_source = dict(eta_source or {}, value=finish, calculated=("estimate" in finish or "provisional" in finish))
     doing = who
     summary = (slice_["name"] + (" — " + slice_["summary"] if slice_.get("summary") else "")) if slice_ else (m.get("goal_brief") or m.get("name") or "")
