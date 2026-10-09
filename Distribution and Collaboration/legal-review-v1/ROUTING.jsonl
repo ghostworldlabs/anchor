@@ -1,1 +1,0 @@
-{"schema":"trio.model-routing.v1","at":"2026-10-04T21:04:16.541Z","label":"review:legal-beagle-ghost-world-lab-license-v1","action":"halt","driver":"grok-cli","reason":"schema_nonconforming","verification":true,"replay_safe":false}

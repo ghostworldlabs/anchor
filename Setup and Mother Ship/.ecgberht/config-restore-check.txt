@@ -1,1 +1,0 @@
-python -c "import hashlib,pathlib; assert hashlib.sha256(pathlib.Path('foreman.config.json').read_bytes()).hexdigest() == 'fc14e59db8f6c50fbd6ed3dd7b0d260da7a1d90293c551f5d2e8dd157bf8ddf4'"

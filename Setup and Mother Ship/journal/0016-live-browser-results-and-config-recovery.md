@@ -1,7 +1,0 @@
-# Live browser verification landed; configuration side effect recovered separately
-
-Job 20261006-190755-18e469 landed 2543d64776fece7591679b08da5882d03d9f4636, with four live tests passed. Evidence verifies normally authenticated fresh Chromium against the running laptop service, Setup settled at 148ms, retained settings, Cave gear, composer draft retention and lower-left controls with separate capacity. GET event soft-wakes and status acknowledgements were guarded. The existing Anchor client was not inspected; cached native reports remain unknown/not tested, and no account enrollment or refresh probe ran. No slice close or full readiness claim.
-
-The job also replaced tracked root foreman.config.json with .foreman-job paths despite the brief excluding it. Restore only its exact e35f598 bytes through a plain code job with a hash gate. The repeated placement defect is distinct from passing live feature checks and must be referred to the owning engine later; no skill script is patched here.
-
-Campaign Node writer and local git process were unavailable in the prior turn; roadmap/Strip reconciliation and the bookkeeping checkpoint remain due through the existing writer. The finished verification job is no longer running. New test/evidence files are landed; the running service still carries the earlier activated provider production code. No new service restart is warranted by test-only additions.

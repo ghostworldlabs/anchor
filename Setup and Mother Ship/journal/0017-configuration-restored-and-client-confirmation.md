@@ -1,9 +1,0 @@
-# Configuration restored; existing-client confirmation remains
-
-Verified job 20261006-193917-76d567 is done, landed c1c0276a269d8eb329e463b1d8a34f3d300b5b52, changed only foreman.config.json, and passed the exact-byte hash gate. Current root bytes match fc14e59db8f6c50fbd6ed3dd7b0d260da7a1d90293c551f5d2e8dd157bf8ddf4. No Anchor writer is running; attention is quiet. No runtime restart was performed and no new runtime activation is claimed.
-
-The previously landed live proof passed four checks against a fresh browser on the actual laptop service. John's already-open Anchor window was not inspected, native reports were only read from cached state, and sign-in/capacity freshness was not re-probed. Preserve those limits. The existing product remains open under approved implementation plan v2; no acceptance, status close or goal_flip is inferred.
-
-Retried the supported campaign writer once with the current facts; Node again failed to initialize at 0xC0000142. No direct roadmap or Strip event edits. Those projections and the bookkeeping checkpoint remain pending through the supported writer. The existing register's stale restart-pause wording is corrected and the already-produced screenshots are listed for access, without producing a new handoff.
-
-Exact bounded question for John's own screen: open the Cave's upper-left gear, confirm it opens Setup, and confirm provider/model controls at the lower left. Recommend checking now because the fresh browser does not prove his existing window. Alternative: defer and retain the unresolved laptop display criterion. A yes records only this display confirmation against provider implementation plan v2; it does not accept account capabilities or close the effort. Reversible by reporting a mismatch and reopening the check. No decision timer authorizes inventing a human observation after silence.
