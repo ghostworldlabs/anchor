@@ -22276,10 +22276,13 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # the client shim carries pid in the URL query for POST too;
                 # accept it from the body OR the query
                 pid = (body or {}).get("pid") or _qpid
-                proot = self._steward_pid_dir(pid)
-                if proot is None:
-                    self._send_json({"ok": False, "error": "unknown project"}, code=404); return
-                obj, code = _scr.api_post(proot, verb, body or {})
+                if verb == "drain-all":         # W5 (2026-10-09): global - every engine of this service, no project
+                    obj, code = _scr.drain_all()
+                else:
+                    proot = self._steward_pid_dir(pid)
+                    if proot is None:
+                        self._send_json({"ok": False, "error": "unknown project"}, code=404); return
+                    obj, code = _scr.api_post(proot, verb, body or {})
             # Deliverable file streaming (2026-08-25): the routes layer returns a
             # {__file__, __ctype__} marker (containment already enforced there);
             # everything else stays JSON.

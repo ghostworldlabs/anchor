@@ -132,6 +132,77 @@ def ensure_warm_seed(project_id, lane, session_id, timeout=None) -> str:
         return "unavailable"
 
 
+def legacy_target():
+    """{"pid", "dir"} of one registered project with a discovered steward effort (W5, 2026-10-09). A service from
+    before this change answers drain-all only inside a valid project and effort - it posted {} and was answered
+    "unknown project" - and its handler then parks EVERY engine of the service, not only that effort's. The new
+    service ignores both fields. None when no such effort exists."""
+    try:
+        import rnd_registry as rnd
+        from steward_cockpit import steward_campaign as camp
+        for proj in rnd.list_projects(include_archived=True, include_future=True, include_retired=False):
+            folder = (proj.get("folder_path") or "").strip()
+            if not folder or not Path(folder).is_dir():
+                continue
+            try:
+                efforts = camp.discover_efforts(folder)
+            except Exception:
+                continue
+            if efforts:
+                return {"pid": proj.get("id"), "dir": efforts[0].get("rel", "")}
+    except Exception:
+        return None
+    return None
+
+
+def service_drain(url=None, token=None, target=None, timeout=30):
+    """Ask THE SERVICE to park its own cockpit engines. Returns the cockpit report; ``note`` is set (and the drain
+    fails) on 401, on any other HTTP error, on an unreachable service, on an answer that is not the drain's own
+    structured report, and on any engine that failed to park - never a vacuous success."""
+    import json as _json
+    import os as _os
+    import urllib.request as _rq
+    import urllib.error as _er
+    cockpit = {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None}
+    url = (url or _os.environ.get("ANCHOR_URL", "http://127.0.0.1:8777")) + "/api/steward/drain-all"
+    token = _os.environ.get("ANCHOR_TOKEN", "") if token is None else token
+    target = legacy_target() if target is None else target
+    payload = dict(target or {})
+    if payload.get("pid"):
+        url += "?pid=" + str(payload["pid"])
+    req = _rq.Request(url, data=_json.dumps(payload).encode("utf-8"), method="POST",
+                      headers={"Content-Type": "application/json"})
+    if token:
+        req.add_header("X-Anchor-Token", token)
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with _rq.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        try:
+            body = _json.loads(raw.decode("utf-8"))
+        except Exception:
+            body = None                                  # judged below: not a drain report
+    except _er.HTTPError as e:
+        if e.code == 401:
+            cockpit["note"] = ("cockpit engines NOT parked: the service refused the token (401) - run this with "
+                               "ANCHOR_TOKEN set (restart_anchor.ps1 reads it from the service)")
+        else:
+            cockpit["note"] = "cockpit drain HTTP %s: engines NOT parked" % e.code
+        return cockpit
+    except Exception as e:
+        cockpit["note"] = "service unreachable (%s): engines NOT parked" % type(e).__name__
+        return cockpit
+    shaped = (isinstance(body, dict) and body.get("ok") in (True, False)
+              and all(isinstance(body.get(k), list) for k in ("parked", "idle", "errors")))
+    if not shaped:
+        cockpit["note"] = "the service's answer was not a drain report: engines NOT known to be parked"
+        return cockpit
+    cockpit.update({k: body[k] for k in ("parked", "idle", "errors")})
+    if body["errors"] or body["ok"] is not True:
+        cockpit["note"] = "%d cockpit engine(s) failed to park" % max(1, len(body["errors"]))
+    return cockpit
+
+
 def drain(project_id=None, dry_run=False, summary_timeout=None) -> dict:
     """Park every live PTY session warm; returns the drain report.
 
@@ -173,37 +244,15 @@ def drain(project_id=None, dry_run=False, summary_timeout=None) -> dict:
     # ENGINES and reported [] — indistinguishable from "none live"). The drain
     # now asks THE SERVICE to park its own engines via POST /api/steward/drain-all
     # and reports each failure class BY NAME — never a vacuous empty.
-    cockpit = {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None}
     if dry_run:
-        cockpit["note"] = "dry-run: service drain-all not called"
+        cockpit = {"mode": "http", "parked": [], "idle": [], "errors": [], "note": "dry-run: service drain-all not called"}
     else:
-        import json as _json
-        import os as _os
-        import urllib.request as _rq
-        import urllib.error as _er
-        url = _os.environ.get("ANCHOR_URL", "http://127.0.0.1:8777") + "/api/steward/drain-all"
-        req = _rq.Request(url, data=b"{}", method="POST",
-                          headers={"Content-Type": "application/json"})
-        tok = _os.environ.get("ANCHOR_TOKEN", "")
-        if tok:
-            req.add_header("X-Anchor-Token", tok)
-        try:
-            with _rq.urlopen(req, timeout=30) as resp:
-                body = _json.loads(resp.read().decode("utf-8"))
-                cockpit.update({k: body.get(k, cockpit[k]) for k in ("parked", "idle", "errors")})
-        except _er.HTTPError as e:
-            if e.code == 401:
-                cockpit["note"] = ("cockpit engines NOT parked: the service requires "
-                                   "X-Anchor-Token and ANCHOR_TOKEN is not in this shell's "
-                                   "env — export it (or park from the dashboard) before "
-                                   "restarting, or steward turns die mid-flight and lean on --resume")
-            else:
-                cockpit["note"] = f"cockpit drain HTTP {e.code}: engines NOT parked"
-        except Exception as e:
-            cockpit["note"] = (f"service unreachable ({type(e).__name__}) — nothing to park "
-                               f"(service already down) OR wrong ANCHOR_URL")
+        cockpit = service_drain()
 
-    return {"ok": True, "dry_run": bool(dry_run), "count": len(drained),
+    # W5 (2026-10-09): fail closed - the restart stops before shutdown unless every engine and session parked
+    failed = [d.get("session_id") for d in drained if not dry_run and not d.get("parked")]
+    ok = bool(dry_run) or (not failed and not cockpit.get("note"))
+    return {"ok": ok, "dry_run": bool(dry_run), "count": len(drained), "failed_sessions": failed,
             "drained": drained, "cockpit": cockpit}
 
 
@@ -226,6 +275,10 @@ def main(argv=None):  # pragma: no cover - thin CLI shim
     report = drain(project_id=args.project, dry_run=args.dry_run,
                    summary_timeout=args.timeout)
     print(json.dumps(report, indent=2))
+    if not report.get("ok"):
+        print("DRAIN FAILED: %s" % ((report.get("cockpit") or {}).get("note")
+                                    or "sessions not parked: %s" % ", ".join(map(str, report.get("failed_sessions") or []))))
+        return 1
     return 0
 
 

@@ -1457,6 +1457,28 @@ def _filetext(cdir, fpath):
 
 
 # ---------- POST acts ----------
+def drain_all():
+    """Park every live cockpit engine of THIS service (the restart drain). Global: no project and no effort (W5,
+    2026-10-09: the drain posted {} and was answered "unknown project", so for weeks nothing was parked)."""
+    # 2026-08-25 hardening (review finding #1): the restart drain runs in a SEPARATE
+    # process, so it can never see this service's live ENGINES — the in-process leg
+    # was a structural no-op. The drain now POSTs here and THE SERVICE parks its own
+    # engines: stop() commits a dirty steward tree and closes the proc; resume stays
+    # seamless. Report distinguishes parked / already-idle — never a vacuous empty.
+    report = {"parked": [], "idle": [], "errors": []}
+    for key, eng in list(ENGINES.items()):
+        try:
+            if eng.alive():
+                eng.stop()
+                report["parked"].append(str(key))
+            else:
+                report["idle"].append(str(key))
+        except Exception as e:
+            report["errors"].append(f"{key}: {type(e).__name__}: {e}")
+    report["ok"] = not report["errors"]
+    return report, 200
+
+
 def handle_post(cdir, verb, body):
     if verb == "refinement-accept":
         from steward_cockpit.refinement_client import update
@@ -1547,23 +1569,7 @@ def handle_post(cdir, verb, body):
         except (ValueError, OSError) as exc:
             return {"ok": False, "error": str(exc)}, 409
     if verb == "drain-all":
-        # 2026-08-25 hardening (review finding #1): the restart drain runs in a SEPARATE
-        # process, so it can never see this service's live ENGINES — the in-process leg
-        # was a structural no-op. The drain now POSTs here and THE SERVICE parks its own
-        # engines: stop() commits a dirty steward tree and closes the proc; resume stays
-        # seamless. Report distinguishes parked / already-idle — never a vacuous empty.
-        report = {"parked": [], "idle": [], "errors": []}
-        for key, eng in list(ENGINES.items()):
-            try:
-                if eng.alive():
-                    eng.stop()
-                    report["parked"].append(str(key))
-                else:
-                    report["idle"].append(str(key))
-            except Exception as e:
-                report["errors"].append(f"{key}: {type(e).__name__}: {e}")
-        report["ok"] = not report["errors"]
-        return report, 200
+        return drain_all()
     if verb == "status-ack":
         # 2026-08-25 (elegance S-batch): render receipt from the pane — never
         # spawns an engine (create=False); a dead engine just means no receipt.

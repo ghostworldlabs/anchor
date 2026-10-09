@@ -14,12 +14,13 @@
 #   restart resumes WARM (continue_session finds the persisted docs + cached
 #   summary), never dead context.
 #
-#   The drain is best-effort and per-session timeout-bounded (a wedged model call
-#   can never block the restart); it never raises. If it fails entirely the
-#   restart still proceeds (fail-open) - a warm restart is a bonus, not a gate.
+#   W5 (2026-10-09): the drain FAILS CLOSED. It reads the service token from the service itself, asks the service to
+#   park every cockpit engine, and if anything did not park (401, a bad answer, an engine or session that failed) the
+#   restart STOPS before the service is touched. A deliberate cold restart: -Cold (or nssm restart anchor).
 #
 # Idempotent / safe to re-run. Leaves 'ledger', bridge, aurora untouched.
 
+param([switch]$Cold)
 $ErrorActionPreference = 'Continue'
 $Port = 8777
 $Base = "http://127.0.0.1:$Port"
@@ -66,18 +67,29 @@ if ($Py) {
 
 # 1. WARM DRAIN (while the service is still up) - park every live session warm.
 Write-Host "`n==> 1/3 Warm drain (park live sessions, persist docs + cache summaries)" -ForegroundColor Cyan
-if ($Py) {
+if ($Cold) {
+  Write-Host "[note] -Cold: the drain is skipped by request; live steward turns end with the process." -ForegroundColor Yellow
+} else {
+  # the service's own token (the admin shell has none): nssm keeps it in AppEnvironmentExtra
+  if (-not $env:ANCHOR_TOKEN) {
+    $extra = ((& $Nssm get anchor AppEnvironmentExtra 2>$null) -join "`n") -replace "`0", ''
+    $m = [regex]::Match($extra, '(?m)^ANCHOR_TOKEN=(.+)$')
+    if ($m.Success) { $env:ANCHOR_TOKEN = $m.Groups[1].Value.Trim() }
+  }
+  if (-not $env:ANCHOR_TOKEN) {
+    Write-Host "[STOP] The service token could not be read, so the stewards cannot be parked. Nothing was changed; the service was not stopped. (A cold restart: -Cold)" -ForegroundColor Red
+    Write-Host "RESULT: RESTART STOPPED BEFORE ANY CHANGE" -ForegroundColor Red; exit 3
+  }
   Push-Location $AnchorDir
   try {
-    # No ANCHOR_TOKEN needed: the drain reads the on-disk registry directly.
     & $Py "tools\pre_restart_drain.py" 2>&1 | ForEach-Object { "    $_" }
-    if ($LASTEXITCODE -ne 0) { Write-Host "[warn] drain exited $LASTEXITCODE; proceeding with restart (fail-open)." -ForegroundColor Yellow }
-    else { Write-Host "[ok] Warm drain complete." -ForegroundColor Green }
-  } catch {
-    Write-Host "[warn] drain threw ($($_.Exception.Message)); proceeding with restart (fail-open)." -ForegroundColor Yellow
-  } finally { Pop-Location }
-} else {
-  Write-Host "[warn] python not found; skipping warm drain (cold restart)." -ForegroundColor Yellow
+    $drainExit = $LASTEXITCODE
+  } catch { $drainExit = 99 } finally { Pop-Location }
+  if ($drainExit -ne 0) {
+    Write-Host "[STOP] The drain did not park everything (exit $drainExit, above). Nothing was changed; the service was not stopped. Look, or choose a cold restart: -Cold" -ForegroundColor Red
+    Write-Host "RESULT: RESTART STOPPED BEFORE ANY CHANGE" -ForegroundColor Red; exit 3
+  }
+  Write-Host "[ok] Warm drain complete: every steward engine and session parked." -ForegroundColor Green
 }
 
 # 2. Restart the service.

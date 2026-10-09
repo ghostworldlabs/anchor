@@ -39,12 +39,12 @@ def test_drain_runs_before_the_stop():
         "the warm drain must run BEFORE 'nssm stop anchor' (service still up = state to snapshot)"
 
 
-def test_wrapper_is_fail_open():
-    """A failed drain must never block the restart - a warm restart is a bonus,
-    not a gate (the drain itself is best-effort / never raises)."""
+def test_wrapper_fails_closed():
+    """W5 (2026-10-09, reversing the 2026-07 fail-open rule): a drain that did not park everything stops the restart
+    before the service is touched; a cold restart is a deliberate -Cold. (The fail-open drain hid, for weeks, that
+    nothing was being parked.)"""
     text = SCRIPT.read_text(encoding="utf-8", errors="replace").lower()
-    assert "fail-open" in text, \
-        "the wrapper must document/behave fail-open: drain failure still restarts"
+    assert "fails closed" in text and "restart stopped before any change" in text and "-cold" in text
 
 
 def test_drain_module_importable_and_bounded():

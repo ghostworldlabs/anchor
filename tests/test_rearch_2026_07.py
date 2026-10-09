@@ -1521,7 +1521,13 @@ class TestW3PreRestartDrain:
         sid = rec["session_id"]
         assert sid in pty_manager.live_sessions()
 
-        report = drain_mod.drain()
+        # W5 (2026-10-09): the service leg is tested against stub servers (test_w5_drain); here it answers parked
+        _svc = drain_mod.service_drain
+        drain_mod.service_drain = lambda: {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None}
+        try:
+            report = drain_mod.drain()
+        finally:
+            drain_mod.service_drain = _svc
         assert report["ok"] is True and report["dry_run"] is False
         entry = next(e for e in report["drained"] if e["session_id"] == sid)
 
@@ -1622,9 +1628,12 @@ class TestW3PreRestartDrain:
             return real_close(sid, project_id=project_id)
 
         monkeypatch.setattr(ts, "close_session", _flaky)
+        monkeypatch.setattr(drain_mod, "service_drain",
+                            lambda: {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None})
         try:
             report = drain_mod.drain(summary_timeout=0.1)
-            assert report["ok"] is True
+            # W5 (2026-10-09): the rest still drains, and the failure is reported - the restart stops (fail closed)
+            assert report["ok"] is False and report["failed_sessions"] == [a["session_id"]]
             by = {e["session_id"]: e for e in report["drained"]}
             assert by[a["session_id"]]["parked"] is False
             assert "boom-park" in by[a["session_id"]]["error"]
