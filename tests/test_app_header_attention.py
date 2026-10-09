@@ -155,6 +155,9 @@ def ui():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         context = browser.new_context(viewport={"width": 1500, "height": 900}, reduced_motion="no-preference")
+        # these tests prove a page comes back right after the app drops its frame (past the keep-alive cap):
+        # cap 0 makes every hidden tile drop, as all of them did before 2026-10-08
+        context.add_init_script("if(window===window.top)window.ANCHOR_KEEP_LIVE=0;")
         context.add_init_script("""if(window===window.top){
 window.hostActions=[];window.pywebview={api:{zoom(){},window_control(act){hostActions.push(act)}}};}
 const originalInterval=window.setInterval;

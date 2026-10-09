@@ -21,6 +21,8 @@
   var FRAME_SCRIPT = "/static/app-frame.js";
   var DROP_AFTER_MS = 15000;
   var KEEP_LIVE = 6, KEEP_LIVE_NARROW = 3;    // hidden tiles that keep their page (a phone keeps fewer)
+  if (typeof window.ANCHOR_KEEP_LIVE === "number" && window.ANCHOR_KEEP_LIVE >= 0)   // tests of the drop path
+    KEEP_LIVE = KEEP_LIVE_NARROW = window.ANCHOR_KEEP_LIVE;
 
   var strip = document.getElementById("strip");
   var rowButton = document.getElementById("rows"), rowsExpanded = false, rowTick = null;
