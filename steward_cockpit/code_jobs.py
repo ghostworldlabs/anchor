@@ -282,10 +282,27 @@ def check_text(check):
     return subprocess.list2cmdline(check)
 
 
+def gate_argv(check):
+    """The argument list Foreman's gate runs through the wrapper: the job's check, with pytest made verbose the way
+    Foreman's own normalizer would (fcj review r8: Foreman's GREEN needs a line per test, and behind the wrapper it
+    cannot see pytest to add -v itself). The job's own final check stays exactly as given."""
+    argv = list(check)
+    names = [os.path.basename(a).lower() for a in argv]
+    at = next((i for i, n in enumerate(names) if n in ("pytest", "pytest.exe", "py.test")), None)
+    if at is None and "pytest" in argv:
+        at = argv.index("pytest")                      # python -m pytest
+    if at is None:
+        return argv
+    head, rest = argv[:at + 1], [a for a in argv[at + 1:] if a not in ("-q", "--quiet")]
+    if not any(a in ("-v", "--verbose", "-vv", "-vvv") for a in rest):
+        rest = ["-v"] + rest
+    return head + rest
+
+
 def _write_gate(job, wt):
     """The wrapper check_text names, when it does (never landed: .foreman-job is Anchor's)."""
     if isinstance(job.get("check"), list):
-        (Path(wt) / FOREMAN_DIR / "run_check.json").write_text(json.dumps(job["check"]), encoding="utf-8")
+        (Path(wt) / FOREMAN_DIR / "run_check.json").write_text(json.dumps(gate_argv(job["check"])), encoding="utf-8")
         (Path(wt) / GATE_SCRIPT).write_text(
             "import json, subprocess, sys\n"
             "from pathlib import Path\n"

@@ -589,3 +589,23 @@ def test_foreman_waits_out_its_writers_usage_limit(env, monkeypatch):
     monkeypatch.setattr(code_jobs, "exhausted_families", lambda: {"claude"})
     out = _start(repo, cdir)
     assert not out["ok"] and "usage limit" in out["error"]
+
+
+# ---- fcj review r8 ----
+
+def test_behind_the_wrapper_pytest_is_still_made_verbose_for_foremans_gate():
+    py = sys.executable
+    assert code_jobs.gate_argv([py, "-m", "pytest", "-q", "-k", "foo or bar", "tests"]) == \
+        [py, "-m", "pytest", "-v", "-k", "foo or bar", "tests"]
+    assert code_jobs.gate_argv(["pytest", "-vv", "-k", "a b"]) == ["pytest", "-vv", "-k", "a b"]
+    assert code_jobs.gate_argv(["node", "--test", "--test-name-pattern=a|b"]) == ["node", "--test", "--test-name-pattern=a|b"]
+
+
+def test_the_jobs_own_final_check_stays_exactly_as_given(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "halt")
+    check = [sys.executable, "-m", "pytest", "-q", "-k", "a or b"]
+    job = _wait(cdir, _start(repo, cdir, check=check)["job"])
+    assert job["check"] == check
+    gate = json.loads((Path(job["kept_worktree"]) / ".foreman-job" / "run_check.json").read_text(encoding="utf-8"))
+    assert gate == [sys.executable, "-m", "pytest", "-v", "-k", "a or b"]
