@@ -591,29 +591,16 @@ def test_foreman_waits_out_its_writers_usage_limit(env, monkeypatch):
     assert not out["ok"] and "usage limit" in out["error"]
 
 
-# ---- fcj review r8 ----
+# ---- fcj reviews r8-r10: pytest behind the wrapper is made verbose by pytest's own setting, never by guessing ----
 
-def test_behind_the_wrapper_pytest_is_still_made_verbose_for_foremans_gate():
-    py = sys.executable
-    assert code_jobs.gate_argv([py, "-m", "pytest", "-q", "-k", "foo or bar", "tests"]) == \
-        [py, "-m", "pytest", "-v", "-k", "foo or bar", "tests"]
-    assert code_jobs.gate_argv(["pytest", "-vv", "-k", "a b"]) == ["pytest", "-vv", "-k", "a b"]
-    assert code_jobs.gate_argv(["node", "--test", "--test-name-pattern=a|b"]) == ["node", "--test", "--test-name-pattern=a|b"]
-
-
-def test_the_jobs_own_final_check_stays_exactly_as_given(env, monkeypatch):
+def test_behind_the_wrapper_any_pytest_reached_is_verbose_and_the_final_check_is_exact(env, monkeypatch, tmp_path):
     repo, cdir, _ = env
     monkeypatch.setenv("FAKE_FOREMAN_MODE", "halt")
-    check = [sys.executable, "-m", "pytest", "-q", "-k", "a or b"]
+    check = [sys.executable, "-u", "-c", "import os, sys; print('ADDOPTS=' + os.environ.get('PYTEST_ADDOPTS', ''))",
+             "a b"]
     job = _wait(cdir, _start(repo, cdir, check=check)["job"])
-    assert job["check"] == check
-    gate = json.loads((Path(job["kept_worktree"]) / ".foreman-job" / "run_check.json").read_text(encoding="utf-8"))
-    assert gate == [sys.executable, "-m", "pytest", "-v", "-k", "a or b"]
-
-
-def test_only_a_real_pytest_invocation_is_made_verbose():
-    # fcj review r9: `make pytest ...` is make, not pytest
-    assert code_jobs.gate_argv(["make", "pytest", "PYTEST_ARGS=-v tests/x.py"]) == ["make", "pytest", "PYTEST_ARGS=-v tests/x.py"]
-    assert code_jobs.gate_argv(["npm", "run", "pytest", "--", "a b"]) == ["npm", "run", "pytest", "--", "a b"]
-    assert code_jobs.gate_argv([r"C:\Py\Scripts\pytest.exe", "-k", "a b"]) == [r"C:\Py\Scripts\pytest.exe", "-v", "-k", "a b"]
-    assert code_jobs.gate_argv(["py", "-m", "pytest", "-k", "a b"]) == ["py", "-m", "pytest", "-v", "-k", "a b"]
+    assert job["check"] == check                                              # the final check: exactly as given
+    wt = Path(job["kept_worktree"])
+    assert json.loads((wt / ".foreman-job" / "run_check.json").read_text(encoding="utf-8")) == check
+    out = subprocess.run([sys.executable, ".foreman-job/run_check.py"], cwd=wt, capture_output=True, text=True).stdout
+    assert "ADDOPTS=-vv" in out                                               # what any pytest under it reads

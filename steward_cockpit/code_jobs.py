@@ -282,33 +282,25 @@ def check_text(check):
     return subprocess.list2cmdline(check)
 
 
-def gate_argv(check):
-    """The argument list Foreman's gate runs through the wrapper: the job's check, with pytest made verbose the way
-    Foreman's own normalizer would (fcj review r8: Foreman's GREEN needs a line per test, and behind the wrapper it
-    cannot see pytest to add -v itself). The job's own final check stays exactly as given."""
-    argv = list(check)
-    exe = os.path.splitext(os.path.basename(argv[0]).lower())[0] if argv else ""
-    if exe in ("pytest", "py.test"):                   # only a REAL pytest invocation (fcj r9: never `make pytest`)
-        at = 0
-    elif exe.startswith(("python", "py")) and argv[1:3] == ["-m", "pytest"]:
-        at = 2
-    else:
-        return argv
-    head, rest = argv[:at + 1], [a for a in argv[at + 1:] if a not in ("-q", "--quiet")]
-    if not any(a in ("-v", "--verbose", "-vv", "-vvv") for a in rest):
-        rest = ["-v"] + rest
-    return head + rest
+GATE_PYTEST_ADDOPTS = "-vv"
 
 
 def _write_gate(job, wt):
-    """The wrapper check_text names, when it does (never landed: .foreman-job is Anchor's)."""
+    """The wrapper check_text names, when it does (never landed: .foreman-job is Anchor's). It runs the job's exact
+    argument list with no shell. Behind it Foreman cannot see a pytest to make verbose, and its GREEN needs a line per
+    test - so the wrapper asks pytest itself, through pytest's own PYTEST_ADDOPTS (fcj reviews r8-r10: no guessing
+    from the arguments; any pytest the check reaches - directly, through python options, through make - reads it, and
+    no other program does). -vv outweighs one -q. The job's own final check runs exactly as given, without it."""
     if isinstance(job.get("check"), list):
-        (Path(wt) / FOREMAN_DIR / "run_check.json").write_text(json.dumps(gate_argv(job["check"])), encoding="utf-8")
+        (Path(wt) / FOREMAN_DIR / "run_check.json").write_text(json.dumps(job["check"]), encoding="utf-8")
         (Path(wt) / GATE_SCRIPT).write_text(
-            "import json, subprocess, sys\n"
+            "import json, os, subprocess, sys\n"
             "from pathlib import Path\n"
             "argv = json.loads((Path(__file__).parent / 'run_check.json').read_text(encoding='utf-8'))\n"
-            "sys.exit(subprocess.run(argv, shell=False).returncode)\n", encoding="utf-8")
+            "env = dict(os.environ)\n"
+            "env['PYTEST_ADDOPTS'] = (env.get('PYTEST_ADDOPTS', '') + ' %s').strip()\n"
+            "sys.exit(subprocess.run(argv, shell=False, env=env).returncode)\n" % GATE_PYTEST_ADDOPTS,
+            encoding="utf-8")
 
 
 def foreman_docs(job, plan_text=""):
