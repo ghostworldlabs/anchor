@@ -8,8 +8,10 @@
  * right - opening the second pane if there was one, and the cockpit keeps the focus so he can dictate.
  *
  * Frames: the Cave's frame lives for the whole session. A tile shown in a pane has a live frame; a tile that
- * leaves the panes drops its frame once the panes' new frames have loaded (never inside the caller's own
- * window.open call), and comes back from its last address on a click. The tile list lives in memory.
+ * leaves the panes KEEPS its frame, hidden, so switching back shows it exactly as he left it - conversation,
+ * draft, scroll (his rule, 2026-10-08: "once opened ... keep the content in them"). Only past KEEP_LIVE hidden
+ * tiles does the least recently shown one drop its frame (once the panes' new frames have loaded, never inside
+ * the caller's own window.open call); it comes back from its last address on a click. The tile list lives in memory.
  */
 (function () {
   "use strict";
@@ -18,6 +20,7 @@
   var COCKPIT = " \u2014 AI Cockpit";
   var FRAME_SCRIPT = "/static/app-frame.js";
   var DROP_AFTER_MS = 15000;
+  var KEEP_LIVE = 6, KEEP_LIVE_NARROW = 3;    // hidden tiles that keep their page (a phone keeps fewer)
 
   var strip = document.getElementById("strip");
   var rowButton = document.getElementById("rows"), rowsExpanded = false, rowTick = null;
@@ -289,6 +292,7 @@
     var prev = panes[k];
     if (other >= 0 && other !== k) panes[other] = prev;       // already on the other side: the two swap
     panes[k] = id;
+    t.seen = ++seq;                                            // least recently shown drops first, past KEEP_LIVE
     if (prev && prev !== id) { hist[k] = hist[k].filter(function (x) { return x !== prev; }); hist[k].push(prev); }
     if (prev && prev !== id && shownIn(prev) < 0) leave(prev);
     if (!t.frame) t.frame = newFrame(t.url || CAVE_URL);
@@ -314,11 +318,18 @@
   }
 
   function settle() {
-    pendingDrop = pendingDrop.filter(function (id) {
+    pendingDrop = pendingDrop.filter(function (id) {        // a tile that left keeps its page: remember where it is
       var t = byId(id);
-      if (!t || shownIn(id) >= 0) return false;
-      if (t.frame) { t.url = addressOf(t.frame.contentWindow) || t.url; if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title); t.frame.remove(); t.frame = null; }
+      if (t && t.frame && shownIn(id) < 0) { t.url = addressOf(t.frame.contentWindow) || t.url; if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title); }
       return false;
+    });
+    var cap = narrowMq.matches ? KEEP_LIVE_NARROW : KEEP_LIVE;
+    var hiddenLive = tiles.filter(function (t) { return t.kind !== "cave" && t.frame && shownIn(t.id) < 0; })
+                          .sort(function (a, b) { return (a.seen || 0) - (b.seen || 0); });
+    hiddenLive.slice(0, Math.max(0, hiddenLive.length - cap)).forEach(function (t) {
+      t.url = addressOf(t.frame.contentWindow) || t.url;
+      if (!t.named) t.title = titleOf(t.frame.contentWindow, t.title);
+      t.frame.remove(); t.frame = null;
     });
   }
 
