@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -152,6 +153,7 @@ def busy_repos():
     """Every repository a live code job works on, across all stewards: {repo: {"job", "cdir"}} - one entry per
     repository even when several jobs run there (stale entries dropped; a Foreman lost to a restart reconciled)."""
     out = {}
+    _prune_finished()
     for key, info in _busy_read().items():
         repo = info.get("repo") or key           # keyed by job since 2026-10-09; older entries by repository
         j = read_jobs(info.get("cdir", "")).get(info.get("job", ""), {})
@@ -160,6 +162,28 @@ def busy_repos():
         if j.get("status") in LIVE:
             out[repo] = info
     return out
+
+
+def _prune_finished():
+    """Drop busy entries whose job record READS as finished (fcj review r7: a crash between the record and the ledger
+    write left one that blocked drained restarts for ever). An entry whose record cannot be read is kept."""
+    with _LOCK:
+        b = _busy_read()
+        gone = []
+        for key, info in b.items():
+            if not isinstance(info, dict):
+                continue
+            try:
+                d = json.loads(_path(info.get("cdir", "")).read_text(encoding="utf-8"))
+            except Exception:
+                continue                          # unreadable: kept, conservatively
+            j = d.get(info.get("job", "")) if isinstance(d, dict) else None
+            if isinstance(j, dict) and j.get("status") and j.get("status") not in LIVE:
+                gone.append(key)
+        if gone:
+            for k in gone:
+                b.pop(k, None)
+            _busy_write(b)
 
 
 def active_repos(cdir=None):
@@ -242,9 +266,31 @@ def foreman_code_jobs_on():
     return os.environ.get("ANCHOR_FOREMAN_CODE_JOBS", "1").strip() != "0"
 
 
+_SHELL_META = re.compile(r'[|&<>^%!()"\s]')
+GATE_SCRIPT = FOREMAN_DIR + "/run_check.py"
+
+
 def check_text(check):
-    """The check as one command line (Foreman's plan declares its gate as text)."""
-    return subprocess.list2cmdline(check) if isinstance(check, list) else str(check or "").strip()
+    """The check as one command line - Foreman's plan declares its gate as text, and Foreman runs it in a SHELL. An
+    argument list whose arguments a shell would read differently (fcj review r7: a | in a test pattern) runs through
+    Anchor's own wrapper in .foreman-job, which executes the exact list with no shell; a plain list (pytest ...) stays
+    readable, so Foreman still recognizes its test runner."""
+    if not isinstance(check, list):
+        return str(check or "").strip()
+    if any(_SHELL_META.search(a) or not a for a in check):
+        return subprocess.list2cmdline([sys.executable, GATE_SCRIPT])
+    return subprocess.list2cmdline(check)
+
+
+def _write_gate(job, wt):
+    """The wrapper check_text names, when it does (never landed: .foreman-job is Anchor's)."""
+    if isinstance(job.get("check"), list):
+        (Path(wt) / FOREMAN_DIR / "run_check.json").write_text(json.dumps(job["check"]), encoding="utf-8")
+        (Path(wt) / GATE_SCRIPT).write_text(
+            "import json, subprocess, sys\n"
+            "from pathlib import Path\n"
+            "argv = json.loads((Path(__file__).parent / 'run_check.json').read_text(encoding='utf-8'))\n"
+            "sys.exit(subprocess.run(argv, shell=False).returncode)\n", encoding="utf-8")
 
 
 def foreman_docs(job, plan_text=""):
@@ -486,6 +532,7 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
     d = Path(wt) / FOREMAN_DIR
     d.mkdir(parents=True, exist_ok=True)
     desc, plan, log = foreman_docs(job, plan_text)
+    _write_gate(job, wt)
     (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
     (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
     (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
@@ -1061,6 +1108,9 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         why = foreman_plan_ok(plan)
         if why:
             return {"ok": False, "error": "no job started: %s" % why}
+        if FOREMAN_WRITER in exhausted_families():   # fcj review r7: its pinned writer is cooling down
+            return {"ok": False, "error": "no job started: Claude - the family Foreman writes with - hit its usage "
+                    "limit recently; start it when that has passed"}
         if not FOREMAN_RUN_LIVE.is_file():
             return {"ok": False, "error": "no job started: Foreman is not at %s" % FOREMAN_RUN_LIVE}
         family = FOREMAN_WRITER                  # its writing seats are pinned to Claude (foreman_settings)

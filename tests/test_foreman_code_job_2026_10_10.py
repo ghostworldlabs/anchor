@@ -556,3 +556,36 @@ def test_a_note_that_cannot_be_written_never_lets_a_running_foreman_go(env, monk
     monkeypatch.setattr(code_jobs, "_transition", real)
     assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"] and held["run"].proc.poll() is not None
     code_jobs._FOREMAN_PROCS.pop(out["job"], None)
+
+
+# ---- fcj review r7 ----
+
+def test_a_list_check_a_shell_would_misread_reaches_foremans_gate_unchanged(env, monkeypatch):
+    repo, cdir, tmp = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "halt")                       # keeps the worktree to run the gate in
+    check = [sys.executable, "-c", "import sys; sys.exit(0 if sys.argv[1] == 'a|b' else 3)", "a|b"]
+    job = _wait(cdir, _start(repo, cdir, check=check)["job"])
+    plan = _log(tmp)[0]["plan"].replace(chr(13), "")
+    gate = next(ln for ln in plan.splitlines() if ln.startswith("test-command:")).split(":", 1)[1].strip().strip("`")
+    assert "run_check.py" in gate
+    assert subprocess.run(gate, shell=True, cwd=job["kept_worktree"]).returncode == 0   # as Foreman runs it
+    assert code_jobs.check_text([sys.executable, "-m", "pytest", "tests"]).endswith("-m pytest tests")
+
+
+def test_a_finished_jobs_busy_entry_is_pruned(env):
+    repo, cdir, _ = env
+    job = _wait(cdir, _start(repo, cdir)["job"])
+    b = code_jobs._busy_read()
+    b[job["id"]] = {"job": job["id"], "cdir": str(cdir), "repo": code_jobs._norm(str(repo))}   # the crash's leftover
+    b["unreadable"] = {"job": "x", "cdir": str(cdir / "nowhere"), "repo": "r"}
+    code_jobs._busy_write(b)
+    code_jobs.busy_repos()
+    left = code_jobs._busy_read()
+    assert job["id"] not in left and "unreadable" in left                 # an unreadable record is kept
+
+
+def test_foreman_waits_out_its_writers_usage_limit(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setattr(code_jobs, "exhausted_families", lambda: {"claude"})
+    out = _start(repo, cdir)
+    assert not out["ok"] and "usage limit" in out["error"]
