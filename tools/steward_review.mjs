@@ -81,7 +81,7 @@ async function main() {
   const diff = git(repo, 'diff', '--no-color', '--find-renames', from, head);
   if (!diff.trim()) throw new Error('the candidate has no change to review');
   if (diff.length > MAX_DIFF) throw new Error(`the diff is ${diff.length} characters - too large for one review; split the job`);
-  const brief = arg('brief-file') && fs.existsSync(arg('brief-file')) ? fs.readFileSync(arg('brief-file'), 'utf8').slice(0, 8000) : '';
+  const brief = arg('brief-file') && fs.existsSync(arg('brief-file')) ? fs.readFileSync(arg('brief-file'), 'utf8').slice(0, 16000) : '';   // code_jobs.REVIEW_BRIEF_READ: Anchor refuses a longer brief
 
   const prompt = [
     'You are the adversarial second-family reviewer of a code change an AI coder made for John.',

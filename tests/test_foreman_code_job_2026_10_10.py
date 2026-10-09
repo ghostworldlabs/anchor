@@ -138,7 +138,7 @@ def test_the_reviewer_is_told_every_new_file_foreman_added(env, monkeypatch):
     assert job["landed"] is True and sorted(job["files"]) == ["a.txt", "b.py"], job["land_note"]
     review = json.loads((tmp / "review.log").read_text(encoding="utf-8").splitlines()[0])
     brief = Path(review[review.index("--brief-file") + 1]).read_text(encoding="utf-8")
-    assert "untracked): b.py." in brief and "byproduct" in brief
+    assert "base): b.py." in brief and "byproduct" in brief
 
 
 def test_an_approved_plan_is_used_as_written_with_the_check_as_its_gate(env):
@@ -382,12 +382,6 @@ def test_the_reviewer_reads_the_new_file_list_first_and_staged_additions_are_on_
     assert "report.json" in job["files"]
 
 
-def test_a_disclosure_too_long_to_be_read_whole_fails_the_review_closed(tmp_path, monkeypatch):
-    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
-    note = code_jobs.foreman_review_note(["f%04d.py" % i for i in range(900)])
-    rec = code_jobs.run_review({"id": "x", "base": "HEAD", "brief": "b", "review_note": note}, str(tmp_path), "HEAD")
-    assert rec["ok"] is False and "too long" in rec["error"]
-    assert code_jobs.review_blocks({}, rec, str(tmp_path), "HEAD").startswith("the review failed")
 
 
 def test_an_end_that_cannot_be_seen_keeps_the_job_running_and_registered(env, monkeypatch):
@@ -424,6 +418,8 @@ def test_a_failure_after_the_launch_ends_foreman_before_anything_is_released(env
     assert not out["ok"] and "no thread" in out["error"]
     assert seen["run"].proc.poll() is not None and seen["run"].ended                  # ended, and seen gone
     assert code_jobs._norm(str(repo)) not in code_jobs.busy_repos()
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]                                  # fcj r4: it ran - its work is kept
+    assert job["kept_worktree"] and Path(job["kept_worktree"]).is_dir()
 
 
 def test_the_source_audit_reads_under_the_repository_lock(env, monkeypatch):
@@ -434,3 +430,55 @@ def test_the_source_audit_reads_under_the_repository_lock(env, monkeypatch):
     monkeypatch.setattr(code_jobs, "_served_tree_changes",
                         lambda job: held.append(git_safety._lock_path(str(repo)).exists()) or [])
     assert code_jobs._locked_served_changes({"id": "x", "repo": str(repo)}) == [] and held == [True]
+
+
+# ---- fcj review r4 ----
+
+def test_a_drain_that_began_during_the_start_is_honoured_after_the_job_is_counted(env, monkeypatch):
+    # MAJOR 7
+    repo, cdir, tmp = env
+    from steward_cockpit import maintenance
+    monkeypatch.setattr(maintenance, "is_active", lambda: True)
+    out = _start(repo, cdir)
+    assert not out["ok"] and "restarting" in out["error"]
+    assert out["job"] not in code_jobs._FOREMAN_PROCS and not code_jobs._busy_read()
+    assert not (tmp / "foreman.log").exists()
+
+
+def test_a_worktree_that_cannot_be_prepared_leaves_no_reservation(tmp_path, env):
+    # MAJOR 8: a repository whose .anchor is a FILE
+    _, cdir, tmp = env
+    repo = _repo(tmp_path / "odd", {"a.txt": "one\n", ".anchor": "not a folder"})
+    out = _start(repo, cdir)
+    assert not out["ok"] and "could not be prepared" in out["error"]
+    assert out["job"] not in code_jobs._FOREMAN_PROCS and not code_jobs._busy_read()
+
+
+def test_a_stop_of_a_foreman_that_never_launched_removes_its_reservation(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setattr(code_jobs, "_start_foreman", lambda *a: None)          # reserved, never launched
+    out = _start(repo, cdir)
+    assert isinstance(code_jobs._FOREMAN_PROCS.get(out["job"]), code_jobs._Starting)
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"]
+    assert out["job"] not in code_jobs._FOREMAN_PROCS
+
+
+def test_the_review_brief_is_whole_or_the_review_fails(tmp_path, monkeypatch):
+    # MAJOR 2 and 3
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    long = {"id": "x", "base": "HEAD", "brief": "b" * (code_jobs.REVIEW_BRIEF_READ + 1)}
+    assert "too long" in code_jobs.run_review(long, str(tmp_path), "HEAD")["error"]
+    (tmp_path / "jobs").mkdir(exist_ok=True)
+    (tmp_path / "jobs" / "checks").write_text("a file where the folder should be", encoding="utf-8")
+    assert "could not be written" in code_jobs.run_review({"id": "y", "base": "HEAD", "brief": "b"}, str(tmp_path), "HEAD")["error"]
+
+
+def test_the_new_file_list_comes_from_the_candidate_with_what_the_check_added(env, monkeypatch):
+    # MAJOR 4: a declared output the final check makes is on the reviewer's list
+    repo, cdir, tmp = env
+    check = [sys.executable, "-c", "open('report.json','w').write('{}')"]
+    job = _wait(cdir, _start(repo, cdir, check=check, outputs=["report.json"])["job"])
+    assert job["landed"] is True, job["land_note"]
+    review = json.loads((tmp / "review.log").read_text(encoding="utf-8").splitlines()[0])
+    brief = Path(review[review.index("--brief-file") + 1]).read_text(encoding="utf-8")
+    assert "report.json" in brief.split("BRIEF:")[0]

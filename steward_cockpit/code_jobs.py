@@ -298,6 +298,10 @@ def foreman_settings(job):
     return d, None
 
 
+class _ForemanRan(Exception):
+    """Foreman began and its start failed afterwards; it was ended and seen gone - its worktree is kept, not removed."""
+
+
 class _Starting:
     """Foreman's place in _FOREMAN_PROCS from the moment its job is recorded until it is launched (fcj review r2:
     registered atomically with the running record, so a reconcile never mistakes a launch for a lost Foreman)."""
@@ -379,6 +383,8 @@ def end_foreman(job, wait_s=60):
     with _LOCK:
         _FOREMAN_STOPPING.add(jid)
         run = _FOREMAN_PROCS.get(jid)
+        if isinstance(run, _Starting):                  # never launched, and now it never will
+            _FOREMAN_PROCS.pop(jid, None)
     if not isinstance(run, _Run):
         return True, ""
     if run.end(wait_s):
@@ -410,14 +416,22 @@ def foreman_manifest(job):
     return [p for p in (changed_paths(job["worktree"], job["base"]) or []) if not never_lands(p) and not _runtime(p)]
 
 
-REVIEW_NOTE_MAX = 6000      # steward_review.mjs reads the first 8000 characters of the brief file; the note goes first
+REVIEW_BRIEF_READ = 16000   # tools/steward_review.mjs reads this much of the brief file; a longer one is refused
+
+
+def added_files(tree, base, head):
+    """Every path the candidate ``head`` ADDS to ``base`` (a committed candidate: what was untracked or staged is in
+    it), or None when git cannot say."""
+    code, out, _ = _git_raw(tree, "-c", "core.quotepath=false", "diff", "--no-renames", "--diff-filter=A",
+                            "--name-only", "-z", base, head, timeout=600)
+    return sorted(p for p in out.split("\0") if p.strip()) if code == 0 else None
 
 
 def foreman_review_note(new):
     """What the landing reviewer must be told, before the brief: Foreman keeps no per-file write record, so every
     new file is named for the reviewer to block a byproduct (John's call, 2026-10-09)."""
     return ("FOREMAN BUILT THIS (several sub-agents), so there is no per-file write record: every file in the diff "
-            "changed in its worktree. NEW files (added since the job's base - committed, staged or untracked): %s. "
+            "changed in its worktree. NEW files (added since the job's base): %s. "
             "Check each new file is intended work (source, test, document), not a byproduct of running the tests or "
             "the build (a report, a cache, a log, an output); a byproduct that would land is a MAJOR finding."
             ) % (", ".join(new) or "none")
@@ -472,22 +486,9 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
     except BaseException as e:
         if run.end(60):
             out.close()
-            _FOREMAN_PROCS.pop(jid, None)
-            raise
+            raise _ForemanRan(str(e))
         _transition(cdir, jid, ("running",), stuck="Foreman's start failed after launch (%s) and its processes could "
                     "not be seen to end; Stop ends them and releases the job" % e)
-
-
-def foreman_new_files(job):
-    """Every path ADDED relative to the job's base - committed, staged or untracked - or None when git cannot say."""
-    wt, base = job["worktree"], job["base"]
-    c1, added, _ = _git_raw(wt, "-c", "core.quotepath=false", "diff", "--no-renames", "--diff-filter=A", "--name-only",
-                            "-z", base, timeout=600)
-    c2, untracked, _ = _git_raw(wt, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z",
-                                timeout=600)
-    if c1 != 0 or c2 != 0:
-        return None
-    return sorted({p for p in (added + "\0" + untracked).split("\0") if p.strip()})
 
 
 def _wait_foreman(cdir, job, wt, run, out):
@@ -518,11 +519,6 @@ def _wait_foreman(cdir, job, wt, run, out):
     elif result.get("error") is None and run.proc.returncode != 0:
         result["error"] = "Foreman exited %s" % run.proc.returncode
     result["manifest"] = foreman_manifest(job)
-    new = foreman_new_files(job)
-    if new is None:                                 # the reviewer must see every new file, or nothing lands
-        result.setdefault("error", "the list of files Foreman added could not be read, so it cannot be reviewed")
-    else:
-        _transition(cdir, jid, ("running",), review_note=foreman_review_note(new))
     try:
         finish(cdir, jid, result)
     finally:
@@ -887,17 +883,21 @@ def run_review(job, tree, head, delta_from=""):
     """One review of the candidate ``head`` in ``tree`` by a family other than the author's. Returns the review
     record; ``record["ok"]`` is False on ANY failure. ANCHOR_REVIEW_CMD (a JSON argv) is the test seam."""
     brief = jobs_base() / "checks" / ("%s-brief.md" % job["id"])
+    note = ""
+    if job.get("worker") == "foreman":                # fcj r4: from THIS candidate, after every output it gained
+        new = added_files(tree, job["base"], head)
+        if new is None:
+            return {"ok": False, "error": "the files Foreman added could not be listed, so it cannot be reviewed"}
+        note = foreman_review_note(new)
+    text = (note + "\n\nBRIEF:\n" if note else "") + (job.get("brief") or "")
+    if len(text) > REVIEW_BRIEF_READ:                 # never sent cut short: the reviewer reads it whole or not at all
+        return {"ok": False, "error": "the review's brief is too long for the reviewer to read whole (%d characters, "
+                                      "%d at most); the work is kept for a look" % (len(text), REVIEW_BRIEF_READ)}
     try:
         brief.parent.mkdir(parents=True, exist_ok=True)
-        note = job.get("review_note") or ""
-        # fcj review r3: the reviewer's mandatory disclosure goes FIRST (the adapter reads the brief's first 8000
-        # characters); one too long to be read whole is never sent cut short - the review fails closed instead
-        if len(note) > REVIEW_NOTE_MAX:
-            return {"ok": False, "error": "the list of new files is too long to put before the reviewer whole "
-                                          "(%d characters); the work is kept for a look" % len(note)}
-        brief.write_text((note + "\n\nBRIEF:\n" if note else "") + (job.get("brief") or ""), encoding="utf-8")
-    except OSError:
-        pass
+        brief.write_text(text, encoding="utf-8")
+    except OSError as e:                              # fcj r4: a reviewer given no brief is never asked
+        return {"ok": False, "error": "the review's brief could not be written (%s)" % e}
     seam = os.environ.get("ANCHOR_REVIEW_CMD")
     try:
         cmd = json.loads(seam) if seam else ["node", str(REVIEW_TOOL)]
@@ -1044,80 +1044,107 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     # John 2026-10-09: several jobs may run on one repository at once - each has its own worktree, landings take the
     # repository's commit lock one at a time, and a job whose base moved is integrated, re-checked and its delta
     # re-reviewed before it is placed (a conflict keeps the work, never lands it). Ordering is the steward's call.
-    with _LOCK:      # the worktree and the busy entry: one step
-        # W1a (2026-10-08): a job on Anchor's own repository starts from anchor-next and lands there, in the lander's
-        # own checkout - never in the running Anchor; John's restart makes it live
-        land_to = ""
-        try:
-            import anchor_next
-            if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
-                # John's Decision 1 (night report, 2026-10-08): a coder's SHELL has no OS boundary - it could write the
-                # running Anchor before the audit refuses the landing. Code jobs on Anchor's own repository run only
-                # once he accepts that (ANCHOR_SERVED_CODE_JOBS=1); until then none start (Grok's final review)
-                return {"ok": False, "error": "no job started: code jobs on Anchor's own code are off until John turns them "
-                        "on (ANCHOR_SERVED_CODE_JOBS=1) - a coder's shell cannot yet be held to its worktree"}
-            if anchor_next.is_served_repo(root) and worker == "foreman" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
-                return {"ok": False, "error": "no job started: Foreman's sub-agents cannot be confined to the worktree "
-                        "under the service, so a change to Anchor's own code uses a Claude coder"}
-            if anchor_next.is_served_repo(root) and worker == "coder" and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
-                # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
-                # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox
-                # cannot start a shell there) - so Anchor's own code goes to a Claude coder (John's choice in the
-                # morning report; ANCHOR_UNCONFINED_CODERS=1 lifts it)
-                return {"ok": False, "error": "no job started: a %s coder cannot be confined to its worktree under the "
-                        "service yet, so a change to Anchor's own code uses a Claude coder (--coder claude)" % family}
-            if anchor_next.is_served_repo(root):
-                ip, why = anchor_next.ensure_integration(root)
-                if ip is None:
-                    return {"ok": False, "error": "no job started: %s" % why}
-                land_to = str(ip)
-        except Exception as e:
-            return {"ok": False, "error": "no job started: could not prepare anchor-next (%s)" % e}
-        code, base, err = _git(land_to or root, "rev-parse", "HEAD")
-        if code != 0:
-            return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
-        if worker == "foreman":                  # Anchor writes foreman.config.json in the worktree: never over the project's
-            code, tracked, _ = _git(land_to or root, "ls-tree", "-r", "--name-only", base, "--", *FOREMAN_OWN)
-            if code != 0 or tracked.strip():
-                return {"ok": False, "error": "no job started: %s tracks files a Foreman code job writes for itself (%s); "
-                        "run Foreman there by hand" % (root, ", ".join(tracked.split()[:4]) or "unreadable")}
-        code, _, err = _git(root, "worktree", "add", "-b", branch, str(wt), base, timeout=600)
-        if code != 0:
-            return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
-        served_dirt = dirty_snapshot(root)
-        if served_dirt is None:
-            return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
-        job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
-               "repo_dirt": served_dirt,
-               "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
-               "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
-               "started_by": str(actor or "the steward")}
-        # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
-        # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
-        label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
-        if label:
-            job["skill"] = label
-        if worker == "foreman":
-            job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
-            _FOREMAN_PROCS[job_id] = _Starting()     # registered with the record: never taken for a lost Foreman
-        _write_job(cdir, job)
-        b = _busy_read()
-        b[job_id] = {"job": job_id, "cdir": str(cdir), "repo": _norm(root)}
-        _busy_write(b)
-    # the coder's own folder record: one workbench terminal
-    terms = Path(wt) / ".anchor" / "steward-terms.json"
-    terms.parent.mkdir(parents=True, exist_ok=True)
-    terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
-    _exclude_local(wt)
+    # fcj review r4: the start's base and its snapshot of the repository's own changes are read under the repository's
+    # commit lock (the one lock every checkout of it shares), so another job's landing is never seen half-placed; the
+    # lock is always taken before _LOCK (the landing's order)
+    import git_safety as _gs
+    with _gs.repo_lock(str(root), wait_s=600, who="start of code job " + job_id) as held:
+        if not held:
+            return {"ok": False, "error": "no job started: the repository's commit lock stayed busy (a landing); try again"}
+        with _LOCK:      # the worktree and the busy entry: one step
+            # W1a (2026-10-08): a job on Anchor's own repository starts from anchor-next and lands there, in the lander's
+            # own checkout - never in the running Anchor; John's restart makes it live
+            land_to = ""
+            try:
+                import anchor_next
+                if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
+                    # John's Decision 1 (night report, 2026-10-08): a coder's SHELL has no OS boundary - it could write the
+                    # running Anchor before the audit refuses the landing. Code jobs on Anchor's own repository run only
+                    # once he accepts that (ANCHOR_SERVED_CODE_JOBS=1); until then none start (Grok's final review)
+                    return {"ok": False, "error": "no job started: code jobs on Anchor's own code are off until John turns them "
+                            "on (ANCHOR_SERVED_CODE_JOBS=1) - a coder's shell cannot yet be held to its worktree"}
+                if anchor_next.is_served_repo(root) and worker == "foreman" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
+                    return {"ok": False, "error": "no job started: Foreman's sub-agents cannot be confined to the worktree "
+                            "under the service, so a change to Anchor's own code uses a Claude coder"}
+                if anchor_next.is_served_repo(root) and worker == "coder" and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
+                    # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
+                    # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox
+                    # cannot start a shell there) - so Anchor's own code goes to a Claude coder (John's choice in the
+                    # morning report; ANCHOR_UNCONFINED_CODERS=1 lifts it)
+                    return {"ok": False, "error": "no job started: a %s coder cannot be confined to its worktree under the "
+                            "service yet, so a change to Anchor's own code uses a Claude coder (--coder claude)" % family}
+                if anchor_next.is_served_repo(root):
+                    ip, why = anchor_next.ensure_integration(root)
+                    if ip is None:
+                        return {"ok": False, "error": "no job started: %s" % why}
+                    land_to = str(ip)
+            except Exception as e:
+                return {"ok": False, "error": "no job started: could not prepare anchor-next (%s)" % e}
+            code, base, err = _git(land_to or root, "rev-parse", "HEAD")
+            if code != 0:
+                return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
+            if worker == "foreman":                  # Anchor writes foreman.config.json in the worktree: never over the project's
+                code, tracked, _ = _git(land_to or root, "ls-tree", "-r", "--name-only", base, "--", *FOREMAN_OWN)
+                if code != 0 or tracked.strip():
+                    return {"ok": False, "error": "no job started: %s tracks files a Foreman code job writes for itself (%s); "
+                            "run Foreman there by hand" % (root, ", ".join(tracked.split()[:4]) or "unreadable")}
+            code, _, err = _git(root, "worktree", "add", "-b", branch, str(wt), base, timeout=600)
+            if code != 0:
+                return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
+            served_dirt = dirty_snapshot(root)
+            if served_dirt is None:
+                return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
+            job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
+                   "repo_dirt": served_dirt,
+                   "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
+                   "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
+                   "started_by": str(actor or "the steward")}
+            # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
+            # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
+            label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
+            if label:
+                job["skill"] = label
+            if worker == "foreman":
+                job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
+                _FOREMAN_PROCS[job_id] = _Starting()     # registered with the record: never taken for a lost Foreman
+            _write_job(cdir, job)
+            b = _busy_read()
+            b[job_id] = {"job": job_id, "cdir": str(cdir), "repo": _norm(root)}
+            _busy_write(b)
+    def abandon(why):                                 # nothing ran in the worktree: it goes, and so does the reservation
+        _FOREMAN_PROCS.pop(job_id, None)
+        j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error=why)
+        _cleanup(j or job, keep_branch=False)
+        return {"ok": False, "error": why, "job": job_id}
+
+    # fcj review r4: the restart barrier is asked AFTER the job is counted (its busy entry, and Foreman's reservation),
+    # so a drain that began meanwhile either sees this job or is seen here - never a job launched into a restart
+    try:
+        from steward_cockpit import maintenance as _maint
+        draining = _maint.is_active()
+    except Exception:
+        draining = False
+    if draining:
+        return abandon("no job started: Anchor is restarting once running work finishes; start it after the restart")
+    try:                                              # the coder's own folder record: one workbench terminal
+        terms = Path(wt) / ".anchor" / "steward-terms.json"
+        terms.parent.mkdir(parents=True, exist_ok=True)
+        terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
+        _exclude_local(wt)
+    except Exception as e:
+        return abandon("no job started: the job's worktree could not be prepared (%s)" % e)
     if worker == "foreman":
         try:
             _start_foreman(cdir, job, wt, plan, profile, settings_dir)
-        except Exception as e:
+        except _ForemanRan as e:                      # it ran, and was ended and seen gone: its work is kept
             _FOREMAN_PROCS.pop(job_id, None)
-            j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
-                            error="Foreman could not start: %s" % e)
-            _cleanup(j or job, keep_branch=False)
-            return {"ok": False, "error": "Foreman could not start: %s" % e, "job": job_id}
+            _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        error="Foreman's start failed after it began: %s" % e, kept_worktree=str(wt),
+                        land_note="not landed: Foreman's start failed after it began; the work is kept at %s" % wt)
+            return {"ok": False, "error": "Foreman's start failed after it began (%s); its work is kept at %s" % (e, wt),
+                    "job": job_id}
+        except Exception as e:
+            return abandon("Foreman could not start: %s" % e)
         return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "foreman",
                 "coder": "Foreman (%s)" % profile}
     try:
@@ -1423,7 +1450,11 @@ def land(job, files):
     fields = {"verified": False}
     if job.get("land_to"):
         import anchor_next
-        ip, why = anchor_next.ensure_integration(job["repo"])
+        with _gs.repo_lock(job["repo"], wait_s=600, who="code job " + job["id"]) as held:   # fcj r4: never half-placed
+            if not held:
+                fields["head_moved"] = True
+                return False, "not landed: the repository's commit lock stayed busy; the work is kept at %s" % wt, fields
+            ip, why = anchor_next.ensure_integration(job["repo"])
         if ip is None or os.path.normcase(str(ip)) != os.path.normcase(str(job["land_to"])):
             return False, "not landed: %s; the work is kept at %s" % (why or "the lander's checkout moved", wt), fields
     code, cand, _ = _git(wt, "rev-parse", "HEAD")
