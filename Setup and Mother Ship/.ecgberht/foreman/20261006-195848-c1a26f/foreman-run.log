@@ -1,8 +1,0 @@
-[19:58:50] === FOREMAN LIVE RUN ===
-[19:58:50] project: C:\Users\john\AppData\Local\anchor-code-jobs\20261006-195848-c1a26f
-[19:58:50] reviewers=2 fixIterCap=3 maxWaves=∞ maxWallClock=∞min git=false branch=foreman/run
-[19:58:50] binding: headless `claude -p … --permission-mode acceptEdits --allowedTools Bash,Edit,Write,Read,Glob,Grep` (cwd=project); ground truth = orchestrator gate
-[19:58:50] model routing: execute=claude:driver-default · review=grok-cli:driver-default · fix=claude:driver-default
-[19:58:50] lock: acquired C:\Users\john\AppData\Local\anchor-code-jobs\20261006-195848-c1a26f\.foreman\run.lock (pid 11280)
-[19:58:50] sibling-repos: checked 1 plan-named repo(s): C:\dev
-[19:58:51] [taxonomy:dirty-sibling] HALT before start: plan-named repo(s) not clean — C:\dev (240 uncommitted path(s)). Commit or stash them, or set FOREMAN_ALLOW_DIRTY_SIBLINGS=1 to proceed with the state recorded. Checked: C:\dev

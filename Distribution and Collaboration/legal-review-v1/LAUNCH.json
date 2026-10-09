@@ -1,6 +1,0 @@
-{
-  "pid": 188384,
-  "log": "legal-review-v1/review.log",
-  "result": "legal-review-v1/RUN-END.json",
-  "retry_reason": "First launch failed before any model call because the quoted absolute filename was treated literally; relative path avoids embedded quotes."
-}
