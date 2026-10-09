@@ -1807,10 +1807,10 @@ def typical_duration_s(campaign_dir, kind, worker=""):
 
 
 def finish_time(started, now, kind, campaign_dir, worker="", own_eta=None, own_eta_at=None):
-    """Always a clock time. The work's own last estimate (with the time it was given); else start + the typical
+    """A clock time when there is a basis for one. The work's own last estimate (with the time it was given); else start + the typical
     duration of the same kind of work here (labelled an estimate); past that, now + max(25% of elapsed, 5 min)
-    (labelled running longer than usual); with no history at all, start + max(2 x elapsed, 10 min) (labelled
-    provisional). The calculation is never a promise and is never called one."""
+    (labelled running longer than usual); with no history at all, "no basis" and no clock time (W4, 2026-10-09).
+    The calculation is never a promise and is never called one."""
     hm = lambda t: time.strftime("%H:%M", time.localtime(t))
     if own_eta:
         return "%s (its own estimate%s)" % (own_eta, (", given " + hm(own_eta_at)) if own_eta_at else "")
@@ -1822,7 +1822,10 @@ def finish_time(started, now, kind, campaign_dir, worker="", own_eta=None, own_e
             return "about %s (estimate: a typical %s here takes %d min)" % (hm(started + typical), {
                 "code_job": "code job", "skill_job": "run", "turn": "turn"}.get(kind, "run"), max(1, round(typical / 60)))
         return "about %s (estimate - running longer than usual)" % hm(now + max(0.25 * elapsed, 300))
-    return "about %s (provisional - no history here to estimate from)" % hm(started + max(2 * elapsed, 600))
+    # W4 (2026-10-09): with nothing to base it on, say so - no invented clock time (it was start + max(2 x elapsed,
+    # 10 min), which read as a forecast and was wrong as often as not)
+    return "no basis for an estimate yet (no finished %s of this kind here to go by)" % {
+        "code_job": "code job", "skill_job": "run", "turn": "turn"}.get(kind, "run")
 
 
 _FORECAST = re.compile(r"\d")
