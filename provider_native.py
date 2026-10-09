@@ -67,12 +67,18 @@ def private_account_path(path):
     """
     try:
         target = Path(path).resolve()
-        homes = [paths.data_dir() / ".anchor" / "provider-accounts"]
-        homes += [Path.home() / name for name in NATIVE_HOME_DIRS.values()]
-        homes += [Path(os.environ[key]) for key in NATIVE_HOME_ENV.values() if os.environ.get(key)]
-        return any(target.is_relative_to(home.resolve()) for home in homes)
+        return any(target.is_relative_to(home) for home in private_homes())
     except (OSError, RuntimeError, ValueError):
         return True
+
+
+def private_homes():
+    """The private homes, resolved NOW (never cached: a junction retargeted a moment ago is seen). W7 (2026-10-10)
+    also compares this tuple to decide whether a reused deliverables answer is still safe to offer."""
+    homes = [paths.data_dir() / ".anchor" / "provider-accounts"]
+    homes += [Path.home() / name for name in NATIVE_HOME_DIRS.values()]
+    homes += [Path(os.environ[key]) for key in NATIVE_HOME_ENV.values() if os.environ.get(key)]
+    return tuple(home.resolve() for home in homes)
 
 
 def account_env(connection):

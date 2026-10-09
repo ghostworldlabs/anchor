@@ -52,9 +52,12 @@ UPLOAD_LOCK = threading.Lock()
 
 # W7 (2026-10-10): the deliverables answer per (effort, pid, dir), reused while what it was built from is unchanged,
 # for at most _DELIV_TTL seconds from the moment its build began. "Unchanged" covers the map's files, the ledger
-# folder AND the identity of every file the answer offers (an lstat each: mode, inode, size, mtime - so a deliverable
-# swapped for a link to something private is rebuilt and re-checked, never re-offered). Misses on one key build once
-# (the others wait for it); the cache is bounded and drops expired entries.
+# folder, the private homes AS THEY RESOLVE NOW (a retargeted junction is a change) and the identity of every file
+# the answer offers (an lstat each: mode, inode, size, mtime - a deliverable swapped for a link is a change). Any
+# change rebuilds, so every offered link was checked by the same containment and privacy rule serving uses. An
+# answer whose files changed WHILE its links were being checked is returned but never kept (review r2). Misses on one
+# key build once (the others wait); the cache is bounded and drops expired entries. The per-key locks are never
+# dropped: the keys are the real efforts (the route resolved them), so they are few.
 _DELIV_CACHE = {}           # key -> (stamp, built_at, data, offered)
 _DELIV_LOCK = threading.Lock()
 _DELIV_KEY_LOCKS = {}
@@ -93,29 +96,39 @@ def _identity(cdir, rels):
     return tuple(sig)
 
 
-def _deliverables_cached(cdir, qs, build):
+def _private_stamp():
+    try:
+        from provider_native import private_homes
+        return tuple(str(h) for h in private_homes())
+    except Exception:
+        return None                                   # unknown: never equal, so never reused
+
+
+def _deliverables_cached(cdir, qs, read, annotate):
+    """``read()`` parses the register; ``annotate(data)`` checks and attaches every reading link."""
     key = (os.path.normcase(os.path.abspath(cdir)), str(qs.get("pid", "")).strip(), str(qs.get("dir", "")).strip())
     with _DELIV_LOCK:
         klock = _DELIV_KEY_LOCKS.setdefault(key, threading.Lock())
     with klock:
-        stamp = _deliv_stamp(cdir)
+        stamp = (_deliv_stamp(cdir), _private_stamp())
         hit = _DELIV_CACHE.get(key)
-        if (hit and hit[0] == stamp and time.monotonic() - hit[1] < _DELIV_TTL
+        if (hit and stamp[1] is not None and hit[0] == stamp and time.monotonic() - hit[1] < _DELIV_TTL
                 and _identity(cdir, [e[0] for e in hit[3]]) == hit[3]):
             return copy.deepcopy(hit[2])
         began = time.monotonic()
-        data = build()
-        offered = _identity(cdir, _offered_paths(data))
+        data = read()
+        before = _identity(cdir, _offered_paths(data))
+        annotate(data)                                # the links are checked here, between the two snapshots
+        after = _identity(cdir, _offered_paths(data))
+        if before != after or stamp[1] is None:
+            return data                               # changed under the check: answered, never kept
         with _DELIV_LOCK:
             now = time.monotonic()
             for k in [k for k, v in _DELIV_CACHE.items() if now - v[1] >= _DELIV_TTL]:
                 _DELIV_CACHE.pop(k, None)
             while len(_DELIV_CACHE) >= _DELIV_MAX:
                 _DELIV_CACHE.pop(min(_DELIV_CACHE, key=lambda k: _DELIV_CACHE[k][1]), None)
-            _DELIV_CACHE[key] = (stamp, began, copy.deepcopy(data), offered)
-            if len(_DELIV_KEY_LOCKS) > 4 * _DELIV_MAX:
-                for k in [k for k in _DELIV_KEY_LOCKS if k not in _DELIV_CACHE and k != key]:
-                    _DELIV_KEY_LOCKS.pop(k, None)
+            _DELIV_CACHE[key] = (stamp, began, copy.deepcopy(data), after)
         return data
 
 
@@ -1120,8 +1133,7 @@ def handle_get(cdir, verb, qs):
         # source the tile, the map links, and the steward's own answer all read.
         # W7 (2026-10-10): every open cockpit polls this; the answer is reused while the effort's files are unchanged
         # (and for at most _DELIV_TTL s, so a file that appears is seen) - rebuilt per poll it queued the whole server
-        def _build():
-            data = campaign.read_deliverables(cdir)
+        def _build(data):
             # 2026-10-07 (item 2): every item carries its ONE reading target - the URL the dialogue's receipt also uses
             try:
                 import deliverables_register as _dr
@@ -1145,8 +1157,7 @@ def handle_get(cdir, verb, qs):
                             c["item"]["reading"] = _dr.reading_target(c["item"], pid=pid_q, effort_rel=dir_q, effort_dir=cdir, registered=reg)
             except Exception:
                 pass   # the tile still builds its own link from the path
-            return data
-        return _deliverables_cached(cdir, qs, _build), 200
+        return _deliverables_cached(cdir, qs, lambda: campaign.read_deliverables(cdir), _build), 200
     if verb == "deliverable-file":
         # Serve ONE deliverable's bytes, HARD-CONTAINED to the effort dir (realpath
         # prefix check — ../ or symlink escapes 404; active content served inert).

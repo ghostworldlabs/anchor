@@ -134,6 +134,41 @@ def test_a_swapped_deliverable_is_rebuilt_and_rechecked_not_reoffered(monkeypatc
     assert len(builds) == 2, "a changed offered file forces a rebuild (its link is re-checked)"
 
 
+def test_review_r2_a_private_home_that_now_resolves_elsewhere_forces_a_rebuild(monkeypatch, tmp_path):
+    cdir = _effort_with_a_deliverable(tmp_path)
+    sr._DELIV_CACHE.clear()
+    builds = []
+    real = sr.campaign.read_deliverables
+    monkeypatch.setattr(sr.campaign, "read_deliverables", lambda d: (builds.append(d), real(d))[1])
+    homes = [("a",)]
+    monkeypatch.setattr(sr, "_private_stamp", lambda: homes[0])
+    qs = {"pid": "p", "dir": "Effort"}
+    sr.handle_get(str(cdir), "deliverables", qs)
+    sr.handle_get(str(cdir), "deliverables", qs)
+    assert len(builds) == 1
+    homes[0] = ("b",)                                   # a junction retargeted: the homes resolve elsewhere now
+    sr.handle_get(str(cdir), "deliverables", qs)
+    assert len(builds) == 2
+
+
+def test_review_r2_files_changed_while_links_were_checked_are_answered_but_never_kept(monkeypatch, tmp_path):
+    cdir = _effort_with_a_deliverable(tmp_path)
+    sr._DELIV_CACHE.clear()
+    import deliverables_register as dr
+    real = dr.reading_target
+    swapped = {"done": False}
+
+    def racing(it, **kw):
+        out = real(it, **kw)
+        if not swapped["done"]:
+            swapped["done"] = True
+            (cdir / "report.md").write_text("# replaced during the check, other size\n", encoding="utf-8")
+        return out
+    monkeypatch.setattr(dr, "reading_target", racing)
+    sr.handle_get(str(cdir), "deliverables", {"pid": "p", "dir": "Effort"})
+    assert not sr._DELIV_CACHE, "an answer whose files moved under its own check is never reused"
+
+
 def test_the_cache_key_is_canonical_and_bounded(monkeypatch, tmp_path):
     """review r1 MAJOR: whitespace variants share one entry; the cache never grows past its bound."""
     cdir = _effort_with_a_deliverable(tmp_path)
