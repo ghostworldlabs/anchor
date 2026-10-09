@@ -25,10 +25,12 @@ def test_no_regex_dispatch_picks_foreman_by_itself():
 
 def test_job_runner_refuses_build_and_plan_before_anything_starts(held, tmp_path):
     import job_runner
-    for lane in ("build", "plan", "planning"):
+    for lane in ("plan", "planning"):
         with pytest.raises(ValueError, match="foreman-crucible-hold"):
             job_runner.launch(lane, cwd=str(tmp_path), prompt="x")
-    with pytest.raises(ValueError, match="foreman-crucible-hold"):
+    with pytest.raises(ValueError, match="foreman-code-job-only"):     # 2026-10-09: Foreman only as a code job
+        job_runner.launch("build", cwd=str(tmp_path), prompt="x")
+    with pytest.raises(ValueError, match="foreman-code-job-only"):
         job_runner.launch("general", cwd=str(tmp_path), command=["node", "C:/dev/trio/foreman/bin/run-live.mjs"])
 
 

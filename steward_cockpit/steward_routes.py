@@ -493,6 +493,7 @@ def _running_job_ids():
     # restart once fired mid-job because only job_runner records counted. The busy ledger names every live one.
     try:
         from steward_cockpit import code_jobs as _cj
+        _cj.busy_repos()                # a Foreman lost to a restart and gone since is marked interrupted first
         ids += ["code:" + str(entry.get("job") or "?") for entry in _cj._busy_read().values() if isinstance(entry, dict)]
     except Exception:
         ids.append("code:unreadable")   # cannot prove none are running: never restart over one

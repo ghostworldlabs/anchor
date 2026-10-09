@@ -749,29 +749,37 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
       tool_result, so the model re-asks in plain text and we answer with a
       stream-json user TEXT turn — best-effort continuation, not guaranteed.
     """
-    # Execution minimum item 3 (John, 2026-10-07): Foreman (build) and Crucible (plan) are held at Anchor's managed
-    # entries until their best-in-class review - refused BEFORE any job id, record or process exists. A control-plane
+    # Execution minimum item 3 (John, 2026-10-07): Crucible (plan) is held at Anchor's managed entries until its
+    # review, and Foreman (build) never starts here at all (2026-10-09, fcj review r1): it runs only as a code job's
+    # worker, inside the protected lifecycle - refused BEFORE any job id, record or process exists. A control-plane
     # command that reaches into either engine is refused the same way. (This patch claims no machine-wide ban.)
     from steward_cockpit import code_jobs as _cj_hold
     _hold_value = os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip()
-    if _hold_value != "0":
-        # "lanes" (set ONLY by the hermetic test harness for modules whose plan/build lanes run the fake runner) lifts
-        # the lane refusal; a command that reaches into either engine is refused whatever the setting
-        if _hold_value != "lanes" and str(lane or "").lower() in ("plan", "planning", "build"):
+    _lane = str(lane or "").lower()
+    # "lanes" (set ONLY by the hermetic test harness for modules whose plan/build lanes run the fake runner) lifts the
+    # lane refusals; a command that reaches into either engine is refused whatever the setting
+    if _hold_value != "lanes":
+        if _lane == "build":
+            import lanes as _lanes_hold
+            raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-code-job-only: " + _cj_hold.FOREMAN_AS_SKILL)
+        if _hold_value != "0" and _lane in ("plan", "planning"):
             import lanes as _lanes_hold
             raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
-        if command:
-            # consensus C7: an ENGINE invocation (a script under foreman/bin or crucible/bin, or run-live.mjs), resolved
-            # against cwd - never a harmless command that merely runs in a folder named foreman
-            base = Path(str(cwd)) if cwd else Path.cwd()
-            for a in command[1:]:
-                a = str(a)
-                if not a or a.startswith("-"):
-                    continue
-                full = str((base / a).resolve()).replace("\\", "/").lower()
-                if ("/foreman/bin/" in full or "/crucible/bin/" in full or full.endswith("/run-live.mjs")):
-                    import lanes as _lanes_hold
-                    raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+    if command:
+        # consensus C7: an ENGINE invocation (a script under foreman/bin or crucible/bin, or run-live.mjs), resolved
+        # against cwd - never a harmless command that merely runs in a folder named foreman
+        base = Path(str(cwd)) if cwd else Path.cwd()
+        for a in command[1:]:
+            a = str(a)
+            if not a or a.startswith("-"):
+                continue
+            full = str((base / a).resolve()).replace("\\", "/").lower()
+            if "/foreman/bin/" in full or full.endswith("/run-live.mjs"):
+                import lanes as _lanes_hold
+                raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-code-job-only: " + _cj_hold.FOREMAN_AS_SKILL)
+            if "/crucible/bin/" in full and _hold_value != "0":
+                import lanes as _lanes_hold
+                raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
     import anchor_settings as _aset
     import model_policy as _mp
     settings_snapshot = None if command else _aset.get_launch_settings()

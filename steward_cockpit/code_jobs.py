@@ -140,6 +140,8 @@ def busy_repos():
     out = {}
     for repo, info in _busy_read().items():
         j = read_jobs(info.get("cdir", "")).get(info.get("job", ""), {})
+        if j.get("worker") == "foreman":
+            j = reconcile_foreman(info.get("cdir", ""), j)
         if j.get("status") in LIVE:
             out[repo] = info
     return out
@@ -212,7 +214,8 @@ FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(6 * 3600)
 FOREMAN_PROFILES = ("slim", "standard")
 FOREMAN_DIR = ".foreman-job"
 _FOREMAN_PROCS = {}
-_DRIVER_FAMILY = {"claude": "claude", "chatgpt-cli": "chatgpt", "codex": "chatgpt", "openai": "chatgpt",
+_FOREMAN_STOPPING = set()     # job ids Stop is ending: their Foreman never launches, and its end never finishes them
+_DRIVER_FAMILY = {"claude": "claude", "chatgpt-cli": "chatgpt", "chatgpt-session": "chatgpt", "codex": "chatgpt", "openai": "chatgpt",
                   "grok-cli": "grok", "grok": "grok", "gemini-cli": "gemini", "gemini": "gemini"}
 
 
@@ -250,27 +253,59 @@ def foreman_plan_ok(plan_text):
     return ""
 
 
-def foreman_authors(status_text):
-    """The families that WROTE (execute and fix), from Foreman's own 'model routing:' line; [] when it cannot say."""
-    m = None
-    for m in re.finditer(r"model routing:\s*(.+)", status_text or ""):
-        pass
-    if not m:
+def _family_of(name):
+    n = str(name or "").strip().lower()
+    return _DRIVER_FAMILY.get(n) or CLI_FAMILY.get(n) or (n if n in FAMILIES else "")
+
+
+def foreman_seat_family():
+    """The family Foreman's writing seats (execute, fix) take: the dashboard's Coder seat, which run-live stamps onto
+    them from the same settings (applyFamilyPrefsToEnv). "" when the settings cannot be read - then no job starts."""
+    try:
+        import anchor_settings
+        return _family_of(anchor_settings.get_launch_settings().get("coding_family"))
+    except Exception:
+        return ""
+
+
+def _routing_journal():
+    """The trio's durable failover journal (drivers/index.mjs journalRouting): written BEFORE another seat launches."""
+    home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
+    return Path(home) / ".anchor" / "journal" / "runs" / "model-routing.jsonl"
+
+
+def foreman_authors(job, status_text=""):
+    """Every family that may have WRITTEN this job, or [] when that cannot be said (then it never lands - fail closed).
+    fcj review r1: never one parsed line. The union of the Coder seat at launch and at the end, the execute/fix seats
+    Foreman's own routing lines name, and every failover the trio journaled during the job (any run's - a union only
+    ever adds a family, so nothing written into the worktree can remove one)."""
+    fams = {job.get("foreman_family") or "", foreman_seat_family()}
+    for line in re.findall(r"model routing:\s*(.+)", status_text or ""):
+        for role, drv in re.findall(r"\b(execute|fix)=([A-Za-z0-9_-]+)", line):
+            fams.add(_family_of(drv) or "?")
+    j = _routing_journal()
+    if j.exists():
+        try:
+            rows = j.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return []
+        since = str(job.get("started_utc") or "")
+        for row in rows:
+            try:
+                ev = json.loads(row)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get("action") == "failover" and str(ev.get("at") or "") >= since:
+                fams.add(_family_of(ev.get("to")) or "?")
+    fams.discard("")
+    if "?" in fams or not fams or not job.get("foreman_family"):
         return []
-    seats = dict(re.findall(r"\b(execute|review|fix)=([A-Za-z0-9_-]+)", m.group(1)))
-    fams = []
-    for role in ("execute", "fix"):
-        fam = _DRIVER_FAMILY.get(str(seats.get(role) or "").lower())
-        if not fam:
-            return []                       # a seat it cannot name: no record of the author, so it never lands
-        if fam not in fams:
-            fams.append(fam)
-    return fams
+    return sorted(fams)
 
 
-def foreman_result(wt):
+def foreman_result(job):
     """Foreman's run as the job's result: DONE -> its waves; anything else (HALT, BUDGET-STOP, no record) -> an error."""
-    d = Path(wt)
+    d = Path(job["worktree"])
     try:
         rec = json.loads((d / ".foreman" / "run-record.json").read_text(encoding="utf-8"))
     except Exception:
@@ -282,65 +317,223 @@ def foreman_result(wt):
     status = str(rec.get("status") or "")
     waves = "; ".join("wave %s %s" % (w.get("wave"), w.get("status")) for w in (rec.get("waves") or []) if isinstance(w, dict))
     text = "Foreman %s%s" % (status or "ended without a run record", (": " + waves) if waves else "")
-    out = {"text": text[:1500], "authors": foreman_authors(status_log), "foreman_status": status}
+    out = {"text": text[:1500], "authors": foreman_authors(job, status_log), "foreman_status": status}
     if status != "DONE":
         why = str(rec.get("halt_reason") or rec.get("taxonomy") or "no run record")
         out["error"] = "Foreman %s: %s" % (status or "did not finish", why[:400])
     return out
 
 
-def foreman_manifest(wt, base):
-    """Foreman writes through its sub-agents, which report no file list: in its own worktree, every changed path
-    (minus runtime records and what never lands) is its work - still checked, reviewed and verified."""
-    return [p for p in (changed_paths(wt, base) or []) if not never_lands(p) and not _runtime(p)]
+def _processes():
+    """{pid: (parent pid, command line)} for every process, or None when Windows cannot say."""
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                            "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, "
+                            "$_.ParentProcessId, $_.CommandLine }"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    out = {}
+    for ln in (r.stdout or "").splitlines():
+        parts = ln.split("|", 2)
+        if len(parts) >= 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
+            out[int(parts[0])] = (int(parts[1]), parts[2] if len(parts) > 2 else "")
+    return out
+
+
+def _is_this_foreman(cmdline, job):
+    line = str(cmdline or "").replace(chr(92), "/").casefold()
+    wt = str(job.get("worktree") or "").replace(chr(92), "/").casefold()
+    return bool(wt) and FOREMAN_RUN_LIVE.name.casefold() in line and wt in line
+
+
+def foreman_left_running(job, procs=None):
+    """After a restart the service no longer holds Foreman's handle, but the process outlives the service: its pid,
+    when that pid is still running Foreman's script on THIS job's worktree (never a reused pid); else None."""
+    pid = job.get("foreman_pid")
+    if os.name != "nt" or not isinstance(pid, int):
+        return None
+    procs = _processes() if procs is None else procs
+    return pid if procs and pid in procs and _is_this_foreman(procs[pid][1], job) else None
+
+
+def _tree(pid, procs):
+    """pid and every descendant of it in one process snapshot."""
+    tree, frontier = {pid}, [pid]
+    while frontier:
+        parent = frontier.pop()
+        for p, (pp, _) in procs.items():
+            if pp == parent and p not in tree and p != pp:
+                tree.add(p)
+                frontier.append(p)
+    return tree
+
+
+def end_foreman(job, wait_s=60):
+    """(ended, why): end this job's Foreman and its whole process tree, and SEE it gone before anything is released
+    (fcj review r1: Stop never frees the repository while a Foreman tree still writes). A Foreman not yet launched is
+    told not to launch."""
+    jid = job["id"]
+    with _LOCK:
+        _FOREMAN_STOPPING.add(jid)
+        proc = _FOREMAN_PROCS.get(jid)
+    pid = getattr(proc, "pid", None)
+    if os.name != "nt":
+        if proc is not None and pid is not None:
+            proc.kill()
+            try:
+                proc.wait(timeout=wait_s)
+            except Exception:
+                return False, "Foreman (pid %s) did not end when asked; it still owns the repository" % pid
+        return True, ""
+    procs = _processes()
+    if procs is None:
+        return False, "Windows could not list processes, so Foreman's end cannot be seen; try Stop again"
+    if pid is None:
+        pid = foreman_left_running(job, procs)      # launched before a restart: its recorded, re-checked pid
+    if pid is None or pid not in procs:
+        return True, ""                             # never launched, or already gone
+    tree = _tree(pid, procs)
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=60)
+    deadline = time.time() + wait_s
+    while True:
+        now = _processes()
+        left = sorted(p for p in tree if now is None or p in now)
+        if not left:
+            return True, ""
+        if time.time() > deadline:
+            return False, ("Foreman did not end when asked (still running: %s); it still owns the repository - "
+                           "try Stop again" % ", ".join(str(p) for p in left[:8]))
+        for p in left:
+            subprocess.run(["taskkill", "/PID", str(p), "/F"], capture_output=True, timeout=30)
+        time.sleep(1)
+
+
+_ORPHAN_SEEN = {}     # job id -> when a lost-handle Foreman was last seen alive (re-checked at most once a minute)
+
+
+def reconcile_foreman(cdir, job):
+    """A Foreman job marked running whose handle this process does not hold (Anchor restarted): while its Foreman
+    still runs it keeps the repository; once it is gone the job is marked interrupted and its work is kept."""
+    if job.get("worker") != "foreman" or job.get("status") != "running" or job["id"] in _FOREMAN_PROCS:
+        return job
+    if time.time() - _ORPHAN_SEEN.get(job["id"], 0) < 60:
+        return job
+    procs = _processes()
+    if procs is None or foreman_left_running(job, procs):
+        _ORPHAN_SEEN[job["id"]] = time.time()
+        return job
+    _remove_foreman_config(job["worktree"])
+    done = _transition(cdir, job["id"], ("running",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                       error="interrupted: Anchor restarted while Foreman ran, and Foreman is gone",
+                       kept_worktree=job["worktree"],
+                       land_note="not landed: Anchor restarted while Foreman ran; the work is kept at %s" % job["worktree"])
+    return done or job
+
+
+def foreman_manifest(job):
+    """Foreman's seats report no file list. In its own worktree every changed path is its work, EXCEPT what the job's
+    check made by itself in the untouched worktree before Foreman began (fcj review r1: a check's byproduct is never
+    Foreman's work - it stays outside the manifest, so a byproduct present at the end refuses the landing unless the
+    job declared it with --output), runtime records, and what never lands."""
+    made = set(job.get("check_byproducts") or [])
+    return [p for p in (changed_paths(job["worktree"], job["base"]) or [])
+            if p not in made and not never_lands(p) and not _runtime(p)]
+
+
+def _remove_foreman_config(wt):
+    try:
+        (Path(wt) / "foreman.config.json").unlink()   # Anchor's own file, never the project's
+    except OSError:
+        pass
+
+
+class _Starting:
+    """Foreman's place in _FOREMAN_PROCS while the job's check runs in the untouched worktree: counted by the restart
+    check, and never mistaken for a Foreman lost to a restart."""
+    pid = None
+
+    def poll(self):
+        return None
+
+
+def _check_byproducts(job, wt):
+    """Run the job's check once in the untouched worktree; return what it changed there, then put the worktree back."""
+    run_check(job, wt)
+    made = sorted(set(changed_paths(wt, job["base"]) or []) | set(ignored_outputs(wt)))
+    _git(wt, "reset", "-q", "--hard", job["base"], timeout=600)
+    _git(wt, "clean", "-fdq", timeout=600)           # untracked only; ignored files (Anchor's .anchor) stay
+    return made
 
 
 def _start_foreman(cdir, job, wt, plan_text, profile):
-    """Write Foreman's documents (never landed), start it in the worktree, and finish the job when it ends."""
-    d = Path(wt) / FOREMAN_DIR
-    d.mkdir(parents=True, exist_ok=True)
-    desc, plan, log = foreman_docs(job, plan_text)
-    (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
-    (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
-    (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
-    cfg = Path(wt) / "foreman.config.json"
-    cfg.write_text(json.dumps({"docs": {"description": FOREMAN_DIR + "/DESCRIPTION.md",
-                                        "plan": FOREMAN_DIR + "/IMPLEMENTATION-PLAN.md",
-                                        "execution_log": FOREMAN_DIR + "/EXECUTION-LOG.md"}}), encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)          # subscription billing, as every skill launcher does
-    env["CRUCIBLE_AGENT_LIVE"] = "1"
-    env["FOREMAN_PROFILE"] = profile
-    out = open(d / "foreman-run.log", "w", encoding="utf-8")
-    try:
-        proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], cwd=str(wt),
-                                stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
-    except Exception:
-        out.close()
-        raise
-    _FOREMAN_PROCS[job["id"]] = proc
+    """Write Foreman's documents (never landed), learn what the check makes by itself, start Foreman in the worktree
+    (unless Stop came first), and finish the job when it ends. Returns at once; the work runs on a thread."""
+    jid = job["id"]
+    _FOREMAN_PROCS[jid] = _Starting()
 
-    def wait():
+    def launch():
+        try:
+            made = _check_byproducts(job, wt)
+            _transition(cdir, jid, ("running",), check_byproducts=made)
+            job["check_byproducts"] = made
+            d = Path(wt) / FOREMAN_DIR
+            d.mkdir(parents=True, exist_ok=True)
+            desc, plan, log = foreman_docs(job, plan_text)
+            (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
+            (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
+            (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
+            (Path(wt) / "foreman.config.json").write_text(json.dumps({"docs": {
+                "description": FOREMAN_DIR + "/DESCRIPTION.md", "plan": FOREMAN_DIR + "/IMPLEMENTATION-PLAN.md",
+                "execution_log": FOREMAN_DIR + "/EXECUTION-LOG.md"}}), encoding="utf-8")
+            env = dict(os.environ)
+            env.pop("ANTHROPIC_API_KEY", None)          # subscription billing, as every skill launcher does
+            env["CRUCIBLE_AGENT_LIVE"] = "1"
+            env["FOREMAN_PROFILE"] = profile
+            out = open(d / "foreman-run.log", "w", encoding="utf-8")
+            with _LOCK:                                 # Stop and the launch never cross: one sees the other
+                cur = read_jobs(cdir).get(jid) or {}
+                if jid in _FOREMAN_STOPPING or cur.get("status") != "running":
+                    out.close()
+                    _remove_foreman_config(wt)
+                    _FOREMAN_PROCS.pop(jid, None)
+                    return
+                proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], cwd=str(wt),
+                                        stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+                _FOREMAN_PROCS[jid] = proc
+                _transition(cdir, jid, ("running",), foreman_pid=proc.pid)   # a restart loses the handle, not the pid
+        except Exception as e:
+            _FOREMAN_PROCS.pop(jid, None)
+            _remove_foreman_config(wt)
+            j = _transition(cdir, jid, ("running",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                            error="Foreman could not start: %s" % e, kept_worktree=wt,
+                            land_note="not landed: Foreman could not start (%s); the worktree is kept at %s" % (e, wt))
+            if j:
+                _report(cdir, j)
+            return
         try:
             try:
                 proc.wait(timeout=FOREMAN_TIMEOUT_S)
             except subprocess.TimeoutExpired:
-                _kill_tree(proc)
+                end_foreman(job)
+                _FOREMAN_STOPPING.discard(jid)
                 proc.wait()
         finally:
             out.close()
-            _FOREMAN_PROCS.pop(job["id"], None)
-        result = foreman_result(wt)
+            _FOREMAN_PROCS.pop(jid, None)
+        _remove_foreman_config(wt)                      # gone before the inventory
+        if jid in _FOREMAN_STOPPING:                    # Stop ended it: Stop records the job
+            return
+        result = foreman_result(job)
         if result.get("error") is None and proc.returncode not in (0, None):
             result["error"] = "Foreman exited %s" % proc.returncode
-        try:
-            cfg.unlink()                        # Anchor's own file, never the project's: gone before the inventory
-        except OSError:
-            pass
-        result["manifest"] = foreman_manifest(wt, job["base"])
-        finish(cdir, job["id"], result)
-    threading.Thread(target=wait, name="foreman-job-" + job["id"], daemon=True).start()
+        result["manifest"] = foreman_manifest(job)
+        finish(cdir, jid, result)
+    threading.Thread(target=launch, name="foreman-job-" + jid, daemon=True).start()
 
 
 # ── Seats: the coder's family, never the model preferences ─────────────────────────────────────────────────────────
@@ -467,9 +660,16 @@ def run_check(job, tree):
 NEVER_LAND = {"foreman.config.json"}
 
 
+FOREMAN_OWN = ("foreman.config.json", ".foreman-job", ".foreman", "_foreman-status.log", "foreman-checkpoint.json")
+
+
 def never_lands(path):
-    """foreman.config.json never lands - in any letter case, at any depth (Windows opens FOREMAN.CONFIG.JSON too)."""
-    return str(path).replace(chr(92), "/").rsplit("/", 1)[-1].casefold() in NEVER_LAND
+    """foreman.config.json never lands - in any letter case, at any depth (Windows opens FOREMAN.CONFIG.JSON too) -
+    nor anything a Foreman code job writes for itself at the root (fcj review r1: never by git's ignore rules alone)."""
+    p = str(path).replace(chr(92), "/").replace(" (ignored by git)", "").lstrip("/").casefold()
+    if p.rsplit("/", 1)[-1] in NEVER_LAND:
+        return True
+    return any(p == own or p.startswith(own + "/") for own in FOREMAN_OWN)
 
 
 def _rel_in(tree, raw):
@@ -803,7 +1003,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             return {"ok": False, "error": "no job started: %s" % why}
         if not FOREMAN_RUN_LIVE.is_file():
             return {"ok": False, "error": "no job started: Foreman is not at %s" % FOREMAN_RUN_LIVE}
-        family = ""                              # Foreman's seats write; the authors come from its own routing line
+        family = ""                              # Foreman's seats write; foreman_authors names every family that may have
+        foreman_family = foreman_seat_family()
+        if not foreman_family:
+            return {"ok": False, "error": "no job started: the dashboard's Coder seat cannot be read, so the family "
+                    "Foreman writes with would be unknown"}
     elif worker == "coder":
         family, why = choose_coder(coder)
         if why:
@@ -854,10 +1058,10 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         if code != 0:
             return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
         if worker == "foreman":                  # Anchor writes foreman.config.json in the worktree: never over the project's
-            code, tracked, _ = _git(land_to or root, "ls-tree", "--name-only", base, "--", "foreman.config.json")
+            code, tracked, _ = _git(land_to or root, "ls-tree", "-r", "--name-only", base, "--", *FOREMAN_OWN)
             if code != 0 or tracked.strip():
-                return {"ok": False, "error": "no job started: %s keeps its own foreman.config.json, which a Foreman code "
-                        "job would replace; run Foreman there by hand" % root}
+                return {"ok": False, "error": "no job started: %s tracks files a Foreman code job writes for itself (%s); "
+                        "run Foreman there by hand" % (root, ", ".join(tracked.split()[:4]) or "unreadable")}
         code, _, err = _git(root, "worktree", "add", "-b", branch, str(wt), base, timeout=600)
         if code != 0:
             return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
@@ -875,7 +1079,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         if label:
             job["skill"] = label
         if worker == "foreman":
-            job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
+            job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()),
+                       foreman_family=foreman_family, started_utc=time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()))
         _write_job(cdir, job)
         b = _busy_read()
         b[_norm(root)] = {"job": job_id, "cdir": str(cdir)}
@@ -1484,6 +1689,11 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
                                                            "- check those files" % (job["repo"], ", ".join(served[:8]))))
         return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True, "kept": job["worktree"],
                 "served_tree_changed": served}
+    if job.get("worker") == "foreman":
+        ended, why = end_foreman(job)
+        if not ended:
+            return {"ok": False, "error": why}
+        _remove_foreman_config(job["worktree"])
     stopped = _transition(cdir, job["id"], ("running",), status="stopped", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                           stopped_by=who, kept_worktree=job["worktree"],
                           land_note="stopped by %s; nothing landed; the work so far is kept at %s (branch %s)" % (
@@ -1497,9 +1707,6 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
             eng.stop()
     except Exception:
         pass
-    proc = _FOREMAN_PROCS.get(job["id"])            # a Foreman job: its whole process tree ends (its wait() sees it go)
-    if proc is not None:
-        _kill_tree(proc)
     served = _served_tree_changes(job)              # the finish will not run: audit the source repository here
     if served:
         _transition(cdir, job["id"], ("stopped",), served_tree_changed=served,

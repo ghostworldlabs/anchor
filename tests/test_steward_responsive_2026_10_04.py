@@ -26,7 +26,7 @@ def test_small_duty_comes_first_and_the_effort_rules_ride_only_with_an_effort(en
     assert "(13) SLICE LOOP" not in c, "no effort here: the heavy rules stay off"
     # 2026-10-07 (execution minimum item 4): the register/link rule is in the BASE contract; small work finishes in
     # the turn; code goes to a reviewed code job; no forced hand-off, no Foreman, no invented validator
-    assert "THE DELIVERABLES REGISTER" in c and "Do not invent a validator" in c and "Foreman and Crucible are on hold" in c
+    assert "THE DELIVERABLES REGISTER" in c and "Do not invent a validator" in c and "Crucible is on hold" in c
     assert "Commission it now" not in c and "Do not finish the work inline" not in c
     d = tmp_path / "mid-effort"; d.mkdir()
     (d / "roadmap.json").write_text(json.dumps({"roadmap_projection": [{"id": "a", "status": "active"}]}), encoding="utf-8")

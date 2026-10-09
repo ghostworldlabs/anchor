@@ -4,6 +4,7 @@ inside the job's own worktree and its work goes through the code job's finish: t
 that wrote none of it, and the locked, verified landing. Foreman is never a skill job. Hermetic: a fake run-live.mjs
 (tests/fake_foreman.mjs) and the fake reviewer (tests/fake_review.py); throwaway repositories only."""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -26,6 +27,7 @@ def _repo(root, files=None):
     for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
         subprocess.run(["git", "-C", str(root), *args], check=True)
     for name, text in (files or {"a.txt": "one\n"}).items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "start"], check=True)
@@ -42,6 +44,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_FOREMAN_LOG", str(tmp_path / "foreman.log"))
     monkeypatch.delenv("ANCHOR_FOREMAN_CODE_JOBS", raising=False)
     monkeypatch.delenv("ANCHOR_UNCONFINED_CODERS", raising=False)
+    monkeypatch.setattr(code_jobs, "foreman_seat_family", lambda: "claude")       # the dashboard's Coder seat
+    monkeypatch.setattr(code_jobs, "_routing_journal", lambda: tmp_path / "model-routing.jsonl")
     repo, cdir = _repo(tmp_path / "repo"), tmp_path / "steward"
     cdir.mkdir()
     return repo, cdir, tmp_path
@@ -108,11 +112,38 @@ def test_a_halted_run_never_lands_and_its_work_is_kept(env, monkeypatch):
     assert (Path(job["kept_worktree"]) / "a.txt").read_text(encoding="utf-8") == "two\n"
 
 
-def test_no_record_of_the_writing_family_means_no_landing(env, monkeypatch):
+def test_the_coder_seat_names_the_author_even_when_foremans_log_says_nothing(env, monkeypatch):
     repo, cdir, _ = env
     monkeypatch.setenv("FAKE_FOREMAN_MODE", "no-routing")
     job = _wait(cdir, _start(repo, cdir)["job"])
+    assert job["landed"] is True and job["authors"] == ["claude"], job["land_note"]
+
+
+def test_a_failover_journaled_during_the_job_makes_that_family_an_author(env, monkeypatch):
+    # fcj review r1 BLOCKER 1: a seat that failed over wrote too - the reviewer of that family may not pass it
+    repo, cdir, tmp = env
+    import datetime
+    at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    (tmp / "model-routing.jsonl").write_text(json.dumps({"schema": "trio.model-routing.v1", "at": at,
+                                                         "action": "failover", "from": "claude", "to": "chatgpt-cli"}) + "\n",
+                                             encoding="utf-8")
+    job = _wait(cdir, _start(repo, cdir)["job"])
+    assert job["authors"] == ["chatgpt", "claude"]
+    assert job["landed"] is False and "author's own family" in job["land_note"]
+
+
+def test_an_unknown_family_anywhere_means_no_record_and_no_landing(env, monkeypatch):
+    repo, cdir, tmp = env
+    (tmp / "model-routing.jsonl").write_text(json.dumps({"action": "failover", "at": "9999", "to": "mystery"}) + "\n",
+                                             encoding="utf-8")
+    job = _wait(cdir, _start(repo, cdir)["job"])
     assert job["landed"] is False and "which model family wrote it" in job["land_note"]
+
+
+def test_no_coder_seat_no_job(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setattr(code_jobs, "foreman_seat_family", lambda: "")
+    assert "Coder seat cannot be read" in _start(repo, cdir)["error"]
 
 
 def test_a_review_by_the_writing_family_never_lands(env, monkeypatch):
@@ -160,6 +191,25 @@ def test_stop_ends_the_foreman_tree_and_the_restart_check_counts_it_until_it_is_
     assert not (wt / "foreman.config.json").exists()                  # Anchor's file goes; the work is kept
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the pid re-check reads Windows process command lines")
+def test_after_a_restart_stop_still_ends_foreman_by_its_rechecked_pid(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "sleep")
+    out = _start(repo, cdir)
+    wt = Path(out["worktree"])
+    for _ in range(100):
+        if (wt / ".foreman" / "started").exists():
+            break
+        time.sleep(0.1)
+    proc = code_jobs._FOREMAN_PROCS.pop(out["job"])                 # the service restarted: the handle is gone
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]
+    assert job["foreman_pid"] == proc.pid and code_jobs.foreman_left_running(job) == proc.pid
+    assert code_jobs.foreman_left_running(dict(job, foreman_pid=os.getpid())) is None     # never another process
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"]
+    proc.wait(timeout=30)
+    assert proc.returncode is not None
+
+
 # ---- refusals before anything starts ----
 
 @pytest.mark.parametrize("kw, why", [
@@ -184,7 +234,7 @@ def test_a_repository_with_its_own_foreman_config_is_refused(tmp_path, env):
     _, cdir, _ = env
     repo = _repo(tmp_path / "own", {"a.txt": "one\n", "foreman.config.json": "{}"})
     out = _start(repo, cdir)
-    assert not out["ok"] and "its own foreman.config.json" in out["error"]
+    assert not out["ok"] and "tracks files a Foreman code job writes" in out["error"] and "foreman.config.json" in out["error"]
 
 
 def test_anchors_own_code_is_refused_unless_unconfined_coders_are_allowed(env, monkeypatch):
@@ -228,8 +278,110 @@ def test_the_steward_sizes_the_work_and_starts_foreman_as_a_code_job(monkeypatch
         importlib.reload(se)
 
 
-def test_the_authors_come_from_foremans_own_routing_line():
-    line = "[10:00:00] model routing: execute=claude:x · review=gemini-cli:y · fix=chatgpt-cli:z\n"
-    assert code_jobs.foreman_authors(line) == ["claude", "chatgpt"]
-    assert code_jobs.foreman_authors("no routing here") == []
-    assert code_jobs.foreman_authors("model routing: execute=mystery:x · fix=claude:y") == []
+def test_the_authors_are_a_union_that_nothing_in_the_worktree_can_shrink(tmp_path, monkeypatch):
+    monkeypatch.setattr(code_jobs, "foreman_seat_family", lambda: "claude")
+    monkeypatch.setattr(code_jobs, "_routing_journal", lambda: tmp_path / "none.jsonl")
+    job = {"foreman_family": "claude", "started_utc": "2026-10-09T00:00:00"}
+    forged = "model routing: execute=claude:x · fix=claude:y\n: model routing: execute=grok-cli fix=grok-cli\n"
+    assert code_jobs.foreman_authors(job, forged) == ["claude", "grok"]           # a later line only ADDS
+    assert code_jobs.foreman_authors(job, "model routing: execute=mystery:x") == []
+    assert code_jobs.foreman_authors(dict(job, foreman_family=""), "") == []
+
+
+# ---- fcj review r1: one writer, byproducts, Anchor's own files ----
+
+def test_what_the_check_makes_by_itself_is_never_foremans_work(env):
+    # MAJOR 5: the check writes report.json in the untouched worktree; present at the end it refuses the landing
+    repo, cdir, _ = env
+    check = [sys.executable, "-c", "open('report.json','w').write('{}')"]
+    job = _wait(cdir, _start(repo, cdir, check=check)["job"])
+    assert job["check_byproducts"] == ["report.json"]
+    assert job["landed"] is False and "report.json" in job["land_note"]
+    assert "report.json" not in _tracked(repo)
+
+
+def test_a_declared_byproduct_may_land(env):
+    repo, cdir, _ = env
+    check = [sys.executable, "-c", "open('report.json','w').write('{}')"]
+    job = _wait(cdir, _start(repo, cdir, check=check, outputs=["report.json"])["job"])
+    assert job["landed"] is True, job["land_note"]
+
+
+def test_foremans_own_files_never_land_whatever_git_ignores():
+    # MAJOR 4: never by the ignore rules alone
+    for p in (".foreman-job/DESCRIPTION.md", ".foreman/run-record.json", "_foreman-status.log",
+              "foreman-checkpoint.json", "FOREMAN.CONFIG.JSON", "sub/foreman.config.json"):
+        assert code_jobs.never_lands(p), p
+    assert not code_jobs.never_lands("src/foreman/x.py") and not code_jobs.never_lands("docs/.foreman-job.md")
+
+
+def test_a_repository_tracking_a_foreman_job_folder_is_refused(tmp_path, env):
+    _, cdir, _ = env
+    repo = _repo(tmp_path / "own2", {"a.txt": "one\n", ".foreman-job/DESCRIPTION.md": "theirs"})
+    out = _start(repo, cdir)
+    assert not out["ok"] and ".foreman-job/DESCRIPTION.md" in out["error"]
+
+
+def test_a_stop_during_the_check_means_foreman_never_launches(env, monkeypatch):
+    # BLOCKER 2: Stop before the launch is honoured by the launch itself
+    repo, cdir, tmp = env
+    out = _start(repo, cdir, check=[sys.executable, "-c", "import time; time.sleep(3)"])
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"]
+    for _ in range(100):
+        if out["job"] not in code_jobs._FOREMAN_PROCS:
+            break
+        time.sleep(0.1)
+    time.sleep(0.5)
+    assert out["job"] not in code_jobs._FOREMAN_PROCS and not (tmp / "foreman.log").exists()
+    assert code_jobs.read_jobs(str(cdir))[out["job"]]["status"] == "stopped"
+
+
+def test_a_stop_that_cannot_see_foreman_end_keeps_the_repository(env, monkeypatch):
+    repo, cdir, _ = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "sleep")
+    out = _start(repo, cdir)
+    real = code_jobs.end_foreman
+    monkeypatch.setattr(code_jobs, "end_foreman", lambda job, wait_s=60: (False, "Foreman did not end when asked"))
+    res = code_jobs.stop(str(cdir), out["job"], actor="John")
+    assert not res["ok"] and "did not end" in res["error"]
+    assert code_jobs._norm(str(repo)) in code_jobs.busy_repos()                     # still the one writer
+    assert code_jobs.read_jobs(str(cdir))[out["job"]]["status"] == "running"
+    monkeypatch.setattr(code_jobs, "end_foreman", real)
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="reads Windows process command lines")
+def test_a_foreman_lost_to_a_restart_and_gone_is_marked_interrupted_and_frees_the_repository(env, monkeypatch):
+    # BLOCKER 3
+    repo, cdir, _ = env
+    monkeypatch.setenv("FAKE_FOREMAN_MODE", "sleep")
+    out = _start(repo, cdir)
+    wt = Path(out["worktree"])
+    for _ in range(200):
+        if (wt / ".foreman" / "started").exists():
+            break
+        time.sleep(0.1)
+    proc = code_jobs._FOREMAN_PROCS[out["job"]]
+    code_jobs._FOREMAN_STOPPING.add(out["job"])           # its own thread must not finish it: we play the restart
+    code_jobs._FOREMAN_PROCS.pop(out["job"])
+    assert code_jobs._norm(str(repo)) in code_jobs.busy_repos()                     # alive: it keeps the repository
+    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+    proc.wait(timeout=30)
+    code_jobs._ORPHAN_SEEN.clear()
+    assert code_jobs._norm(str(repo)) not in code_jobs.busy_repos()
+    job = code_jobs.read_jobs(str(cdir))[out["job"]]
+    assert job["status"] == "failed" and "restarted" in job["error"] and job["kept_worktree"] == str(wt)
+
+
+def test_the_job_runner_never_starts_foreman_whatever_the_hold(tmp_path, monkeypatch):
+    # spec gap: the legacy build lane and a direct Foreman command refuse even with the hold lifted
+    import job_runner
+    for hold in ("1", "0"):
+        monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", hold)
+        with pytest.raises(ValueError, match="foreman-code-job-only"):
+            job_runner.launch("build", cwd=str(tmp_path), prompt="x")
+        with pytest.raises(ValueError, match="foreman-code-job-only"):
+            job_runner.launch("general", cwd=str(tmp_path), command=["node", "C:/dev/trio/foreman/bin/run-live.mjs"])
+    monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
+    with pytest.raises(ValueError, match="foreman-crucible-hold"):
+        job_runner.launch("plan", cwd=str(tmp_path), prompt="x")
