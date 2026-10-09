@@ -609,3 +609,11 @@ def test_the_jobs_own_final_check_stays_exactly_as_given(env, monkeypatch):
     assert job["check"] == check
     gate = json.loads((Path(job["kept_worktree"]) / ".foreman-job" / "run_check.json").read_text(encoding="utf-8"))
     assert gate == [sys.executable, "-m", "pytest", "-v", "-k", "a or b"]
+
+
+def test_only_a_real_pytest_invocation_is_made_verbose():
+    # fcj review r9: `make pytest ...` is make, not pytest
+    assert code_jobs.gate_argv(["make", "pytest", "PYTEST_ARGS=-v tests/x.py"]) == ["make", "pytest", "PYTEST_ARGS=-v tests/x.py"]
+    assert code_jobs.gate_argv(["npm", "run", "pytest", "--", "a b"]) == ["npm", "run", "pytest", "--", "a b"]
+    assert code_jobs.gate_argv([r"C:\Py\Scripts\pytest.exe", "-k", "a b"]) == [r"C:\Py\Scripts\pytest.exe", "-v", "-k", "a b"]
+    assert code_jobs.gate_argv(["py", "-m", "pytest", "-k", "a b"]) == ["py", "-m", "pytest", "-v", "-k", "a b"]

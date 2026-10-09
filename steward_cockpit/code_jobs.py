@@ -287,11 +287,12 @@ def gate_argv(check):
     Foreman's own normalizer would (fcj review r8: Foreman's GREEN needs a line per test, and behind the wrapper it
     cannot see pytest to add -v itself). The job's own final check stays exactly as given."""
     argv = list(check)
-    names = [os.path.basename(a).lower() for a in argv]
-    at = next((i for i, n in enumerate(names) if n in ("pytest", "pytest.exe", "py.test")), None)
-    if at is None and "pytest" in argv:
-        at = argv.index("pytest")                      # python -m pytest
-    if at is None:
+    exe = os.path.splitext(os.path.basename(argv[0]).lower())[0] if argv else ""
+    if exe in ("pytest", "py.test"):                   # only a REAL pytest invocation (fcj r9: never `make pytest`)
+        at = 0
+    elif exe.startswith(("python", "py")) and argv[1:3] == ["-m", "pytest"]:
+        at = 2
+    else:
         return argv
     head, rest = argv[:at + 1], [a for a in argv[at + 1:] if a not in ("-q", "--quiet")]
     if not any(a in ("-v", "--verbose", "-vv", "-vvv") for a in rest):
