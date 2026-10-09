@@ -195,7 +195,8 @@ def test_one_writer_and_a_dirty_repository_is_not_overwritten(tmp_path, monkeypa
     assert (repo / "a.txt").read_text(encoding="utf-8") == "his own edit\n", "his work is untouched"
 
 
-def test_a_second_job_on_the_same_repository_waits_and_stop_keeps_the_branch(tmp_path, monkeypatch):
+def test_a_second_job_on_the_same_repository_runs_too_and_stop_keeps_the_branch(tmp_path, monkeypatch):
+    # John 2026-10-09: several jobs may run on one repository (own worktrees; landings one at a time under the lock)
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
 
     class Slow(FakeCoder):
@@ -206,9 +207,11 @@ def test_a_second_job_on_the_same_repository_waits_and_stop_keeps_the_branch(tmp
     first = code_jobs.start(str(cdir), str(repo), "Long work.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
     assert first["ok"] and code_jobs.active_repos(str(cdir)) == [code_jobs._norm(repo)]
     again = code_jobs.start(str(cdir), str(repo), "More.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
-    assert again["ok"] is False and "one writer" in again["error"]
-    s = code_jobs.stop(str(cdir))
-    assert s["ok"] and code_jobs.read_jobs(str(cdir))[first["job"]]["status"] == "stopped" and not code_jobs.active_repos(str(cdir))
+    assert again["ok"] and again["worktree"] != first["worktree"]
+    assert code_jobs.active_repos(str(cdir)) == [code_jobs._norm(repo)]
+    assert code_jobs.stop(str(cdir), first["job"])["ok"] and code_jobs.read_jobs(str(cdir))[first["job"]]["status"] == "stopped"
+    assert code_jobs.active_repos(str(cdir)) == [code_jobs._norm(repo)], "the second job still works there"
+    assert code_jobs.stop(str(cdir), again["job"])["ok"] and not code_jobs.active_repos(str(cdir))
 
 
 def test_the_route_and_the_tool_exist():
@@ -274,7 +277,7 @@ def test_stop_keeps_the_branch_and_the_report_wakes_the_real_steward(tmp_path, m
     assert said and said[0][1] is False and said[0][0].startswith("(code job j1 finished - not John)")
 
 
-def test_one_writer_holds_across_stewards_and_on_a_path_boundary(tmp_path, monkeypatch):
+def test_jobs_from_two_stewards_share_a_repository_and_the_path_boundary_holds(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
 
     class Slow(FakeCoder):
@@ -285,12 +288,12 @@ def test_one_writer_holds_across_stewards_and_on_a_path_boundary(tmp_path, monke
     a.mkdir(); b.mkdir()
     assert code_jobs.start(str(a), str(repo), "One.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))["ok"]
     other = code_jobs.start(str(b), str(repo), "Two.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt))
-    assert other["ok"] is False and "one writer" in other["error"], "another steward cannot start a second writer"
+    assert other["ok"], "another steward may start a job on the same repository (John 2026-10-09)"
     assert code_jobs.inside(str(repo / "x.py"), str(repo)) and not code_jobs.inside(str(repo) + "-wt/x.py", str(repo))
 
 
 # ---------- Grok code review R2 ----------
-def test_two_stewards_starting_at_once_get_one_writer(tmp_path, monkeypatch):
+def test_four_stewards_starting_at_once_each_get_their_own_worktree(tmp_path, monkeypatch):
     import threading as _th
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
 
@@ -305,7 +308,8 @@ def test_two_stewards_starting_at_once_get_one_writer(tmp_path, monkeypatch):
     ts = [_th.Thread(target=lambda d=d: outs.append(code_jobs.start(str(d), str(repo), "Go.", [sys.executable, "-c", "pass"], engine_factory=lambda wt: Slow(wt)))) for d in dirs]
     [t.start() for t in ts]
     [t.join() for t in ts]
-    assert sum(1 for o in outs if o.get("ok")) == 1, outs
+    assert sum(1 for o in outs if o.get("ok")) == 4, outs
+    assert len({o["worktree"] for o in outs}) == 4 and len(code_jobs._busy_read()) == 4
 
 
 def test_effort_mode_follows_the_current_roadmap_unless_he_said(eng, tmp_path):

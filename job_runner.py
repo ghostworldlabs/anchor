@@ -758,13 +758,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     _lane = str(lane or "").lower()
     # "lanes" (set ONLY by the hermetic test harness for modules whose plan/build lanes run the fake runner) lifts the
     # lane refusals; a command that reaches into either engine is refused whatever the setting
-    if _hold_value != "lanes":
-        if _lane == "build":
-            import lanes as _lanes_hold
-            raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-code-job-only: " + _cj_hold.FOREMAN_AS_SKILL)
-        if _hold_value != "0" and _lane in ("plan", "planning"):
-            import lanes as _lanes_hold
-            raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
+    # fcj review r2: the test harness's "lanes" value lifts the Foreman build lane ONLY with its fake runner wired
+    _fake_runner = _hold_value == "lanes" and "fake_claude" in os.environ.get("ANCHOR_RUNNER_CMD", "")
+    if _lane == "build" and not _fake_runner:
+        import lanes as _lanes_hold
+        raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-code-job-only: " + _cj_hold.FOREMAN_AS_SKILL)
+    if _hold_value not in ("0", "lanes") and _lane in ("plan", "planning"):
+        import lanes as _lanes_hold
+        raise _lanes_hold.EngineNotAllowedError(lane, backend, "foreman-crucible-hold: " + _cj_hold.HOLD_REASON)
     if command:
         # consensus C7: an ENGINE invocation (a script under foreman/bin or crucible/bin, or run-live.mjs), resolved
         # against cwd - never a harmless command that merely runs in a folder named foreman
