@@ -467,9 +467,9 @@ def declare_hint(path):
     return ("declare it: --output %s" % ok[0]) if ok else ("cannot be declared: %s" % why)
 
 
-def refusal_detail(paths, limit=MAX_OUTPUTS):
-    shown = ["%s [%s]" % (p, declare_hint(p)) for p in paths[:limit]]
-    return "; ".join(shown) + (" ..." if len(paths) > limit else "")
+def refusal_detail(paths):
+    """Every refused path, each with its declaration line or why it cannot be declared - never cut short."""
+    return "; ".join("%s [%s]" % (p, declare_hint(p)) for p in paths)
 
 
 _BOOKKEEPING = re.compile(r"^(?:\.anchor/|\.ecgberht/|\.foreman-job/|\.foreman/|_foreman-status\.log$|foreman-checkpoint\.json$)"
