@@ -43,11 +43,10 @@ def test_skill_jobs_refuse_a_foreman_or_crucible_script(held, tmp_path, monkeypa
     assert skill_jobs.validate(["node", str(root / "gandalf" / "bin" / "run.mjs")]) == (True, "")
 
 
-def test_the_hold_is_one_explicit_switch(monkeypatch):
-    # S7 (night 2026-10-10): John approved the slim design on 2026-10-09 - lifted by default, 1 puts it back
+def test_lifting_the_hold_is_one_explicit_switch(monkeypatch):
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
     assert cj.foreman_crucible_held()
     monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD")
-    assert not cj.foreman_crucible_held(), "lifted by default since his approval"
+    assert cj.foreman_crucible_held(), "held by default (final review 2026-10-10: Foreman is not yet on the protected path)"
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
     assert not cj.foreman_crucible_held()

@@ -1812,8 +1812,7 @@ const Proto = (() => {
       currentBlock.querySelector(".body").textContent = currentBlock._raw;
       if (stick) pin(s, true);
     } else if (ev.t === "john") {
-      closeCurrent();
-      turnReplyBlocks = [];
+      closeCurrent();                    // the reply's blocks stay this turn's until turn_end (final review 10-10)
       addBlock("john", opts.johnLabel || "JOHN", ev.text);
       tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();

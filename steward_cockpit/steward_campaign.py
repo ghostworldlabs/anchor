@@ -1003,7 +1003,10 @@ def clear_stale_job_flag(campaign_dir, now=None):
             if state not in ("working", "paused") or not job:
                 return None
             kind, rec = _named_job(campaign_dir, job)
-            if rec is None or str(rec.get("status") or "") not in ("done", "stopped"):
+            status = str((rec or {}).get("status") or "")
+            # a FINISHED job; a stopped one only when it is a skill job whose process is checked gone (final review:
+            # a code job is recorded stopped before its engine is), a failed one never (the halt escalation says it)
+            if rec is None or not (status == "done" or (status == "stopped" and kind == "skill")):
                 return None
             if kind == "skill" and _pid_alive(rec.get("pid")):
                 return None

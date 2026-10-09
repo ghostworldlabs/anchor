@@ -18,7 +18,9 @@ function mdReportHref(raw) {
     dest.pathname === "/api/steward/deliverable-file";
   const loop = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(dest.hostname) && (dest.port === "8777" || dest.port === "");
   // review r1: only loopback or THIS page's own host name - never any *.ts.net machine or a look-alike
-  const legacy = dest.origin === "http://127.0.0.1:8777" || loop || dest.hostname === current.hostname;
+  // final review 10-10: the same host on ANOTHER service's port is that service's, never Anchor's
+  const legacy = dest.origin === "http://127.0.0.1:8777" || loop || dest.origin === current.origin ||
+    (dest.hostname === current.hostname && dest.port === "8777");
   if (internal && !dest.username && !dest.password &&
       (dest.origin === current.origin || legacy)) {
     dest.searchParams.delete("token");

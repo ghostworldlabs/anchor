@@ -202,6 +202,11 @@ def check_route(route):
         state, fp = _inside(effort, qs.get("path", ""))
         if state != "ok":
             return state
+        try:
+            if fp.stat().st_size > 50 * 1024 * 1024:       # the route answers 413 above this (final review 10-10)
+                return UNAVAILABLE
+        except OSError:
+            return UNAVAILABLE
         if qs.get("hash"):
             try:
                 if hashlib.sha256(fp.read_bytes()).hexdigest() != qs["hash"]:
@@ -305,6 +310,13 @@ def _check_reply(text, cdir, hosts):
         nonlocal reg
         kind, route = classify(url, hosts)
         if kind != "anchor":
+            # final review 10-10: a malformed Anchor URL (a bad port) still never records a credential
+            try:
+                host = (urlsplit(str(url)).hostname or "").lower()
+            except ValueError:
+                host = ""
+            if host in hosts and _SECRET_IN_TEXT.search(str(url)):
+                return _SECRET_IN_TEXT.sub(r"\1", str(url))
             return None
         clean = scrub(route)
         verdict = check_route(clean)

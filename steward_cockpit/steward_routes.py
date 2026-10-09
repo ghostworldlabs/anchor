@@ -479,6 +479,11 @@ def _busy_engine_keys():
 def _running_job_ids():
     import job_runner as _jr
     ids = _running_record_ids(_jr)
+    try:                         # final review 10-10: a skill job (Gandalf, researchPrime ...) is a child of this server too
+        from steward_cockpit import skill_jobs as _skj
+        ids += ["skill:" + str(k) for k, p in list(_skj._PROCS.items()) if p.poll() is None]
+    except Exception:
+        ids.append("skill:unreadable")
     # 2026-10-07: a steward code job (Foreman in its own worktree) is a child of this server too; the drained
     # restart once fired mid-job because only job_runner records counted. The busy ledger names every live one.
     try:

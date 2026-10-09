@@ -185,10 +185,12 @@ def _repo_root(path):
 
 # ── The Foreman/Crucible hold (execution minimum item 3) ────────────────────────────────────────────────────────────
 def foreman_crucible_held():
-    """True while Foreman and Crucible may not start from Anchor's managed entries. The hold (John, 2026-10-07) is
-    LIFTED by his approval of the slim design (2026-10-09: "go ahead ... include the crucible/foreman plan"): Anchor
-    runs them slim (S7, night 2026-10-10). ANCHOR_FOREMAN_CRUCIBLE_HOLD=1 puts the hold back."""
-    return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0").strip() == "1"
+    """True while Foreman and Crucible may not start from Anchor's managed entries (John's binding, 2026-10-07).
+    His approval of the slim design (2026-10-09) does not lift it yet: the final review of the night of 2026-10-10
+    found that Foreman started as a skill job would write the project directly, outside the protected code-job
+    lifecycle (own worktree, one writer, reviewed landing). It lifts when Foreman runs through that lifecycle.
+    ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it by hand."""
+    return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0"
 
 
 HOLD_REASON = ("Foreman and Crucible are on hold in Anchor until their best-in-class review (John, 2026-10-07); "
@@ -1020,6 +1022,7 @@ def land(job, files):
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
         code, merged, _ = _git(wt, "rev-parse", "HEAD")
         ok, out = run_check(job, wt)
+        fields["integration_check_ok"] = ok is True        # final review 10-10: the stage line reads the final gate
         if ok is not True:                                 # a missing check is a failure too (W1a)
             return False, "not landed: the check did not pass after bringing in newer changes; the work is kept at %s" % wt, fields
         if _stop_asked(job):
@@ -1142,6 +1145,8 @@ def stage_line(job):
     if verdict:
         if not verdict.startswith("PASS"):
             return " → ".join(out + ["review blocked (%s)" % verdict.lower()])
+        if job.get("integration_check_ok") is False:
+            return " \u2192 ".join(out + ["reviewed", "integration check failed"])
         delta = job.get("delta_review") if isinstance(job.get("delta_review"), dict) else None
         dverdict = str((delta or {}).get("verdict") or "").upper()
         if delta is not None and not dverdict.startswith("PASS"):

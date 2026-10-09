@@ -150,10 +150,11 @@ RESUME_QUIET = (
 JOIN_PICKUP = "\n\nJOHN SAYS (give the short pickup first, then answer this):\n"
 JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\n"
 
-# S7 (night 2026-10-10, John's Q3 slim design approved 10-09: "go ahead ... include the crucible/foreman plan"): the
-# steward SIZES the work; Foreman and Crucible run slim from Anchor. ANCHOR_FOREMAN_CRUCIBLE_HOLD=1 puts the hold back.
+# S7 (night 2026-10-10, John's Q3 slim design approved 10-09): once the hold lifts (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 -
+# not yet the default: Foreman must first run through the protected code-job lifecycle), the steward SIZES the work and
+# Foreman and Crucible run slim from Anchor. While held, the hold sentence stands.
 def _size_or_hold():
-    if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0").strip() == "1":
+    if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0":   # held by default (final review 10-10)
         return "Foreman and Crucible are on hold. "
     return (
         "SIZE THE WORK first and say the size in one line with why: SMALL (reversible, about three files or fewer) is a "

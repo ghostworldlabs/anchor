@@ -94,6 +94,12 @@ def start(cdir, argv, label=""):
     ok, why = validate(argv)
     if not ok:
         return {"ok": False, "error": why}
+    try:
+        from steward_cockpit import maintenance
+        if maintenance.is_active():
+            return {"ok": False, "error": "Anchor is draining for a restart; start the skill when it is back"}
+    except ImportError:
+        pass
     argv = with_profile(argv)
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     log_rel = "%s/%s.log" % (LOG_DIR, job_id)

@@ -33,7 +33,7 @@ def _rows(cdir):
     except OSError:
         return []
     out = []
-    for line in lines[-2000:]:
+    for line in lines:                       # bounded by compaction, so an old unresolved forecast is never dropped
         try:
             row = json.loads(line)
         except ValueError:
