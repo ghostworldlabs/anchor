@@ -185,9 +185,10 @@ def _repo_root(path):
 
 # ── The Foreman/Crucible hold (execution minimum item 3) ────────────────────────────────────────────────────────────
 def foreman_crucible_held():
-    """True while Foreman and Crucible may not start from Anchor's managed entries (John's binding, 2026-10-07:
-    off until a separate Gandalf + researchPrime best-in-class review). ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it."""
-    return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0"
+    """True while Foreman and Crucible may not start from Anchor's managed entries. The hold (John, 2026-10-07) is
+    LIFTED by his approval of the slim design (2026-10-09: "go ahead ... include the crucible/foreman plan"): Anchor
+    runs them slim (S7, night 2026-10-10). ANCHOR_FOREMAN_CRUCIBLE_HOLD=1 puts the hold back."""
+    return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0").strip() == "1"
 
 
 HOLD_REASON = ("Foreman and Crucible are on hold in Anchor until their best-in-class review (John, 2026-10-07); "
@@ -1117,9 +1118,14 @@ def live_state(job):
 def stage_line(job):
     """W4 (2026-10-10): what John reads about a code job - the stages it reached, in order, stopping at the first
     one it did not: made, checked, reviewed, landed, then waits for restart or live. The stored status stays
-    done/failed (the one-writer lock depends on it); this line is derived from the record's own evidence."""
+    done/failed (the one-writer lock depends on it); this line is derived from the record's own evidence. A job that
+    ran a SKILL (--skill) gets no coding stages - only whether it finished (review r1). "Reviewed" counts only when
+    the FINAL candidate passed: an integration recheck (delta_review) that did not pass is said."""
     if not isinstance(job, dict):
         return ""
+    if str(job.get("skill") or "").strip():
+        return "%s %s" % (str(job["skill"]).strip(), {"done": "finished", "failed": "failed", "stopped": "stopped"}.get(
+            str(job.get("status") or ""), str(job.get("status") or "running")))
     out = []
     if not (job.get("files") or job.get("manifest")):
         return "nothing made"
@@ -1134,10 +1140,13 @@ def stage_line(job):
     review = job.get("review") if isinstance(job.get("review"), dict) else {}
     verdict = str(review.get("verdict") or "").upper()
     if verdict:
-        if verdict.startswith("PASS"):
-            out.append("reviewed")
-        else:
+        if not verdict.startswith("PASS"):
             return " → ".join(out + ["review blocked (%s)" % verdict.lower()])
+        delta = job.get("delta_review") if isinstance(job.get("delta_review"), dict) else None
+        dverdict = str((delta or {}).get("verdict") or "").upper()
+        if delta is not None and not dverdict.startswith("PASS"):
+            return " → ".join(out + ["integration review blocked (%s)" % (dverdict.lower() or "no verdict")])
+        out.append("reviewed")
     if not job.get("landed"):
         return " → ".join(out + ["not landed"])
     out.append("landed")

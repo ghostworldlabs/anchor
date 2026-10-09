@@ -9,6 +9,7 @@ its subject (the status pane recomposes every few seconds); an actual is written
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -16,6 +17,9 @@ from pathlib import Path
 
 MILESTONE = "worker finished"
 _CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")
+_RANGE = re.compile(r"\b(\d{1,2}:\d{2})\s*(?:[-\u2013\u2014]|to)\s*(\d{1,2}:\d{2})\b")
+MAX_BYTES = 512 * 1024          # past this the file is compacted: resolved history moves to the archive
+KEEP_ROWS = 300                 # the newest rows a compaction keeps, beside every unresolved subject
 _LOCK = threading.Lock()
 
 
@@ -44,6 +48,34 @@ def _append(cdir, row):
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    try:
+        if p.stat().st_size > MAX_BYTES:
+            _compact(cdir)
+    except OSError:
+        pass
+
+
+def _compact(cdir):
+    """Keep every row of a subject still waiting for its actual, and the newest KEEP_ROWS rows; the rest (resolved
+    history) moves to forecasts-archive.jsonl. The active file stays small; nothing unresolved is lost."""
+    p = _path(cdir)
+    rows = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    done = {r.get("subject") for r in rows if r.get("type") == "actual"}
+    keep_idx = {i for i, r in enumerate(rows) if r.get("subject") not in done} | set(range(max(0, len(rows) - KEEP_ROWS), len(rows)))
+    keep = [r for i, r in enumerate(rows) if i in keep_idx]
+    moved = [r for i, r in enumerate(rows) if i not in keep_idx]
+    if moved:
+        with open(p.with_name("forecasts-archive.jsonl"), "a", encoding="utf-8") as fh:
+            for r in moved:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in keep), encoding="utf-8")
+    os.replace(str(tmp), str(p))
 
 
 def clock_epoch(text, now=None):
@@ -62,7 +94,33 @@ def clock_epoch(text, now=None):
     return t
 
 
-def note(cdir, subject, kind, text, basis="", now=None):
+def basis_of(text):
+    """The basis the forecast's own words state: own (the work's own estimate), typical (same-kind history),
+    provisional, none (no basis), or calculated."""
+    t = str(text or "").lower()
+    if "its own estimate" in t:
+        return "own"
+    if "typical" in t or "longer than usual" in t:
+        return "typical"
+    if "provisional" in t:
+        return "provisional"
+    if "no basis" in t or "no finish time" in t:
+        return "none"
+    return "calculated"
+
+
+def window(text, now=None):
+    """(low, high) epochs of the forecast's stated time - a range "14:10-14:30" kept as a range, one time as (t, t)."""
+    m = _RANGE.search(str(text or ""))
+    if m:
+        a, b = clock_epoch(m.group(1), now), clock_epoch(m.group(2), now)
+        if a and b:
+            return (a, b) if a <= b else (a, b + 86400)
+    t = clock_epoch(text, now)
+    return (t, t) if t else (None, None)
+
+
+def note(cdir, subject, kind, text, basis=None, now=None):
     """Record a forecast for ``subject`` (a job id or skill run id) when its text changed; a forecast with no clock
     time ("no basis ...") is recorded too - it is what John was told."""
     if not subject or not text:
@@ -77,9 +135,10 @@ def note(cdir, subject, kind, text, basis="", now=None):
                     break
             if last and last.get("text") == text:
                 return False
+            low, high = window(text, now)
             _append(cdir, {"type": "forecast", "subject": subject, "kind": kind, "milestone": MILESTONE,
-                           "issued_at": round(now, 1), "text": text, "forecast_epoch": clock_epoch(text, now),
-                           "basis": basis})
+                           "issued_at": round(now, 1), "text": text, "forecast_epoch": low, "forecast_high": high,
+                           "basis": basis or basis_of(text)})
             return True
     except Exception:
         return False
@@ -142,7 +201,9 @@ def accuracy(cdir):
         if not fc:
             continue
         last = fc[-1]
-        out.append({"subject": subject, "kind": last.get("kind"), "issued_at": last["issued_at"], "text": last["text"],
-                    "forecast_epoch": last["forecast_epoch"], "actual_epoch": act,
-                    "error_min": round((act - last["forecast_epoch"]) / 60.0, 1)})
+        low, high = last["forecast_epoch"], last.get("forecast_high") or last["forecast_epoch"]
+        err = 0.0 if low <= act <= high else ((act - high) if act > high else (act - low))   # inside the window: 0
+        out.append({"subject": subject, "kind": last.get("kind"), "basis": last.get("basis"), "issued_at": last["issued_at"],
+                    "text": last["text"], "forecast_epoch": low, "forecast_high": high, "actual_epoch": act,
+                    "error_min": round(err / 60.0, 1)})
     return out

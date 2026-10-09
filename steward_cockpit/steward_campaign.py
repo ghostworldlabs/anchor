@@ -945,6 +945,11 @@ def _halt_reason(text):
 def write_attention(campaign_dir, state, reason, failure_code=None, by="engine", job=None):
     """Atomic write of the ONE attention flag (the same shape the steward writes). ``job`` names the job a working
     or paused flag is about (W4, 2026-10-10) - the only kind of flag Anchor ever clears by itself."""
+    with _ATTENTION_LOCK:
+        return _write_attention_locked(campaign_dir, state, reason, failure_code, by, job)
+
+
+def _write_attention_locked(campaign_dir, state, reason, failure_code, by, job):
     f = Path(campaign_dir) / ".ecgberht" / "attention.json"
     f.parent.mkdir(parents=True, exist_ok=True)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -964,25 +969,48 @@ def write_attention(campaign_dir, state, reason, failure_code=None, by="engine",
     return rec
 
 
+_ATTENTION_LOCK = threading.Lock()   # write_attention and the stale-flag clearing never interleave
+
+
+def _named_job(campaign_dir, job):
+    """(kind, record) for a job id in this effort's code-jobs.json or skill-jobs.json; (None, None) when it is in
+    neither; raises when a record file exists but cannot be read (unknown is never "stopped")."""
+    for kind, name in (("code", "code-jobs.json"), ("skill", "skill-jobs.json")):
+        p = Path(campaign_dir) / ".ecgberht" / name
+        if not p.exists():
+            continue
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        rec = raw.get(job) if isinstance(raw, dict) else None
+        if isinstance(rec, dict):
+            return kind, rec
+    return None, None
+
+
 def clear_stale_job_flag(campaign_dir, now=None):
-    """W4 (2026-10-10): a "working" or "paused" flag is cleared ONLY when it names its job and that job is not
-    running (no running code job with that id; no running skill job with that id whose process is alive). A flag
-    that names no job is never cleared here - it stays the steward's to change, and the pane already says when
-    nothing is running. Returns the new flag, or None (no change). Never raises."""
+    """W4 (2026-10-10, review r1): a "working" or "paused" flag is cleared ONLY when it names its job, that job's own
+    record says it FINISHED or was STOPPED (a failed run is left for the halt escalation to say), and - for a skill
+    job - its process is gone. Anything unknown (no record, an unreadable record) leaves the flag alone. The write is
+    made only if the flag is still exactly the one read (no newer flag is ever overwritten). Returns the new flag, or
+    None (no change). Never raises."""
     try:
-        att, _err = _read_json(Path(campaign_dir) / ".ecgberht" / "attention.json")
-        if not isinstance(att, dict):
-            return None
-        state = str(att.get("state") or "").lower()
-        job = str(att.get("job") or "").strip()
-        if state not in ("working", "paused") or not job:
-            return None
-        if any(str(j.get("id")) == job for j in running_code_jobs(campaign_dir)):
-            return None
-        for k in running_skill_jobs(campaign_dir):
-            if str(k.get("id")) == job and _pid_alive(k.get("pid")):
+        f = Path(campaign_dir) / ".ecgberht" / "attention.json"
+        with _ATTENTION_LOCK:
+            att, _err = _read_json(f)
+            if not isinstance(att, dict):
                 return None
-        return write_attention(campaign_dir, "quiet", "", by="anchor: job %s is no longer running" % job)
+            state = str(att.get("state") or "").lower()
+            job = str(att.get("job") or "").strip()
+            if state not in ("working", "paused") or not job:
+                return None
+            kind, rec = _named_job(campaign_dir, job)
+            if rec is None or str(rec.get("status") or "") not in ("done", "stopped"):
+                return None
+            if kind == "skill" and _pid_alive(rec.get("pid")):
+                return None
+            again, _err = _read_json(f)
+            if again != att:
+                return None
+            return _write_attention_locked(campaign_dir, "quiet", "", None, "anchor: job %s finished" % job, None)
     except Exception:
         return None
 
@@ -1958,7 +1986,7 @@ def running_skill_jobs(campaign_dir):
     return [r for r in rows if isinstance(r, dict) and r.get("status") == "running"]
 
 
-def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_tests="", slice_started=None):
+def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_tests="", slice_started=None, skills=None):
     """(who, phase, started_epoch, tests, finish) - John's three lines' first and third, from records only."""
     now = time.time() if now is None else now
     st = engine_state or {}
@@ -1993,7 +2021,7 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
             finish = eta or finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)   # phase window
         return ("The steward is running %s on %s (%s) - %s - and is in charge of it" % (name, what, j["title"], phase),
                 phase, j.get("started_epoch"), tests, finish)
-    skills = running_skill_jobs(campaign_dir)
+    skills = running_skill_jobs(campaign_dir) if skills is None else skills   # W4 r1: the caller's own snapshot
     look_tests = (look or {}).get("tests") if (look or {}).get("tests") not in (None, "", "-", "\u2014") else ""
     if skills:
         k = skills[-1]
@@ -2279,8 +2307,10 @@ def compose_status(campaign_dir: str, engine_state=None):
             if feedback.get("at"):
                 events.append({"at":feedback["at"], "summary":"Feedback received for " + sl["title"]})
     latest_event = max(events, key=lambda event:event["at"]) if events else None
+    skills_now = running_skill_jobs(campaign_dir)      # ONE snapshot: the forecast and its subject come from it
     who, phase, work_started, tests_line, finish = who_is_working(
-        campaign_dir, st, jobs, look if live_skill else None, evidence_tests=local_evidence["tests"], slice_started=started)
+        campaign_dir, st, jobs, look if live_skill else None, evidence_tests=local_evidence["tests"], slice_started=started,
+        skills=skills_now)
     elapsed_line = ""
     if work_started:
         mins = int(max(0, time.time() - work_started) // 60)
@@ -2297,13 +2327,13 @@ def compose_status(campaign_dir: str, engine_state=None):
     try:
         from steward_cockpit import forecasts as _fc
         if jobs:
-            _fc.note(campaign_dir, "code:" + str(jobs[0].get("id")), "code_job", finish,
-                     basis="own" if "its own estimate" in finish else ("typical" if "typical" in finish else "none"))
-        else:
-            _sk = running_skill_jobs(campaign_dir)
-            if _sk:
-                _fc.note(campaign_dir, "skill:" + str(_sk[-1].get("id")), "skill_job", finish,
-                         basis="own" if "its own estimate" in finish else ("typical" if "typical" in finish else "none"))
+            _fc.note(campaign_dir, "code:" + str(jobs[0].get("id")), "code_job", finish)
+        elif skills_now:
+            _fc.note(campaign_dir, "skill:" + str(skills_now[-1].get("id")), "skill_job", finish)
+        elif live_skill and look and not look.get("final"):
+            # a run seen only through its own status log (no registered job): its subject is that log and its start
+            _fc.note(campaign_dir, "log:%s@%s" % (look.get("source"), int(look_started(campaign_dir, look) or 0)),
+                     "skill_log", finish)
         _fc.observe_finished(campaign_dir, _job_epoch)
     except Exception:
         pass
