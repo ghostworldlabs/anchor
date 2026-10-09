@@ -298,6 +298,14 @@ def foreman_settings(job):
     return d, None
 
 
+def _note_stuck(cdir, jid, why):
+    """Best effort (fcj review r6): the note is a diagnosis; failing to write it never changes what is kept."""
+    try:
+        _transition(cdir, jid, ("running",), stuck=why)
+    except Exception:
+        pass
+
+
 class _Uncontained(Exception):
     """A Foreman process that may be running outside its containment: the run is kept so it stays counted and Stop
     can still end it (fcj review r5)."""
@@ -375,7 +383,9 @@ class _Run:
 
 def _popen_contained(argv, cwd, env, out):
     """Start ``argv`` suspended, place it in a verified kill-on-close Job Object, then let it run (Windows); a process
-    group elsewhere. Never returns a process that runs outside its containment."""
+    group elsewhere. Never returns a process that runs outside its containment. Accepted residual (fcj review r6,
+    disclosed to John): if Anchor itself dies in the instant between the suspended start and the assignment, the
+    suspended process is left behind unaccounted - it never runs (only Anchor would resume it), so it cannot write."""
     if os.name != "nt":
         proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
                                 start_new_session=True)
@@ -498,7 +508,7 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
                 run = _popen_contained(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], str(wt), env, out)
             except _Uncontained as u:
                 _FOREMAN_PROCS[jid] = u.run              # still counted by the restart check; Stop ends it
-                _transition(cdir, jid, ("running",), stuck=str(u) + "; Stop ends it and releases the job")
+                _note_stuck(cdir, jid, str(u) + "; Stop ends it and releases the job")
                 raise _ForemanStuck(str(u))
             _FOREMAN_PROCS[jid] = run
     except _ForemanStuck:
@@ -519,8 +529,8 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
         if run.end(60):
             out.close()
             raise _ForemanRan(str(e))
-        _transition(cdir, jid, ("running",), stuck="Foreman's start failed after launch (%s) and its processes could "
-                    "not be seen to end; Stop ends them and releases the job" % e)
+        _note_stuck(cdir, jid, "Foreman's start failed after launch (%s) and its processes could not be seen to end; "
+                    "Stop ends them and releases the job" % e)
         raise _ForemanStuck("Foreman's start failed after launch (%s) and it could not be seen to end" % e)
 
 
@@ -539,8 +549,7 @@ def _wait_foreman(cdir, job, wt, run, out):
     finally:
         out.close()
     if not ended:
-        _transition(cdir, jid, ("running",),
-                    stuck="Foreman's processes could not be seen to end; Stop ends them and releases the job")
+        _note_stuck(cdir, jid, "Foreman's processes could not be seen to end; Stop ends them and releases the job")
         return
     _remove_foreman_config(wt)                      # gone before the inventory
     if jid in _FOREMAN_STOPPING:                    # Stop ended it: Stop records the job

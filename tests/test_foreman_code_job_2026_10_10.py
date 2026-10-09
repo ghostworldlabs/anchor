@@ -529,3 +529,30 @@ def test_the_brief_is_written_exactly_and_the_adapter_never_slices_it(tmp_path, 
     assert (tmp_path / "jobs" / "checks" / "nl-brief.md").read_bytes() == b"a\nb\n"
     src = (ROOT / "tools" / "steward_review.mjs").read_text(encoding="utf-8")
     assert ".slice(0, 16000)" not in src and "longer than the reviewer reads whole" in src
+
+
+# ---- fcj review r6 ----
+
+def test_a_note_that_cannot_be_written_never_lets_a_running_foreman_go(env, monkeypatch):
+    repo, cdir, _ = env
+    held = {}
+
+    def uncontained(argv, cwd, env_, out):
+        proc = subprocess.Popen(["node", "-e", "setTimeout(()=>{},600000)"], stdout=subprocess.DEVNULL)
+        held["run"] = code_jobs._Run(proc, None)
+        raise code_jobs._Uncontained(held["run"], "Foreman could not be contained (test)")
+    real = code_jobs._transition
+
+    def no_stuck_note(cdir_, jid, expect, **u):
+        if "stuck" in u:
+            raise OSError("the record is locked")
+        return real(cdir_, jid, expect, **u)
+    monkeypatch.setattr(code_jobs, "_popen_contained", uncontained)
+    monkeypatch.setattr(code_jobs, "_transition", no_stuck_note)
+    out = _start(repo, cdir)
+    assert not out["ok"] and "keeps its place" in out["error"]
+    assert code_jobs._FOREMAN_PROCS[out["job"]] is held["run"]
+    assert code_jobs.read_jobs(str(cdir))[out["job"]]["status"] == "running" and Path(out["worktree"] if "worktree" in out else code_jobs.read_jobs(str(cdir))[out["job"]]["worktree"]).is_dir()
+    monkeypatch.setattr(code_jobs, "_transition", real)
+    assert code_jobs.stop(str(cdir), out["job"], actor="John")["ok"] and held["run"].proc.poll() is not None
+    code_jobs._FOREMAN_PROCS.pop(out["job"], None)
