@@ -137,11 +137,22 @@ def start(cdir, argv, label=""):
     try:
         _write_job(cdir, job)
     except Exception as e:                      # spawned but unrecorded: end it, so nothing runs that nobody owns
+        _PROCS[job_id] = proc                   # counted by the restart check until it is SEEN to end (review r4)
         _kill_tree(proc)
         try:
             proc.wait(timeout=30)
         except Exception:
             pass
+        if proc.poll() is None:                 # it would not stop: keep it counted, and let a reaper drop it on exit
+            def reap():
+                try:
+                    proc.wait()
+                finally:
+                    out.close()
+                    _PROCS.pop(job_id, None)
+            threading.Thread(target=reap, name="skill-job-reap-" + job_id, daemon=True).start()
+            return {"ok": False, "error": "could not record the skill job (%s), and it did not stop when asked - it is "
+                                          "still counted as running until it ends (pid %s)" % (e, proc.pid)}
         out.close()
         _PROCS.pop(job_id, None)
         return {"ok": False, "error": "could not record the skill job, so it was stopped: %s" % e}

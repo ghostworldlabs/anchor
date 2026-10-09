@@ -128,3 +128,25 @@ def test_r3_a_start_that_fails_after_its_reservation_gives_the_reservation_back(
     before = set(skill_jobs._PROCS)
     out = skill_jobs.start(str(tmp_path), ["node", "x.mjs"])
     assert out["ok"] is False and set(skill_jobs._PROCS) == before
+
+
+def test_r4_an_unrecorded_child_that_will_not_stop_stays_counted_until_it_ends(monkeypatch, tmp_path):
+    import subprocess as sp
+    import sys as _sys
+    import time as _t
+    from steward_cockpit import maintenance
+    monkeypatch.setattr(maintenance, "is_active", lambda: False)
+    monkeypatch.setattr(skill_jobs, "validate", lambda argv: (True, ""))
+    monkeypatch.setattr(skill_jobs, "_write_job", lambda cdir, job: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(skill_jobs, "_kill_tree", lambda p: None)            # the kill does not land
+    real_wait = sp.Popen.wait
+    monkeypatch.setattr(sp.Popen, "wait", lambda self, timeout=None: real_wait(self, timeout=0.2 if timeout else None))
+    out = skill_jobs.start(str(tmp_path), [_sys.executable, "-c", "import time; time.sleep(1.5)"])
+    assert out["ok"] is False and "still counted" in out["error"]
+    assert any(not isinstance(p, skill_jobs._Reserved) and p.poll() is None for p in skill_jobs._PROCS.values())
+    for _ in range(50):
+        if not any(getattr(p, "pid", None) and p.poll() is None for p in list(skill_jobs._PROCS.values())):
+            break
+        _t.sleep(0.1)
+    _t.sleep(0.3)
+    assert not [k for k, p in skill_jobs._PROCS.items() if not isinstance(p, skill_jobs._Reserved)], "dropped once it ended"
