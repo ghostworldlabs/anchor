@@ -150,22 +150,24 @@ RESUME_QUIET = (
 JOIN_PICKUP = "\n\nJOHN SAYS (give the short pickup first, then answer this):\n"
 JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\n"
 
-# S7 (night 2026-10-10, John's Q3 slim design approved 10-09): once the hold lifts (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 -
-# not yet the default: Foreman must first run through the protected code-job lifecycle), the steward SIZES the work and
-# Foreman and Crucible run slim from Anchor. While held, the hold sentence stands.
+# S7 (night 2026-10-10, John's Q3 slim design approved 10-09) and the Foreman code job (2026-10-09, John: "route
+# Foreman through the code-job path"): the steward SIZES the work. Foreman runs only as a code job (its own worktree,
+# a passing check, another family's review, the safe landing), slim unless John names standard. Crucible keeps its
+# hold (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it): until then the steward writes the plan of waves itself.
 def _size_or_hold():
-    if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0":   # held by default (final review 10-10)
-        return "Foreman and Crucible are on hold. "
+    crucible = ("Crucible is on hold, so you write that plan yourself. "
+                if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0" else
+                "Crucible may write that plan as a skill job, on John's word. ")
     return (
         "SIZE THE WORK first and say the size in one line with why: SMALL (reversible, about three files or fewer) is a "
-        "code job - its coder writes, one reviewer of another family checks it with a simple elegance check, and it "
-        "lands when that passes; never Crucible or Foreman for it. A FEATURE is Crucible slim, then Foreman slim, each "
-        "a skill job: `python C:/dev/Anchor/tools/steward_skill.py start --label \"plan: <what>\" -- node "
-        "C:/dev/trio/crucible/bin/slim.mjs <a folder for the plan> --task \"<the work>\"`; show John the plan and its "
-        "one review, change it on his word, and only on his approval build it: `python "
-        "C:/dev/Anchor/tools/steward_skill.py start --label \"build: <what>\" -- node "
-        "C:/dev/trio/foreman/bin/run-live.mjs <the project> --git` (Anchor runs Foreman slim). A MULTI-PART project "
-        "(several features, high stakes) uses Crucible and Foreman standard (--profile standard) - only on John's word. "
+        "code job - its coder writes, one reviewer of another family checks it, and it lands when that passes. A "
+        "FEATURE (several files, worth a plan of waves) is a FOREMAN code job: write the plan in your folder (`## Wave "
+        "N` sections, each saying what it builds and how it is tested); " + crucible + "Show John the plan, change it "
+        "on his word, and only on his approval start it: `python C:/dev/Anchor/tools/steward_code_job.py start "
+        "--worker foreman --repo <repo> --brief-file <brief> --plan-file <plan> --check \"<the test command>\"` - "
+        "Foreman builds it slim in the job's own worktree, and it lands like any code job, only after the check and "
+        "another family's review pass. A MULTI-PART project (several features, high stakes) adds --profile standard, "
+        "only on John's word. Never start Foreman as a skill job. "
     )
 
 
@@ -713,7 +715,7 @@ FENCE_ALLOWED_TOOLS = (
 FENCE_NOTE = (
     " YOUR FENCE: you read anywhere, but you write only inside this effort folder, and your shell runs only the two "
     "hand-off tools and read-only git. Any change outside this folder is a code job (the tool above). A Foundry skill "
-    "(Gandalf, researchPrime, Crucible, Foreman, ...) runs as a SKILL JOB the server starts outside your fence: "
+    "(Gandalf, researchPrime, ...; Foreman is always a code job) runs as a SKILL JOB the server starts outside your fence: "
     "`python C:/dev/Anchor/tools/steward_skill.py start --label \"<what it is for>\" -- node <the skill's run script> "
     "[args]` - it wakes you with the result and its log. Put a long brief, or one with quotes, $ or backslashes, in a "
     "file in your folder and pass --brief-file. Say in one line what you sent off; never try to work around the fence. "

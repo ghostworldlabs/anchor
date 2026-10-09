@@ -484,6 +484,11 @@ def _running_job_ids():
         ids += ["skill:" + str(k) for k, p in list(_skj._PROCS.items()) if p.poll() is None]
     except Exception:
         ids.append("skill:unreadable")
+    try:                         # a Foreman code job's process counts until it is seen to end, even after its Stop
+        from steward_cockpit import code_jobs as _cjf
+        ids += ["foreman:" + str(k) for k, p in list(_cjf._FOREMAN_PROCS.items()) if p.poll() is None]
+    except Exception:
+        ids.append("foreman:unreadable")
     # 2026-10-07: a steward code job (Foreman in its own worktree) is a child of this server too; the drained
     # restart once fired mid-job because only job_runner records counted. The busy ledger names every live one.
     try:
@@ -1782,7 +1787,8 @@ def handle_post(cdir, verb, body):
                             engine_factory=lambda wt: get_engine(wt, general=True, tid="1"),
                             steward=(eng.steward if eng else ""), coder=str(body.get("coder") or ""),
                             actor=str(body.get("actor") or "the steward"), skill=str(body.get("skill") or ""),
-                            outputs=body.get("outputs") or [])
+                            outputs=body.get("outputs") or [], worker=str(body.get("worker") or "coder"),
+                            plan=str(body.get("plan") or ""), profile=str(body.get("profile") or "slim"))
             if out.get("ok") and eng is not None:
                 what = ("%s job" % str(body.get("skill")).strip()) if str(body.get("skill") or "").strip() else "code job"
                 eng._emit({"t": "sys", "text": "%s %s started on %s - coder %s, in its own worktree; it lands only "

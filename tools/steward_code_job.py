@@ -3,6 +3,7 @@ conversation whose folder is the current directory. A code job is a coder on the
 worktree of --repo; it lands its work when clean and wakes this steward with the result.
 
   python C:/dev/Anchor/tools/steward_code_job.py start --repo C:/dev/Anchor --brief-file brief.md [--check "<cmd>"]
+  python C:/dev/Anchor/tools/steward_code_job.py start --worker foreman --repo <repo> --brief-file brief.md --check "<test command>" [--plan-file PLAN.md] [--profile slim|standard]
   python C:/dev/Anchor/tools/steward_code_job.py stop [--job <id>]
   python C:/dev/Anchor/tools/steward_code_job.py list
 """
@@ -41,6 +42,10 @@ def main():
     ap.add_argument("--skill", default="", help="the skill this job runs (e.g. Chekhov), so the status names it")
     ap.add_argument("--output", action="append", default=[],
                     help="a file this job will PRODUCE (e.g. a render), named up front so it may land; repeatable")
+    ap.add_argument("--worker", default="coder", choices=("coder", "foreman"),
+                    help="foreman: Foreman builds it in the job's worktree, gated by --check (a test command)")
+    ap.add_argument("--plan-file", default="", help="Foreman: the plan John approved (## Wave N sections)")
+    ap.add_argument("--profile", default="slim", choices=("slim", "standard"), help="Foreman: slim unless John said standard")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args()
     pid, rel = project_for(os.getcwd())
@@ -51,7 +56,8 @@ def main():
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
         body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
-                    outputs=a.output)
+                    outputs=a.output, worker=a.worker, profile=a.profile,
+                    plan=Path(a.plan_file).read_text(encoding="utf-8") if a.plan_file else "")
     if a.action == "stop":
         body["actor"] = "the steward"
     if a.job:

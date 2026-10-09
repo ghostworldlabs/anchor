@@ -62,7 +62,10 @@ def validate(argv):
     if not script.is_file():
         return False, "no such script: %s" % argv[1]
     from steward_cockpit import code_jobs as _cj
-    if _cj.foreman_crucible_held() and any(part.lower() in ("foreman", "crucible") for part in script.parts):
+    parts = [part.lower() for part in script.parts]
+    if "foreman" in parts:          # 2026-10-09: Foreman writes a project, so it runs only as a code job, never here
+        return False, _cj.FOREMAN_AS_SKILL
+    if _cj.foreman_crucible_held() and "crucible" in parts:
         return False, _cj.HOLD_REASON
     for root in skill_roots():
         try:
@@ -75,19 +78,6 @@ def validate(argv):
 
 def running(cdir):
     return [j for j in read_jobs(cdir).values() if j.get("status") == "running"]
-
-
-def with_profile(argv):
-    """S7 (night 2026-10-10): Foreman started from Anchor runs SLIM unless the steward named a profile (John's word
-    for a multi-part project: --profile standard)."""
-    try:
-        script = Path(argv[1])
-    except (IndexError, TypeError):
-        return argv
-    if (script.name.lower() == "run-live.mjs" and "foreman" in (p.lower() for p in script.parts)
-            and "--profile" not in argv):
-        return list(argv) + ["--profile", "slim"]
-    return argv
 
 
 class _Reserved:
@@ -103,7 +93,6 @@ def start(cdir, argv, label=""):
     ok, why = validate(argv)
     if not ok:
         return {"ok": False, "error": why}
-    argv = with_profile(argv)
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     _PROCS[job_id] = _Reserved()
     try:

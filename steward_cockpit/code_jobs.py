@@ -17,8 +17,8 @@ record field and a line to the steward.
 
 Execution minimum item 3 (PROPOSAL v1.1, 2026-10-07) - one commit: preservation, safe checks, the Foreman/Crucible
 hold, and the review gate.
-- HOLD: a code job is always a coder; Foreman never starts from here (nor Crucible) until John lifts the hold after a
-  separate best-in-class review (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0). This claims Anchor's managed entries only.
+- HOLD: Crucible never starts from Anchor's managed entries until John lifts the hold (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0).
+  Foreman starts ONLY as a code job's worker (2026-10-09): in the job's worktree, through this same finish.
 - CHECKS: an argument list, or the full command text run from a temp script - never cut, never re-quoted - in the
   job's OWN tree; the live tree is touched only by the landing itself.
 - MANIFEST: only the paths the coder's tools wrote are staged and placed (no ``git add -A``); any other changed path
@@ -185,16 +185,162 @@ def _repo_root(path):
 
 # ── The Foreman/Crucible hold (execution minimum item 3) ────────────────────────────────────────────────────────────
 def foreman_crucible_held():
-    """True while Foreman and Crucible may not start from Anchor's managed entries (John's binding, 2026-10-07).
-    His approval of the slim design (2026-10-09) does not lift it yet: the final review of the night of 2026-10-10
-    found that Foreman started as a skill job would write the project directly, outside the protected code-job
-    lifecycle (own worktree, one writer, reviewed landing). It lifts when Foreman runs through that lifecycle.
-    ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it by hand."""
+    """True while Crucible (and the job runner's plan/build lanes) may not start from Anchor's managed entries (John's
+    binding, 2026-10-07). Foreman is not held by it: it runs only as a code job's worker, inside the protected
+    lifecycle (own worktree, one writer, reviewed landing) - the path the final review of 2026-10-10 asked for - and
+    never as a skill job. ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts the rest by hand."""
     return os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0"
 
 
-HOLD_REASON = ("Foreman and Crucible are on hold in Anchor until their best-in-class review (John, 2026-10-07); "
-               "a code job is a coder in its own worktree, and Anchor did not start Foreman or Crucible")
+HOLD_REASON = ("Crucible, and Foreman outside a code job, are on hold in Anchor (John, 2026-10-07); Foreman runs as a "
+               "code job (steward_code_job.py start --worker foreman), and Anchor did not start this")
+FOREMAN_AS_SKILL = ("Foreman runs only as a code job (its own worktree, one writer, a passing check, another family's "
+                    "review, the safe landing): python C:/dev/Anchor/tools/steward_code_job.py start --worker foreman "
+                    "--repo <repo> --brief-file <brief> --check \"<test command>\" [--plan-file <plan>]")
+
+
+# ── Foreman as a code job's worker (John 2026-10-09: "route Foreman through the code-job path") ─────────────────────
+# The final review of the night of 2026-10-10 held Foreman because, started as a skill job, it wrote the project
+# directly. Here it builds INSIDE the job's worktree, exactly where a coder would, and its result goes through the same
+# finish: the job's own check, a review by a family that wrote none of it, and the locked, verified landing. Foreman
+# runs without --git (the job commits); its documents and foreman.config.json are Anchor's, written in the worktree and
+# never landed. Its sub-agents are not held to the worktree by a fence, so - like any unconfined coder - it never runs
+# on Anchor's own code unless ANCHOR_UNCONFINED_CODERS=1, and a write into the source repository blocks the landing.
+FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
+                        (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
+FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(6 * 3600)))
+FOREMAN_PROFILES = ("slim", "standard")
+FOREMAN_DIR = ".foreman-job"
+_FOREMAN_PROCS = {}
+_DRIVER_FAMILY = {"claude": "claude", "chatgpt-cli": "chatgpt", "codex": "chatgpt", "openai": "chatgpt",
+                  "grok-cli": "grok", "grok": "grok", "gemini-cli": "gemini", "gemini": "gemini"}
+
+
+def foreman_code_jobs_on():
+    """Foreman code jobs are on by default; ANCHOR_FOREMAN_CODE_JOBS=0 turns them off."""
+    return os.environ.get("ANCHOR_FOREMAN_CODE_JOBS", "1").strip() != "0"
+
+
+def check_text(check):
+    """The check as one command line (Foreman's plan declares its gate as text)."""
+    return subprocess.list2cmdline(check) if isinstance(check, list) else str(check or "").strip()
+
+
+def foreman_docs(job, plan_text=""):
+    """(description, plan, execution log): Foreman's three documents. A plan John approved is used as written (its
+    test command is the job's check unless it names one); without one, the brief is a single wave gated by the check."""
+    check = check_text(job["check"])
+    title = next((ln.strip().lstrip("#").strip() for ln in job["brief"].splitlines() if ln.strip()), "the change")[:120]
+    description = "# Code job %s - description\n\n%s\n" % (job["id"], job["brief"])
+    if plan_text.strip():
+        plan = plan_text if re.search(r"(?im)^\s*(test[-_ ]?command|build[-_ ]?and[-_ ]?test|gate[-_ ]?command)\s*[:=]",
+                                      plan_text) else "test-command: `%s`\n\n%s" % (check, plan_text)
+    else:
+        brief = "\n".join(ln.lstrip("#").strip() if ln.lstrip().startswith("#") else ln for ln in job["brief"].splitlines())
+        plan = ("# Code job %s - Implementation Plan\n\n**North Star:** %s\n\ntest-command: `%s`\n\n"
+                "## Wave 1 - %s\n\n%s\n\nDone when: `%s` passes and the change is reached by a test.\n") % (
+            job["id"], title, check, title, brief, check)
+    return description, plan, "# Code job %s - execution log\n" % job["id"]
+
+
+def foreman_plan_ok(plan_text):
+    """'' when a plan has the wave structure Foreman needs, else why not."""
+    if plan_text and not re.search(r"(?m)^##\s+Wave\s+\d+", plan_text):
+        return "the plan has no '## Wave N' sections, so Foreman cannot build it"
+    return ""
+
+
+def foreman_authors(status_text):
+    """The families that WROTE (execute and fix), from Foreman's own 'model routing:' line; [] when it cannot say."""
+    m = None
+    for m in re.finditer(r"model routing:\s*(.+)", status_text or ""):
+        pass
+    if not m:
+        return []
+    seats = dict(re.findall(r"\b(execute|review|fix)=([A-Za-z0-9_-]+)", m.group(1)))
+    fams = []
+    for role in ("execute", "fix"):
+        fam = _DRIVER_FAMILY.get(str(seats.get(role) or "").lower())
+        if not fam:
+            return []                       # a seat it cannot name: no record of the author, so it never lands
+        if fam not in fams:
+            fams.append(fam)
+    return fams
+
+
+def foreman_result(wt):
+    """Foreman's run as the job's result: DONE -> its waves; anything else (HALT, BUDGET-STOP, no record) -> an error."""
+    d = Path(wt)
+    try:
+        rec = json.loads((d / ".foreman" / "run-record.json").read_text(encoding="utf-8"))
+    except Exception:
+        rec = {}
+    try:
+        status_log = (d / "_foreman-status.log").read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        status_log = ""
+    status = str(rec.get("status") or "")
+    waves = "; ".join("wave %s %s" % (w.get("wave"), w.get("status")) for w in (rec.get("waves") or []) if isinstance(w, dict))
+    text = "Foreman %s%s" % (status or "ended without a run record", (": " + waves) if waves else "")
+    out = {"text": text[:1500], "authors": foreman_authors(status_log), "foreman_status": status}
+    if status != "DONE":
+        why = str(rec.get("halt_reason") or rec.get("taxonomy") or "no run record")
+        out["error"] = "Foreman %s: %s" % (status or "did not finish", why[:400])
+    return out
+
+
+def foreman_manifest(wt, base):
+    """Foreman writes through its sub-agents, which report no file list: in its own worktree, every changed path
+    (minus runtime records and what never lands) is its work - still checked, reviewed and verified."""
+    return [p for p in (changed_paths(wt, base) or []) if not never_lands(p) and not _runtime(p)]
+
+
+def _start_foreman(cdir, job, wt, plan_text, profile):
+    """Write Foreman's documents (never landed), start it in the worktree, and finish the job when it ends."""
+    d = Path(wt) / FOREMAN_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    desc, plan, log = foreman_docs(job, plan_text)
+    (d / "DESCRIPTION.md").write_text(desc, encoding="utf-8")
+    (d / "IMPLEMENTATION-PLAN.md").write_text(plan, encoding="utf-8")
+    (d / "EXECUTION-LOG.md").write_text(log, encoding="utf-8")
+    cfg = Path(wt) / "foreman.config.json"
+    cfg.write_text(json.dumps({"docs": {"description": FOREMAN_DIR + "/DESCRIPTION.md",
+                                        "plan": FOREMAN_DIR + "/IMPLEMENTATION-PLAN.md",
+                                        "execution_log": FOREMAN_DIR + "/EXECUTION-LOG.md"}}), encoding="utf-8")
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)          # subscription billing, as every skill launcher does
+    env["CRUCIBLE_AGENT_LIVE"] = "1"
+    env["FOREMAN_PROFILE"] = profile
+    out = open(d / "foreman-run.log", "w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(["node", str(FOREMAN_RUN_LIVE), str(wt), "--profile", profile], cwd=str(wt),
+                                stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+    except Exception:
+        out.close()
+        raise
+    _FOREMAN_PROCS[job["id"]] = proc
+
+    def wait():
+        try:
+            try:
+                proc.wait(timeout=FOREMAN_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
+                proc.wait()
+        finally:
+            out.close()
+            _FOREMAN_PROCS.pop(job["id"], None)
+        result = foreman_result(wt)
+        if result.get("error") is None and proc.returncode not in (0, None):
+            result["error"] = "Foreman exited %s" % proc.returncode
+        try:
+            cfg.unlink()                        # Anchor's own file, never the project's: gone before the inventory
+        except OSError:
+            pass
+        result["manifest"] = foreman_manifest(wt, job["base"])
+        finish(cdir, job["id"], result)
+    threading.Thread(target=wait, name="foreman-job-" + job["id"], daemon=True).start()
 
 
 # ── Seats: the coder's family, never the model preferences ─────────────────────────────────────────────────────────
@@ -631,19 +777,39 @@ def declared_outputs(outputs):
     return out, None
 
 
-def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None):
+def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None,
+          worker="coder", plan="", profile="slim"):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
-    family choice (else the Coder seat); ``check`` is an argument list or the full command text."""
+    family choice (else the Coder seat); ``check`` is an argument list or the full command text. ``worker="foreman"``
+    builds the brief (or the approved ``plan``) with Foreman in the same worktree, gated by the check (2026-10-09)."""
     brief = str(brief or "").strip()
     if not brief:
         return {"ok": False, "error": "a code job needs a brief"}
     check, why = normalize_check(check)
     if why:
         return {"ok": False, "error": why}
-    family, why = choose_coder(coder)
-    if why:
-        return {"ok": False, "error": why}
+    worker = str(worker or "coder").strip().lower()
+    plan, profile = str(plan or ""), str(profile or "slim").strip().lower()
+    if worker == "foreman":
+        if not foreman_code_jobs_on():
+            return {"ok": False, "error": "no job started: Foreman code jobs are off (ANCHOR_FOREMAN_CODE_JOBS=0)"}
+        if not check:
+            return {"ok": False, "error": "no job started: Foreman needs the test command it builds to (--check)"}
+        if profile not in FOREMAN_PROFILES:
+            return {"ok": False, "error": "no job started: the Foreman profile is slim or standard, not %s" % profile}
+        why = foreman_plan_ok(plan)
+        if why:
+            return {"ok": False, "error": "no job started: %s" % why}
+        if not FOREMAN_RUN_LIVE.is_file():
+            return {"ok": False, "error": "no job started: Foreman is not at %s" % FOREMAN_RUN_LIVE}
+        family = ""                              # Foreman's seats write; the authors come from its own routing line
+    elif worker == "coder":
+        family, why = choose_coder(coder)
+        if why:
+            return {"ok": False, "error": why}
+    else:
+        return {"ok": False, "error": "a code job's worker is a coder or foreman, not %s" % worker}
     outputs, why = declared_outputs(outputs)
     if why:
         return {"ok": False, "error": why}
@@ -667,7 +833,10 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                 # once he accepts that (ANCHOR_SERVED_CODE_JOBS=1); until then none start (Grok's final review)
                 return {"ok": False, "error": "no job started: code jobs on Anchor's own code are off until John turns them "
                         "on (ANCHOR_SERVED_CODE_JOBS=1) - a coder's shell cannot yet be held to its worktree"}
-            if anchor_next.is_served_repo(root) and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
+            if anchor_next.is_served_repo(root) and worker == "foreman" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
+                return {"ok": False, "error": "no job started: Foreman's sub-agents cannot be confined to the worktree "
+                        "under the service, so a change to Anchor's own code uses a Claude coder"}
+            if anchor_next.is_served_repo(root) and worker == "coder" and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
                 # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
                 # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox
                 # cannot start a shell there) - so Anchor's own code goes to a Claude coder (John's choice in the
@@ -684,6 +853,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         code, base, err = _git(land_to or root, "rev-parse", "HEAD")
         if code != 0:
             return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
+        if worker == "foreman":                  # Anchor writes foreman.config.json in the worktree: never over the project's
+            code, tracked, _ = _git(land_to or root, "ls-tree", "--name-only", base, "--", "foreman.config.json")
+            if code != 0 or tracked.strip():
+                return {"ok": False, "error": "no job started: %s keeps its own foreman.config.json, which a Foreman code "
+                        "job would replace; run Foreman there by hand" % root}
         code, _, err = _git(root, "worktree", "add", "-b", branch, str(wt), base, timeout=600)
         if code != 0:
             return {"ok": False, "error": "could not make the worktree: %s" % err[:300]}
@@ -693,13 +867,15 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
                "repo_dirt": served_dirt,
                "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
-               "steward_dir": str(cdir), "steward": steward, "worker": "coder", "coder_family": family,
+               "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
                "started_by": str(actor or "the steward")}
         # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
         # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
         label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
         if label:
             job["skill"] = label
+        if worker == "foreman":
+            job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
         _write_job(cdir, job)
         b = _busy_read()
         b[_norm(root)] = {"job": job_id, "cdir": str(cdir)}
@@ -709,6 +885,16 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     terms.parent.mkdir(parents=True, exist_ok=True)
     terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
     _exclude_local(wt)
+    if worker == "foreman":
+        try:
+            _start_foreman(cdir, job, wt, plan, profile)
+        except Exception as e:
+            j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                            error="Foreman could not start: %s" % e)
+            _cleanup(j or job, keep_branch=False)
+            return {"ok": False, "error": "Foreman could not start: %s" % e, "job": job_id}
+        return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "foreman",
+                "coder": "Foreman (%s)" % profile}
     try:
         eng = engine_factory(str(wt)) if engine_factory else None
         if eng is None:
@@ -1311,6 +1497,9 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
             eng.stop()
     except Exception:
         pass
+    proc = _FOREMAN_PROCS.get(job["id"])            # a Foreman job: its whole process tree ends (its wait() sees it go)
+    if proc is not None:
+        _kill_tree(proc)
     served = _served_tree_changes(job)              # the finish will not run: audit the source repository here
     if served:
         _transition(cdir, job["id"], ("stopped",), served_tree_changed=served,

@@ -16,8 +16,10 @@ def held(monkeypatch):
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
 
 
-def test_the_code_job_has_no_foreman_worker_and_no_regex_dispatch():
-    for gone in ("is_test_gate", "_TEST_GATE", "_start_foreman", "foreman_docs", "foreman_result", "FOREMAN_ON"):
+def test_no_regex_dispatch_picks_foreman_by_itself():
+    # 2026-10-09: Foreman is a code job's worker only when the steward asks for it (--worker foreman), never chosen by
+    # matching the check (the 2026-10-05 regex dispatch stays gone)
+    for gone in ("is_test_gate", "_TEST_GATE", "FOREMAN_ON"):
         assert not hasattr(cj, gone), gone
 
 
@@ -37,9 +39,10 @@ def test_skill_jobs_refuse_a_foreman_or_crucible_script(held, tmp_path, monkeypa
         (root / name / "bin").mkdir(parents=True)
         (root / name / "bin" / "run.mjs").write_text("", encoding="utf-8")
     monkeypatch.setattr(skill_jobs, "skill_roots", lambda: [root])
-    for name in ("foreman", "crucible"):
-        ok, why = skill_jobs.validate(["node", str(root / name / "bin" / "run.mjs")])
-        assert not ok and "on hold" in why
+    ok, why = skill_jobs.validate(["node", str(root / "crucible" / "bin" / "run.mjs")])
+    assert not ok and "on hold" in why
+    ok, why = skill_jobs.validate(["node", str(root / "foreman" / "bin" / "run.mjs")])
+    assert not ok and "only as a code job" in why
     assert skill_jobs.validate(["node", str(root / "gandalf" / "bin" / "run.mjs")]) == (True, "")
 
 
@@ -47,6 +50,6 @@ def test_lifting_the_hold_is_one_explicit_switch(monkeypatch):
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1")
     assert cj.foreman_crucible_held()
     monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD")
-    assert cj.foreman_crucible_held(), "held by default (final review 2026-10-10: Foreman is not yet on the protected path)"
+    assert cj.foreman_crucible_held(), "Crucible stays held by default (Foreman runs only as a code job, 2026-10-09)"
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
     assert not cj.foreman_crucible_held()
