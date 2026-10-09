@@ -159,8 +159,10 @@ SMALL_DUTY = (
     "CODE - any change to an Anchor application file or any program's code - goes to a code job in its own "
     "worktree, never into the served tree: say the plan in a few lines first, and for a major coding effort wait "
     "for John's approval before starting it; then run `python C:/dev/Anchor/tools/steward_code_job.py start --repo "
-    "<the repo that owns the files> --brief-file <brief.md> [--check \"<the command that proves it>\"]` and tell "
-    "John in one line. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
+    "<the repo that owns the files> --brief-file <brief.md> [--check \"<the command that proves it>\"] [--output "
+    "<path> ...]` and tell John in one line. Name with --output (repeat it, up to 80) every file a command will "
+    "PRODUCE - a render, a PDF, a built figure - exactly as a path in the repo; only what the coder's tools write or "
+    "you name up front can land. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
     "lands only when that review passes; it wakes you with the result - report it in two or three sentences. While "
     "a code job runs on a repository, do not write there yourself. When John says stop, run `python "
     "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator, a verify script or a Foreman run; "
@@ -172,7 +174,8 @@ SMALL_DUTY = (
 EFFORT_DUTY = (
     "THIS IS AN EFFORT: the plan discipline below applies in full. Code goes to a code job in its own worktree "
     "(`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file <brief.md> [--check "
-    "\"<cmd>\"]`; another family reviews it before it lands) and you tell John in one line; do not write in a "
+    "\"<cmd>\"] [--output <path> ...]`, naming every file a command will produce; another family reviews it before "
+    "it lands) and you tell John in one line; do not write in a "
     "repository while a code job owns it. Foreman and Crucible are on hold. "
 )
 

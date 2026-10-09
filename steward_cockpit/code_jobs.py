@@ -442,6 +442,36 @@ def dirty_snapshot(repo):
     return snap
 
 
+MAX_OUTPUTS = 80      # W1 (2026-10-09): exact paths named before the job starts; more is refused, never cut short
+
+
+def _runtime(path):
+    """A steward's runtime record (git_safety.is_runtime_path - the one rule): it never refuses a job and never enters
+    its commit; a dirty one keeps the worktree. Fails closed (not runtime) when git_safety cannot be read."""
+    try:
+        import git_safety as _gs
+        return bool(_gs.is_runtime_path(str(path).replace(" (ignored by git)", "").replace(chr(92), "/")))
+    except Exception:
+        return False
+
+
+def _not_runtime(paths):
+    return [p for p in paths if not _runtime(p)]
+
+
+def declare_hint(path):
+    """The declaration line that would admit ``path`` (a refusal is actionable, W1) - only when declared_outputs
+    would accept it; otherwise why it cannot be declared."""
+    p = str(path).replace(" (ignored by git)", "")
+    ok, why = declared_outputs([p])
+    return ("declare it: --output %s" % ok[0]) if ok else ("cannot be declared: %s" % why)
+
+
+def refusal_detail(paths, limit=12):
+    shown = ["%s [%s]" % (p, declare_hint(p)) for p in paths[:limit]]
+    return "; ".join(shown) + (" ..." if len(paths) > limit else "")
+
+
 _BOOKKEEPING = re.compile(r"^(?:\.anchor/|\.ecgberht/|\.foreman-job/|\.foreman/|_foreman-status\.log$|foreman-checkpoint\.json$)"
                           r"|(?:^|/)__pycache__/|(?:^|/)\.pytest_cache/|\.pyc$")
 
@@ -571,9 +601,10 @@ def _kill_tree(proc):
 
 def declared_outputs(outputs):
     """([relative paths], None) or (None, why): the files a job names up front as its outputs (W2, 2026-10-08) - a
-    plain path inside the repository, never a runtime record, never foreman.config.json, at most 40."""
+    plain path inside the repository, never a runtime record, never foreman.config.json, at most MAX_OUTPUTS (80).
+    The whole declaration is validated; it is never cut short (W1, 2026-10-09)."""
     out = []
-    for raw in list(outputs or [])[:41]:
+    for raw in list(outputs or []):
         p = str(raw or "").strip().replace(chr(92), "/")
         if not p:
             continue
@@ -586,13 +617,14 @@ def declared_outputs(outputs):
         try:
             import git_safety as _gs
             if _gs.is_runtime_path(p) or never_lands(p) or _RECORDS.search(p):
-                return None, "a declared output may not be a runtime record or foreman.config.json: %s" % p
+                return None, ("a declared output may not be a runtime record, a cockpit record (ECGBERHT, DELIVERABLES, "
+                              "STATUS, strip, roadmap, journal) or foreman.config.json: %s" % p)
         except Exception:
             return None, "the declared outputs could not be checked"
         if p not in out:
             out.append(p)
-    if len(out) > 40:
-        return None, "at most 40 declared outputs"
+    if len(out) > MAX_OUTPUTS:
+        return None, "at most %d declared outputs (%d named)" % (MAX_OUTPUTS, len(out))
     return out, None
 
 
@@ -781,27 +813,28 @@ def _finish(cdir, job_id, job, result):
         # W2 (2026-10-08): only what the coder's tools recorded writing lands - plus a file the job named up front as
         # its declared output (a render a script made), still reviewed; the exclusions hold for both
         allowed = {p for p in manifest + list(job.get("outputs") or []) if not never_lands(p)}
-        unexpected = [p for p in changed if p not in allowed]
-        files = [p for p in changed if p in allowed]
+        unexpected = [p for p in changed if p not in allowed and not _runtime(p)]     # W1: runtime never refuses
+        files = [p for p in changed if p in allowed and not _runtime(p)]              # ... and never lands
         fields.update(unexpected=unexpected, files=files)
         status, error = ("failed" if err else "done"), err
         if err:
             note = "not landed: the coder's turn ended in an error; the work is kept at %s" % wt
         elif unexpected:
             note = ("not landed: %d changed path(s) the coder's tools did not write (%s); everything is kept at %s"
-                    % (len(unexpected), ", ".join(unexpected[:12]) + (" ..." if len(unexpected) > 12 else ""), wt))
+                    % (len(unexpected), refusal_detail(unexpected), wt))
         elif not files:
             note = "not landed: nothing the coder wrote changed; the worktree is kept at %s" % wt
         else:
             fields["check_ok"], fields["check_output"] = run_check(job, wt)
             after = changed_paths(wt, job["base"])
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
+            late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
             made = [x for x in late if x in set(job.get("outputs") or []) and not never_lands(x)]
             if made:                                     # a declared output the check produced lands with the rest (W2)
                 files = files + made
                 fields["files"] = files
                 late = [x for x in late if x not in made]
-            late += [p + " (ignored by git)" for p in ignored_outputs(wt)]
+            late += [p + " (ignored by git)" for p in _not_runtime(ignored_outputs(wt))]
             served = _served_tree_changes(job)
             if late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
@@ -813,7 +846,7 @@ def _finish(cdir, job_id, job, result):
             elif late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
                 note = ("not landed: the check or the coder left changes outside the coder's own files (%s); everything "
-                        "is kept at %s" % (", ".join(late[:12]), wt))
+                        "is kept at %s" % (refusal_detail(late), wt))
             elif served:
                 fields["served_tree_changed"] = served
                 note = ("not landed: %s changed during the job outside the landing (%s) - something wrote into it "
@@ -906,6 +939,7 @@ def dirty_snapshot_paths(repo, paths):
 
 def _commit_manifest(wt, job, files):
     """Stage ONLY the coder's own changed paths, by literal path, and commit them on the job's branch."""
+    files = _not_runtime(files)
     present = [p for p in files if (Path(wt) / p).exists()]
     gone = [p for p in files if p not in present]
     if present:
@@ -916,9 +950,17 @@ def _commit_manifest(wt, job, files):
         code, _, err = _git(wt, "--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", *gone, timeout=600)
         if code != 0:
             return "git rm failed: " + err[:250]
-    code, staged, err = _git(wt, "diff", "--cached", "--name-only", timeout=600)
+    code, staged, err = _git(wt, "-c", "core.quotepath=false", "diff", "--cached", "--name-only", timeout=600)
     if code != 0:
         return "git diff failed: " + err[:250]
+    held = [s for s in staged.splitlines() if s.strip() and _runtime(s)]
+    if held:                                             # W1: kept in the worktree, absent from the commit
+        code, _, err = _git(wt, "--literal-pathspecs", "reset", "-q", "--", *held, timeout=600)
+        if code != 0:
+            return "git reset of runtime records failed: " + err[:250]
+        code, staged, err = _git(wt, "diff", "--cached", "--name-only", timeout=600)
+        if code != 0:
+            return "git diff failed: " + err[:250]
     if staged:
         code, out, err = _git(wt, "commit", "-q", "-m", "Code job %s for the steward\n\n%s" % (job["id"], job["brief"][:600]),
                               timeout=600)
@@ -1000,11 +1042,11 @@ def land(job, files):
         if code_h != 0 or now_head != cand:           # something committed after the review: never place an older candidate
             return False, ("not landed: the job's branch moved after review (%s, reviewed %s); everything is kept at %s"
                            % (now_head[:12], cand[:12], wt)), fields
-        left = _unlanded(wt, files)                    # a second check after integration made nothing extra
+        left = _not_runtime(_unlanded(wt, files))      # a second check after integration made nothing extra (W1: runtime records aside)
         if left:
             fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
             return False, ("not landed: changes outside the coder's own files appeared before placement (%s); "
-                           "everything is kept at %s" % (", ".join(left[:12]), wt)), fields
+                           "everything is kept at %s" % (refusal_detail(left), wt)), fields
         served_now = _served_tree_changes(job)
         if served_now:
             fields["served_tree_changed"] = served_now

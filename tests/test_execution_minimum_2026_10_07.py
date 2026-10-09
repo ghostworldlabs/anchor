@@ -612,12 +612,13 @@ def test_a_long_check_in_a_path_with_a_space_runs_whole(tmp_path, monkeypatch):
 
 def test_an_unexpected_change_blocks_landing_and_everything_is_kept(tmp_path, monkeypatch):
     repo, job = _job(tmp_path, monkeypatch, coder_kw={"tool_writes": {"report.pdf": "%PDF-1.4"},
-                                                      "stray": {"strip.json": "{}"}})
+                                                      "stray": {"notes/other.txt": "x"}})
+    # W1 (2026-10-09): a steward runtime record (strip.json) no longer refuses a job - any OTHER extra path still does
     assert job["landed"] is False and job["status"] == "done"
-    assert job["unexpected"] == ["strip.json"] and job["files"] == ["report.pdf"]
+    assert job["unexpected"] == ["notes/other.txt"] and job["files"] == ["report.pdf"]
     kept = _P(job["kept_worktree"])
-    assert (kept / "report.pdf").read_text(encoding="utf-8") == "%PDF-1.4" and (kept / "strip.json").is_file()
-    assert not (repo / "report.pdf").exists() and not (repo / "strip.json").exists()
+    assert (kept / "report.pdf").read_text(encoding="utf-8") == "%PDF-1.4" and (kept / "notes" / "other.txt").is_file()
+    assert not (repo / "report.pdf").exists() and not (repo / "notes").exists()
 
 
 def test_foreman_config_never_lands_even_when_the_coder_writes_it(tmp_path, monkeypatch):
