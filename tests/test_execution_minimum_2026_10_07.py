@@ -1656,7 +1656,9 @@ def test_a_stop_during_finishing_is_honoured_before_placement(tmp_path, monkeypa
         return rec
     monkeypatch.setattr(code_jobs, "run_review", review_then_stop)
     repo, job = _job(tmp_path, monkeypatch)
-    assert job["landed"] is False and "asked to stop it" in job["land_note"]
+    assert job["landed"] is False and job["status"] == "stopped" and job["stopped_by"] == "John"
+    assert job["check_ok"] is True and job["review"]["verdict"] == "PASS"
+    assert _P(job["kept_worktree"]).is_dir()
     assert (repo / "a.txt").read_text(encoding="utf-8") == "one\n"
 
 

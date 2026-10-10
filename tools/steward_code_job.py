@@ -58,7 +58,7 @@ def main():
         if not (a.repo and brief.strip()):
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
-        body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
+        body.update(repo=str(Path(a.repo).resolve()), brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
                     outputs=a.output, worker=a.worker, profile=a.profile, work_dir=a.work_dir,
                     plan=Path(a.plan_file).read_text(encoding="utf-8") if a.plan_file else "")
     if a.action == "stop":

@@ -31,7 +31,7 @@ def snapshot(job):
     try:
         wt = job["worktree"]
         code, head, _ = cj._git(wt, "rev-parse", "HEAD")
-        changed = cj.changed_paths(wt, job["base"])
+        changed = cj.changed_paths(wt, cj.candidate_base(job))
         if code or changed is None:
             raise ValueError("cannot read saved Git tree")
         names = sorted(set(changed + list(job.get("manifest") or []) + list(job.get("outputs") or [])))
@@ -154,7 +154,13 @@ def supervise(job, *, native=None, now=None):
         controller = process_state(claim.get("pid"), claim.get("birth")) if job.get("finalizer_active") else "unknown"
         worker = {"state": controller, "last_activity": command.get("activity_at")}
         if command.get("state") == "active" and command.get("phase") == job.get("phase"):
-            worker["state"] = process_state(command.get("pid"), command.get("birth"))
+            child_state = process_state(command.get("pid"), command.get("birth"))
+            if child_state == "dead" and controller == "active":
+                worker["state"] = "completed"
+            elif child_state == "dead" and controller == "unknown":
+                worker["state"] = "unknown"
+            else:
+                worker["state"] = child_state
             worker["last_activity"] = command.get("activity_at")
         if command.get("state") == "cleanup_wait":
             worker.update(waiting=command.get("error") or "waiting for process tree to end", state="active")
@@ -273,14 +279,28 @@ def orphaned_finalizer(job):
     New Windows commands die with their owner's Job Object. A legacy/unknown
     command or controller is not presumed safe. Byte/provenance gates still apply.
     """
+    def identity_dead(pid, birth):
+        if not pid or birth is None:
+            return False
+        try:
+            import proc_probe
+
+            state, actual_birth, _ = proc_probe.probe_status(pid)
+            if (state == proc_probe.PROBE_RUNNING and actual_birth is not None
+                    and abs(float(actual_birth) - float(birth)) > 0.001):
+                return True
+        except Exception:
+            pass
+        return process_state(pid, birth) == "dead"
+
     claim, command = job.get("claim") or {}, job.get("command") or {}
     if not job.get("finalizer_active") or not claim.get("pid") or claim.get("birth") is None:
         return False
-    if process_state(claim["pid"], claim["birth"]) != "dead":
+    if not identity_dead(claim["pid"], claim["birth"]):
         return False
     if command and command.get("state") != "completed":
         return bool(command.get("contained") and command.get("pid") and command.get("birth") is not None
-                    and process_state(command["pid"], command["birth"]) == "dead")
+                    and identity_dead(command["pid"], command["birth"]))
     return True
 
 
@@ -426,18 +446,49 @@ def notify(cdir, job_id, *, engine=None, wake=False):
 
 
 def retry_pending(cdir, *, engine):
-    """One compact pending record per existing steward tick; no wake, file copying or model poll."""
-    for job in cj.read_jobs(cdir).values():
-        if (job.get("handoff") or {}).get("state") == "pending":
-            return notify(cdir, job["id"], engine=engine)
+    """Materialize one saved outcome, then retry one notification on the existing tick."""
+    jobs = list(cj.read_jobs(cdir).values())
+    # Separate passes: a previously pending notification cannot hide a missing
+    # result. Old unmarked terminal jobs remain quiet until explicit collection.
+    due = [j for j in jobs if (j.get("handoff") or {}).get("state") == "needs_report"]
+    if due:
+        job = min(due, key=lambda j: (j.get("handoff") or {}).get("last_try", 0))
+        materialize(cdir, job["id"])
+    pending = [j for j in cj.read_jobs(cdir).values() if (j.get("handoff") or {}).get("state") == "pending"]
+    if pending:
+        job = min(pending, key=lambda j: (j.get("handoff") or {}).get("last_try", 0))
+        return notify(cdir, job["id"], engine=engine)
     return False
 
 
+def materialize(cdir, job_id):
+    """Repair a terminal result through the normal report writer, without waking an engine."""
+    with _handoff_lock(cdir, job_id):
+        job = owned_job(cdir, job_id)
+        if not job or job.get("status") in cj.LIVE:
+            return None
+        current = job.get("handoff") or {}
+        if current.get("id"):
+            return current
+        try:
+            return cj._report(cdir, job, notify_result=False)
+        except Exception:
+            # The normal report writer preserves the obligation and its error.
+            # Another tick/collect retries only reporting, never execution.
+            return None
+
+
 def collect(cdir, job_id, handoff_id=None):
-    with _handoff_lock(cdir, job_id), cj._LOCK:
+    with _handoff_lock(cdir, job_id):
+        materialize(cdir, job_id)
+        return _collect_saved(cdir, job_id, handoff_id)
+
+
+def _collect_saved(cdir, job_id, handoff_id):
+    with cj._LOCK:
         job = owned_job(cdir, job_id)
         handoff = (job or {}).get("handoff") or {}
-        if not handoff:
+        if not handoff.get("id"):
             return {"ok": False, "error": "no durable result yet; inspect this original job"}
         if handoff_id and handoff["id"] != handoff_id:
             return {"ok": False, "error": "this result was superseded; collect the current result", "handoff_id": handoff["id"]}

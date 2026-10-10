@@ -219,7 +219,30 @@ def _transition(cdir, job_id, expect, *, expect_attempt=None, **updates):
             return None
         if expect_attempt is not None and j.get("attempt", 1) != expect_attempt:
             return None
+        previous_status, previous_phase = j.get("status"), j.get("phase")
+        stop_request, stop_actor = j.get("stop_requested"), j.get("stop_requested_by")
         j.update(updates)
+        if previous_status in LIVE and j.get("status") not in LIVE:
+            # Stop wins at the same atomic boundary as the outcome, including a
+            # request arriving after the controller assembled its local fields.
+            if previous_status == "finishing" and stop_request and not (j.get("placed") or j.get("landed")):
+                j.update(status="stopped", stopped_by=stop_actor or "unknown", stop_requested=stop_request,
+                         stop_requested_by=stop_actor, kept_worktree=j.get("worktree", ""),
+                         land_note="stopped by %s during %s; saved work is kept at %s" % (
+                             stop_actor or "unknown", previous_phase or "finishing", j.get("worktree", "")))
+                command = j.get("command") or {}
+                if command.get("cancelled"):
+                    if command.get("phase") == "checking":
+                        j.update(check_ok=None, integration_check_ok=None)
+                    elif command.get("phase") == "reviewing":
+                        if j.get("delta_review") is not None:
+                            j["delta_review"] = None
+                        else:
+                            j["review"] = None
+            # A crash before _report must leave a durable obligation. Legacy
+            # terminal rows are collected explicitly, not broadcast at boot.
+            if not (j.get("handoff") or {}).get("id"):
+                j["handoff"] = {"state": "needs_report", "attempt": j.get("attempt", 1)}
         d[job_id] = j
         p = _path(cdir)
         tmp = p.with_suffix(".json.tmp")
@@ -569,11 +592,16 @@ def reconcile_foreman(cdir, job):
     return done or job
 
 
+def candidate_base(job):
+    """The job's own delta after integration; its original base remains the audit boundary."""
+    return job.get("integrated_base") or job["base"]
+
+
 def foreman_manifest(job):
     """Foreman's seats keep no per-file write record, so its manifest is its whole change in its own worktree (minus
     runtime records and what never lands) - and every NEW file is named to the landing reviewer (review_note), who
     blocks a byproduct of running the tests (fcj r2, his call 2026-10-09: no pre-run of the check)."""
-    return [p for p in (changed_paths(job["worktree"], job["base"]) or []) if not never_lands(p) and not _runtime(p)]
+    return [p for p in (changed_paths(job["worktree"], candidate_base(job)) or []) if not never_lands(p) and not _runtime(p)]
 
 
 REVIEW_BRIEF_READ = 16000   # tools/steward_review.mjs reads this much of the brief file; a longer one is refused
@@ -675,6 +703,7 @@ def _wait_foreman(cdir, job, wt, run, out):
     if not ended:
         _note_stuck(cdir, jid, "Foreman's processes could not be seen to end; Stop ends them and releases the job")
         return
+    _transition(cdir, jid, ("running",), worker_completed_at=time.time())
     _remove_foreman_config(wt)                      # gone before the inventory
     if jid in _FOREMAN_STOPPING:                    # Stop ended it: Stop records the job
         _FOREMAN_PROCS.pop(jid, None)
@@ -819,6 +848,8 @@ def run_command(job, tree, argv, *, output_limit=128 * 1024):
             except Exception as exc:
                 observation_error("command observation could not be saved: " + str(exc)[:200])
     if cdir and _stop_asked(job, on_error=observation_error):
+        command.update(state="completed", ended_at=time.time(), cancelled=True)
+        save()
         return subprocess.CompletedProcess(argv, 130, "", "stopped before command launch")
     with log.open("wb") as output:
         fatal_launch = None
@@ -1146,7 +1177,7 @@ def run_review(job, tree, head, delta_from=""):
     brief = jobs_base() / "checks" / ("%s-brief.md" % job["id"])
     note = ""
     if job.get("worker") == "foreman":                # fcj r4: from THIS candidate, after every output it gained
-        new = added_files(tree, job["base"], head)
+        new = added_files(tree, candidate_base(job), head)
         if new is None:
             return {"ok": False, "error": "the files Foreman added could not be listed, so it cannot be reviewed"}
         note = foreman_review_note(new)
@@ -1165,7 +1196,7 @@ def run_review(job, tree, head, delta_from=""):
         cmd = json.loads(seam) if seam else ["node", str(REVIEW_TOOL)]
     except ValueError:
         return {"ok": False, "error": "ANCHOR_REVIEW_CMD is not a JSON argument list"}
-    argv = cmd + ["--repo", str(tree), "--base", job["base"], "--head", head,
+    argv = cmd + ["--repo", str(tree), "--base", candidate_base(job), "--head", head,
                   "--author-family", ",".join(job.get("authors") or [job.get("coder_family") or ""]), "--brief-file", str(brief),
                   "--exhausted", ",".join(sorted(exhausted_families()))]
     if delta_from:
@@ -1265,6 +1296,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         return {"ok": False, "error": "no job started: the brief is %d characters; the limit is %d. "
                 "Keep the assignment within that limit and reference supporting files; nothing was truncated."
                 % (len(brief), BRIEF_MAX)}
+    if not repo or not Path(repo).is_absolute():
+        return {"ok": False, "error": "no job started: repository must be an absolute path resolved by the caller"}
     check, why = normalize_check(check)
     if why:
         return {"ok": False, "error": why}
@@ -1561,7 +1594,7 @@ def _finish(cdir, job_id, job, result):
     if not _transition(cdir, job_id, ("finishing",), expect_attempt=job.get("attempt", 1),
                        authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
         return
-    changed = changed_paths(wt, job["base"])
+    changed = changed_paths(wt, candidate_base(job))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
     checked = False
@@ -1571,7 +1604,7 @@ def _finish(cdir, job_id, job, result):
         fields["check_ok"], fields["check_output"] = run_check(job, wt)
         checked = True
         phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
-        changed = changed_paths(wt, job["base"])
+        changed = changed_paths(wt, candidate_base(job))
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
         note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
@@ -1608,7 +1641,7 @@ def _finish(cdir, job_id, job, result):
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
-            after = changed_paths(wt, job["base"])
+            after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
             made = [x for x in late if x in set(job.get("outputs") or []) and not never_lands(x)]
@@ -1664,13 +1697,14 @@ def _finish(cdir, job_id, job, result):
         if not fields.get("landed"):
             note += ("; ALSO: %s changed during the job outside any landing (%s) - check those files"
                      % (job["repo"], ", ".join(served[:8])))
+    fields["recovery_snapshot"] = handoff.snapshot(job)
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        expect_attempt=job.get("attempt", 1),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), phase="outcome", phase_at=time.time(),
-                       recovery_snapshot=handoff.snapshot(job), **fields)
+                       **fields)
     if done is None:
         return
-    if not keep:
+    if not keep and done["status"] != "stopped":
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
 
@@ -1841,7 +1875,19 @@ def land(job, files):
             _git(wt, "merge", "--abort")
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
         code, merged, _ = _git(wt, "rev-parse", "HEAD")
-        phase(job, "checking")
+        from steward_cockpit import code_job_handoff as handoff
+        # Pair the upstream comparison boundary with the exact integrated tree
+        # before another command can change it. Preserve it on later failures.
+        job["integrated_base"] = head
+        integrated_snapshot = handoff.snapshot(job)
+        fields.update(integrated_base=head, recovery_snapshot=integrated_snapshot)
+        try:
+            saved = not integrated_snapshot.get("error") and phase(job, "checking", integrated_base=head,
+                                                                    recovery_snapshot=integrated_snapshot)
+        except Exception:
+            saved = False  # the terminal write still carries this exact pair; never run an unrecorded check
+        if not saved:
+            return False, "not landed: the integrated recovery snapshot could not be saved; work is kept at " + wt, fields
         ok, out = run_check(job, wt)
         fields["integration_check_ok"] = ok is True        # final review 10-10: the stage line reads the final gate
         if ok is not True:                                 # a missing check is a failure too (W1a)
@@ -1961,6 +2007,8 @@ def stage_line(job):
     the FINAL candidate passed: an integration recheck (delta_review) that did not pass is said."""
     if not isinstance(job, dict):
         return ""
+    if job.get("status") == "stopped":
+        return "stopped; saved work retained"
     if job.get("status") in LIVE:
         return "%s%s" % ((str(job.get("skill")) + ": ") if job.get("skill") else "",
                          job.get("phase") or ("producing" if job.get("status") == "running" else "finishing"))
@@ -2008,8 +2056,34 @@ def live_note(job):
             "on his screen until the running build carries it.")
 
 
-def _report(cdir, job):
-    """Save the commissioning steward's result before attempting notification."""
+def _report(cdir, job, *, notify_result=True):
+    """Materialize the saved terminal outcome once, then optionally notify its steward."""
+    from steward_cockpit import code_job_handoff as handoff
+    with handoff._handoff_lock(cdir, job["id"]):
+        current = handoff.owned_job(cdir, job["id"])
+        if (not current or current.get("status") in LIVE
+                or current.get("attempt", 1) != job.get("attempt", 1)):
+            return None
+        receipt = current.get("handoff") or {}
+        if not receipt.get("id"):
+            try:
+                receipt = _materialize_report(cdir, current)
+            except Exception as exc:
+                with _LOCK:
+                    latest = handoff.owned_job(cdir, job["id"])
+                    if (latest and latest.get("attempt", 1) == job.get("attempt", 1)
+                            and latest.get("status") not in LIVE and not (latest.get("handoff") or {}).get("id")):
+                        _transition(cdir, job["id"], (latest["status"],), expect_attempt=job.get("attempt", 1),
+                            handoff={"state": "needs_report", "attempt": job.get("attempt", 1),
+                                     "last_try": time.time(), "error": str(exc)[:300]})
+                raise
+    if receipt and notify_result:
+        handoff.notify(cdir, job["id"], wake=True)
+    return receipt
+
+
+def _materialize_report(cdir, job):
+    """Render only persisted outcome fields; never re-execute a gate or placement."""
     from steward_cockpit import code_job_handoff as handoff
     lines = ["(code job %s, attempt %s result - not John) Status: %s." % (job["id"], job.get("attempt", 1), job["status"]),
              "Destination: %s; work directory: %s." % (job["repo"], job.get("work_dir") or "repository root")]
@@ -2039,7 +2113,8 @@ def _report(cdir, job):
                  "A later attempt supersedes an earlier result. Reconcile prior delivery; never start another worker "
                  "because this notice repeats. For unchanged kept work, inspect/recover this original job instead of "
                  "rebuilding. Report briefly, preserve pending human decisions, and continue independent authorized work." % job["id"])
-    if handoff.save_result(cdir, job, "\n".join(lines)):
+    receipt = handoff.save_result(cdir, job, "\n".join(lines))
+    if receipt:
         if kept:
             # Even a copy/registrar failure cannot erase the controller's already durable result.
             try:
@@ -2047,7 +2122,7 @@ def _report(cdir, job):
             except Exception as exc:
                 _transition(cdir, job["id"], (job["status"],), expect_attempt=job.get("attempt", 1), kept_delivery={
                     "errors": [{"reason": str(exc)[:300]}], "recovery": "saved work remains in " + job["kept_worktree"]})
-        handoff.notify(cdir, job["id"], wake=True)
+    return receipt
 
 
 def reading_outputs(job):
