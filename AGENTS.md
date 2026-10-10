@@ -19,3 +19,16 @@ The Star Chart BOARD displays its existing artwork followed by **Star Chart**, m
 
 ## Readable managed review links - October 4, 2026
 For a managed revision, labels and opening/download names must identify its human product and actual version, not hashes or internal product IDs. The shared cockpit reader supports an exact binding in the existing DELIVERABLES Where cell: `contained readable copy` review: `immutable revision path`. Keep the immutable lifecycle path, hash and product/revision/presentation IDs unchanged; a copy is served only through the original hash check. A binding must have the same resolved owner and file type, be contained and unambiguous; do not create a second registry. Preserve approval/view actions and history. Verify actual managed controls, suggested download filename and reload/repaint; source-link bytes alone are insufficient. Existing clients must load the revised shared.js by a safe page reload; do not restart active sessions to activate a static asset. Evidence:MBA Teaching AI turn110264a2-e740-4003-a459-272b81daa09c and .ecgberht/review-labels-20261004/.
+
+## Doctor completion includes the existing Cave banner — October 7, 2026
+
+After repairing a Doctor correctness issue, verify that the already-open Cave
+reconciles its health banner with the latest report. A clean report, Doctor JSON
+or fresh browser does not prove cleanup in John's persistent Cave frame.
+Health-only changes must update that banner without a campaign stamp change,
+lost composer/draft, replaced initiative conversation or restarted session.
+Keep timing warnings available in Doctor and genuine failures visible; retain
+the last known indication if a read fails. Qualify any unavailable existing-client
+inspection and journal the remaining display gap instead of claiming visible
+cleanup. Source: John's October 7 follow-up in the Anchor Doctor session;
+`docs/friction/2026-10-07-cave-health-banner-cleanup.md`.
