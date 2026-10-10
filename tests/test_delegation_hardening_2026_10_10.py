@@ -136,6 +136,42 @@ def test_direct_start_rejects_relative_repo_before_worker_allocation(
     assert workers == []
 
 
+def test_stop_only_during_integration_preserves_the_passed_coder_check(project, tmp_path):
+    root, workers, factory = project
+    cdir = root / "A"
+    marker = tmp_path / "integration-check-started"
+    check = [sys.executable, "-c",
+             "from pathlib import Path; import time\n"
+             "if Path('B/sibling.py').exists():\n"
+             f" Path({str(marker)!r}).write_text('integration')\n"
+             " time.sleep(60)\n"]
+    first = cj.start(cdir, root / "B", "Produce B/first.py", check, engine_factory=factory)
+    second = cj.start(cdir, root / "B", "Produce B/sibling.py", PASS, engine_factory=factory)
+    assert first["ok"] and second["ok"]
+    workers[1].produce({"B/sibling.py": "sibling = 84\n"})
+    assert await_job(cdir, second["job"])["landed"]
+    try:
+        workers[0].produce({"B/first.py": "first = 42\n"})
+        deadline = time.monotonic() + 15
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.03)
+        assert marker.exists(), cj.read_jobs(cdir)
+        assert cj.read_jobs(cdir)[first["job"]]["check_ok"] is True
+        assert cj.stop(cdir, first["job"], actor="human")["ok"]
+        stopped = await_job(cdir, first["job"])
+        assert stopped["status"] == "stopped" and stopped["stopped_by"] == "human"
+        assert stopped["check_ok"] is True
+        assert stopped["integration_check_ok"] is None
+        assert not stopped["landed"] and not stopped.get("placed")
+        assert not (root / "B/first.py").exists()
+        assert (root / "B/sibling.py").read_text() == "sibling = 84\n"
+        assert (workers[0].wt / "B/first.py").read_text() == "first = 42\n"
+        assert len(workers) == 2
+    finally:
+        if (cj.read_jobs(cdir).get(first["job"]) or {}).get("status") in cj.LIVE:
+            cj.stop(cdir, first["job"], actor="human")
+
+
 def test_cli_resolves_relative_repo_against_callers_working_directory(
     project, monkeypatch
 ):

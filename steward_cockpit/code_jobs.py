@@ -233,7 +233,11 @@ def _transition(cdir, job_id, expect, *, expect_attempt=None, **updates):
                 command = j.get("command") or {}
                 if command.get("cancelled"):
                     if command.get("phase") == "checking":
-                        j.update(check_ok=None, integration_check_ok=None)
+                        if j.get("check_ok") is True:
+                            if j.get("integration_check_ok") is not True:
+                                j["integration_check_ok"] = None
+                        else:
+                            j["check_ok"] = None
                     elif command.get("phase") == "reviewing":
                         if j.get("delta_review") is not None:
                             j["delta_review"] = None
