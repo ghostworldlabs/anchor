@@ -28,16 +28,31 @@ def test_foreman_from_anchor_runs_slim_unless_a_profile_is_named():
     assert not hasattr(skill_jobs, "with_profile")
 
 
-def test_the_steward_always_sizes_the_work_and_crucible_waits_on_its_hold(monkeypatch):
+def test_the_steward_sizes_work_and_exposes_only_the_proved_slim_path(monkeypatch):
     import steward_cockpit.steward_engine as se
     monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", raising=False)
     se = importlib.reload(se)
     for text in (se.CONTRACT, se.EFFORT_DUTY, se.EFFORT_RULES):
-        assert "SIZE THE WORK" in text and "Crucible is on hold" in text
+        assert "SIZE THE WORK" in text and "Crucible slim" in text
     monkeypatch.setenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "0")
     se = importlib.reload(se)
     for text in (se.CONTRACT, se.EFFORT_DUTY, se.EFFORT_RULES):
-        assert "SIZE THE WORK" in text and "on hold" not in text
+        assert "SIZE THE WORK" in text and "producing a plan does not approve it" in text
     assert "--worker foreman" in se.SIZE_OR_HOLD and "run-live.mjs" not in se.SIZE_OR_HOLD
     monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", raising=False)
     importlib.reload(se)
+
+
+def test_only_installed_slim_entry_point_gets_the_managed_exception(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_SKILL_ROOTS", str(tmp_path))
+    monkeypatch.delenv("ANCHOR_FOREMAN_CRUCIBLE_HOLD", raising=False)
+    folder = tmp_path / "crucible" / "bin"
+    folder.mkdir(parents=True)
+    for name in ("slim.mjs", "enhanced.mjs"):
+        (folder / name).write_text("// fixture\n", encoding="utf-8")
+    assert skill_jobs.validate(["node", str(folder / "slim.mjs")])[0]
+    assert not skill_jobs.validate(["node", str(folder / "enhanced.mjs")])[0]
+    other = tmp_path / "other" / "crucible" / "bin" / "slim.mjs"
+    other.parent.mkdir(parents=True)
+    other.write_text("// fixture\n", encoding="utf-8")
+    assert not skill_jobs.validate(["node", str(other)])[0]

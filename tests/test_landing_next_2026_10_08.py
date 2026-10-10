@@ -148,8 +148,15 @@ def test_a_conflict_between_the_branches_stops_the_restart_before_any_change(tmp
 
 
 def test_every_landing_needs_an_explicit_passing_check(tmp_path, monkeypatch, served):
-    job = _run_job(tmp_path, monkeypatch, served, {"static/page.js": "var build = 'two';\n"}, check="", name="nocheck")
-    assert job["landed"] is False and "no check was given" in job["land_note"] and job["kept_worktree"]
+    # a missing check is refused at the START (the production gate): no job, no worktree, no coder, no record
+    monkeypatch.setattr(code_jobs, "choose_coder", lambda requested="": ("claude", None))
+    made = []
+    cdir = tmp_path / "nocheck"
+    cdir.mkdir()
+    out = code_jobs.start(str(cdir), str(served), "Change the page.", "", engine_factory=lambda wt: made.append(wt))
+    assert out["ok"] is False and "needs --check" in out["error"] and "no job started" in out["error"]
+    assert made == [] and code_jobs.read_jobs(str(cdir)) == {} and not (tmp_path / "jobs").exists()
+    # a failing check never lands
     job = _run_job(tmp_path, monkeypatch, served, {"static/page.js": "var build = 'three';\n"},
                    check=[sys.executable, "-c", "raise SystemExit(4)"], name="badcheck")
     assert job["landed"] is False and "check failed" in job["land_note"]

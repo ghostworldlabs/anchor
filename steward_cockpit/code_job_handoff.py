@@ -251,7 +251,7 @@ def recovery_error(job, worker=None):
         return "worker is active or its liveness is unknown"
     if not job.get("authors") or any(a not in cj.FAMILIES for a in job["authors"]):
         return "original authorship is unknown"
-    why = cj.destination_error(job.get("repo"))
+    why = cj.destination_error(job.get("repo")) or cj.integration_required_error(job)
     if why:
         return why
     try:

@@ -13,7 +13,16 @@ reaches John's screen is his restart, in this order (restart_anchor.ps1):
 the lander's checkout, then fast-forwards the running checkout to it. If an uncommitted file in the running checkout
 would be overwritten, or the two branches conflict, it stops before anything changes and lists why - never a reset.
 
-Every function never raises; stdlib only. CLI: ``python anchor_next.py status|check|activate``.
+Every function never raises; stdlib only. CLI: ``python anchor_next.py status|check|activate [<repository>]``.
+
+The same two places hold for an INSTALLED SKILL REPOSITORY (2026-10-10): the checkouts the installed skills run from -
+the skill roots a skill job may start (C:\\dev\\trio, C:\\dev\\Skill Foundry\\skills), the repository Foreman's run-live.mjs
+belongs to, the SKILLS_ROOT registry and the Claude adapter farm's targets. A code job there lands on that repository's
+own ``anchor-next`` in the lander's checkout and is NOT installed: the checked-out code keeps running until a human
+activates it (``python anchor_next.py activate <repository>``). ``is_installed_repo`` is the one predicate every caller
+uses, keyed on the owning git common directory, so a worktree or a junction alias of an installed repository is the
+same repository. Discovery fails CLOSED (``InstalledUnknown``): a configured source that is present but unreadable, or
+a root whose git identity cannot be read, refuses every direct landing instead of reading as "nothing installed".
 """
 from __future__ import annotations
 
@@ -47,6 +56,12 @@ def _norm(p):
 
 class ServedUnknown(RuntimeError):
     """The running checkout could not be identified: every caller refuses (fail closed)."""
+
+
+class InstalledUnknown(RuntimeError):
+    """Installation discovery cannot be trusted - a CONFIGURED source is present but unreadable (a manifest that will
+    not parse, a farm that will not list, a provider that will not import) or a skill root's git identity cannot be
+    read. Every caller refuses a DIRECT landing and says why (fail closed); it is never read as "nothing installed"."""
 
 
 def served_root():
@@ -88,33 +103,220 @@ def is_served_repo(path):
     return bool(c) and c == common_dir(served_root())
 
 
-def integration_dir(repo):
+def _manifest_roots():
+    """The source directory of every skill the Foundry manifest registers (foundry_api.MANIFEST_PATH, each ``source``
+    resolved by foundry_api._resolve_source) - an external registered skill needs no Claude farm junction to count. An
+    ABSENT manifest is normal (nothing registered); a PRESENT one is read STRICTLY: unreadable, not JSON, without its
+    ``skills`` list, an entry that is not an object or a source that will not resolve raises InstalledUnknown (the
+    lenient foundry_api._load_manifest reads such a manifest as empty, which a landing guard may not)."""
+    try:
+        import foundry_api as _fa
+    except Exception as e:
+        raise InstalledUnknown("the Foundry manifest reader (foundry_api) cannot be imported: %s" % e)
+    path = Path(_fa.MANIFEST_PATH)
+    try:
+        present = path.exists()
+    except OSError as e:
+        raise InstalledUnknown("the Foundry manifest %s cannot be looked at: %s" % (path, e))
+    if not present:
+        return []
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as e:
+        raise InstalledUnknown("the Foundry manifest %s is present but cannot be read: %s" % (path, e))
+    skills = parsed.get("skills") if isinstance(parsed, dict) else None
+    if not isinstance(skills, list):
+        raise InstalledUnknown("the Foundry manifest %s is present but has no 'skills' list" % path)
+    roots = []
+    for i, entry in enumerate(skills):
+        if not isinstance(entry, dict):
+            raise InstalledUnknown("the Foundry manifest %s: entry %d is not an object" % (path, i))
+        source = entry.get("source")
+        if source in (None, ""):
+            continue                                    # registered without a location: nothing on disk to protect
+        try:
+            resolved = _fa._resolve_source(str(source))
+        except Exception as e:
+            raise InstalledUnknown("the Foundry manifest %s: the source of %s cannot be resolved (%s)" % (
+                path, entry.get("name") or "entry %d" % i, e))
+        if not resolved:
+            raise InstalledUnknown("the Foundry manifest %s: the source of %s resolves to nothing (%r)" % (
+                path, entry.get("name") or "entry %d" % i, source))
+        roots.append(Path(resolved))
+    return roots
+
+
+def installed_sources():
+    """[(where it is named, Path)] - every path an installed skill runs from, as the running Anchor actually knows
+    them, never a list kept here: the skill roots a skill job may start a script under (steward_cockpit.skill_jobs.
+    skill_roots, ANCHOR_SKILL_ROOTS), the repository Foreman's run-live.mjs belongs to (steward_cockpit.code_jobs.
+    FOREMAN_RUN_LIVE), the SKILLS_ROOT the share registry names, the Foundry manifest's registered sources, and the
+    targets of Claude's adapter farm (~/.claude/skills/<id>, junctions into the installed skills). An ABSENT optional
+    directory is normal; a configured source that is PRESENT but cannot be read raises InstalledUnknown - discovery
+    that cannot be trusted never reads as "nothing installed" (bounded review, 2026-10-10)."""
+    found = []
+    try:
+        from steward_cockpit import skill_jobs as _sj
+        found += [("skill root", Path(p)) for p in _sj.skill_roots()]
+    except Exception as e:
+        raise InstalledUnknown("the skill-job roots cannot be read: %s" % e)
+    try:
+        from steward_cockpit import code_jobs as _cj
+        found.append(("Foreman's run-live", Path(_cj.FOREMAN_RUN_LIVE).parent))
+    except Exception as e:
+        raise InstalledUnknown("Foreman's location cannot be read: %s" % e)
+    try:
+        import share_skills_root as _ssr
+        found.append(("SKILLS_ROOT", Path(_ssr.resolve_skills_root())))
+    except Exception as e:
+        raise InstalledUnknown("the SKILLS_ROOT registry cannot be read: %s" % e)
+    found += [("Foundry manifest", p) for p in _manifest_roots()]
+    farm = Path(os.environ.get("ANCHOR_SKILLS_DIR") or (Path.home() / ".claude" / "skills"))
+    try:
+        present = farm.is_dir()
+    except OSError as e:
+        raise InstalledUnknown("the Claude skills farm %s cannot be looked at: %s" % (farm, e))
+    if present:
+        try:
+            entries = sorted(farm.iterdir())
+        except OSError as e:
+            raise InstalledUnknown("the Claude skills farm %s is present but cannot be listed: %s" % (farm, e))
+        for entry in entries:
+            try:
+                if entry.is_dir():                      # a dangling junction is not a directory: absent, normal
+                    found.append(("Claude farm", entry.resolve()))
+            except OSError as e:
+                raise InstalledUnknown("the Claude skills farm entry %s cannot be read: %s" % (entry, e))
+    seen, roots = set(), []
+    for label, p in found:
+        key = _norm(p)
+        if key not in seen:
+            seen.add(key)
+            roots.append((label, Path(p)))
+    return roots
+
+
+def installed_roots():
+    """The installed skill roots as paths (installed_sources without the labels); raises InstalledUnknown alike."""
+    return [p for _, p in installed_sources()]
+
+
+def _git_anchor(path):
+    """The nearest ancestor of ``path`` (itself included) holding a .git entry - a directory (a checkout) or a file
+    (a linked worktree) - so one git call per REPOSITORY identifies many skill directories of it; "" when none."""
+    try:
+        p = Path(path).resolve()
+    except Exception as exc:
+        raise InstalledUnknown("cannot resolve repository path %s: %s" % (path, exc)) from exc
+    for cand in (p, *p.parents):
+        try:
+            # exists() can turn access errors into False. A failed identity
+            # inspection must not make an installed repository look absent.
+            (cand / ".git").lstat()
+            return str(cand)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            raise InstalledUnknown("cannot inspect repository identity at %s: %s" % (cand, exc)) from exc
+    return ""
+
+
+def installed_common_dirs():
+    """The owning git common directories of every installed skill root - one git call per distinct repository (roots
+    are grouped by their nearest .git entry first, within this one discovery). A root that is not under git
+    contributes nothing (nothing there is a repository a job could target); a root whose .git entry is PRESENT but
+    whose identity git cannot read raises InstalledUnknown, never reads as absent."""
+    anchors, seen = [], set()
+    for label, root in installed_sources():
+        a = _git_anchor(root)
+        if a and _norm(a) not in seen:
+            seen.add(_norm(a))
+            anchors.append((label, a))
+    dirs = set()
+    for label, a in anchors:
+        c = common_dir(a)
+        if not c:
+            raise InstalledUnknown("the %s %s has a .git entry but git cannot name its repository - fix or remove it "
+                                   "before anything lands there" % (label, a))
+        dirs.add(c)
+    return dirs
+
+
+def is_installed_repo(path):
+    """True when ``path`` is - or is a worktree or an alias of - a repository an installed skill runs from. The running
+    Anchor's own repository is served, not installed (``is_served_repo`` decides it); it is never reported here.
+    Raises InstalledUnknown when discovery cannot be trusted (a caller then refuses a direct landing, never guesses)."""
+    c = common_dir(path)
+    if not c:
+        try:
+            Path(path).lstat()
+        except FileNotFoundError:
+            return False  # an absent child of a checkout is not a failed Git lookup
+        except OSError as e:
+            raise InstalledUnknown("cannot inspect repository path %s: %s" % (path, e))
+        if _git_anchor(path):
+            raise InstalledUnknown("cannot verify Git common directory for %s" % path)
+        return False
+    try:
+        served = served_root()
+        served_common = common_dir(served)
+        if not served_common and _git_anchor(served):
+            raise InstalledUnknown("cannot verify served Anchor Git common directory for %s" % served)
+        if c == served_common:
+            return False
+    except ServedUnknown as exc:
+        raise InstalledUnknown("cannot identify the served Anchor repository: %s" % exc) from exc
+    return c in installed_common_dirs()
+
+
+INSTALLED_NOTE = ("landed to integration (branch %s in %s); NOT installed - %s still runs its checked-out code until a "
+                  "human activates it: python anchor_next.py activate \"%s\"")
+
+
+def installed_note(repo, integration):
+    """The one sentence every result about an installed-repository landing carries."""
+    return INSTALLED_NOTE % (BRANCH, integration, repo, repo)
+
+
+def integration_dir(repo, common=""):
     import paths as _paths
     base = _paths.code_jobs_dir()
-    return base / "integration" / hashlib.sha1(common_dir(repo).encode()).hexdigest()[:16]
+    return base / "integration" / hashlib.sha1((common or common_dir(repo)).encode()).hexdigest()[:16]
 
 
 def ensure_integration(repo):
     """(path, "") - the lander's own checkout of ``anchor-next`` for this repository, made when missing (the branch
     starts at the running checkout's HEAD) - or (None, why). A checkout that is not on the branch, or holds changes
-    nobody committed, is refused, never cleaned: it is the lander's, and something else wrote there."""
-    if not common_dir(repo):
+    nobody committed, is refused, never cleaned: it is the lander's, and something else wrote there. Whatever sits at
+    the expected path must be a checkout of THIS repository (the same git common directory) - another repository
+    there, even on a branch named anchor-next, is refused, never trusted by its path or its branch name (bounded
+    review, 2026-10-10)."""
+    mine = common_dir(repo)
+    if not mine:
         return None, "not a git repository: %s" % repo
-    path = integration_dir(repo)
-    code, _, _ = _git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + BRANCH, timeout=60)
-    if code != 0:
-        code, head, err = _git(served_root() if is_served_repo(repo) else repo, "rev-parse", "HEAD", timeout=60)
+    path = integration_dir(repo, mine)
+    try:
+        present = (path / ".git").exists()
+    except OSError as e:
+        return None, "could not look at the lander's checkout %s: %s" % (path, e)
+    if not present:
+        code, _, _ = _git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + BRANCH, timeout=60)
         if code != 0:
-            return None, "could not read the running checkout's HEAD: %s" % err[:200]
-        code, _, err = _git(repo, "branch", BRANCH, head, timeout=60)
-        if code != 0:
-            return None, "could not make the %s branch: %s" % (BRANCH, err[:200])
-    if not (path / ".git").exists():
+            code, head, err = _git(served_root() if is_served_repo(repo) else repo, "rev-parse", "HEAD", timeout=60)
+            if code != 0:
+                return None, "could not read the running checkout's HEAD: %s" % err[:200]
+            code, _, err = _git(repo, "branch", BRANCH, head, timeout=60)
+            if code != 0:
+                return None, "could not make the %s branch: %s" % (BRANCH, err[:200])
         path.parent.mkdir(parents=True, exist_ok=True)
         _git(repo, "worktree", "prune", timeout=120)
         code, _, err = _git(repo, "worktree", "add", str(path), BRANCH)
         if code != 0:
             return None, "could not make the lander's checkout of %s: %s" % (BRANCH, err[:300])
+    owner = common_dir(path)
+    if owner != mine:
+        return None, ("the lander's checkout %s belongs to another repository (%s), not %s - nothing landed" % (
+            path, owner or "no readable repository", repo))
     code, branch, _ = _git(path, "symbolic-ref", "--short", "-q", "HEAD", timeout=60)
     if code != 0 or branch != BRANCH:
         return None, "the lander's checkout %s is not on %s (it is on %s) - nothing landed" % (path, BRANCH, branch or "a detached HEAD")
@@ -327,21 +529,24 @@ def activate(repo=None):
 
 def _main(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
+    # an optional repository: the running Anchor when omitted, else an INSTALLED skill repository (its activation is
+    # the human's explicit step after a code job landed there - a model pass never installs skill code)
+    repo = argv[2] if len(argv) > 2 else None
     if cmd == "status":
-        w = waiting()
-        print("%d change(s) landed on %s wait for a restart" % (len(w), BRANCH))
+        w = waiting(repo)
+        print("%d change(s) landed on %s wait for %s" % (len(w), BRANCH, "activation in " + repo if repo else "a restart"))
         for sha, subj in w[:20]:
             print("  %s %s" % (sha[:10], subj[:100]))
         return 0
     if cmd == "check":
-        r = check()
+        r = check(repo)
         print(json.dumps(r, indent=1))
         return 0 if r["ok"] else 3
     if cmd == "activate":
-        r = activate()
+        r = activate(repo)
         print(json.dumps(r, indent=1))
         return 0 if r["ok"] else (4 if r.get("unverified") else 3)     # 4: do not start on this checkout
-    print("usage: python anchor_next.py status|check|activate")
+    print("usage: python anchor_next.py status|check|activate [<repository>]")
     return 2
 
 

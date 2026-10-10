@@ -1817,13 +1817,19 @@ def handle_post(cdir, verb, body):
         from steward_cockpit import skill_jobs as _sj
         action = body.get("action") or "list"
         if action == "start":
-            out = _sj.start(cdir, body.get("argv") or [], str(body.get("label") or ""))
+            out = _sj.start(cdir, body.get("argv") or [], str(body.get("label") or ""),
+                            actor=str(body.get("actor") or "the steward"))
             eng = get_engine(cdir)
             if out.get("ok") and eng is not None:
                 eng._emit({"t": "sys", "text": "skill job %s started - %s; the steward stays free to talk" % (out["job"], body.get("label") or "a skill")})
             return out, (200 if out.get("ok") else 400)
         if action == "stop":
-            return _sj.stop(cdir, body.get("job")), 200
+            out = _sj.stop(cdir, body.get("job"), actor=str(body.get("actor") or "the steward"))
+            return out, (200 if out.get("ok") else 409)
+        if action in ("inspect", "collect"):      # 2026-10-10: the durable result and the observation, like a code job's
+            jid = str(body.get("job") or "")
+            out = _sj.inspect(cdir, jid) if action == "inspect" else _sj.collect(cdir, jid, body.get("handoff_id"))
+            return out, 200 if out.get("ok") else 409
         return {"ok": True, "jobs": list(_sj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "engine":
         eng = get_engine(cdir, bool(body.get("general")),

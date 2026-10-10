@@ -155,9 +155,10 @@ JOIN_QUIET = "\n\nJOHN SAYS (answer this as the next turn of the conversation):\
 # a passing check, another family's review, the safe landing), slim unless John names standard. Crucible keeps its
 # hold (ANCHOR_FOREMAN_CRUCIBLE_HOLD=0 lifts it): until then the steward writes the plan of waves itself.
 def _size_or_hold():
-    crucible = ("Crucible is on hold, so you write that plan yourself. "
-                if os.environ.get("ANCHOR_FOREMAN_CRUCIBLE_HOLD", "1").strip() != "0" else
-                "Crucible may write that plan as a skill job, on John's word. ")
+    crucible = ("Crucible slim may write that plan as a managed skill job on John's word: use "
+                "C:/dev/trio/crucible/bin/slim.mjs <effort>/plan --task <brief> --project <effort> "
+                "--require-independent. Its older planning-lane launchers remain on hold. "
+                "Collect the original skill job's result; producing a plan does not approve it. ")
     return (
         "SIZE THE WORK first and say the size in one line with why: SMALL (reversible, about three files or fewer) is a "
         "code job - its coder writes, one reviewer of another family checks it, and it lands when that passes. A "
@@ -3985,6 +3986,9 @@ class Engine:
                     from steward_cockpit.code_job_handoff import retry_pending, refresh_supervision
                     refresh_supervision(self.dir, engine=self)
                     retry_pending(self.dir, engine=self)
+                    from steward_cockpit import skill_jobs as _skj      # the same tick observes this effort's skill jobs
+                    _skj.refresh_supervision(self.dir, engine=self)
+                    _skj.retry_pending(self.dir, engine=self)
                     self._job_result_retry_error = None
                 except Exception as exc:
                     detail = str(exc)

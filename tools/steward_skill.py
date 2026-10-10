@@ -5,6 +5,8 @@ the result. Only a skill's run script inside a skill root (C:/dev/trio, C:/dev/S
   python C:/dev/Anchor/tools/steward_skill.py start --label "Gandalf read of the plan" -- node <skill run script> [args]
   python C:/dev/Anchor/tools/steward_skill.py stop [--job <id>]
   python C:/dev/Anchor/tools/steward_skill.py list
+  python C:/dev/Anchor/tools/steward_skill.py inspect --job <id>     (its process evidence and observation; quiet is not failed)
+  python C:/dev/Anchor/tools/steward_skill.py collect --job <id>     (its durable result; a skill job lands nothing in Git)
 """
 import argparse, json, os, sys, urllib.request
 from pathlib import Path
@@ -20,8 +22,9 @@ def main():
         i = argv.index("--")
         argv, rest = argv[:i], argv[i + 1:]
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("start", "stop", "list"))
+    ap.add_argument("action", choices=("start", "stop", "list", "inspect", "collect"))
     ap.add_argument("--label", default=""); ap.add_argument("--job")
+    ap.add_argument("--handoff-id", help="collect only this exact result revision; omit to collect current")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args(argv)
     pid, rel = project_for(os.getcwd())
@@ -30,8 +33,12 @@ def main():
         if len(rest) < 2:
             raise SystemExit('start needs: -- node|python <the skill\'s run script> [args]')
         body.update(argv=rest, label=a.label)
+    if a.action in ("inspect", "collect") and not a.job:
+        raise SystemExit("%s needs --job <id>" % a.action)
     if a.job:
         body["job"] = a.job
+    if a.handoff_id:
+        body["handoff_id"] = a.handoff_id
     req = urllib.request.Request("http://127.0.0.1:%s/api/steward/skill_job?pid=%s" % (a.port, pid),
                                  data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "application/json",

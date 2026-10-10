@@ -284,6 +284,32 @@ def destination_error(repo):
     return ""
 
 
+def integration_required_error(job):
+    """Why a job may NOT land directly into its repository: an INSTALLED skill repository (2026-10-10: C:\\dev\\trio,
+    C:\\dev\\Skill Foundry, anchor_next.is_installed_repo) takes a landing only on its own anchor-next, in the lander's
+    checkout named at the job's start as ``land_to``. A record without one - an older job, a hand-made one - is REFUSED,
+    never redirected, so neither a finish nor a recovery can install skill code by landing it. "" when the landing may
+    proceed. Fails closed when the question cannot be answered."""
+    if job.get("land_to"):
+        return ""
+    repo = job.get("repo") or ""
+    if job.get("installed_repo"):                     # durable: a classification made at the start is never un-learned
+        return ("%s was classified an installed skill repository when this job started, and the job names no "
+                "integration checkout (land_to): a direct landing would install skill code by a model pass. Keep this "
+                "job's work for a look; a NEW job there lands on anchor-next and waits for a human activation" % repo)
+    try:
+        import anchor_next
+        installed = anchor_next.is_installed_repo(repo)
+    except Exception as e:                            # discovery cannot be trusted: refuse, never guess
+        return ("could not tell whether %s is an installed skill repository (%s): a direct landing is refused until "
+                "the installed-skill sources can be read; the work is kept" % (repo, e))
+    if installed:
+        return ("%s is an installed skill repository and this job names no integration checkout (land_to): a direct "
+                "landing would install skill code by a model pass. Keep this job's work for a look; a NEW job there "
+                "lands on anchor-next and waits for a human activation" % repo)
+    return ""
+
+
 def work_scope(root, requested, work_dir, outputs):
     """Omitted scope derives from --repo; explicit empty scope preserves root-wide jobs."""
     try:
@@ -1365,7 +1391,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         with _LOCK:      # the worktree and the busy entry: one step
             # W1a (2026-10-08): a job on Anchor's own repository starts from anchor-next and lands there, in the lander's
             # own checkout - never in the running Anchor; John's restart makes it live
-            land_to = ""
+            land_to, installed = "", False
             try:
                 import anchor_next
                 if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
@@ -1389,6 +1415,14 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                     if ip is None:
                         return {"ok": False, "error": "no job started: %s" % why}
                     land_to = str(ip)
+                elif anchor_next.is_installed_repo(root):
+                    # 2026-10-10: an INSTALLED skill repository (C:\dev\trio, C:\dev\Skill Foundry, ...) is live code the
+                    # next skill run executes. A model pass never installs it: the job lands on that repository's own
+                    # anchor-next in the lander's checkout, and a human activates it (anchor_next.activate <repo>)
+                    ip, why = anchor_next.ensure_integration(root)
+                    if ip is None:
+                        return {"ok": False, "error": "no job started: %s" % why}
+                    land_to, installed = str(ip), True
             except Exception as e:
                 return {"ok": False, "error": "no job started: could not prepare anchor-next (%s)" % e}
             code, base, err = _git(land_to or root, "rev-parse", "HEAD")
@@ -1416,6 +1450,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
             if label:
                 job["skill"] = label
+            if installed:                                 # the record says where it lands and that it does not install
+                job["installed_repo"] = True
             if worker == "foreman":
                 job.update(skill="Foreman", foreman_profile=profile, plan_given=bool(plan.strip()))
                 _FOREMAN_PROCS[job_id] = _Starting()     # registered with the record: never taken for a lost Foreman
@@ -1845,7 +1881,7 @@ def land(job, files):
     # the job's start and checked again here), else the repository itself. The running Anchor is refused by land_locked.
     repo = job.get("land_to") or job["repo"]
     fields = {"verified": False}
-    why = destination_error(job["repo"]) or scope_error(job, wt, files)
+    why = destination_error(job["repo"]) or integration_required_error(job) or scope_error(job, wt, files)
     if why:
         return False, "not landed: " + why, fields
     if job.get("land_to"):
@@ -1918,7 +1954,7 @@ def land(job, files):
         return False, "not landed: the candidate would place paths outside the job's own files (%s); kept at %s" % (
             ", ".join(stray[:8]), wt), fields
     phase(job, "landing")
-    with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
+    with _gs.repo_lock(job["repo"], wait_s=300, who="code job " + job["id"]) as held:
         if not held:
             return False, "not landed: the repository's commit lock is busy; the work is kept at %s" % wt, fields
         current = read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}
@@ -1950,6 +1986,13 @@ def land(job, files):
             fields["head_moved"] = True                 # another landing came first: _finish integrates and tries again
             return False, "not landed: %s moved during the review; the work is kept at %s - start the landing again" % (
                 repo, wt), fields
+        if job.get("land_to"):
+            import anchor_next
+            ip, why = anchor_next.ensure_integration(job["repo"])
+            if (ip is None or os.path.normcase(str(ip)) != os.path.normcase(str(job["land_to"]))
+                    or anchor_next.common_dir(repo) != anchor_next.common_dir(job["repo"])):
+                return False, "not landed: %s; the work is kept at %s" % (
+                    why or "the integration checkout changed identity during review", wt), fields
         landed, note = _gs.land_locked(repo, cand, land_files, "Code job %s for the steward\n\n%s" % (
             job["id"], job["brief"][:600]), who="code job " + job["id"], expect_head=head)
         bad = []
@@ -1969,10 +2012,14 @@ def land(job, files):
                     record_landed_commit(fields["landed_commit"])     # only a verified landing's own commit is exempt
     if not landed:
         return False, note + "; the work is kept at %s" % wt, fields
+    tail = ""
+    if job.get("installed_repo"):                   # landed is not installed: the human's activation is the only way
+        import anchor_next
+        tail = "; " + anchor_next.installed_note(job["repo"], repo)
     if bad:
-        return True, "landed, but %d placed file(s) differ from the candidate (%s); the worktree is kept at %s" % (
-            len(bad), ", ".join(bad[:8]), wt), fields
-    return True, note, fields
+        return True, "landed, but %d placed file(s) differ from the candidate (%s); the worktree is kept at %s%s" % (
+            len(bad), ", ".join(bad[:8]), wt, tail), fields
+    return True, note + tail, fields
 
 
 def _cleanup(job, keep_branch=True):
@@ -2042,6 +2089,8 @@ def stage_line(job):
     if not job.get("landed"):
         return " → ".join(out + ["not landed"])
     out.append("landed")
+    if job.get("installed_repo"):                    # an installed skill repository: landed on anchor-next, not installed
+        out.append("not installed (awaits a human activation)")
     state = live_state(job)
     if state:
         out.append("waits for restart" if state.startswith("waits") else state)
@@ -2058,6 +2107,23 @@ def live_note(job):
             "it - the change shows only after Anchor restarts (an Anchor restart is John's word, or his standing "
             "'restart when idle'). Tell him it is landed and waits for a restart; never call it installed, live or done "
             "on his screen until the running build carries it.")
+
+
+def installed_note(job):
+    """For a job landed in an INSTALLED skill repository (2026-10-10): landed is not installed. The installed skill
+    keeps running its checked-out code until a human activates anchor-next there; the steward must never say
+    installed, live or active before that."""
+    if not (job.get("landed") and job.get("installed_repo")):
+        return ""
+    try:
+        import anchor_next
+        branch = anchor_next.BRANCH
+    except Exception:
+        branch = "anchor-next"
+    return ("NOT INSTALLED: this landed on %s in the lander's checkout (%s), not in %s - the installed skill still runs "
+            "its checked-out code. Activation is a human step (python anchor_next.py activate \"%s\"); tell John it is "
+            "landed to integration and awaits his activation, and never call it installed, live or active until he has "
+            "activated it." % (branch, job.get("land_to") or "the integration checkout", job["repo"], job["repo"]))
 
 
 def _report(cdir, job, *, notify_result=True):
@@ -2112,6 +2178,9 @@ def _materialize_report(cdir, job):
     live = live_note(job)
     if live:
         lines.append(live)
+    installed = installed_note(job)
+    if installed:
+        lines.append(installed)
     lines.append("The coder's summary: " + (job.get("summary") or "(none)"))
     lines.append("Collect this original job's CURRENT result before acting (steward_code_job.py collect --job %s). "
                  "A later attempt supersedes an earlier result. Reconcile prior delivery; never start another worker "

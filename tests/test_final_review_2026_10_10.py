@@ -85,22 +85,37 @@ def test_r2_a_start_is_counted_before_the_drain_question_and_a_refused_one_leave
 
 
 def test_r2_a_stopped_skill_stays_registered_until_its_process_ends(monkeypatch, tmp_path):
-    killed = []
+    # 2026-10-10 lifetime parity: Stop ends the contained tree and SEES it gone (code_jobs._Run.end) before the record
+    # says stopped - no taskkill, no stop recorded on hope; the run stays counted until its wait drops it
+    ended = []
 
     class Proc:
-        pid = 4242
+        pid, returncode = 4242, None
 
         def poll(self):
-            return None
-    monkeypatch.setattr(skill_jobs, "running", lambda cdir: [{"id": "k9", "started": "2026-10-10 10:00:00"}])
-    monkeypatch.setattr(skill_jobs, "_write_job", lambda cdir, job: None)
-    monkeypatch.setattr(skill_jobs, "_kill_tree", lambda p: killed.append(p.pid))
-    monkeypatch.setitem(skill_jobs._PROCS, "k9", Proc())
+            return self.returncode
+
+        def kill(self):
+            ended.append(self.pid)
+            self.returncode = -1
+
+        def wait(self, timeout=None):
+            return self.returncode
+    (tmp_path / ".ecgberht").mkdir()
+    (tmp_path / ".ecgberht" / "skill-jobs.json").write_text(json.dumps({"k9": {
+        "id": "k9", "status": "running", "started": "2026-10-10 10:00:00", "label": "k9", "argv": ["node", "x.mjs"],
+        "log": ".ecgberht/skill-jobs/k9.log", "process": {"pid": 4242, "contained": False}}}), encoding="utf-8")
+    monkeypatch.setitem(skill_jobs._PROCS, "k9", code_jobs._Run(Proc(), None))
     try:
-        assert skill_jobs.stop(str(tmp_path), "k9")["ok"] and killed == [4242]
-        assert "k9" in skill_jobs._PROCS, "still counted by the restart check until wait() sees it end"
+        out = skill_jobs.stop(str(tmp_path), "k9", actor="John")
+        assert out["ok"] and ended == [4242], out
+        rec = skill_jobs.read_jobs(str(tmp_path))["k9"]
+        assert rec["status"] == "stopped" and rec["stopped_by"] == "John" and rec["stop_requested"]
+        assert rec["process"]["state"] == "ended" and rec["handoff"]["state"] == "needs_report"
+        assert "k9" in skill_jobs._PROCS, "still counted by the restart check until its wait sees it end"
     finally:
         skill_jobs._PROCS.pop("k9", None)
+    assert not hasattr(skill_jobs, "_kill_tree") and not hasattr(skill_jobs, "TIMEOUT_S")
 
 
 def test_r2_an_encoded_credential_name_is_removed_from_a_malformed_link():
@@ -130,23 +145,21 @@ def test_r3_a_start_that_fails_after_its_reservation_gives_the_reservation_back(
     assert out["ok"] is False and set(skill_jobs._PROCS) == before
 
 
-def test_r4_an_unrecorded_child_that_will_not_stop_stays_counted_until_it_ends(monkeypatch, tmp_path):
-    import subprocess as sp
+def test_r4_a_record_that_cannot_be_written_launches_nothing(monkeypatch, tmp_path):
+    # 2026-10-10 lifetime parity: the record is written BEFORE the launch (the code-job order), so a registry that
+    # cannot be written means no process at all - never a child nobody owns that a kill then has to catch
     import sys as _sys
-    import time as _t
     from steward_cockpit import maintenance
     monkeypatch.setattr(maintenance, "is_active", lambda: False)
     monkeypatch.setattr(skill_jobs, "validate", lambda argv: (True, ""))
     monkeypatch.setattr(skill_jobs, "_write_job", lambda cdir, job: (_ for _ in ()).throw(OSError("disk full")))
-    monkeypatch.setattr(skill_jobs, "_kill_tree", lambda p: None)            # the kill does not land
-    real_wait = sp.Popen.wait
-    monkeypatch.setattr(sp.Popen, "wait", lambda self, timeout=None: real_wait(self, timeout=0.2 if timeout else None))
+    launched = []
+
+    def never(*a, **k):
+        launched.append(a)
+        raise AssertionError("launched without a record")
+    monkeypatch.setattr(code_jobs, "_popen_contained", never)
+    before = set(skill_jobs._PROCS)
     out = skill_jobs.start(str(tmp_path), [_sys.executable, "-c", "import time; time.sleep(1.5)"])
-    assert out["ok"] is False and "still counted" in out["error"]
-    assert any(not isinstance(p, skill_jobs._Reserved) and p.poll() is None for p in skill_jobs._PROCS.values())
-    for _ in range(50):
-        if not any(getattr(p, "pid", None) and p.poll() is None for p in list(skill_jobs._PROCS.values())):
-            break
-        _t.sleep(0.1)
-    _t.sleep(0.3)
-    assert not [k for k, p in skill_jobs._PROCS.items() if not isinstance(p, skill_jobs._Reserved)], "dropped once it ended"
+    assert out["ok"] is False and "nothing started" in out["error"] and "disk full" in out["error"]
+    assert launched == [] and set(skill_jobs._PROCS) == before
