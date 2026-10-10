@@ -876,7 +876,7 @@ def _candidate_state(cand_dir, baseline_sha, root_real, allowed_head=None):
         state["reason"] = "candidate HEAD unreadable: %s" % (err.strip() or "git error")
         return state
     state["head"] = head
-    if head != (allowed_head or baseline_sha):
+    if head not in {baseline_sha, allowed_head or baseline_sha}:
         state["reason"] = "candidate HEAD changed since the recorded operation; preserving committed work"
         return state
     ok, _rc, _out, _err = _git(cand_dir, ["cat-file", "-e", baseline_sha + "^{commit}"])
@@ -1350,7 +1350,10 @@ def _sleep_operation(body, verb, operation):
                 return _refusal(verb, "proposal unavailable or another apply/rollback owns it")
             return operation(body)
     except OSError as exc:
-        return _refusal(verb, "proposal operation unavailable: %s" % exc, 500)
+        # A receipt write can fail AFTER the kernel changed its candidate.
+        # Do not label that as a pre-launch refusal or invent a rolled-back state.
+        return {"ok": False, "verb": verb, "outcome": "error", "kernelRan": None,
+                "error": "proposal operation failed; inspect this original candidate: %s" % exc}, 500
 
 
 def sleep_apply(body):

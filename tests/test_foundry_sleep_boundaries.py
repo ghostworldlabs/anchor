@@ -797,8 +797,38 @@ def test_live_kernel_blocked_apply_is_a_failure_status_and_rolls_the_candidate_b
     gate_before = payload["proposal"]["baseline"]["gateBefore"]
     assert gate_before.get("ok") is True, gate_before
     cand = cand_of(payload)
+    original_lesson = (cand / "crucible" / "LESSONS.md").read_bytes()
     out, status = _apply(payload)
     assert status == 422 and out["outcome"] == "blocked" and out["ok"] is False, out
     assert "regress" in out["reason"] or "rolled back" in out["reason"]
     assert g(cand, "rev-parse", "HEAD").stdout.strip() == rig.head, "the kernel auto-rolled the CANDIDATE back"
+    assert (cand / "crucible" / "LESSONS.md").read_bytes() == original_lesson
     assert snapshot(rig.trio) == rig.before, "the installed checkout is untouched by a blocked apply"
+
+
+@live_kernel
+def test_rollback_retry_recovers_after_post_kernel_receipt_failure(rig, monkeypatch):
+    payload, status = fa.sleep_propose({"skill": "foreman"})
+    assert status == 200, payload
+    promoted, status = _apply(payload)
+    assert status == 200, promoted
+    cand = cand_of(payload)
+    original_write = fa._paths.atomic_write_text
+    failures = []
+    def fail_restored_receipt_once(target, text):
+        if str(target).endswith(".operation.json") and '"restored"' in text and not failures:
+            failures.append(True)
+            raise OSError("simulated receipt write failure after kernel checkout")
+        return original_write(target, text)
+    monkeypatch.setattr(fa._paths, "atomic_write_text", fail_restored_receipt_once)
+    body = {"proposalPath": payload["proposalDir"]}
+    result, status = fa.sleep_rollback(body)
+    assert status == 500 and result["kernelRan"] is None
+    assert g(cand, "rev-parse", "HEAD").stdout.strip() == rig.head
+    receipt_path = fa._operation_receipt_path(Path(payload["proposalDir"]).name)
+    assert json.loads(receipt_path.read_text())["outcome"] == "applied"
+    result, status = fa.sleep_rollback(body)
+    assert status == 200 and result["outcome"] == "restored", result
+    assert json.loads(receipt_path.read_text())["outcome"] == "restored"
+    assert g(cand, "rev-parse", promoted["branch"]).stdout.strip() == promoted["promotedCommit"]
+    assert snapshot(rig.trio) == rig.before
