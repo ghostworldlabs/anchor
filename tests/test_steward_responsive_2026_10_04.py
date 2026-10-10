@@ -269,12 +269,20 @@ def test_stop_keeps_the_branch_and_the_report_wakes_the_real_steward(tmp_path, m
     said = []
 
     class Steward:
+        dir = str(cdir)
+        general = False
         def alive(self): return True
-        def say(self, text, human=True): said.append((text, human))
+        def enqueue_job_result(self, identity, text):
+            said.append((text, identity))
+            return {"ok": True}
     from steward_cockpit import steward_routes
     monkeypatch.setattr(steward_routes, "get_engine", lambda cdir, *a, **k: Steward())
-    code_jobs._report(str(cdir), {"id": "j1", "status": "done", "files": ["a.txt"], "land_note": "landed on x", "summary": "did it"})
-    assert said and said[0][1] is False and said[0][0].startswith("(code job j1 finished - not John)")
+    job = {"id": "j1", "status": "done", "repo": str(repo), "steward_dir": str(cdir), "files": ["a.txt"],
+           "land_note": "landed on x", "summary": "did it"}
+    code_jobs._write_job(cdir, job)
+    code_jobs._report(str(cdir), job)
+    assert said and said[0][1].startswith("j1:1:") and said[0][0].startswith("(code job j1, attempt 1 result - not John)")
+    assert code_jobs.read_jobs(cdir)["j1"]["handoff"]["state"] == "queued"
 
 
 def test_jobs_from_two_stewards_share_a_repository_and_the_path_boundary_holds(tmp_path, monkeypatch):

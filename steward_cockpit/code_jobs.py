@@ -34,18 +34,20 @@ hold, and the review gate.
 from __future__ import annotations
 
 import json
+import hashlib
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import uuid
 from pathlib import Path
 
 JOBS_FILE = ".ecgberht/code-jobs.json"
-CHECK_TIMEOUT_S = 900
 _LOCK = threading.RLock()
 
 
@@ -104,17 +106,26 @@ def _path(cdir):
     return Path(cdir) / JOBS_FILE
 
 
-def read_jobs(cdir):
-    try:
-        d = json.loads(_path(cdir).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+def read_jobs(cdir, *, strict=False):
+    # Share the writer's lock: Windows replacement can briefly deny an unsynchronized read.
+    # A writer must never interpret an unreadable existing registry as an empty one.
+    with _LOCK:
+        try:
+            d = json.loads(_path(cdir).read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                raise ValueError("the code-job registry is not an object")
+            return d
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            if strict:
+                raise
+            return {}
 
 
 def _write_job(cdir, job):
     with _LOCK:
-        d = read_jobs(cdir)
+        d = read_jobs(cdir, strict=True)
         d[job["id"]] = job
         p = _path(cdir)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -198,13 +209,15 @@ def inside(path, repo):
     return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
 
 
-def _transition(cdir, job_id, expect, **updates):
+def _transition(cdir, job_id, expect, *, expect_attempt=None, **updates):
     """One locked status change: applies ``updates`` only when the job's status is in ``expect``; returns the job
     after the change, or None when it was not in that state (finish and stop never both win)."""
     with _LOCK:
-        d = read_jobs(cdir)
+        d = read_jobs(cdir, strict=True)
         j = d.get(job_id)
         if not j or j.get("status") not in expect:
+            return None
+        if expect_attempt is not None and j.get("attempt", 1) != expect_attempt:
             return None
         j.update(updates)
         d[job_id] = j
@@ -225,6 +238,61 @@ def _transition(cdir, job_id, expect, **updates):
 def _repo_root(path):
     code, out, _ = _git(path, "rev-parse", "--show-toplevel")
     return Path(out).resolve() if code == 0 and out else None
+
+
+def destination_error(repo):
+    """A product belongs to its main checkout, never to another job's linked worktree."""
+    import paths
+    if not repo or ":" in str(repo)[2:]:
+        return "invalid repository destination"
+    root = Path(repo).resolve()
+    if any(inside(root, base) for base in (paths.code_jobs_dir(), paths.legacy_code_jobs_dir())):
+        return "destination is a temporary code-job worktree; inspect/collect or recover the original job %s in its commissioning effort" % root.name
+    c, gd, _ = _git(root, "rev-parse", "--absolute-git-dir")
+    c2, common, _ = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if c or c2:
+        return "destination repository identity could not be verified"
+    if _norm(gd) != _norm(common):
+        return "destination is a linked worktree; use its owning main checkout, or recover the original job in its commissioning effort"
+    return ""
+
+
+def work_scope(root, requested, work_dir, outputs):
+    """Omitted scope derives from --repo; explicit empty scope preserves root-wide jobs."""
+    try:
+        if work_dir is None:
+            scope = Path(requested).resolve().relative_to(Path(root).resolve()).as_posix()
+        else:
+            scope = str(work_dir).replace(chr(92), "/").strip()
+        scope = "" if scope in ("", ".") else scope
+        if scope:
+            _output_path(root, scope)
+        why = scope_error({"work_dir": scope}, root, outputs)
+        return (scope, why)
+    except (OSError, ValueError) as exc:
+        return "", "invalid work directory: %s" % exc
+
+
+def scope_error(job, tree, paths):
+    name = job.get("work_dir") or "(repository)"
+    try:
+        root = Path(tree).resolve()
+        scope = _output_path(root, job["work_dir"]) if job.get("work_dir") else root
+        for name in paths:
+            if not _runtime(name):
+                _output_path(root, name).relative_to(scope)
+        return ""
+    except (OSError, ValueError) as exc:
+        return "path outside the job's work directory or unsafe path (%s): %s" % (name, exc)
+
+
+def phase(job, value, **fields):
+    """Controller observation, written at the actual transition, not a guessed heartbeat."""
+    stamp = time.time()
+    out = _transition(job["steward_dir"], job["id"], LIVE, expect_attempt=job.get("attempt", 1), phase=value, phase_at=stamp, **fields)
+    if out:
+        job.update(phase=value, phase_at=stamp, **fields)
+    return out
 
 
 # ── The Foreman/Crucible hold (execution minimum item 3) ────────────────────────────────────────────────────────────
@@ -252,7 +320,6 @@ FOREMAN_AS_SKILL = ("Foreman runs only as a code job (its own worktree, a passin
 # on Anchor's own code unless ANCHOR_UNCONFINED_CODERS=1, and a write into the source repository blocks the landing.
 FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
                         (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
-FOREMAN_TIMEOUT_S = int(os.environ.get("ANCHOR_FOREMAN_TIMEOUT_S", str(6 * 3600)))
 FOREMAN_PROFILES = ("slim", "standard")
 FOREMAN_DIR = ".foreman-job"
 _FOREMAN_PROCS = {}
@@ -309,6 +376,8 @@ def foreman_docs(job, plan_text=""):
     check = check_text(job["check"])
     title = next((ln.strip().lstrip("#").strip() for ln in job["brief"].splitlines() if ln.strip()), "the change")[:120]
     description = "# Code job %s - description\n\n%s\n" % (job["id"], job["brief"])
+    description += "\nOwning repository: %s. Artifact work directory: %s. Commands run at the worktree root; output paths are repository-relative. Change only this scope.\n" % (
+        job.get("repo", ""), job.get("work_dir") or "repository root (root-wide)")
     if plan_text.strip():
         plan = plan_text if re.search(r"(?im)^\s*(test[-_ ]?command|build[-_ ]?and[-_ ]?test|gate[-_ ]?command)\s*[:=]",
                                       plan_text) else "test-command: `%s`\n\n%s" % (check, plan_text)
@@ -577,6 +646,8 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
     # start() records the failure; if it cannot be seen gone, the job keeps running and registered (its claim holds)
     try:
         try:                                        # informational: never a reason to end a running Foreman
+            from steward_cockpit.code_job_handoff import record_worker
+            record_worker(job, run.pid)
             _transition(cdir, jid, ("running",), foreman_pid=run.pid)
         except Exception:
             pass
@@ -592,16 +663,12 @@ def _start_foreman(cdir, job, wt, plan_text, profile, settings_dir):
 
 
 def _wait_foreman(cdir, job, wt, run, out):
-    """Foreman ended (or ran out of time): end what it left running and SEE it gone, then - unless Stop ended it -
+    """Foreman ended: end what it left running and SEE it gone, then - unless Stop ended it -
     hand its whole change to the code job's finish. A tree that cannot be seen gone keeps the job running and
     registered, whoever asked (fcj review r3: never released on a failed end)."""
     jid = job["id"]
-    timed_out = False
     try:
-        try:
-            run.proc.wait(timeout=FOREMAN_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+        run.proc.wait()  # duration is not evidence of a hang; the existing ticker observes progress
         ended = run.end(60)
     finally:
         out.close()
@@ -613,9 +680,7 @@ def _wait_foreman(cdir, job, wt, run, out):
         _FOREMAN_PROCS.pop(jid, None)
         return
     result = foreman_result(job)
-    if timed_out:
-        result.setdefault("error", "Foreman ran longer than %ss and was ended" % FOREMAN_TIMEOUT_S)
-    elif result.get("error") is None and run.proc.returncode != 0:
+    if result.get("error") is None and run.proc.returncode != 0:
         result["error"] = "Foreman exited %s" % run.proc.returncode
     result["manifest"] = foreman_manifest(job)
     try:
@@ -709,6 +774,7 @@ def choose_coder(requested=""):
 
 # ── Checks: an argument list or a temp script; never cut, never re-quoted ──────────────────────────────────────────
 CHECK_MAX = 20000
+BRIEF_MAX = 8000
 
 
 def normalize_check(check):
@@ -722,6 +788,107 @@ def normalize_check(check):
     if len(text) > CHECK_MAX:
         return None, "the check is %d characters - put it in a script file in the repository" % len(text)
     return text, None
+
+
+COMMAND_OBSERVE_S = 5  # observation cadence, never a runtime limit
+
+
+def run_command(job, tree, argv, *, output_limit=128 * 1024):
+    """One owned, contained check/review. Observe until exit or explicit Stop, without a guessed deadline.
+
+    Reuses Foreman's process containment. File-backed output avoids pipe deadlocks and unbounded RAM;
+    the log remains outside the product tree for inspection. A live/unknown tree never releases its claim.
+    """
+    import proc_probe
+    d = jobs_base() / "checks"
+    d.mkdir(parents=True, exist_ok=True)
+    log = d / ("%s-%s-%s.log" % (job["id"], job.get("attempt", 1), uuid.uuid4().hex[:8]))
+    cdir = job.get("steward_dir")
+    command = {"phase": job.get("phase"), "started_at": time.time(), "log": str(log),
+               "state": "starting", "activity_at": None}
+    def observation_error(message):
+        if (command.get("last_observation_error") or {}).get("text") != message:
+            logging.getLogger(__name__).warning("code job %s: %s", job["id"], message)
+        command["last_observation_error"] = {"text": message, "at": time.time()}
+
+    def save():
+        if cdir:
+            try:
+                if not _transition(cdir, job["id"], LIVE, expect_attempt=job.get("attempt", 1), command=dict(command)):
+                    observation_error("command observation was not saved; checking current ownership")
+            except Exception as exc:
+                observation_error("command observation could not be saved: " + str(exc)[:200])
+    if cdir and _stop_asked(job, on_error=observation_error):
+        return subprocess.CompletedProcess(argv, 130, "", "stopped before command launch")
+    with log.open("wb") as output:
+        fatal_launch = None
+        try:
+            run = _popen_contained(argv, str(tree), dict(os.environ), output)
+        except _Uncontained as exc:
+            run = exc.run
+            fatal_launch = command["error"] = str(exc)
+        try:
+            birth = proc_probe.creation_time(run.pid)
+        except Exception as exc:
+            birth = None
+            observation_error("command identity could not be observed: " + str(exc)[:200])
+        command.update(pid=run.pid, birth=birth, state="active", contained=run.wjob is not None)
+        save()
+        size, cancelled = 0, False
+        while True:
+            if cdir and _stop_asked(job, on_error=observation_error):
+                cancelled = True
+            exited = False
+            try:
+                exited = run.poll() is not None
+            except Exception as exc:
+                observation_error("command exit could not be observed: " + str(exc)[:200])
+            if cancelled or fatal_launch or exited:
+                ended = False
+                try:
+                    ended = run.end(5)
+                except Exception as exc:
+                    observation_error("command cleanup could not be confirmed: " + str(exc)[:200])
+                if ended:
+                    command.pop("cleanup_detail", None)
+                    break
+                command.update(state="cleanup_wait", cleanup_detail="process tree has not been confirmed ended; work stays claimed")
+                save()
+                time.sleep(COMMAND_OBSERVE_S)
+                continue
+            try:
+                try:
+                    run.proc.wait(timeout=COMMAND_OBSERVE_S)
+                except subprocess.TimeoutExpired:
+                    pass  # inspect; never convert quiet or elapsed time into failure
+                current_size = log.stat().st_size
+                if current_size != size:
+                    size = current_size
+                    command.update(activity_at=time.time(), output_bytes=size)
+            except Exception as exc:
+                observation_error("command observation failed: " + str(exc)[:200])
+                time.sleep(COMMAND_OBSERVE_S)
+            save()  # retry observation persistence even when the command is quiet
+        try:
+            size = log.stat().st_size
+        except OSError as exc:
+            observation_error("command log size could not be read: " + str(exc)[:200])
+        command.update(state="completed", ended_at=time.time(), returncode=run.proc.returncode,
+                       cancelled=cancelled, output_bytes=size)
+        save()
+    try:
+        with log.open("rb") as output:
+            output.seek(max(0, log.stat().st_size - output_limit))
+            text = output.read(output_limit).decode("utf-8", errors="replace")
+    except OSError as exc:
+        text = ""
+        observation_error("command output could not be read: " + str(exc)[:200])
+        save()
+    if cancelled:
+        text += "\nStopped at the user's request; saved work is retained."
+    if fatal_launch:
+        text += "\n" + fatal_launch
+    return subprocess.CompletedProcess(argv, 130 if cancelled else 1 if fatal_launch else run.proc.returncode, text, "")
 
 
 def run_check(job, tree):
@@ -746,12 +913,8 @@ def run_check(job, tree):
                 script = d / ("%s-%s.sh" % (job["id"], uuid.uuid4().hex[:6]))
                 script.write_text(check + "\n", encoding="utf-8")
                 argv = ["sh", str(script)]
-        r = subprocess.run(argv, cwd=str(tree), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=CHECK_TIMEOUT_S, shell=False,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
+        r = run_command(job, tree, argv, output_limit=1200)
         return r.returncode == 0, ((r.stdout or "") + (r.stderr or ""))[-1200:]
-    except subprocess.TimeoutExpired:
-        return False, "the check ran longer than %ss" % CHECK_TIMEOUT_S
     except Exception as e:
         return False, "the check did not run: %s" % e
     finally:
@@ -954,7 +1117,6 @@ def changed_paths(tree, base):
 
 
 # ── The review gate ────────────────────────────────────────────────────────────────────────────────────────────────
-REVIEW_TIMEOUT_S = int(os.environ.get("ANCHOR_CODE_REVIEW_TIMEOUT_S", "2400"))
 DOCUMENT_EXTS = {".md", ".markdown", ".pdf", ".ics", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg"}
 # instruction files steer agents - they are never "just documents"
 INSTRUCTION_FILES = {"claude.md", "agents.md", "skill.md", "gemini.md", "copilot-instructions.md"}
@@ -1009,11 +1171,7 @@ def run_review(job, tree, head, delta_from=""):
     if delta_from:
         argv += ["--delta-from", delta_from]
     try:
-        r = subprocess.run(argv, cwd=str(tree), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=REVIEW_TIMEOUT_S, shell=False,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "the review ran longer than %ss" % REVIEW_TIMEOUT_S}
+        r = run_command(job, tree, argv)
     except Exception as e:
         return {"ok": False, "error": "the review could not run: %s" % e}
     lines = [ln for ln in (r.stdout or "").splitlines() if ln.strip().startswith("{")]
@@ -1074,7 +1232,7 @@ def declared_outputs(outputs):
         p = str(raw or "").strip().replace(chr(92), "/")
         if not p:
             continue
-        if p.startswith("/") or re.match(r"^[A-Za-z]:", p) or ".." in p.split("/") or "*" in p or "?" in p:
+        if p.startswith("/") or ":" in p or any(ord(c) < 32 for c in p) or ".." in p.split("/") or "*" in p or "?" in p:
             return None, "a declared output is a plain path inside the repository: %s" % p
         import posixpath
         p = posixpath.normpath(p)          # normalized FIRST, then every exclusion applies to this exact path (ChatGPT r3)
@@ -1095,7 +1253,7 @@ def declared_outputs(outputs):
 
 
 def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None,
-          worker="coder", plan="", profile="slim"):
+          worker="coder", plan="", profile="slim", work_dir=None):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
     family choice (else the Coder seat); ``check`` is an argument list or the full command text. ``worker="foreman"``
@@ -1103,9 +1261,16 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     brief = str(brief or "").strip()
     if not brief:
         return {"ok": False, "error": "a code job needs a brief"}
+    if len(brief) > BRIEF_MAX:
+        return {"ok": False, "error": "no job started: the brief is %d characters; the limit is %d. "
+                "Keep the assignment within that limit and reference supporting files; nothing was truncated."
+                % (len(brief), BRIEF_MAX)}
     check, why = normalize_check(check)
     if why:
         return {"ok": False, "error": why}
+    if not check or (isinstance(check, str) and not check.strip()):
+        return {"ok": False, "error": "no job started: every code job needs --check or --check-argv "
+                "with the existing verification/test command for its output"}
     worker = str(worker or "coder").strip().lower()
     plan, profile = str(plan or ""), str(profile or "slim").strip().lower()
     if worker == "foreman":
@@ -1136,6 +1301,12 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     root = _repo_root(repo or "")
     if root is None:
         return {"ok": False, "error": "not a git repository: %s" % repo}
+    why = destination_error(root)
+    if why:
+        return {"ok": False, "error": "no job started: " + why}
+    work_dir, why = work_scope(root, repo, work_dir, outputs)
+    if why:
+        return {"ok": False, "error": "no job started: " + why}
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     branch = "steward-job-" + job_id
     wt = jobs_base() / job_id
@@ -1197,7 +1368,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             served_dirt = dirty_snapshot(root)
             if served_dirt is None:
                 return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
-            job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief[:8000],
+            job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief,
+                   "work_dir": work_dir, "attempt": 1, "phase": "producing", "phase_at": time.time(),
                    "repo_dirt": served_dirt,
                    "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
                    "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
@@ -1266,12 +1438,14 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         except Exception as e:
             return abandon("Foreman could not start: %s" % e)
         return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "foreman",
-                "coder": "Foreman (%s)" % profile}
+                "coder": "Foreman (%s)" % profile, "repo": str(root), "work_dir": work_dir, "outputs": outputs}
     try:
         eng = engine_factory(str(wt)) if engine_factory else None
         if eng is None:
             raise RuntimeError("no engine slot for the coder")
-        eng.code_job = {"cdir": str(cdir), "id": job_id, "repo": str(root)}
+        eng.code_job = {"cdir": str(cdir), "id": job_id, "repo": str(root),
+                        "worktree": str(wt), "work_dir": work_dir, "outputs": outputs}
+        eng.job_observation = {}
         try:   # this job's family, for this engine only (the dashboard's preferences are never written)
             import anchor_settings
             eng.policy_override = {"family": family, "revision": anchor_settings.get_launch_settings()["settings_revision"],
@@ -1285,6 +1459,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         ok, why = eng.wake(fresh=True, seed=coder_brief(job))
         if not ok:
             raise RuntimeError(why)
+        from steward_cockpit.code_job_handoff import record_worker
+        record_worker(job, getattr(getattr(eng, "proc", None), "pid", None))
         try:   # 2026-10-08: the status names the model and effort the coder was asked for, not only its family
             sel = getattr(eng, "model_selection", None) or {}
             asked = " ".join(str(x) for x in (sel.get("model"), sel.get("effort")) if x)
@@ -1296,7 +1472,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         j = _transition(cdir, job_id, LIVE, status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"), error="the coder could not start: %s" % e)
         _cleanup(j or job, keep_branch=False)
         return {"ok": False, "error": "the coder could not start: %s" % e, "job": job_id}
-    return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "coder", "coder": family}
+    return {"ok": True, "job": job_id, "branch": branch, "worktree": str(wt), "worker": "coder", "coder": family,
+            "repo": str(root), "work_dir": work_dir, "outputs": outputs}
 
 
 def _exclude_local(wt):
@@ -1318,36 +1495,58 @@ def _exclude_local(wt):
 
 
 def coder_brief(job):
+    documents = reading_outputs(job)
+    assignment = (
+        "The commissioned reading outputs are: %s. Produce these declared documents as part of the brief, "
+        "including its requested reading copies. A declared output may also be generated by the stated check. "
+        "Do not create extra deliverables, campaign plans, journals, attention or status records. "
+        "Do not add review passes beyond the brief; the controller independently reviews the finished candidate. "
+        % ", ".join(documents)
+    ) if documents else (
+        "Do not write plan pages, reports, journals or status files; edit the commissioned code. "
+    )
     return ("You are a CODE JOB commissioned by John's steward. Work only in this folder, a git worktree of "
             "%s on branch %s. Do the work in the brief below completely, at your best; you may use sub-agents if "
             "the brief asks for a swarm. Do not ask questions back: if something is genuinely John's to decide, "
-            "stop and say so in your final message. Do not write plan pages, reports, journals or status files; "
-            "edit the code with your file tools (only the files your tools write will land; anything else that "
+            "stop and say so in your final message. %s"
+            "Use your file tools (only the files your tools write will land; anything else that "
             "changes keeps the work from landing), run the checks that apply, and end with a plain summary of what "
             "you changed and how you checked it. Do not commit; the job commits your files, a reviewer of another "
-            "model family reviews them, and they land only if that review passes.%s%s\n\nBRIEF:\n%s") % (
-        job["repo"], job["branch"], ("\nNamed up front as this job's outputs (they may land even when a command you ran "
+            "model family reviews them, and they land only if that review passes.%s%s\n"
+            "Destination: %s. Work directory: %s. Stay at the worktree root for commands; output paths are always "
+            "repository-relative, including the work-directory prefix. Change files only within that scope.\n\nBRIEF:\n%s") % (
+        job["repo"], job["branch"], assignment, ("\nNamed up front as this job's outputs (they may land even when a command you ran "
                                      "wrote them, not your file tools): " + ", ".join(job["outputs"])) if job.get("outputs") else "",
         ("\nThe job will run this check after you finish: " + (
-            " ".join(job["check"]) if isinstance(job["check"], list) else job["check"])) if job.get("check") else "", job["brief"])
+            " ".join(job["check"]) if isinstance(job["check"], list) else job["check"])) if job.get("check") else "",
+        job["repo"], job.get("work_dir") or "(repository root; root-wide assignment)", job["brief"])
 
 
 def finish(cdir, job_id, result):
     """The coder's turn ended: check, commit, land when clean, wake the steward with the result. Never raises.
     The job is claimed first (running -> finishing): a stop that already won leaves it alone."""
-    job = _transition(cdir, job_id, ("running",), status="finishing", finishing_at=time.time())
+    import proc_probe
+    job = _transition(cdir, job_id, ("running",), status="finishing", finishing_at=time.time(), worker_completed_at=time.time(),
+                      finalizer_active=True, claim={"pid": os.getpid(), "birth": proc_probe.creation_time(os.getpid()),
+                                                    "actor": "finish controller", "at": time.time()})
     if not job:
         return
     try:
         _finish(cdir, job_id, job, result)
     except Exception as e:      # never leave the repository owned by a finish that died
         j = _transition(cdir, job_id, ("finishing",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        expect_attempt=job.get("attempt", 1),
+                        phase="outcome", phase_at=time.time(), kept_worktree=job["worktree"],
                         error="the job's finish failed: %s" % e, land_note="not landed; the work waits on branch %s" % job["branch"])
         if j:
             _report(cdir, j)
+    finally:
+        _transition(cdir, job_id, ("finishing", "done", "failed", "stopped"),
+                    expect_attempt=job.get("attempt", 1), finalizer_active=False)
 
 
 def _finish(cdir, job_id, job, result):
+    from steward_cockpit import code_job_handoff as handoff
     wt, repo = job["worktree"], job["repo"]
     summary = str((result or {}).get("text") or "")[-1500:]
     err = str((result or {}).get("error") or "")
@@ -1357,9 +1556,22 @@ def _finish(cdir, job_id, job, result):
         mark_exhausted(CLI_FAMILY.get(str(fam).lower(), str(fam).lower()))
     job["authors"] = [a for a in ((result or {}).get("authors") or []) if a in FAMILIES]
     manifest = [p for p in ((result or {}).get("manifest") or []) if isinstance(p, str)]
+    job["manifest"] = manifest
+    saved = handoff.snapshot(job)
+    if not _transition(cdir, job_id, ("finishing",), expect_attempt=job.get("attempt", 1),
+                       authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
+        return
     changed = changed_paths(wt, job["base"])
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
+    checked = False
+    if changed == [] and not err and missing_reading_outputs(job, wt):
+        # A packaging check can be the only producer (e.g. unchanged source -> new PDF).
+        phase(job, "checking")
+        fields["check_ok"], fields["check_output"] = run_check(job, wt)
+        checked = True
+        phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
+        changed = changed_paths(wt, job["base"])
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
         note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
@@ -1370,11 +1582,17 @@ def _finish(cdir, job_id, job, result):
         if left:
             fields["unexpected"] = left
             note = "nothing landable changed; outputs git ignores are kept at %s (%s)" % (wt, ", ".join(left[:8]))
+        missing = missing_reading_outputs(job, wt)
+        if missing:
+            keep, status, error = True, "failed", "declared reading outputs missing or unsafe: " + ", ".join(missing)
+            note = "not landed: " + error + "; the work is kept at %s" % wt
+            fields["missing_outputs"] = missing
     else:
         # W2 (2026-10-08): only what the coder's tools recorded writing lands - plus a file the job named up front as
         # its declared output (a render a script made), still reviewed; the exclusions hold for both
         allowed = {p for p in manifest + list(job.get("outputs") or []) if not never_lands(p)}
         unexpected = [p for p in changed if p not in allowed and not _runtime(p)]     # W1: runtime never refuses
+        unexpected += [p for p in changed if not _runtime(p) and scope_error(job, wt, [p]) and p not in unexpected]
         files = [p for p in changed if p in allowed and not _runtime(p)]              # ... and never lands
         fields.update(unexpected=unexpected, files=files)
         status, error = ("failed" if err else "done"), err
@@ -1386,7 +1604,10 @@ def _finish(cdir, job_id, job, result):
         elif not files:
             note = "not landed: nothing the coder wrote changed; the worktree is kept at %s" % wt
         else:
-            fields["check_ok"], fields["check_output"] = run_check(job, wt)
+            phase(job, "checking")
+            if not checked:
+                fields["check_ok"], fields["check_output"] = run_check(job, wt)
+            phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
             after = changed_paths(wt, job["base"])
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
@@ -1397,6 +1618,8 @@ def _finish(cdir, job_id, job, result):
                 late = [x for x in late if x not in made]
             late += [p + " (ignored by git)" for p in _not_runtime(ignored_outputs(wt))]
             served = _locked_served_changes(job)
+            missing = missing_reading_outputs(job, wt)
+            fields["missing_outputs"] = missing
             if late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
             if fields["check_ok"] is None:       # W1a (2026-10-08): every landing needs an explicit passing check
@@ -1404,6 +1627,9 @@ def _finish(cdir, job_id, job, result):
                         "--check); the work is kept at %s" % wt)
             elif fields["check_ok"] is not True:
                 note = "not landed: the check failed in the job's tree; the work is kept at %s" % wt
+            elif missing:
+                note = "not landed: declared reading outputs missing or unsafe (%s); finish packaging in the kept worktree %s" % (
+                    ", ".join(missing), wt)
             elif late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
                 note = ("not landed: the check or the coder left changes outside the coder's own files (%s); everything "
@@ -1439,7 +1665,9 @@ def _finish(cdir, job_id, job, result):
             note += ("; ALSO: %s changed during the job outside any landing (%s) - check those files"
                      % (job["repo"], ", ".join(served[:8])))
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
-                       error=error, land_note=note, kept_worktree=(wt if keep else ""), **fields)
+                       expect_attempt=job.get("attempt", 1),
+                       error=error, land_note=note, kept_worktree=(wt if keep else ""), phase="outcome", phase_at=time.time(),
+                       recovery_snapshot=handoff.snapshot(job), **fields)
     if done is None:
         return
     if not keep:
@@ -1553,8 +1781,19 @@ def _commit_manifest(wt, job, files):
     return ""
 
 
-def _stop_asked(job):
-    return bool((read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}).get("stop_requested"))
+def _stop_asked(job, *, on_error=None):
+    try:
+        current = read_jobs(job.get("steward_dir") or "", strict=True).get(job["id"])
+    except Exception as exc:
+        if on_error:
+            on_error("job ownership could not be read: " + str(exc)[:200])
+        return False  # lost visibility is not a Stop instruction
+    if not isinstance(current, dict) or not current.get("status"):
+        if on_error:
+            on_error("job ownership is unavailable; no Stop is established")
+        return False
+    return bool(current.get("stop_requested") or current.get("status") not in LIVE
+                or current.get("attempt", 1) != job.get("attempt", 1))
 
 
 def land(job, files):
@@ -1568,6 +1807,9 @@ def land(job, files):
     # the job's start and checked again here), else the repository itself. The running Anchor is refused by land_locked.
     repo = job.get("land_to") or job["repo"]
     fields = {"verified": False}
+    why = destination_error(job["repo"]) or scope_error(job, wt, files)
+    if why:
+        return False, "not landed: " + why, fields
     if job.get("land_to"):
         import anchor_next
         with _gs.repo_lock(job["repo"], wait_s=600, who="code job " + job["id"]) as held:   # fcj r4: never half-placed
@@ -1582,6 +1824,7 @@ def land(job, files):
         return False, "not landed: could not read the candidate; the work is kept at %s" % wt, fields
     if _stop_asked(job):
         return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
+    phase(job, "reviewing")
     rec = run_review(job, wt, cand)           # W2 (2026-10-08): every job is reviewed by another family, documents too
     fields["review"] = rec
     why = review_blocks(job, rec, wt, cand)
@@ -1592,17 +1835,24 @@ def land(job, files):
         return False, "not landed: could not read %s HEAD (%s)" % (repo, err[:120]), fields
     code, _, _ = _git(wt, "merge-base", "--is-ancestor", head, cand)
     if code != 0:                                          # newer commits in the repository: integrate in the job's tree
+        phase(job, "integrating")
         code, _, _ = _git(wt, "merge", "--no-edit", head, timeout=600)
         if code != 0:
             _git(wt, "merge", "--abort")
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
         code, merged, _ = _git(wt, "rev-parse", "HEAD")
+        phase(job, "checking")
         ok, out = run_check(job, wt)
         fields["integration_check_ok"] = ok is True        # final review 10-10: the stage line reads the final gate
         if ok is not True:                                 # a missing check is a failure too (W1a)
             return False, "not landed: the check did not pass after bringing in newer changes; the work is kept at %s" % wt, fields
+        missing = missing_reading_outputs(job, wt)
+        if missing:
+            fields.update(integration_check_ok=False, missing_outputs=missing)
+            return False, "not landed: declared reading outputs missing or unsafe after integration: " + ", ".join(missing), fields
         if _stop_asked(job):
             return False, "not landed: John asked to stop it; the work is kept at %s" % wt, fields
+        phase(job, "reviewing")
         delta = run_review(job, wt, merged, delta_from=cand)
         fields["delta_review"] = delta
         why = review_blocks(job, delta, wt, merged)
@@ -1617,10 +1867,14 @@ def land(job, files):
     if stray:
         return False, "not landed: the candidate would place paths outside the job's own files (%s); kept at %s" % (
             ", ".join(stray[:8]), wt), fields
+    phase(job, "landing")
     with _gs.repo_lock(repo, wait_s=300, who="code job " + job["id"]) as held:
         if not held:
             return False, "not landed: the repository's commit lock is busy; the work is kept at %s" % wt, fields
         current = read_jobs(job.get("steward_dir") or "").get(job["id"]) or {}
+        why = destination_error(job["repo"]) or scope_error(job, wt, land_files)
+        if why or current.get("attempt", 1) != job.get("attempt", 1):
+            return False, "not landed: " + (why or "the job attempt changed"), fields
         if current.get("stop_requested"):              # his Stop, honoured under the same lock placement holds
             return False, "not landed: %s asked to stop it; the work is kept at %s" % (
                 current.get("stop_requested_by") or "John", wt), fields
@@ -1650,7 +1904,7 @@ def land(job, files):
             job["id"], job["brief"][:600]), who="code job " + job["id"], expect_head=head)
         bad = []
         if landed:                                      # recorded before the lock goes: a stop can no longer release it
-            _transition(job.get("steward_dir") or "", job["id"], ("finishing",), placed=True)
+            _transition(job.get("steward_dir") or "", job["id"], ("finishing",), expect_attempt=job.get("attempt", 1), placed=True)
             c, out, _ = _git(repo, "rev-parse", "HEAD")  # the landing commit itself: read while nothing else can commit
             fields["landed_commit"] = out.strip() if c == 0 else ""
             # the placed tree is the reviewed one for every path the job touched - additions, edits AND deletions -
@@ -1707,9 +1961,9 @@ def stage_line(job):
     the FINAL candidate passed: an integration recheck (delta_review) that did not pass is said."""
     if not isinstance(job, dict):
         return ""
-    if str(job.get("skill") or "").strip():
-        return "%s %s" % (str(job["skill"]).strip(), {"done": "finished", "failed": "failed", "stopped": "stopped"}.get(
-            str(job.get("status") or ""), str(job.get("status") or "running")))
+    if job.get("status") in LIVE:
+        return "%s%s" % ((str(job.get("skill")) + ": ") if job.get("skill") else "",
+                         job.get("phase") or ("producing" if job.get("status") == "running" else "finishing"))
     out = []
     if not (job.get("files") or job.get("manifest")):
         return "nothing made"
@@ -1755,82 +2009,201 @@ def live_note(job):
 
 
 def _report(cdir, job):
-    """Wake the steward that commissioned the job with its result (a control turn, not his words)."""
-    lines = ["(code job %s finished - not John) Status: %s." % (job["id"], job["status"])]
+    """Save the commissioning steward's result before attempting notification."""
+    from steward_cockpit import code_job_handoff as handoff
+    lines = ["(code job %s, attempt %s result - not John) Status: %s." % (job["id"], job.get("attempt", 1), job["status"]),
+             "Destination: %s; work directory: %s." % (job["repo"], job.get("work_dir") or "repository root")]
     if job.get("error"):
         lines.append("Error: " + job["error"][:300])
     if job.get("files"):
         lines.append("Files: " + ", ".join(job["files"][:20]) + (" and %d more" % (len(job["files"]) - 20) if len(job["files"]) > 20 else ""))
     if job.get("check"):
-        lines.append("Check `%s`: %s." % (job["check"], "passed" if job.get("check_ok") else "FAILED") + ((" Output tail: " + job["check_output"][-400:]) if job.get("check_ok") is False else ""))
+        lines.append("Check: %s." % handoff.check_state(job).replace("_", " ") + ((" Output tail: " + job.get("check_output", "")[-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
     lines.append("Stage: " + stage_line(job) + " (say the job's state in these words)")
-    if job.get("kept_worktree") and (job.get("files") or job.get("unexpected")) and not job.get("landed"):
-        links = announce_kept(cdir, job)
-        lines.append("Kept (not landed): " + (("readable copies are linked in the dialogue: " + ", ".join(links))
-                                               if links else ", ".join(str(Path(job["kept_worktree"]) / f) for f in job["files"][:10])))
+    if job.get("landed"):
+        products = handoff.products(job)
+        job["products"] = products
+        links = ["[%s](%s)" % (Path(p["path"]).name.replace("[", "\\["), p["href"]) for p in products if p.get("href")]
+        if links:
+            lines.append("Landed reading outputs: " + ", ".join(links[:6]))
+        lines.append("Landing is verified placement, not managed publication or human acceptance; register the reading products through their owning effort's existing writer.")
+    kept = job.get("kept_worktree") and (job.get("files") or job.get("unexpected")) and not job.get("landed")
+    if kept:
+        lines.append("Saved work: %s. Collect/inspect returns reading-copy links and any delivery errors; kept copies are not landed or accepted." % job["kept_worktree"])
     live = live_note(job)
     if live:
         lines.append(live)
     lines.append("The coder's summary: " + (job.get("summary") or "(none)"))
-    lines.append("Tell John the result in two or three plain sentences; ask him only what is genuinely his to decide.")
+    lines.append("Collect this original job's CURRENT result before acting (steward_code_job.py collect --job %s). "
+                 "A later attempt supersedes an earlier result. Reconcile prior delivery; never start another worker "
+                 "because this notice repeats. For unchanged kept work, inspect/recover this original job instead of "
+                 "rebuilding. Report briefly, preserve pending human decisions, and continue independent authorized work." % job["id"])
+    if handoff.save_result(cdir, job, "\n".join(lines)):
+        if kept:
+            # Even a copy/registrar failure cannot erase the controller's already durable result.
+            try:
+                announce_kept(cdir, job)
+            except Exception as exc:
+                _transition(cdir, job["id"], (job["status"],), expect_attempt=job.get("attempt", 1), kept_delivery={
+                    "errors": [{"reason": str(exc)[:300]}], "recovery": "saved work remains in " + job["kept_worktree"]})
+        handoff.notify(cdir, job["id"], wake=True)
+
+
+def reading_outputs(job):
+    """Only explicitly declared reading products grant the worker a document assignment."""
+    return list(dict.fromkeys(p for p in job.get("outputs") or [] if isinstance(p, str) and is_document(p)))
+
+
+def _output_path(root, name):
+    """A plain relative path, contained after resolving Windows links as well as POSIX links."""
+    name = str(name).replace(chr(92), "/")
+    if (not name or name.startswith("/") or ":" in name or any(ord(c) < 32 for c in name)
+            or any(p in ("", ".", "..") for p in name.split("/"))):
+        raise ValueError("unsafe output path")
+    root = Path(root).resolve()
+    path = (root / name).resolve()
+    if path == root or not path.is_relative_to(root):
+        raise ValueError("output link escapes its root")
+    return path
+
+
+def missing_reading_outputs(job, tree):
+    missing = []
+    for name in reading_outputs(job):
+        try:
+            if not _output_path(tree, name).is_file():
+                missing.append(name)
+        except (OSError, ValueError):
+            missing.append(name)
+    return missing
+
+
+def _file_hash(path):
+    with open(path, "rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _copy_kept(src, dst):
+    """Atomic, no-clobber publication: partial copying never becomes a reading target."""
+    wanted = _file_hash(src)
+    if dst.exists():
+        if not dst.is_file() or _file_hash(dst) != wanted:
+            raise ValueError("different preserved copy exists; both versions kept")
+        return wanted
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=".kept-", dir=dst.parent)
+    os.close(fd)
     try:
-        from steward_cockpit import steward_routes as _sr
-        eng = _sr.get_engine(str(cdir))
-        if eng is not None:
-            try:   # two-lane step 5 (2026-10-05): he sees the result at once, in the engine's own words
-                # W4: the stage line, not the stored status, is what he reads
-                eng._emit({"t": "sys", "text": "code job %s: %s%s" % (
-                    job["id"], stage_line(job),
-                    (" \u2014 " + job.get("land_note")) if (job.get("land_note") and not job.get("landed")) else "")})
-            except Exception:
-                pass
-            if not eng.alive():
-                eng.wake(fresh=False)
-            eng.say("\n".join(lines), human=False)
-    except Exception:
-        pass
+        shutil.copy2(src, temp)
+        if _file_hash(temp) != wanted:
+            raise ValueError("source changed while copying; retry from the preserved worktree")
+        try:
+            os.link(temp, dst)           # same directory/volume; never replaces an existing target
+        except FileExistsError:
+            if not dst.is_file() or _file_hash(dst) != wanted:
+                raise ValueError("different preserved copy exists; both versions kept")
+        return wanted
+    finally:
+        os.unlink(temp)
 
 
 def announce_kept(cdir, job):
-    """The readable outputs of a job that did NOT land are copied into the steward's folder
-    (code-job-outputs/<job>/...) and announced in its dialogue with their Read links - John can open the PDF the job
-    made even though the code did not land. Returns the copied names."""
-    import shutil as _sh
+    """Bounded reading handback, not an evidence sweep. Original work and acceptance stay untouched."""
+    from steward_cockpit import steward_engine as _se
+    import deliverables_register as _dr
+    delivery = {"items": [], "errors": [], "retained_count": 0, "recovery": ""}
+    previous = (read_jobs(cdir).get(job["id"]) or job).get("kept_delivery") or {}
+    links, readable = [], []
     try:
-        from steward_cockpit import steward_engine as _se
-        import deliverables_register as _dr
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", str(job["id"])):
+            raise ValueError("unsafe job id")
+        root = Path(cdir).resolve()
+        relative_out = "code-job-outputs/" + job["id"]
+        out = _output_path(root, relative_out)
         pid, rel = _dr.project_and_rel(cdir)
-        out, links, unlisted = Path(cdir) / "code-job-outputs" / job["id"], [], []
-        preserved = list(job.get("files") or []) + [str(u).replace(" (ignored by git)", "") for u in job.get("unexpected") or []]
-        for f in dict.fromkeys(preserved):
-            src = Path(job["kept_worktree"]) / f
-            if not src.is_file() or not (is_document(f) or os.path.splitext(f)[1].lower() in (".html", ".htm")):
-                continue
-            dst = out / f
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            _sh.copy2(str(src), str(dst))
-            where = dst.relative_to(Path(cdir)).as_posix()
-            t = _dr.reading_target({"path": where}, pid=pid, effort_rel=rel, effort_dir=cdir)
-            if t["read"] or t["download"]:
-                links.append(Path(f).name)
-                _dr.register(cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(f).name), "`%s`" % where, notify=False)
-                unlisted.append("[%s](%s)" % (Path(f).name, t["read"] or t["download"]))
-        # W2 (2026-10-08): ONE line for the job, never one per file - its register rows (Deliverables and Next steps
-        # still carry each) are marked announced, and this line says them all
-        if unlisted:
-            line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(unlisted))
-            _se._default_record(cdir)(line, "receipt:kept:%s" % job["id"])
+        preserved = list(dict.fromkeys(list(job.get("files") or []) + [str(u).removesuffix(" (ignored by git)")
+                                      for u in job.get("unexpected") or []]))
+        selected = reading_outputs(job)
+        if not job.get("outputs"):      # legacy jobs retain a small useful handback
+            selected = [p for p in preserved if is_document(p)]
+            selected.sort(key=lambda p: (Path(p).suffix.lower() != ".pdf", p))
+            selected = selected[:6]
+        else:
+            selected.sort(key=lambda p: (Path(p).suffix.lower() != ".pdf", p))
+        delivery["retained_count"] = len(set(preserved) - set(selected))
+        for name in selected:
             try:
-                from steward_cockpit import steward_routes as _sr
-                eng = _sr.get_engine(str(cdir), create=False)
-                if eng is not None:
-                    (getattr(eng, "emit_receipt", None) or eng._emit)({"t": "receipt", "text": line, "id": "receipt:kept:%s" % job["id"]})
-            except Exception:
-                pass
-        return links
-    except Exception:
-        return []
+                src = _output_path(job["kept_worktree"], name)
+                dst = _output_path(out, name)
+                # Check from the cockpit too: the job directory itself must not escape through a junction.
+                if dst != _output_path(root, relative_out + "/" + name):
+                    raise ValueError("preserved output root changed")
+                if not src.is_file():
+                    raise ValueError("output missing from preserved worktree")
+                digest = _copy_kept(src, dst)
+                where = relative_out + "/" + name.replace(chr(92), "/")
+                item = {"path": name, "where": where, "sha256": digest, "registered": False}
+                delivery["items"].append(item)
+                old = next((i for i in previous.get("items", []) if i.get("where") == where
+                            and i.get("sha256") == digest and i.get("registered")), None)
+                try:
+                    registration = {"written": True} if old else _dr.register(
+                        cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(name).name), "`%s`" % where, notify=False)
+                except Exception as exc:
+                    registration = {"reason": str(exc)[:200]}
+                item["registered"] = bool(registration.get("written") or registration.get("reason") == "dup")
+                if not item["registered"]:
+                    delivery["errors"].append({"path": name, "reason": "registration: " + str(registration.get("reason"))})
+                target = _dr.reading_target({"path": where}, pid=pid, effort_rel=rel, effort_dir=cdir)
+                href = target.get("read") or target.get("download")
+                if href:
+                    label = Path(name).name.replace("[", "\\[").replace("]", "\\]")
+                    links.append(Path(name).name)
+                    readable.append("[%s](%s)" % (label, href))
+                    item["href"] = href
+                else:
+                    delivery["errors"].append({"path": name, "reason": "reading target unavailable"})
+            except Exception as exc:
+                delivery["errors"].append({"path": name, "reason": str(exc)[:240]})
+    except Exception as exc:
+        delivery["errors"].append({"path": "", "reason": str(exc)[:240]})
+    if delivery["errors"]:
+        delivery["recovery"] = "%d handback item(s) need recovery; use the kept worktree %s and the job's kept_delivery errors. Do not rerun the worker." % (
+            len(delivery["errors"]), job.get("kept_worktree", "(unavailable)"))
+    elif delivery["retained_count"]:
+        delivery["recovery"] = "%d supporting file(s) remain in %s; the reading copies above are not landed or accepted." % (
+            delivery["retained_count"], job.get("kept_worktree", "(unavailable)"))
+    line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(readable[:6]) or "no reading copy published")
+    if len(readable) > 6:
+        line += "; %d more reading copies are listed in this job's kept_delivery record" % (len(readable) - 6)
+    if delivery["recovery"]:
+        line += ". " + delivery["recovery"]
+    # A changed partial result must not collide with the history writer's immutable turn ID.
+    rid = "receipt:kept:%s:%s" % (job["id"], hashlib.sha256(line.encode("utf-8")).hexdigest()[:16])
+    try:
+        if previous.get("receipt_id") != rid and _se._default_record(cdir)(line, rid):
+            delivery["receipt_id"] = rid
+            from steward_cockpit import steward_routes as _sr
+            eng = _sr.get_engine(str(cdir), create=False)
+            if eng is not None:
+                (getattr(eng, "emit_receipt", None) or eng._emit)({"t": "receipt", "text": line, "id": rid})
+        elif previous.get("receipt_id") == rid:
+            delivery["receipt_id"] = rid
+        else:
+            delivery["errors"].append({"path": "", "reason": "dialogue receipt not saved"})
+    except Exception as exc:
+        delivery["errors"].append({"path": "", "reason": "receipt: " + str(exc)[:200]})
+    if delivery["errors"]:
+        delivery["recovery"] = "%d handback item(s) need recovery; inspect this job's kept_delivery errors. Original work remains at %s; do not rerun the worker." % (
+            len(delivery["errors"]), job.get("kept_worktree", "(unavailable)"))
+    job["kept_delivery"] = delivery
+    try:
+        _transition(cdir, job["id"], (job.get("status"),), expect_attempt=job.get("attempt", 1), kept_delivery=delivery)
+    except Exception as exc:
+        delivery["recovery"] = "Handback record could not be saved (%s); original work remains at %s." % (
+            str(exc)[:160], job.get("kept_worktree", "(unavailable)"))
+    return links
 
 
 def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
@@ -1842,43 +2215,31 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
     job = sorted(jobs, key=lambda j: j["started"])[-1]
     who = str(actor or "unknown")
     if job.get("status") == "finishing":
-        if time.time() - float(job.get("finishing_at") or 0) < 2 * (CHECK_TIMEOUT_S + REVIEW_TIMEOUT_S) + 900:
-            # consensus C6: his Stop counts NOW - recorded with its actor; the finish checks it before every review and
-            # under the placement lock, so the job does not land after it (a landing already placed stays placed)
-            import git_safety as _gs
-            # under the repository's commit lock - the lock placement holds while it re-reads the Stop and places - so
-            # the answer is exact: recorded before placement (it will not land), or too late (it already landed)
-            with _gs.repo_lock(job["repo"], wait_s=900, who="stop of code job " + job["id"]) as held:
-                if not held:
-                    return {"ok": False, "error": "the repository is busy landing; try the stop again in a moment"}
-                if (read_jobs(cdir).get(job["id"]) or {}).get("placed"):
-                    return {"ok": False, "error": "too late: it has already landed; its report is on the way"}
-                asked = _transition(cdir, job["id"], ("finishing",), stop_requested=time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    stop_requested_by=who)
-            if asked is None:
-                return {"ok": False, "error": "the code job finished while the stop was asked; see its result"}
-            return {"ok": True, "job": job["id"], "branch": job["branch"], "stop_requested": True, "kept": job["worktree"],
-                    "note": "stop recorded; the job will not land and its work is kept"}
+        # Stop is an explicit instruction, not a guessed stale-age release. The controller
+        # stops its contained command and retains ownership until the whole tree is gone.
         import git_safety as _gs
-        # the release happens under the repository's commit lock - the same lock placement holds - so a landing in
-        # progress finishes first, and a landing not yet begun sees the release and refuses
-        with _gs.repo_lock(job["repo"], wait_s=900, who="stop of code job " + job["id"]) as held:
+        with _gs.repo_lock(job.get("land_to") or job["repo"], wait_s=900,
+                           who="stop of code job " + job["id"]) as held:
             if not held:
                 return {"ok": False, "error": "the repository is busy landing; try the stop again in a moment"}
             if (read_jobs(cdir).get(job["id"]) or {}).get("placed"):
-                return {"ok": False, "error": "it has already landed; its report is on the way"}
-            released = _transition(cdir, job["id"], ("finishing",), status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
-                                   error="the job's finish never completed", stopped_by=who, kept_worktree=job["worktree"],
-                                   land_note="released by %s; the work is kept at %s" % (who, job["worktree"]))
-        if released is None:
-            return {"ok": False, "error": "the code job finished while the stop waited; see its result"}
+                return {"ok": False, "error": "too late: it has already landed; its report is on the way"}
+            asked = _transition(cdir, job["id"], ("finishing",), expect_attempt=job.get("attempt", 1),
+                                stop_requested=time.strftime("%Y-%m-%d %H:%M:%S"), stop_requested_by=who)
+        if asked is None:
+            return {"ok": False, "error": "the code job finished while the stop was asked; see its result"}
+        from steward_cockpit.code_job_handoff import settle_stopped_finalizer
+        settled = settle_stopped_finalizer(cdir, asked)
+        if settled is not None:
+            return {"ok": True, "job": job["id"], "branch": job["branch"],
+                    "kept": job["worktree"], "stopped_by": settled["stopped_by"],
+                    "note": settled["land_note"]}
         served = _locked_served_changes(job)
         if served:
-            _transition(cdir, job["id"], ("failed",), served_tree_changed=served,
-                        land_note=released["land_note"] + ("; ALSO: %s changed during the job outside any landing (%s) "
-                                                           "- check those files" % (job["repo"], ", ".join(served[:8]))))
-        return {"ok": True, "job": job["id"], "branch": job["branch"], "released": True, "kept": job["worktree"],
-                "served_tree_changed": served}
+            _transition(cdir, job["id"], ("finishing",), expect_attempt=job.get("attempt", 1), served_tree_changed=served)
+        return {"ok": True, "job": job["id"], "branch": job["branch"], "stop_requested": True,
+                "kept": job["worktree"], "served_tree_changed": served,
+                "note": "stop recorded; its process tree must end before the claim is released; saved work stays kept"}
     if job.get("worker") == "foreman":
         ended, why = end_foreman(job)
         if not ended:

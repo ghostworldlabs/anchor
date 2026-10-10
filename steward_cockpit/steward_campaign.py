@@ -1497,9 +1497,16 @@ def _job_epoch(value):
 
 def _code_job_native(record, now):
     """Bounded reads of this job's existing Foreman files, without waking work."""
-    phase = "build" if record["status"] == "running" else record["status"]
-    out = {"phase": phase, "phase_at": record.get("started_epoch"), "observed_at": None,
+    phase = record.get("phase") or ("build" if record["status"] == "running" else record["status"])
+    out = {"phase": phase, "phase_at": record.get("phase_at") or record.get("started_epoch"), "observed_at": None,
            "estimates": [record.get("eta")], "stopped": False}
+    if record.get("phase") and record["phase"] != "producing":
+        return out  # controller check/review/landing takes precedence over the completed worker's logs
+    if record.get("worker", "coder") != "foreman" and record.get("phase"):
+        from steward_cockpit.code_job_handoff import observe
+        observed = observe(record)
+        out.update(liveness=observed["state"], observed_at=observed.get("last_activity"))
+        return out
     identity, worktree = record["id"], record.get("worktree")
     if not worktree or not re.fullmatch(r"[A-Za-z0-9_-]+", identity):
         return out
@@ -1563,6 +1570,13 @@ def _code_job_native(record, now):
         else:
             out.update(worker="foreman", source="foreman-checkpoint.json")
     checkpoint_state = str(checkpoint.get("status", "")).lower()
+    if checkpoint:
+        # Stable native milestones, never heartbeat timestamps or a status file's mtime.
+        out.update(progress_token=json.dumps({key: checkpoint.get(key) for key in (
+            "current_wave", "completed_waves", "intra_wave_step", "status")}, sort_keys=True), progress_at=cp_at)
+        out["waiting"] = ""
+    if checkpoint_state in ("paused", "halt", "halted", "budget-stop", "budget_stopped"):
+        out["waiting"] = str(checkpoint.get("halt_reason") or checkpoint.get("reason") or checkpoint_state)[:300]
     if checkpoint_state in ("done", "failed", "halt", "halted", "paused", "stopped", "cancelled", "budget-stop", "budget_stopped"):
         out.update(stopped=True, phase=checkpoint_state)
         return out
@@ -1687,6 +1701,14 @@ def _code_job_eta(job, now=None):
         first_reason = first_reason or reason
     if not native:
         reason = first_reason or reason
+        if job.get("phase"):
+            # New controller records carry observed phases. Do not turn those into a fresh 20-60 minute
+            # allowance on every read. A native forecast or an explicitly labeled historical estimate is separate.
+            text = "Job %s: %s; %s; no current task-specific finish estimate%s" % (
+                job["id"], phase, elapsed_text, (" (" + reason + ")") if reason else "")
+            return text, {"state": "unavailable", "source": "code_job", "job_id": job["id"],
+                          "phase": phase, "phase_at": observed.get("phase_at"), "native": False,
+                          "qualification": reason or "no measured forecast", "value": text}
         # Remaining-work assumptions, not an operational child timeout or a
         # roadmap-step count. Review/fixes may extend these provisional windows.
         lo, hi = {"queued": (30, 90), "execute": (20, 60), "build": (20, 60),
@@ -1759,6 +1781,9 @@ def running_code_jobs(campaign_dir):
         job = {**r, "id": str(r.get("id") or ""), "title": title[:120] or "a code job",
                "minutes": minutes, "started_epoch": started, "status": str(r.get("status"))}
         job["native"] = _code_job_native(job, now)
+        if job.get("phase"):
+            from steward_cockpit.code_job_handoff import supervise
+            job["supervision"] = supervise(job, native=job["native"], now=now)
         out.append(job)
     return list(reversed(out))
 
@@ -2014,6 +2039,15 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
             finish = "Unavailable - " + native["unavailable"]     # an explicit native refusal is said, not papered over
         elif (src or {}).get("native"):
             finish = eta                                   # the job's own forecast, with the time it was given
+        elif j.get("phase"):
+            typical = typical_duration_s(campaign_dir, "code_job", worker)
+            if typical and j.get("started_epoch"):
+                estimate = j["started_epoch"] + typical
+                clock = time.strftime("%H:%M", time.localtime(estimate))
+                finish = (("about %s (historical median for this kind here; provisional)" % clock) if estimate > now
+                          else "historical estimate %s exceeded; %s; no revised forecast" % (clock, phase))
+            else:
+                finish = eta
         elif typical_duration_s(campaign_dir, "code_job", worker):
             finish = finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)
         elif str(j.get("skill") or "").strip():
@@ -2022,7 +2056,16 @@ def who_is_working(campaign_dir, engine_state, jobs, look, now=None, evidence_te
                 str(j["skill"]).strip(), ("%d min" % j["minutes"]) if j.get("minutes") is not None else "just started")
         else:
             finish = eta or finish_time(j.get("started_epoch"), now, "code_job", campaign_dir, worker)   # phase window
-        return ("The steward is running %s on %s (%s) - %s - and is in charge of it" % (name, what, j["title"], phase),
+        who = ("The steward is tracking %s on %s (%s) - recorded %s; worker liveness is unknown" % (name, what, j["title"], phase)
+               if native.get("liveness") == "unknown" else
+               "The steward is running %s on %s (%s) - %s - and is in charge of it" % (name, what, j["title"], phase))
+        observation = j.get("supervision") or {}
+        if observation:
+            who = "The steward is tracking %s (%s) - %s" % (name, j["title"], observation["reason"])
+            if observation.get("progress_at"):
+                who += " Last observed progress: " + time.strftime("%H:%M", time.localtime(observation["progress_at"])) + "."
+            phase += "; " + observation["state"].replace("_", " ")
+        return (who,
                 phase, j.get("started_epoch"), tests, finish)
     skills = running_skill_jobs(campaign_dir) if skills is None else skills   # W4 r1: the caller's own snapshot
     look_tests = (look or {}).get("tests") if (look or {}).get("tests") not in (None, "", "-", "\u2014") else ""

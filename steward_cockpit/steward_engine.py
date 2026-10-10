@@ -182,8 +182,9 @@ SMALL_DUTY = (
     "CODE - any change to an Anchor application file or any program's code - goes to a code job in its own "
     "worktree, never into the served tree: say the plan in a few lines first, and for a major coding effort wait "
     "for John's approval before starting it; then run `python C:/dev/Anchor/tools/steward_code_job.py start --repo "
-    "<the repo that owns the files> --brief-file <brief.md> [--check \"<the command that proves it>\"] [--output "
-    "<path> ...]` and tell John in one line. Name with --output (repeat it, up to 80) every file a command will "
+    "<the repo that owns the files> --brief-file <brief.md> --check \"<the command that proves it>\" [--output "
+    "<path> ...]` and tell John in one line. A check is mandatory; keep the complete brief within 8000 characters "
+    "and reference supporting files. Name with --output (repeat it, up to 80) every file a command will "
     "PRODUCE - a render, a PDF, a built figure - exactly as a path in the repo; only what the coder's tools write or "
     "you name up front can land. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
     "lands only when that review passes; it wakes you with the result - report it in two or three sentences. While "
@@ -195,16 +196,39 @@ SMALL_DUTY = (
 # while an effort is on (his word, or a cockpit mid-effort): the full discipline, with the hand-off for big build work
 EFFORT_DUTY = (
     "THIS IS AN EFFORT: the plan discipline below applies in full. Code goes to a code job in its own worktree "
-    "(`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file <brief.md> [--check "
-    "\"<cmd>\"] [--output <path> ...]`, naming every file a command will produce; another family reviews it before "
+    "(`python C:/dev/Anchor/tools/steward_code_job.py start --repo <repo> --brief-file <brief.md> --check "
+    "\"<cmd>\" [--output <path> ...]`, with a complete brief of at most 8000 characters and every file a command "
+    "will produce named up front; another family reviews it before "
     "it lands) and you tell John in one line; do not write in a "
     "repository while a code job owns it. " + SIZE_OR_HOLD
 )
 
+DELEGATION_DUTY = """
+Delegate one bounded task with its required --check and exact repository-relative
+--output flags. Supply --work-dir for a named effort directory; output paths remain
+relative to the repository root. Keep the canonical owning repository as --repo.
+Use the original job's inspect and collect actions to monitor gates and retrieve
+its durable result. If a finished job kept useful work but did not land, use
+recover on that same job with a corrected check or exact outputs when needed;
+do not launch a fresh worker just to collect or land its existing product. Add
+planning, nested skills, or extra reviewers only when the task actually requires
+them. A late result does not cancel independently authorized work: collect it and
+continue that work while honoring explicit human pauses and outstanding questions.
+Inspect supervision evidence: distinguish activity from observed advancement,
+explicit waits, repeated failures, verified exit and missing visibility. A quiet
+interval calls for inspection, never automatic termination or a replacement job.
+Use the existing log and saved output before proposing intervention; only actual
+completion and passing gates establish delivery. Estimates are not cutoffs.
+"""
+SMALL_DUTY += DELEGATION_DUTY
+EFFORT_DUTY += DELEGATION_DUTY
+
 # the coder of a code job: no steward duties, the work itself
 CODER_CONTRACT = (
-    "You are a code job commissioned by John's steward, not the steward: no campaign duties, no plan pages, no "
-    "journals, no status files, no questions back. Do the brief completely and well, check it, and end with a plain "
+    "You are a code job commissioned by John's steward, not the steward: no campaign duties, journals, attention "
+    "or status records, and no questions back. Do the commissioned code work; when the launch brief explicitly "
+    "names declared reading outputs, produce those documents too. Do not create additional deliverables or "
+    "campaign plans. Do the brief completely and well, check it, and end with a plain "
     "summary of what you changed and how you checked it. "
 )
 
@@ -929,6 +953,10 @@ class Engine:
         # never-lose: restore undelivered words from the durable record so a
         # park/crash cannot drop what he already typed (2026-08-27).
         self.queue = list(stored_entry.get("pending_queue") or [])
+        accepted = stored_entry.get("accepted_job_results")
+        self.accepted_job_results = dict(accepted) if isinstance(accepted, dict) else {}
+        # Drive being off is not itself a pause: an explicit human control is.
+        self.job_results_paused = bool(stored_entry.get("job_results_paused", False))
         self.session_id = (_usage_uuid(stored_entry.get("session_id"))
             if self.cli == "chatgpt" and stored_entry.get("cli") == self.cli else None)
         # (2026-09-04, John) "the total spend tokens, time and $ resets every time I
@@ -1886,6 +1914,72 @@ class Engine:
             self._hold_queue("session closed")
         self._emit({"t": "sys", "text": "steward asleep"})
 
+    def enqueue_job_result(self, handoff_id, text):
+        """Durably accept a result once; use the existing queue's send semantics.
+
+        The accepted identity and pending machine-control item share one state
+        write. An outer job may therefore retry after an acknowledgement is lost
+        without adding another queue item. This does not claim exactly-once
+        delivery across the model transport's send boundary. Callers must not
+        hold the code-jobs registry lock while entering this engine method.
+        """
+        import hashlib
+
+        if (not isinstance(handoff_id, str) or not handoff_id.strip()
+                or len(handoff_id) > 512 or any(ord(ch) < 32 for ch in handoff_id)):
+            return {"ok": False, "error": "A stable job-result identity is required."}
+        if not isinstance(text, str) or not text.strip():
+            return {"ok": False, "error": "The job result is empty."}
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        with self._lock:
+            accepted = self.accepted_job_results
+            if handoff_id in accepted:
+                previous = accepted[handoff_id]
+                if not isinstance(previous, dict) or previous.get("text_sha256") != digest:
+                    return {"ok": False, "error": "This job-result identity already has different content."}
+                return {"ok": True, "duplicate": True, "handoff_id": handoff_id}
+
+            from steward_cockpit import maintenance
+            if maintenance.is_active():
+                return {"ok": False, "error": "Anchor maintenance is active; the result remains pending."}
+            if self.job_results_paused:
+                return {"ok": False, "error": "The steward is explicitly paused; the result remains pending."}
+            if not self.alive():
+                return {"ok": False, "error": "The steward is asleep; the result remains pending."}
+
+            old_queue = list(self.queue)
+            old_accepted = dict(accepted)
+            label = "job observation " if handoff_id.startswith("attention:") else "job result "
+            self.queue.append(MACHINE_MARK + "[" + label + handoff_id + "]\n" + text)
+            self.accepted_job_results = dict(accepted)
+            self.accepted_job_results[handoff_id] = {
+                "text_sha256": digest, "accepted_at": time.time(),
+            }
+            try:
+                persisted = _update_state(self.skey(), {
+                    "pending_queue": list(self.queue),
+                    "accepted_job_results": dict(self.accepted_job_results),
+                }) is True
+            except Exception as exc:
+                self.queue = old_queue
+                self.accepted_job_results = old_accepted
+                return {"ok": False, "error": "Could not persist the job result: " + str(exc)}
+            if not persisted:
+                self.queue = old_queue
+                self.accepted_job_results = old_accepted
+                return {"ok": False, "error": "Could not persist the job result; it remains pending."}
+
+            result = {"ok": True, "duplicate": False, "handoff_id": handoff_id}
+            if not self.busy:
+                try:
+                    self._deliver_next_queued_locked()
+                except Exception as exc:
+                    # Acceptance is already durable. A send error must not make
+                    # callers insert the same control message for a second time.
+                    result["dispatch_error"] = str(exc)
+                    self._emit({"t": "sys", "text": "Job result accepted; queued delivery needs attention: " + str(exc)})
+            return result
+
     def _persist_queue(self):
         """Caller holds self._lock. True only when words are durable."""
         return _update_state(
@@ -2100,10 +2194,16 @@ class Engine:
                 low = text.lower().rstrip(".!").strip()
                 if low == "go":
                     self.drive = True
+                    self.job_results_paused = False
+                    if _update_state(self.skey(), {"job_results_paused": False}) is not True:
+                        self._emit({"t": "sys", "text": "Could not persist the job-result pause setting; the current session still honors it."})
                     self.auto_count = 0
                     control = "go"
                 elif low in ("pause", "stop", "hold"):
                     self.drive = False
+                    self.job_results_paused = True
+                    if _update_state(self.skey(), {"job_results_paused": True}) is not True:
+                        self._emit({"t": "sys", "text": "Could not persist the job-result pause setting; the current session still honors it."})
                     control = "pause"
                 self.last_say = time.time()
                 self.john_msgs += 1
@@ -2454,12 +2554,21 @@ class Engine:
         from steward_cockpit import maintenance
         if maintenance.is_active():
             return False  # Wave 1.6: held until activation
-        queued = self.queue[0]
+        queue_index = 0
+        if getattr(self, "job_results_paused", False):
+            # Hold automatic controls during an explicit pause, but still answer
+            # people. Removing only the chosen human item preserves the order
+            # of held results and of every other pending message.
+            queue_index = next((i for i, item in enumerate(self.queue)
+                                if not _is_machine_text(item)), None)
+            if queue_index is None:
+                return False
+        queued = self.queue[queue_index]
         machine = _is_machine_text(queued)
         suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
         words = self.__dict__.setdefault("_queued_words", {}).pop(queued, "")   # unknown after a restart: not guessed
         if self._send_locked(queued + suffix, origin="control" if machine else "human", words=words):
-            self.queue.pop(0)
+            self.queue.pop(queue_index)
         if not self._persist_queue():
             self.broken = True
             self._emit({"t": "sys", "text":
@@ -3207,6 +3316,9 @@ class Engine:
     def _handle(self, ev, proc):
         if proc is not self.proc:
             return   # event from a superseded process - drop it entirely
+        if self.code_job:
+            from steward_cockpit.code_job_progress import note_event
+            note_event(self, ev)
         t = ev.get("type")
         if self._submitted is not None and t in ("assistant", "stream_event", "result"):
             self._ack_submitted(proc, ev)
@@ -3868,6 +3980,17 @@ class Engine:
             if proc is not self.proc:   # superseded by a newer process
                 return
             now = time.time()
+            if not self.general and not self.code_job:
+                try:
+                    from steward_cockpit.code_job_handoff import retry_pending, refresh_supervision
+                    refresh_supervision(self.dir, engine=self)
+                    retry_pending(self.dir, engine=self)
+                    self._job_result_retry_error = None
+                except Exception as exc:
+                    detail = str(exc)
+                    if detail != getattr(self, "_job_result_retry_error", None):
+                        self._job_result_retry_error = detail
+                        self._emit({"t": "sys", "text": "Job observation or result delivery is deferred: " + detail})
             if not self.busy and self._pending_refinement_handoffs:
                 if self._retry_refinement_handoffs():
                     with self._lock:

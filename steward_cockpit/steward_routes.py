@@ -1789,7 +1789,8 @@ def handle_post(cdir, verb, body):
                             steward=(eng.steward if eng else ""), coder=str(body.get("coder") or ""),
                             actor=str(body.get("actor") or "the steward"), skill=str(body.get("skill") or ""),
                             outputs=body.get("outputs") or [], worker=str(body.get("worker") or "coder"),
-                            plan=str(body.get("plan") or ""), profile=str(body.get("profile") or "slim"))
+                            plan=str(body.get("plan") or ""), profile=str(body.get("profile") or "slim"),
+                            work_dir=body.get("work_dir"))
             if out.get("ok") and eng is not None:
                 what = ("%s job" % str(body.get("skill")).strip()) if str(body.get("skill") or "").strip() else "code job"
                 eng._emit({"t": "sys", "text": "%s %s started on %s - coder %s, in its own worktree; it lands only "
@@ -1799,6 +1800,17 @@ def handle_post(cdir, verb, body):
         if action == "stop":
             return _cj.stop(cdir, body.get("job"), engine_lookup=lambda wt: get_engine(wt, general=True, tid="1", create=False),
                             actor=str(body.get("actor") or "the steward")), 200
+        if action in ("inspect", "recover", "collect"):
+            from steward_cockpit import code_job_handoff as _ch
+            jid = str(body.get("job") or "")
+            if action == "inspect":
+                out = _ch.inspect(cdir, jid)
+            elif action == "collect":
+                out = _ch.collect(cdir, jid, body.get("handoff_id"))
+            else:
+                out = _ch.recover(cdir, jid, check=body.get("check"), outputs=body.get("outputs"),
+                                  actor=str(body.get("actor") or "the steward"))
+            return out, 200 if out.get("ok") else 409
         return {"ok": True, "jobs": list(_cj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "skill_job":
         # two-lane step 3 (2026-10-06): a fenced steward's skill runs here, outside its fence, and wakes it when done

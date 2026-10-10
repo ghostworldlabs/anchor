@@ -2,7 +2,7 @@
 conversation whose folder is the current directory. A code job is a coder on the best model at full effort in its own
 worktree of --repo; it lands its work when clean and wakes this steward with the result.
 
-  python C:/dev/Anchor/tools/steward_code_job.py start --repo C:/dev/Anchor --brief-file brief.md [--check "<cmd>"]
+  python C:/dev/Anchor/tools/steward_code_job.py start --repo C:/dev/Anchor --brief-file brief.md --check "<cmd>"
   python C:/dev/Anchor/tools/steward_code_job.py start --worker foreman --repo <repo> --brief-file brief.md --check "<test command>" [--plan-file PLAN.md] [--profile slim|standard]
   python C:/dev/Anchor/tools/steward_code_job.py stop [--job <id>]
   python C:/dev/Anchor/tools/steward_code_job.py list
@@ -34,9 +34,12 @@ def project_for(cwd):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("start", "stop", "list"))
+    ap.add_argument("action", choices=("start", "stop", "list", "inspect", "recover", "collect"))
     ap.add_argument("--repo"); ap.add_argument("--brief-file"); ap.add_argument("--brief")
-    ap.add_argument("--check", default=""); ap.add_argument("--job")
+    ap.add_argument("--check", default="", help="required for start unless --check-argv is supplied: existing verification command")
+    ap.add_argument("--job")
+    ap.add_argument("--handoff-id", help="collect only this exact result revision; omit to collect current")
+    ap.add_argument("--work-dir", default=None, help="repository-relative artifact scope; omitted derives from --repo, '.' is root-wide")
     ap.add_argument("--check-argv", default="", help="the check as a JSON argument list (no shell)")
     ap.add_argument("--coder", default="", help="this job's coder family (claude|chatgpt|grok|gemini); default: the Coder seat")
     ap.add_argument("--skill", default="", help="the skill this job runs (e.g. Chekhov), so the status names it")
@@ -56,10 +59,20 @@ def main():
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
         body.update(repo=a.repo, brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
-                    outputs=a.output, worker=a.worker, profile=a.profile,
+                    outputs=a.output, worker=a.worker, profile=a.profile, work_dir=a.work_dir,
                     plan=Path(a.plan_file).read_text(encoding="utf-8") if a.plan_file else "")
     if a.action == "stop":
         body["actor"] = "the steward"
+    if a.action in ("inspect", "recover", "collect") and not a.job:
+        raise SystemExit(a.action + " needs --job; use list to find the original job")
+    if a.action == "recover":
+        body["actor"] = "the steward"
+        if a.check_argv or a.check:
+            body["check"] = json.loads(a.check_argv) if a.check_argv else a.check
+        if a.output:
+            body["outputs"] = a.output
+    if a.handoff_id:
+        body["handoff_id"] = a.handoff_id
     if a.job:
         body["job"] = a.job
     req = urllib.request.Request("http://127.0.0.1:%s/api/steward/code_job?pid=%s" % (a.port, pid),

@@ -857,13 +857,13 @@ def test_a_stop_during_review_means_no_landing(tmp_path, monkeypatch):
 
     def review_then_stopped(job, tree, head, delta_from=""):
         code_jobs._transition(job["steward_dir"], job["id"], ("finishing",), finishing_at=0)
-        assert code_jobs.stop(job["steward_dir"], actor="John")["ok"]                 # released while reviewing
+        assert code_jobs.stop(job["steward_dir"], actor="John")["ok"]  # explicit Stop; age cannot release a writer
         return real(job, tree, head, delta_from)
     monkeypatch.setattr(code_jobs, "run_review", review_then_stopped)
     repo, job = _job(tmp_path, monkeypatch)
     _time.sleep(1.0)                                          # the finishing thread has had its chance to land
     job = code_jobs.read_jobs(job["steward_dir"])[job["id"]]
-    assert job.get("landed") is not True and job["stopped_by"] == "John"
+    assert job.get("landed") is not True and job["stop_requested_by"] == "John"
     assert (repo / "a.txt").read_text(encoding="utf-8") == "one\n" and _P(job["kept_worktree"]).is_dir()
 
 
@@ -897,7 +897,7 @@ def test_the_hold_refuses_a_relative_foreman_command_and_any_held_lane(monkeypat
             job_runner.launch(lane, cwd=str(cwd), command=cmd)
             raise AssertionError("not refused: %s" % lane)
         except ValueError as e:
-            assert "foreman-crucible-hold" in str(e)
+            assert "foreman-code-job-only" in str(e)
 
 
 def test_foreman_config_never_lands_in_any_case_or_folder():
@@ -1669,7 +1669,7 @@ def test_the_hold_refuses_engines_not_folders_and_is_a_structured_refusal(monkey
         job_runner.launch("build", cwd=str(tmp_path), prompt="x")
         raise AssertionError("not refused")
     except lanes.EngineNotAllowedError as e:                                  # the dashboard answers it as 400 JSON
-        assert "foreman-crucible-hold" in str(e)
+        assert "foreman-code-job-only" in str(e)
     from steward_cockpit import code_jobs as _cj
     harmless = [_sys.executable, "-c", "pass"]
     assert not any(("/foreman/bin/" in str((fdir / a).resolve()).replace(chr(92), "/").lower()) for a in harmless[1:])
