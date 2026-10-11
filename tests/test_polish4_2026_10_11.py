@@ -71,20 +71,26 @@ def eng(monkeypatch, tmp_path):
 
 
 def test_his_message_behind_his_own_turn_is_taken_after_the_wait(eng, monkeypatch):
-    taken = []
-    monkeypatch.setattr(eng, "take_now", lambda: taken.append(1) or {"ok": True})
+    calls = []
+    monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda reason: calls.append(reason) or {"ok": True})
+    monkeypatch.setattr(eng, "_wake_locked", lambda fresh, seed: calls.append("wake") or (True, ""))
     eng.busy, eng.queue, eng.turn_started = True, ["why not at the same time?"], 1000.0
     eng._auto_take_now(999.0)
-    assert taken == [], "a later turn is never stopped for a message an earlier one held"
+    assert calls == [], "a later turn is never stopped for a message an earlier one held"
     eng._auto_take_now(1000.0)
-    assert taken == [1]
+    assert calls == ["John: take this now", "wake"]
     eng.queue = []
     eng._auto_take_now(1000.0)
-    assert taken == [1], "nothing waiting: nothing stopped"
+    assert calls == ["John: take this now", "wake"], "nothing waiting: nothing stopped"
     monkeypatch.setenv("ANCHOR_TAKE_NOW_AFTER_S", "0")
     assert steward_engine._take_now_after() == 0
     monkeypatch.delenv("ANCHOR_TAKE_NOW_AFTER_S")
     assert steward_engine._take_now_after() == 30
+
+
+def test_a_failed_turn_still_announces_what_it_registered():
+    src = (Path(steward_engine.__file__)).read_text(encoding="utf-8")
+    assert "else:                                # what the turn registered is still announced" in src
 
 
 def test_a_page_opened_mid_turn_replays_what_the_turn_has_said():

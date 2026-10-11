@@ -2858,19 +2858,19 @@ class Engine:
 
     def _auto_take_now(self, turn_started):
         """His message is still waiting behind the SAME human turn: take it now, as his "Take this now" would."""
-        with self._lock:
-            if not (self.busy and self.queue) or getattr(self, "turn_started", 0) != turn_started:
-                return
-        self._emit({"t": "sys", "text": "your message has waited - the steward stops this turn and answers you now"})
-        self.take_now()
+        self.take_now(expected_turn=turn_started)
 
-    def take_now(self):
+    def take_now(self, expected_turn=None):
         """R1: his "Take this now" - the running turn ends (outcome uncertain, partial work kept, as a Stop turn) and
         the steward wakes on the same thread to answer the queue at once, the sequence the self-started branch of
         say() already uses."""
         with self._lock:
             if not (self.busy and self.queue):
                 return {"ok": False, "error": "nothing is waiting behind a running turn"}
+            if expected_turn is not None and getattr(self, "turn_started", 0) != expected_turn:
+                return {"ok": False, "error": "that turn already ended"}     # the timer's turn, never a later one
+            if expected_turn is not None:
+                self._emit({"t": "sys", "text": "your message has waited - the steward stops this turn and answers you now"})
             out = self._interrupt_turn_locked("John: take this now")
             if not (isinstance(out, dict) and out.get("ok")):
                 return out
@@ -3517,6 +3517,8 @@ class Engine:
             if history_saved and not err_text:
                 self._publish_delivery_receipt(completed_turn_id, reply=txt,
                                                written=list(getattr(self, "_turn_output_refs", []) or []))
+            else:                                # what the turn registered is still announced (writes wait for the end)
+                self._publish_delivery_receipt(completed_turn_id)
             if history_saved and link_report:
                 self._publish_link_report(completed_turn_id, link_report)
             self._finish_served_audit()
