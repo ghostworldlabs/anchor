@@ -418,6 +418,8 @@ def notify_receipt(effort_dir):
                         and os.path.normcase(str(Path(e.dir).resolve())) == want]
             if live:
                 eng = live[0]
+                if getattr(eng, "busy", False):
+                    return       # its turn is running: the turn's end announces everything it made, in one go
                 emit = getattr(eng, "emit_receipt", None) or eng._emit
                 record = lambda line, rid: eng._record_conversation("steward", line, turn_id=rid)
         except Exception:

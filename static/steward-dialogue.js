@@ -157,7 +157,19 @@
     function primeSeq() {   // the ring's current top, so the poll never replays lines the log below already shows
       return fetch('/api/steward/events' + q() + '&since=0', { headers: getHeaders() })
         .then(asJson)
-        .then(function (j) { (j.events || []).forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); }); if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch; showState(j.state); })
+        .then(function (j) {
+          var evs = j.events || [];
+          evs.forEach(function (ev) { live.seq = Math.max(live.seq, ev.seq || 0); });
+          if (j.state && j.state.epoch !== undefined) live.epoch = j.state.epoch;
+          showState(j.state);
+          // 2026-10-11: opened mid-turn, the page shows what the steward has said so far in this turn (the log holds
+          // it only at the turn's end); his own words are already in the log below, so they are not replayed
+          if (j.state && j.state.busy) {
+            var from = 0;
+            evs.forEach(function (ev, i) { if (ev.t === 'turn_end') from = i + 1; });
+            evs.slice(from).forEach(function (ev) { if (ev.t !== 'john') handleEvent(ev); });
+          }
+        })
         .catch(function (e) { if (e && e.auth) refusedOnce(); });
     }
     function pollLoop() {

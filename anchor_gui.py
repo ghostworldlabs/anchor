@@ -14725,6 +14725,7 @@ _ECGBERHT_ARTIFACT_TYPES = {
     ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
     ".pdf": "application/pdf",
 }
+_ECGBERHT_ARTIFACT_TYPES.update({e: "text/plain; charset=utf-8" for e in _rv.SOURCE_TEXT_EXTENSIONS})
 
 
 def handle_ecgberht_artifact(handler, path, body):

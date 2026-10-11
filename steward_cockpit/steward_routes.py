@@ -1221,12 +1221,13 @@ def handle_get(cdir, verb, qs):
             return {"__html__": "<!doctype html><meta charset='utf-8'><title>Slide preview unavailable</title>"
                     "<h1>Slide preview not yet registered</h1><p>This PowerPoint version needs a verified PDF companion.</p>"
                     '<p><a href="' + html.escape(dl, quote=True) + '">Download the PowerPoint</a></p>'}, 200
-        if str(qs.get("render", "")).strip() in ("1", "true") and not want_download and ext in (".md", ".markdown", ".txt"):
+        if str(qs.get("render", "")).strip() in ("1", "true") and not want_download and (
+                ext in (".md", ".markdown", ".txt") or ext in _SOURCE_TEXT):
             # 2026-10-07 (execution minimum item 2): the canonical reading URL of a markdown product - formatted
             # (tables, links, math), never raw bytes; plain text keeps its lines in a code block
             import report_viewer
             text = Path(real).read_text(encoding="utf-8", errors="replace")
-            if ext == ".txt":
+            if ext not in (".md", ".markdown"):          # plain text and program source keep their lines
                 text = "```\n" + text.replace("```", "'''") + "\n```"
             return {"__html__": report_viewer.reader_html(text, title=os.path.basename(real))}, 200
         if want_view and not want_download and ext in OFFICE_PREVIEW_EXTENSIONS:
@@ -1472,6 +1473,8 @@ _DELIVERABLE_TYPES = {
     ".xls": ("application/vnd.ms-excel", "attachment"),
     ".zip": ("application/zip", "attachment"),
 }
+_SOURCE_TEXT = __import__("report_viewer").SOURCE_TEXT_EXTENSIONS    # program source reads as text, never a download
+_DELIVERABLE_TYPES.update({e: ("text/plain; charset=utf-8", "inline") for e in _SOURCE_TEXT if e not in _DELIVERABLE_TYPES})
 
 
 #: The sandbox a project's own HTML/SVG renders under: scripts may run, popups and forms

@@ -435,6 +435,11 @@ _ARTIFACT_CONTENT_TYPES = {
     ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
     ".csv": "text/csv; charset=utf-8",
 }
+# Program source and plain config read as text in the browser - a .py link shows its code, never a download (2026-10-11).
+SOURCE_TEXT_EXTENSIONS = frozenset({".py", ".r", ".jl", ".m", ".sh", ".ps1", ".bat", ".sql", ".tex", ".bib", ".toml",
+                                    ".yaml", ".yml", ".ini", ".cfg", ".ts", ".tsx", ".jsx", ".java", ".c", ".h",
+                                    ".cpp", ".rs", ".go", ".rb", ".log"})
+_ARTIFACT_CONTENT_TYPES.update({e: "text/plain; charset=utf-8" for e in SOURCE_TEXT_EXTENSIONS})
 
 
 def resolve_project_artifact(folder_path, rel_path: str):

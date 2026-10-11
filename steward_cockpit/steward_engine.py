@@ -2302,7 +2302,14 @@ class Engine:
                 # R1 (steward responsiveness, 2026-10-04): the receipt names what the steward is on and since
                 # when, and carries "Take this now" (interrupt, then deliver his message at once)
                 if human:
-                    self._emit({"t": "sys", "text": self._queued_receipt(), "take_now": True})
+                    wait = _take_now_after()
+                    receipt = self._queued_receipt()
+                    if wait:                     # 2026-10-11: his question is answered within about half a minute
+                        receipt += " If it is still busy in %d seconds, it stops and answers you." % wait
+                        timer = threading.Timer(wait, self._auto_take_now, args=(getattr(self, "turn_started", 0),))
+                        timer.daemon = True
+                        timer.start()
+                    self._emit({"t": "sys", "text": receipt, "take_now": True})
                 else:
                     self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
                 return {"ok": True, "queued": True}
@@ -2848,6 +2855,14 @@ class Engine:
         ahead = max(0, len(self.queue) - 1)
         nxt = "Your message is next." if not ahead else "Your message is queued after %d other%s." % (ahead, "" if ahead == 1 else "s")
         return "%s is on: %s%s. %s" % (self.steward or "The steward", self._turn_activity(), since, nxt)
+
+    def _auto_take_now(self, turn_started):
+        """His message is still waiting behind the SAME human turn: take it now, as his "Take this now" would."""
+        with self._lock:
+            if not (self.busy and self.queue) or getattr(self, "turn_started", 0) != turn_started:
+                return
+        self._emit({"t": "sys", "text": "your message has waited - the steward stops this turn and answers you now"})
+        self.take_now()
 
     def take_now(self):
         """R1: his "Take this now" - the running turn ends (outcome uncertain, partial work kept, as a Stop turn) and
@@ -4379,6 +4394,14 @@ def _receipt_lock(cdir):
         return _RECEIPT_LOCKS.setdefault(key, threading.Lock())
 
 
+def _take_now_after():
+    """Seconds his message waits behind his own running turn before that turn is stopped for it (0 = never)."""
+    try:
+        return max(0, int(os.environ.get("ANCHOR_TAKE_NOW_AFTER_S", "30")))
+    except ValueError:
+        return 30
+
+
 def _deliv_key(it):
     key = "|".join(str(it.get(k) or "") for k in ("path", "route", "hash", "date", "what"))
     # a deck whose reading copy (its verified PDF companion) arrives later is a NEW announcement: "ready to read"
@@ -4469,6 +4492,10 @@ def _publish_locked(cdir, reply, written, since, record, emit):
     if kept:                                             # a kept code job says its rows itself, in ONE line (W2)
         seen = set(seen) | {_deliv_key(it) for it in kept}
         _write_seen(cdir, seen)
+    auto = [it for it in items if it.get("auto") and _deliv_key(it) not in seen]
+    if auto:                                             # the register's own "Plan ·" rows are listed, never announced
+        seen = set(seen) | {_deliv_key(it) for it in auto}
+        _write_seen(cdir, seen)
     fresh = [it for it in items if _deliv_key(it) not in seen]
     fresh += _named_unregistered(cdir, items, reply, written, since)
     if not fresh:
@@ -4479,7 +4506,7 @@ def _publish_locked(cdir, reply, written, since, record, emit):
     registered |= {(dr._canonical_route(it["route"]) or "").lower() for it in items if it.get("route")}
     groups, order = {}, []
     for it in fresh:
-        k = campaign._product_key(it, steps)
+        k = _announce_key(it, steps)
         if k not in groups:
             groups[k] = []
             order.append(k)
@@ -4487,7 +4514,8 @@ def _publish_locked(cdir, reply, written, since, record, emit):
     changed = False
     whole = {}
     for it in items:                                     # every registered format of each product, old and new
-        whole.setdefault(campaign._product_key(it, steps), []).append(it)
+        if not it.get("auto"):
+            whole.setdefault(_announce_key(it, steps), []).append(it)
     for k in order:
         group = sorted(groups[k], key=campaign._format_rank)
         full = list(group) + [it for it in whole.get(k, []) if it not in group]
@@ -4502,6 +4530,16 @@ def _publish_locked(cdir, reply, written, since, record, emit):
         changed = True
     if changed and not _write_seen(cdir, seen) and emit:
         emit({"t": "sys", "text": "delivery receipts were said, but their checkpoint was not saved"})
+
+
+def _announce_key(it, steps):
+    """One announcement per product: a file is one product whatever step or title its rows give it (the same calc.py
+    registered under three steps is said once); a managed product keeps its own pairing."""
+    from steward_cockpit import steward_campaign as campaign
+    if it.get("managed"):
+        return campaign._product_key(it, steps)
+    folder, stem = campaign._split_path(it)
+    return ("file", folder.lower(), stem.lower()) if stem else campaign._product_key(it, steps)
 
 
 def _named_unregistered(cdir, items, reply, written, since):
@@ -4557,7 +4595,11 @@ def _receipt_line(cdir, group, pid, rel, registered):
         group = decks + others
     targets = [(it, dr.reading_target(it, pid=pid, effort_rel=rel, effort_dir=cdir, registered=registered))
                for it in group]
-    readable = [(it, t) for it, t in targets if t["read"]]
+    readable, links = [], set()
+    for it, t in targets:                                # the same link is offered once, however many rows name it
+        if t["read"] and t["read"] not in links:
+            links.add(t["read"])
+            readable.append((it, t))
     bits = []
     if readable:
         bits.append("ready to read: [%s](%s)" % (title, readable[0][1]["read"]))
