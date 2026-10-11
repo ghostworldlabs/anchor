@@ -21710,6 +21710,16 @@ def handle_zombie_resume(handler, path, body):
         handler._send_json({"ok": True, "session_id": sid, "resumed": resumed})
 
 
+def _anchor_code_dest(dest):
+    """Is ``dest`` one of Anchor's own code files? John 2026-10-10: those are never changed through Anchor - he changes
+    them from outside it. Unknown counts as code."""
+    try:
+        from steward_cockpit import code_jobs as _cj
+        return _cj.inside(str(dest), str(ANCHOR_DIR)) and _cj.is_app_file(os.path.relpath(str(dest), str(ANCHOR_DIR)))
+    except Exception:
+        return True
+
+
 def handle_upload_batch(handler, path, body):
     """POST /api/rnd/upload_batch — write a batch of base64-encoded files into a
     project's folder (or the dashboard 'dev' dir), traversal-safe. Auth enforced by
@@ -21764,6 +21774,9 @@ def handle_upload_batch(handler, path, body):
             except ValueError:
                 handler._send_json({"ok": False, "error": f"Path containment check failed for {rel_path_str}"})
                 return
+            if _anchor_code_dest(dest_path):
+                handler._send_json({"ok": False, "error": f"Anchor's own code is never changed through an upload: {rel_path_str}"})
+                return
 
             file_data = base64.b64decode(content_b64)
 
@@ -21809,8 +21822,14 @@ def handle_upload(handler, path, body):
             else:
                 upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
 
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        if Path(filename).name != filename or filename in (".", ".."):
+            handler._send_json({"ok": False, "error": "the file name must be a plain name"})
+            return
         dest_path = upload_dir / filename
+        if _anchor_code_dest(dest_path):
+            handler._send_json({"ok": False, "error": "Anchor's own code is never changed through an upload"})
+            return
+        upload_dir.mkdir(parents=True, exist_ok=True)
         dest_path.write_bytes(file_data)
 
         handler._send_json({"ok": True, "message": f"Uploaded {filename} successfully."})

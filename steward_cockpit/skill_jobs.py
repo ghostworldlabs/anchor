@@ -117,7 +117,8 @@ def validate(argv):
     if not script.is_file():
         return False, "no such script: %s" % argv[1]
     parts = [part.lower() for part in script.parts]
-    if "foreman" in parts:          # 2026-10-09: Foreman writes a project, so it runs only as a code job, never here
+    if "foreman" in parts or "foreman" in script.name.lower():   # 2026-10-09: Foreman writes a project, so it runs only
+                                                                     # as a code job - its wrappers too (run-foreman.mjs)
         return False, _cj.FOREMAN_AS_SKILL
     slim = any(script == (root / "crucible" / "bin" / "slim.mjs").resolve() for root in skill_roots())
     if _cj.foreman_crucible_held() and "crucible" in parts and not slim:

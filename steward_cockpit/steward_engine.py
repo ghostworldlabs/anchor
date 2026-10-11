@@ -268,9 +268,9 @@ _EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full
 _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
 
 CONTRACT = (
-    "CODE (John, 2026-10-07; every mode): any change to an Anchor application file or any program's code goes to "
+    "CODE (John, 2026-10-07; every mode): any program's code goes to "
     "a code job in its own worktree, never into the served tree; say the plan in a few lines first, and for a major "
-    "coding effort wait for John's approval before starting it. Do not invent a validator or a verify script. " + SIZE_OR_HOLD +
+    "coding effort wait for John's approval before starting it. Do not invent a validator or a verify script. " + ANCHOR_RULE + SIZE_OR_HOLD +
     "A background job that runs a SKILL (Chekhov, a review, research) uses the same launcher with --skill <its "
     "name> (John, 2026-10-08), so his status names the skill and its models - never 'code job'. "
     "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
@@ -763,9 +763,8 @@ SERVED_CODE_DENY = tuple("Edit(./**/*%s)" % ext for ext in (".py", ".js", ".mjs"
 SERVED_READ_ONLY = os.environ.get("ANCHOR_SERVED_READ_ONLY", "1").strip() != "0"   # only an explicit 0 lifts it (Grok)
 SERVED_READ_ONLY_NOTE = (
     " YOUR FOLDER IS INSIDE THE RUNNING ANCHOR, and this provider has no proven write boundary there, so you run "
-    "read-only: you read, think and talk. You cannot start a code job yourself here (the service's sandbox cannot run "
-    "a shell): say in one line what should change and ask John - or a Claude cockpit - to start the code job, which "
-    "lands on anchor-next and goes live at his restart. "
+    "read-only: you read, think and talk. Anchor's own code is never changed from a cockpit (John's rule): say in a "
+    "few lines what should change and why, and John makes the change from outside Anchor. "
 )
 
 
@@ -2770,8 +2769,8 @@ class Engine:
             if code:
                 reason = "production code goes to a code job"
                 note = ("(interface - not John) Your last turn was ended: it edited Anchor's served code (%s). That edit "
-                        "STANDS in the served tree, unreviewed - tell John in one line, and either revert it or send the "
-                        "change to a code job (tools/steward_code_job.py: its own worktree, another family's review)." % code[0])
+                        "STANDS in the served tree, unreviewed - revert it, and tell John in one line what should change: "
+                        "Anchor's own code is never changed from a cockpit (John's rule); he makes it from outside Anchor." % code[0])
         if reason:
             with self._lock:
                 self._emit({"t": "sys", "text": "%s ended its turn (%s)" % (self.steward or "The steward", reason)})

@@ -289,10 +289,19 @@ def integration_required_error(job):
     C:\\dev\\Skill Foundry, anchor_next.is_installed_repo) takes a landing only on its own anchor-next, in the lander's
     checkout named at the job's start as ``land_to``. A record without one - an older job, a hand-made one - is REFUSED,
     never redirected, so neither a finish nor a recovery can install skill code by landing it. "" when the landing may
-    proceed. Fails closed when the question cannot be answered."""
+    proceed. Fails closed when the question cannot be answered. John 2026-10-10: nothing lands on Anchor's own code from
+    a cockpit - an older job's work there is kept for a look, never landed or recovered."""
+    repo = job.get("repo") or ""
+    try:
+        import anchor_next
+        served = anchor_next.is_served_repo(repo)
+    except Exception:
+        served = True                                 # unknown: the careful answer
+    if served and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
+        return ("Anchor's own code is never changed from a cockpit (John's rule); this job's work is kept for a look "
+                "and John makes the change from outside Anchor")
     if job.get("land_to"):
         return ""
-    repo = job.get("repo") or ""
     if job.get("installed_repo"):                     # durable: a classification made at the start is never un-learned
         return ("%s was classified an installed skill repository when this job started, and the job names no "
                 "integration checkout (land_to): a direct landing would install skill code by a model pass. Keep this "
