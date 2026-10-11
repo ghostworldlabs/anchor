@@ -1098,7 +1098,8 @@ def _state_cached(eng, cdir):
         ttl = max(0.0, float(os.environ.get("ANCHOR_STATE_TTL_S", "2")))
     except ValueError:
         ttl = 2.0
-    key = (id(eng), getattr(eng, "seq", None), getattr(eng, "busy", None))
+    stamp = campaign.map_stamp(cdir)                  # a question or review written to disk is never answered stale
+    key = (id(eng), getattr(eng, "seq", None), getattr(eng, "busy", None), stamp)
     now = time.monotonic()
     if ttl:
         with _STATE_LOCK:
@@ -1106,7 +1107,7 @@ def _state_cached(eng, cdir):
             if hit and now - hit[0] < ttl:
                 return copy.deepcopy(hit[1])
     st = _state_with_usage(eng, cdir)
-    st["stamp"] = campaign.map_stamp(cdir)
+    st["stamp"] = stamp
     if ttl:
         with _STATE_LOCK:
             for k in [k for k, v in _STATE_CACHE.items() if now - v[0] >= ttl]:

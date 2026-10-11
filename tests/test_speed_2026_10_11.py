@@ -33,6 +33,8 @@ def test_one_state_answer_serves_every_asker_until_the_engine_says_something(tmp
     assert sr._state_cached(eng, str(tmp_path))["n"] == 2, "a new event: fresh"
     eng.busy = True
     assert sr._state_cached(eng, str(tmp_path))["n"] == 3, "busy changed: fresh"
+    monkeypatch.setattr(campaign, "map_stamp", lambda cdir: "s2")
+    assert sr._state_cached(eng, str(tmp_path))["n"] == 4, "a question written to disk: fresh"
 
 
 def test_the_heartbeat_folder_is_listed_again_when_a_file_arrives(tmp_path):
