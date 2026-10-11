@@ -564,6 +564,7 @@ def _popen_contained(argv, cwd, env, out):
     group elsewhere. Never returns a process that runs outside its containment. Accepted residual (fcj review r6,
     disclosed to John): if Anchor itself dies in the instant between the suspended start and the assignment, the
     suspended process is left behind unaccounted - it never runs (only Anchor would resume it), so it cannot write."""
+    env = {k: v for k, v in env.items() if k != "ANCHOR_TOKEN"}   # a job's commands never carry Anchor's key
     if os.name != "nt":
         proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
                                 start_new_session=True)
@@ -1395,11 +1396,10 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             try:
                 import anchor_next
                 if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
-                    # John's Decision 1 (night report, 2026-10-08): a coder's SHELL has no OS boundary - it could write the
-                    # running Anchor before the audit refuses the landing. Code jobs on Anchor's own repository run only
-                    # once he accepts that (ANCHOR_SERVED_CODE_JOBS=1); until then none start (Grok's final review)
-                    return {"ok": False, "error": "no job started: code jobs on Anchor's own code are off until John turns them "
-                            "on (ANCHOR_SERVED_CODE_JOBS=1) - a coder's shell cannot yet be held to its worktree"}
+                    # John 2026-10-10: a cockpit never changes Anchor's own code; he makes those changes from outside
+                    # Anchor (the switch is set only on the service, elevated - by John, and today only by the tests)
+                    return {"ok": False, "error": "no job started: Anchor's own code is never changed from a cockpit (John's "
+                            "rule) - write what should change in a note for John; he makes Anchor changes from outside Anchor"}
                 if anchor_next.is_served_repo(root) and worker == "foreman" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
                     return {"ok": False, "error": "no job started: Foreman's sub-agents cannot be confined to the worktree "
                             "under the service, so a change to Anchor's own code uses a Claude coder"}

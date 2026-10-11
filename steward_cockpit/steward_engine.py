@@ -174,13 +174,20 @@ def _size_or_hold():
 
 SIZE_OR_HOLD = _size_or_hold()
 
+# John 2026-10-10: a cockpit never changes Anchor's own code; he makes those changes from outside Anchor
+ANCHOR_RULE = (
+    "ANCHOR'S OWN CODE (C:/dev/Anchor) is never changed from a cockpit - not by a code job, not by you (John's rule). "
+    "When Anchor itself should change, write what and why in a short note in your folder and tell John; he makes "
+    "Anchor changes from outside Anchor. "
+)
+
 # R2 (steward responsiveness, Ecgberht journals 2069/2070, John 2026-10-04): the duty that comes first. In the Cave's
 # 51-minute turn about 5 of 56 steps changed code; the rest was ceremony. Small is the default.
 SMALL_DUTY = (
     "SIZE THE REQUEST FIRST, then finish what fits. (a) DOCUMENTS and small non-code work - an answer, a note, a "
     "draft, a calendar file, an HTML or PDF page - you finish in this turn yourself and reply in one or two plain "
     "sentences; a document John will read is registered so its link appears (see THE DELIVERABLES REGISTER). (b) "
-    "CODE - any change to an Anchor application file or any program's code - goes to a code job in its own "
+    "CODE - any program's code - goes to a code job in its own "
     "worktree, never into the served tree: say the plan in a few lines first, and for a major coding effort wait "
     "for John's approval before starting it; then run `python C:/dev/Anchor/tools/steward_code_job.py start --repo "
     "<the repo that owns the files> --brief-file <brief.md> --check \"<the command that proves it>\" [--output "
@@ -190,7 +197,7 @@ SMALL_DUTY = (
     "you name up front can land. The job's coder writes, a reviewer of ANOTHER model family reviews the exact result, and it "
     "lands only when that review passes; it wakes you with the result - report it in two or three sentences. While "
     "a code job runs on a repository, do not write there yourself. When John says stop, run `python "
-    "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator or a verify script. " + SIZE_OR_HOLD + "A swarm only when he asks for one. A long turn is fine when the work is "
+    "C:/dev/Anchor/tools/steward_code_job.py stop`. Do not invent a validator or a verify script. " + ANCHOR_RULE + SIZE_OR_HOLD + "A swarm only when he asks for one. A long turn is fine when the work is "
     "his and in hand: the engine adds a progress line, and you keep going. "
 )
 
@@ -201,7 +208,7 @@ EFFORT_DUTY = (
     "\"<cmd>\" [--output <path> ...]`, with a complete brief of at most 8000 characters and every file a command "
     "will produce named up front; another family reviews it before "
     "it lands) and you tell John in one line; do not write in a "
-    "repository while a code job owns it. " + SIZE_OR_HOLD
+    "repository while a code job owns it. " + ANCHOR_RULE + SIZE_OR_HOLD
 )
 
 DELEGATION_DUTY = """
@@ -3273,6 +3280,8 @@ class Engine:
             pass
         env.pop("ANCHOR_FENCE_SHELL", None)
         env.pop("ANCHOR_FENCE_ROOT", None)
+        if self.code_job is not None:
+            env.pop("ANCHOR_TOKEN", None)     # a code job's coder never carries Anchor's key (stewards need it to start jobs)
         env.update(getattr(self, "_fence_env", None) or {})   # W1a: what the fence guard enforces for THIS launch
         return env
 

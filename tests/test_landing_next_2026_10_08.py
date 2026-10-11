@@ -364,7 +364,7 @@ def test_code_jobs_on_the_running_anchor_are_off_until_john_turns_them_on(tmp_pa
     cdir = tmp_path / "off"
     cdir.mkdir()
     out = code_jobs.start(str(cdir), str(served), "x", PASS, engine_factory=lambda wt: _Coder(wt, {}))
-    assert out["ok"] is False and "ANCHOR_SERVED_CODE_JOBS=1" in out["error"]
+    assert out["ok"] is False and "never changed from a cockpit" in out["error"]
 
 
 def test_temporary_builds_live_under_c_dev_beside_the_checkout(monkeypatch):

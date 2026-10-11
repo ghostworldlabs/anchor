@@ -36,3 +36,11 @@ cleanup. Source: John's October 7 follow-up in the Anchor Doctor session;
 ## Delegation evidence and original-job recovery - John, October 10, 2026
 
 Assess delegated work from the original job's current phase, process identity, observed advancement, activity, explicit waits and failures. Elapsed time or quiet alone may trigger inspection, never automatic termination, stale ownership release or a replacement worker. Inspect and collect the original job; recover its saved work through the existing check/review/landing path when provenance is verified. Bind the canonical repository and effort directory at launch, and never point a new job at a prior temporary worktree to deliver its outputs. Preserve explicit Stop and human acceptance; a worker finishing does not establish checked, reviewed, landed or accepted work. The mechanism and incident evidence are recorded in docs/friction/2026-10-10-delegation-supervision.md.
+
+## Cockpits never change Anchor's own code - John, October 10, 2026
+
+No AI cockpit changes Anchor's own code (`C:/dev/Anchor`): not by a code job, not by a steward's own edit. John makes
+Anchor changes from outside Anchor (a Claude Code or Codex session in a worktree, installed by his elevated script).
+A cockpit that sees an Anchor change worth making writes what and why in a note in its folder and tells John. Code jobs
+on Anchor's repository are refused (`code_jobs.start`); a code job's processes never carry `ANCHOR_TOKEN`. The
+second-Windows-account design (Option A, branch `optiona/coder-account-20261010`) is shelved, not merged.
