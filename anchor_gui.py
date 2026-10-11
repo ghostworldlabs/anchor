@@ -24089,6 +24089,15 @@ def main():
         sys.exit(1)
 
     _boot_t0 = time.time()
+    _boot_last = [_boot_t0]
+
+    def _boot_step(label):
+        """2026-10-11 speed: each boot step's own time, so a slow start names its cause (any step over a second)."""
+        now = time.time()
+        took, _boot_last[0] = now - _boot_last[0], now
+        if took >= 1.0:
+            print(f"  boot step {label}: {took:.1f}s", flush=True)
+            _logger.info("boot step %s took %.1fs", label, took)
     try:
         # BIND now (the single-instance guard must fire before any boot work
         # touches shared state) but LISTEN only after the boot reconcile below
@@ -24127,6 +24136,7 @@ def main():
     print(f"{'='*50}\n")
 
     _logger.info(f"Server started on {url}")
+    _boot_step('bind and banner')
 
     if not no_browser:
         # Open browser after a short delay
@@ -24137,6 +24147,7 @@ def main():
         job_runner.reconcile_on_startup(defer_handoffs=True)
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
+    _boot_step('job records')
 
     try:
         # Wave 4 / NS criterion 15: commission durable handback boot reconcile.
@@ -24151,6 +24162,7 @@ def main():
             )
     except Exception as e:
         _logger.error(f"commission_executor.reconcile_commissions_on_startup failed: {e}")
+    _boot_step('commissions')
 
     try:
         # rearch W15: re-adopt in-flight jobs through the supervisor seam — a
@@ -24167,6 +24179,7 @@ def main():
                             _summary.get("rebuilt_folder_locks", 0)))
     except Exception as e:
         _logger.error(f"supervisor.rebuild failed: {e}")
+    _boot_step('supervisor')
 
     try:
         # (2026-07 durability Wave 3) No perpetual "running" Gandalf row after a
@@ -24174,6 +24187,7 @@ def main():
         _reconcile_gandalf_boot_runs()
     except Exception as e:
         _logger.error(f"gandalf boot reconcile failed: {e}")
+    _boot_step('gandalf runs')
 
     try:
         # (#3, single source) Reconcile managed-terminal-session registry
@@ -24235,6 +24249,7 @@ def main():
             _logger.error(f"session_registry idle→parked-warm migration failed: {e}")
     except Exception as e:
         _logger.error(f"session_registry boot reconcile failed: {e}")
+    _boot_step('terminal sessions')
 
     try:
         # zombie-hunter safe-to-arm Wave 7: re-honor the persisted, PROTECT-ONLY
@@ -24254,12 +24269,14 @@ def main():
                 len(_fz.would_kill_pending))
     except Exception as e:
         _logger.error(f"freeze_state boot reconcile failed: {e}")
+    _boot_step('freeze state')
 
     try:
         import preview_server
         preview_server.reap_orphans()
     except Exception as e:
         _logger.error(f"preview_server.reap_orphans failed: {e}")
+    _boot_step('previews')
 
     try:
         import worktrees
@@ -24277,6 +24294,7 @@ def main():
                 and not _reap.get("errors") else "held (report not clean)")
     except Exception as e:
         _logger.error(f"worktrees.reap_orphans failed: {e}")
+    _boot_step('worktree sweep')
 
     try:
         # telemetry-resume W6 — bounded oldest-first parked-worktree eviction.
@@ -24298,6 +24316,7 @@ def main():
                     _ev.get("parked_count"))
     except Exception as e:
         _logger.error(f"worktrees.evict_oldest_parked failed: {e}")
+    _boot_step('worktree eviction')
 
     try:
         # Purge leaked synthetic health-check probe projects. The daily
@@ -24314,6 +24333,7 @@ def main():
             _logger.info(f"purged {_purged} leaked __healthcheck__ probe project(s)")
     except Exception as e:
         _logger.error(f"healthcheck-probe purge failed: {e}")
+    _boot_step('healthcheck purge')
 
     try:
         if "PYTEST_CURRENT_TEST" not in os.environ and not _zombie_hunter_started:
@@ -24387,6 +24407,7 @@ def main():
                 
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")
+    _boot_step('zombie hunter')
 
     try:
         # Durability (2026-07-07): the incremental-autosave heartbeat — every

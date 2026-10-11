@@ -72,6 +72,9 @@ if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
     # ("lanes"); an explicit Foreman/Crucible command and a Foreman/Crucible skill job stay refused in every test,
     # and the hold's own tests set it fully on ("1").
     os.environ["ANCHOR_FOREMAN_CRUCIBLE_HOLD"] = "lanes"
+    # usage figures are reused for a few seconds in service (2026-10-11 speed); tests read them fresh unless they ask
+    os.environ.setdefault("ANCHOR_USAGE_ROLLUP_TTL_S", "0")
+    os.environ.setdefault("ANCHOR_STATE_TTL_S", "0")
     # gh reachable a real `gh repo create` from two healthcheck/cli tests.
     if _STUB_GH.exists():
         os.environ["ANCHOR_GH_CMD"] = f"python {_STUB_GH}"

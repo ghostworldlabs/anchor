@@ -861,7 +861,38 @@ def _other_recorded_usage(cdir):
     return result
 
 
+_ROLLUP_CACHE, _ROLLUP_LOCK = {}, threading.Lock()
+
+
+def _rollup_ttl():
+    try:
+        return max(0.0, float(os.environ.get("ANCHOR_USAGE_ROLLUP_TTL_S", "15")))
+    except ValueError:
+        return 15.0
+
+
 def _usage_rollup(cdir, estate=None):
+    """A cockpit's usage figures, reused for a few seconds (2026-10-11 speed): every open tile asks for its state every
+    few seconds and recomputing these from every engine record was ~40% of the service's busy time. Spend and token
+    figures a quarter-minute old are fine; a caller handing its own engine state always gets a fresh figure."""
+    ttl = _rollup_ttl()
+    if estate is not None or not ttl:
+        return _usage_rollup_fresh(cdir, estate)
+    key = os.path.normcase(os.path.abspath(cdir))
+    now = time.monotonic()
+    with _ROLLUP_LOCK:
+        hit = _ROLLUP_CACHE.get(key)
+        if hit and now - hit[0] < ttl:
+            return copy.deepcopy(hit[1])
+    value = _usage_rollup_fresh(cdir)
+    with _ROLLUP_LOCK:
+        if len(_ROLLUP_CACHE) > 256:
+            _ROLLUP_CACHE.clear()
+        _ROLLUP_CACHE[key] = (now, value)
+    return copy.deepcopy(value)
+
+
+def _usage_rollup_fresh(cdir, estate=None):
     numeric_fields = ("reported_spend", "unpriced_turns", "estimated_spend", "estimated_turns", "tokens", "secs")
     coverage_fields = ("tracked_invocations", "reported_invocations", "partial_invocations",
                        "unavailable_invocations", "finalized_invocations")
@@ -1054,6 +1085,35 @@ def _usage_rollup(cdir, estate=None):
         for field in private:
             del bucket[field]
     return {"steward": stew, "terms": term, "jobs": jobs, "children": children, "seats": seats, "total": total}
+
+
+_STATE_CACHE, _STATE_LOCK = {}, threading.Lock()
+
+
+def _state_cached(eng, cdir):
+    """The state poll (2026-10-11 speed): the app's tiles and the Cave page both ask every open cockpit every few
+    seconds; one answer serves every asker for up to two seconds, and anything the engine says (a new event) makes the
+    next ask fresh."""
+    try:
+        ttl = max(0.0, float(os.environ.get("ANCHOR_STATE_TTL_S", "2")))
+    except ValueError:
+        ttl = 2.0
+    key = (id(eng), getattr(eng, "seq", None), getattr(eng, "busy", None))
+    now = time.monotonic()
+    if ttl:
+        with _STATE_LOCK:
+            hit = _STATE_CACHE.get(key)
+            if hit and now - hit[0] < ttl:
+                return copy.deepcopy(hit[1])
+    st = _state_with_usage(eng, cdir)
+    st["stamp"] = campaign.map_stamp(cdir)
+    if ttl:
+        with _STATE_LOCK:
+            for k in [k for k, v in _STATE_CACHE.items() if now - v[0] >= ttl]:
+                _STATE_CACHE.pop(k, None)
+            _STATE_CACHE[key] = (now, st)
+        return copy.deepcopy(st)
+    return st
 
 
 def _state_with_usage(eng, cdir):
@@ -1289,8 +1349,7 @@ def handle_get(cdir, verb, qs):
         eng = get_engine(cdir, qs.get("general") == "1", qs.get("term"))
         if eng is None:
             return {"error": "no such session"}, 404
-        st = _state_with_usage(eng, cdir); st["stamp"] = campaign.map_stamp(cdir)
-        return st, 200
+        return _state_cached(eng, cdir), 200
     if verb == "status":
         # the deterministic two-part 10-minute status, composed FRESH
         # (zero-model) — the same shape the engine's cadence persists to

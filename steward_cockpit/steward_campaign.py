@@ -767,6 +767,33 @@ def suggest_effort_name(goal_brief, limit=4):
     return name if len(name) >= 3 else ""
 
 
+_HEARTBEAT_NAMES, _HEARTBEAT_LOCK = {}, threading.Lock()
+
+
+def _heartbeat_names(folder):
+    """The heartbeat files in ``folder``, listed again only when the folder itself changed (2026-10-11 speed: the map
+    poll listed a whole project folder every time; a file added, removed or replaced changes the folder's stamp)."""
+    try:
+        st = os.stat(folder)
+    except OSError:
+        return []
+    key = os.path.normcase(str(folder))
+    stamp = (st.st_mtime_ns, st.st_ino)
+    with _HEARTBEAT_LOCK:
+        hit = _HEARTBEAT_NAMES.get(key)
+    if hit and hit[0] == stamp:
+        return list(hit[1])
+    try:
+        names = [p for p in Path(folder).iterdir() if _SWARM_HEARTBEAT_NAME.fullmatch(p.name)]
+    except OSError:
+        return []
+    with _HEARTBEAT_LOCK:
+        if len(_HEARTBEAT_NAMES) > 512:
+            _HEARTBEAT_NAMES.clear()
+        _HEARTBEAT_NAMES[key] = (stamp, names)
+    return list(names)
+
+
 def read_swarm_trails(campaign_dir: str):
     """Scoped, lease-aware heartbeat files from supervised swarm seats.
 
@@ -777,16 +804,9 @@ def read_swarm_trails(campaign_dir: str):
     root = Path(campaign_dir)
     candidates = []
     for folder in (root, root / ".ecgberht"):
-        if not folder.is_dir():
-            continue
-        try:
-            names = list(folder.iterdir())
-        except OSError:
-            continue
+        names = _heartbeat_names(folder)
         for p in names:
             if not p.is_file():
-                continue
-            if not _SWARM_HEARTBEAT_NAME.fullmatch(p.name):
                 continue
             file_age = _age(p)
             label = re.sub(r"^heartbeat-r\d+-", "", p.stem,
