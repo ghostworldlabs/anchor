@@ -2363,6 +2363,25 @@ def announce_kept(cdir, job):
     return links
 
 
+def stopped_record(job, engine=None):
+    """What a normal finish saves for a later recovery: who wrote the work, what its tools wrote and a pin of its bytes."""
+    from steward_cockpit import code_job_handoff as handoff
+    if engine is None and job.get("worker") != "foreman":
+        try:                                          # the coder's engine still knows who served it and what it wrote
+            from steward_cockpit import steward_routes as sr
+            engine = sr.get_engine(job["worktree"], general=True, tid="1", create=False)
+        except Exception:
+            engine = None
+    foreman = job.get("worker") == "foreman"
+    authors = [FOREMAN_WRITER] if foreman else (authors_of(engine) if engine is not None else job.get("authors")) or [
+        job.get("coder_family")]
+    manifest = (foreman_manifest(job) if foreman else manifest_of(engine, job["worktree"]) if engine is not None
+                else job.get("manifest") or [])
+    job = dict(job, manifest=manifest)
+    return {"authors": [a for a in authors if a in FAMILIES], "manifest": job["manifest"],
+            "recovery_snapshot": handoff.snapshot(job)}
+
+
 def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
     """Stop the running job (the newest when no id) on behalf of ``actor`` (recorded as said - never assumed to be
     John). Nothing is committed or removed: the worktree is kept exactly as the coder left it."""
@@ -2408,11 +2427,16 @@ def stop(cdir, job_id=None, engine_lookup=None, actor="unknown"):
                               who, job["worktree"], job["branch"]))
     if stopped is None:
         return {"ok": False, "error": "the code job is already finishing; its result is on the way"}
+    eng = None
     try:
         eng = engine_lookup(job["worktree"]) if engine_lookup else None
         if eng is not None:
             eng.on_turn_done = None
             eng.stop()
+    except Exception:
+        pass
+    try:                                              # so John can have it finished later, as a normal finish would allow
+        _transition(cdir, job["id"], ("stopped",), **stopped_record(stopped, eng))
     except Exception:
         pass
     served = _locked_served_changes(job)              # the finish will not run: audit the source repository here

@@ -141,7 +141,8 @@ def inspect(cdir, job_id):
     return {"ok": True, "job": job, "worker": worker, "supervision": supervision, "phase": job.get("phase") or job.get("status"),
             "phase_at": job.get("phase_at"), "elapsed_seconds": elapsed, "check_state": check_state(job),
             "stage": cj.stage_line(job), "recovery": {"available": not why, "reason": why,
-                "action": "collect" if job.get("landed") else "recover" if not why else "inspect saved work; do not relaunch"}}
+                "action": "collect" if job.get("landed") else "inspect saved work; do not relaunch" if why
+                    else "recover only when John asks to finish it" if job.get("status") == "stopped" else "recover"}}
 
 
 def supervise(job, *, native=None, now=None):
@@ -243,11 +244,10 @@ def recovery_error(job, worker=None):
         return "job is active or its finish is unresolved; no concurrent recovery"
     if job.get("finalizer_active") and not orphan:
         return "the prior controller has not released its finish; no concurrent recovery"
-    if job.get("status") == "stopped" or job.get("stop_requested") or job.get("stopped_by"):
-        return "stopped work requires separately authorized repair; automatic original-author recovery is refused"
-    if (job.get("status") not in ("done", "failed") and not orphan) or not job.get("worker_completed_at"):
+    stopped = job.get("status") == "stopped"          # John stopped it; finishing it later is his call, so it may be recovered
+    if not stopped and ((job.get("status") not in ("done", "failed") and not orphan) or not job.get("worker_completed_at")):
         return "no completed-worker receipt; liveness/provenance is unknown"
-    if (worker or observe(job))["state"] != "completed":
+    if (worker or observe(job))["state"] not in (("completed", "dead") if stopped else ("completed",)):
         return "worker is active or its liveness is unknown"
     if not job.get("authors") or any(a not in cj.FAMILIES for a in job["authors"]):
         return "original authorship is unknown"
@@ -312,6 +312,9 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
     job = owned_job(cdir, job_id)
     if job is None:
         return {"ok": False, "error": "no job owned by this commissioning effort"}
+    if job.get("status") == "stopped" and not job.get("recovery_snapshot"):
+        job = cj._transition(cdir, job_id, ("stopped",), expect_attempt=job.get("attempt", 1),
+                             **cj.stopped_record(job)) or job        # a job stopped before its stop saved this record
     why = recovery_error(job)
     if why:
         return {"ok": False, "error": why}
@@ -330,22 +333,25 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
     # No repo lock here or during the check/review. All placements keep their existing repo -> record lock order.
     with cj._LOCK:
         current = owned_job(cdir, job_id)
-        if (not current or (current.get("status") not in ("done", "failed") and not orphan)
+        if (not current or (current.get("status") not in ("done", "failed", "stopped") and not orphan)
                 or current.get("attempt", 1) != job.get("attempt", 1)
-                or (current.get("finalizer_active") and not orphan) or current.get("stop_requested")
+                or (current.get("finalizer_active") and not orphan)
+                or (current.get("status") != "stopped" and (current.get("stop_requested") or current.get("stopped_by")))
                 or (orphan and (current.get("claim") != job.get("claim") or current.get("command") != job.get("command")))
-                or current.get("stopped_by") or current.get("landed") or current.get("placed")):
+                or current.get("landed") or current.get("placed")):
             return {"ok": False, "error": "job changed while recovery was being prepared"}
         if maintenance.is_active():
             return {"ok": False, "error": "Anchor entered maintenance"}
         history = list(current.get("attempts") or []) + [{k: current.get(k) for k in (
             "attempt", "finished", "check", "outputs", "check_ok", "review", "delta_review", "land_note", "error", "handoff",
-            "command", "claim", "supervision")}]
+            "command", "claim", "supervision", "stopped_by", "stop_requested", "stop_requested_by")}]
         claimed = cj._transition(cdir, job_id, (current["status"],), status="finishing", finishing_at=time.time(),
             expect_attempt=job.get("attempt", 1), finalizer_active=True,
             finished="", attempt=job.get("attempt", 1) + 1, attempts=history, check=revised_check, outputs=revised_outputs,
             claim={"pid": os.getpid(), "birth": proc_probe.creation_time(os.getpid()), "actor": str(actor), "at": time.time()},
             handoff=None, phase="checking", phase_at=time.time(), error="", check_ok=None,
+            stopped_by=None, stop_requested=None, stop_requested_by=None, kept_worktree="",
+            worker_completed_at=current.get("worker_completed_at") or time.time(),   # a stopped coder is proven ended above
             integration_check_ok=None, review=None, delta_review=None, supervision=None, command=None)
         busy = cj._busy_read()
         busy[job_id] = {"job": job_id, "cdir": str(cdir), "repo": cj._norm(job["repo"])}
