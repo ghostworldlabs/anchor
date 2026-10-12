@@ -7,6 +7,8 @@ renderer: Anchor's own Markdown page (report_viewer, math included), printed by 
 Prints the written path(s); exit 1 with the reason when it could not."""
 import argparse
 import base64
+import html as htmllib
+import urllib.parse
 import mimetypes
 import re
 import os
@@ -42,7 +44,7 @@ def page(md_path, for_print):
         folder = md_path.resolve().parent
 
         def embed(m):
-            src = m.group(1)
+            src = urllib.parse.unquote(htmllib.unescape(m.group(1)))      # review r9: "Figure 1.png" arrives escaped
             try:
                 f = (folder / src).resolve()
                 f.relative_to(folder)
