@@ -1646,6 +1646,7 @@ def _finish(cdir, job_id, job, result):
         # A packaging check can be the only producer (e.g. unchanged source -> new PDF).
         phase(job, "checking")
         fields["check_ok"], fields["check_output"] = run_check(job, wt)
+        _make_reading_copies(job, wt)                    # review r4: the check may be what wrote the Markdown
         checked = True
         phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
         changed = changed_paths(wt, candidate_base(job))
@@ -1684,6 +1685,7 @@ def _finish(cdir, job_id, job, result):
             phase(job, "checking")
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
+                _make_reading_copies(job, wt)            # review r4: the check may be what wrote the Markdown
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
             after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]

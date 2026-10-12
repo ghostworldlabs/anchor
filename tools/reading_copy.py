@@ -30,7 +30,11 @@ def page(md_path, for_print):
     text = md_path.read_text(encoding="utf-8", errors="replace")
     title = next((ln.lstrip("# ").strip() for ln in text.splitlines() if ln.startswith("#")), md_path.stem)
     html = report_viewer.reader_html(text, title=title, katex_url_prefix=report_viewer.VENDOR_KATEX_DIR.as_uri())
-    return html.replace("</head>", PRINT_CSS, 1) if for_print else html
+    if not for_print:
+        return html
+    # review r4: the print page is a temp file - its relative links resolve against the document's own folder
+    base = '<base href="%s/">\n' % md_path.resolve().parent.as_uri()
+    return html.replace("<head>\n", "<head>\n" + base, 1).replace("</head>", PRINT_CSS, 1)
 
 
 def edge():
