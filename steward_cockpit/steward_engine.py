@@ -2611,8 +2611,9 @@ class Engine:
         # 2026-10-12: every message of his waiting next in line goes in this one turn - one left behind waited out the
         # whole next turn (26 min), its take-now timer spent on the turn it first queued behind
         take = [queue_index]
-        if not machine:
-            while take[-1] + 1 < len(self.queue) and not _is_machine_text(self.queue[take[-1] + 1]):
+        if not machine:            # ... his words for the same place only: each reply is shown where it was asked
+            while (take[-1] + 1 < len(self.queue) and not _is_machine_text(self.queue[take[-1] + 1])
+                   and _goal_in(self.queue[take[-1] + 1]) == _goal_in(queued)):
                 take.append(take[-1] + 1)
         items = [self.queue[i] for i in take]
         queued = "\n\n".join(items)
@@ -2627,6 +2628,11 @@ class Engine:
         if sent:
             for i in reversed(take):
                 self.queue.pop(i)
+            wait = _take_now_after()
+            if wait and any(not _is_machine_text(q) for q in self.queue):   # his words still waiting: the timer
+                timer = threading.Timer(wait, self._auto_take_now, args=(self._turn_identity(),))   # rides this turn
+                timer.daemon = True
+                timer.start()
         if not self._persist_queue():
             self.broken = True
             self._emit({"t": "sys", "text":
@@ -3421,6 +3427,12 @@ class Engine:
             # 2026-10-12 (calc plan lost): a turn can end while a command it started in the background still runs;
             # the session wakes when it finishes and works on. The list is the CLI's own count of what still runs.
             self._bg_tasks = [x for x in (ev.get("tasks") or []) if isinstance(x, dict)]
+        if (t in ("assistant", "stream_event") and self.code_job is not None and not self.busy
+                and getattr(self, "_bg_wait_stamp", None)):
+            # review r3: the coder woke on its own (a background command finished) and works again - it is busy,
+            # and the wait timer of its earlier turn is void; the next result decides again
+            self._bg_wait_stamp = None
+            self.busy = True
         if t == "system" and ev.get("subtype") == "init":
             if proc is not self.proc:
                 return

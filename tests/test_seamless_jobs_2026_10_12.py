@@ -63,6 +63,36 @@ def test_a_background_command_that_never_ends_does_not_hold_the_job_forever(code
     assert len(done) == 1 and "background command(s) running" in done[0]["error"], done
 
 
+def test_a_coder_that_woke_on_its_own_is_never_ended_by_its_earlier_wait(coder, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    eng, done = coder
+    monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.3)
+    eng._handle({"type": "system", "subtype": "background_tasks_changed",
+                 "tasks": [{"task_id": "a"}, {"task_id": "b"}]}, eng.proc)
+    eng.turn_text = "STARTED"
+    eng._handle(_result("STARTED"), eng.proc)
+    eng._handle({"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "b"}]}, eng.proc)
+    eng._handle({"type": "assistant", "message": {"content": [{"type": "text", "text": "a finished"}]}}, eng.proc)
+    assert eng.busy, "it is working again"
+    import time
+    time.sleep(0.7)
+    assert done == [], "the earlier turn's timer did not end the working coder"
+
+
+def test_his_messages_for_different_places_are_not_batched(steward, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    sent = []
+    monkeypatch.setattr(steward, "_send_locked", lambda text, origin, words="": sent.append(text) or True)
+    monkeypatch.setattr(steward, "_persist_queue", lambda: True)
+    monkeypatch.setattr(steward, "effort_on", lambda: False)
+    monkeypatch.setenv("ANCHOR_TAKE_NOW_AFTER_S", "0")
+    a = se._scoped_text("first", "g1", "Goal one")
+    b = se._scoped_text("second", "g2", "Goal two")
+    steward.busy, steward.queue = False, [a, b]
+    steward._deliver_next_queued_locked()
+    assert sent == [a] and steward.queue == [b]
+
+
 def test_a_turn_with_nothing_in_the_background_finishes_at_once(coder):
     eng, done = coder
     eng.turn_text = "Done."
