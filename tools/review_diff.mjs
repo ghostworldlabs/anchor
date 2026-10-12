@@ -9,9 +9,17 @@ import { execFileSync } from 'node:child_process';
 export function reviewDiff(repo, from, head) {
   const bytes = (...a) => execFileSync('git', ['-C', repo, ...a], { maxBuffer: 64 * 1024 * 1024 });
   const plain = ['--no-ext-diff', '--no-textconv', '--find-renames', from, head];
-  const binaries = binaryPaths(bytes('diff', '--numstat', '-z', ...plain).toString('utf8'));
+  const all = numstatRows(bytes('diff', '--numstat', '-z', ...plain).toString('utf8'));
+  const binaries = all.filter(r => r.binary);
   const exclude = binaries.flatMap(b => [b.from, b.to]).filter(Boolean).map(p => `:(exclude,literal)${p}`);
-  const raw = bytes('diff', '--no-color', ...plain, '--', '.', ...exclude);
+  const only = ['--', '.', ...exclude];
+  // an excluded path also excludes what lies under it (a binary file "foo" replaced by a folder "foo/"): the text
+  // rows left must be exactly the text rows of the whole change, or a text change would vanish unreviewed
+  const kept = numstatRows(bytes('diff', '--numstat', '-z', ...plain, ...only).toString('utf8'));
+  if (kept.some(r => r.binary) || kept.length !== all.length - binaries.length) {
+    throw new Error('a binary file and a text file share a path in this change - the reviewer could not be shown it exactly');
+  }
+  const raw = bytes('diff', '--no-color', ...plain, ...only);
   if (raw.includes(0)) throw new Error('the diff holds a NUL byte - the reviewer reads text only');
   let text;
   try {
@@ -25,7 +33,7 @@ export function reviewDiff(repo, from, head) {
   const rows = binaries.map(b => {
     const was = b.from ? size(from, b.from) : null, now = b.to ? size(head, b.to) : null;
     const name = b.from && b.from !== b.to ? `${b.from} -> ${b.to}` : b.to || b.from;
-    const what = now === null ? `deleted (was ${was} bytes)` : was === null ? `added, ${now} bytes, blob ${hash(head, b.to)}`
+    const what = now === null ? `deleted (was ${was} bytes, blob ${hash(from, b.from)})` : was === null ? `added, ${now} bytes, blob ${hash(head, b.to)}`
       : `changed, ${was} -> ${now} bytes, blob ${hash(head, b.to)}`;
     return `- ${name}: ${what}`;
   });
@@ -34,14 +42,14 @@ export function reviewDiff(repo, from, head) {
 }
 
 // `git diff --numstat -z`: "A\tD\tpath\0", or for a rename "A\tD\t\0from\0to\0"; a binary file counts as "-\t-".
-function binaryPaths(numstat) {
+function numstatRows(numstat) {
   const parts = numstat.split('\0'), out = [];
   for (let i = 0; i < parts.length; i++) {
     const m = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(parts[i]);
     if (!m) continue;
     let from = m[3], to = m[3];
     if (m[3] === '') { from = parts[++i]; to = parts[++i]; }
-    if (m[1] === '-' && m[2] === '-') out.push({ from, to });
+    out.push({ from, to, binary: m[1] === '-' && m[2] === '-' });
   }
   return out;
 }

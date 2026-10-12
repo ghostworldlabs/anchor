@@ -92,6 +92,16 @@ def test_a_binary_only_change_is_still_listed(repo):
     assert out["ok"] and out["diff"].startswith("BINARY FILES") and "- c.png: added" in out["diff"], out
 
 
+def test_a_binary_file_replaced_by_a_folder_of_text_is_refused_not_hidden(repo):
+    (repo / "foo").write_bytes(b"\x00\x01binary")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "binary foo")
+    base = g(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "foo").unlink(); (repo / "foo").mkdir(); (repo / "foo" / "main.py").write_text("x = 1\n", encoding="utf-8")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "folder foo")
+    out = _review_input(repo, base, "HEAD")
+    assert not out["ok"] and "share a path" in out["error"], out
+
+
 def test_a_review_that_exits_with_an_error_is_never_a_pass(repo, tmp_path, monkeypatch):
     from steward_cockpit import code_jobs
     fake = tmp_path / "half_review.py"
