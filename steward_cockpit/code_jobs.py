@@ -977,8 +977,8 @@ def run_check(job, tree):
             d.mkdir(parents=True, exist_ok=True)
             if os.name == "nt":
                 script = d / ("%s-%s.cmd" % (job["id"], uuid.uuid4().hex[:6]))
-                script.write_text("@echo off\r\n" + check.replace("\r\n", "\n").replace("\n", "\r\n") + "\r\n",
-                                  encoding="utf-8", newline="")     # already CRLF: text mode made it CR CR LF
+                with script.open("w", encoding="utf-8", newline="") as fh:   # already CRLF: text mode made CR CR LF
+                    fh.write("@echo off\r\n" + check.replace("\r\n", "\n").replace("\n", "\r\n") + "\r\n")
                 argv = ["cmd.exe", "/d", "/c", "call", str(script)]
             else:
                 script = d / ("%s-%s.sh" % (job["id"], uuid.uuid4().hex[:6]))
