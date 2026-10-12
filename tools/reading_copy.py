@@ -43,13 +43,24 @@ def edge():
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("document")
-    ap.add_argument("--html", action="store_true", help="also write the same-version HTML beside it")
+    ap.add_argument("--html", nargs="?", const="", default=None,
+                    help="also write the same-version HTML (beside it, or at the path given)")
     ap.add_argument("--out", help="the PDF path (default: the document's name with .pdf)")
+    ap.add_argument("--no-pdf", action="store_true", help="only the HTML")
     a = ap.parse_args(argv)
     md = Path(a.document).resolve()
     if not md.is_file():
         print("no such document: %s" % md)
         return 1
+    html_out = None if a.html is None else (Path(a.html).resolve() if a.html else md.with_suffix(".html"))
+    if a.no_pdf:
+        if html_out is None:
+            print("--no-pdf needs --html")
+            return 1
+        html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
+                            encoding="utf-8")
+        print(html_out)
+        return 0
     pdf = Path(a.out).resolve() if a.out else md.with_suffix(".pdf")
     browser = edge()
     if not browser:
@@ -72,11 +83,10 @@ def main(argv=None):
         print("no PDF was made (Edge exit %s): %s" % (r.returncode, (r.stderr or "").strip()[-300:]))
         return 1
     print(pdf)
-    if a.html:
-        out = md.with_suffix(".html")
-        out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
-                       encoding="utf-8")
-        print(out)
+    if html_out is not None:
+        html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
+                            encoding="utf-8")
+        print(html_out)
     return 0
 
 

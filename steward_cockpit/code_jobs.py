@@ -2235,14 +2235,15 @@ def _make_reading_copies(job, tree):
         try:
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
-            if target.exists() or not source.is_file():
+            # review r1: never through a link, never from (or to) outside the job's tree, never over a file
+            if (target.exists() or target.is_symlink() or not source.is_file() or source.is_symlink()
+                    or not inside(str(source.resolve()), str(Path(tree).resolve()))
+                    or not inside(str(target.parent.resolve()), str(Path(tree).resolve()))):
                 continue
             args = [sys.executable, str(READING_COPY_TOOL), str(source)]
-            args += ["--out", str(target)] if suffix == ".pdf" else ["--html", "--out", str(Path(tempfile.mkdtemp()) / "x.pdf")]
+            args += ["--out", str(target)] if suffix == ".pdf" else ["--no-pdf", "--html", str(target)]
             r = subprocess.run(args, capture_output=True, text=True, timeout=120,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            if suffix != ".pdf" and source.with_suffix(".html") != target and source.with_suffix(".html").is_file():
-                os.replace(source.with_suffix(".html"), target)
             if r.returncode == 0 and target.is_file():
                 made.append(name)
         except Exception:

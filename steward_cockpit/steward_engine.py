@@ -1746,6 +1746,7 @@ class Engine:
             self._emit({"t": "sys", "text": f"could not start the steward: {e}"})
             return False, str(e)
         self.proc = proc
+        self._bg_tasks = []          # background commands belong to the process that started them (review r1)
         _update_state(self.skey(), {"cli": self.cli, "model_policy": self.model_selection,
                                    "provider_connection": self.provider_connection,
                                    "provider_quality": self.provider_quality,
@@ -2575,6 +2576,12 @@ class Engine:
                 # would false-match the rollout (Grok R1 F1).
                 self._submitted = {"text": human_text[:4000], "at": time.time(),
                                    "family": self.cli, "session_id": self.session_id}
+                parts = getattr(self, "_batch_parts", None)
+                if parts:       # a batch is replayed message by message, each whole (ChatGPT review r1)
+                    self._submitted["parts"] = list(parts)
+                    for _ in parts[1:]:                     # its later messages' arrivals belong to this turn too
+                        if arrivals:
+                            arrivals.pop(0)
                 _update_state(self.skey(), {"submitted": self._submitted})
             return True
         except Exception as e:
@@ -2612,7 +2619,12 @@ class Engine:
         suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
         bank = self.__dict__.setdefault("_queued_words", {})
         words = "\n\n".join(w for w in (bank.pop(x, "") for x in items) if w)   # unknown after a restart: not guessed
-        if self._send_locked(queued + suffix, origin="control" if machine else "human", words=words):
+        self._batch_parts = items if len(items) > 1 else None
+        try:
+            sent = self._send_locked(queued + suffix, origin="control" if machine else "human", words=words)
+        finally:
+            self._batch_parts = None
+        if sent:
             for i in reversed(take):
                 self.queue.pop(i)
         if not self._persist_queue():
@@ -2634,8 +2646,10 @@ class Engine:
             return
         marker = ("(possibly a repeat after a restart or interruption; if you already "
                   "handled this, say so in one line and do nothing else) ")
-        if not any(q.endswith(sub["text"]) for q in self.queue):
-            self.queue.insert(0, marker + sub["text"])
+        parts = [p for p in (sub.get("parts") or []) if isinstance(p, str) and p] or [sub["text"]]
+        missing = [p for p in parts if not any(q.endswith(p) for q in self.queue)]   # one still queued is not doubled
+        for p in reversed(missing):
+            self.queue.insert(0, marker + p)
         self._emit({"t": "sys", "text": "a message submitted before the last interruption was re-queued with a repeat marker"})
         self._submitted = None
         _update_state(self.skey(), {"submitted": None, "pending_queue": list(self.queue)})
@@ -2887,6 +2901,17 @@ class Engine:
         ahead = max(0, len(self.queue) - 1)
         nxt = "Your message is next." if not ahead else "Your message is queued after %d other%s." % (ahead, "" if ahead == 1 else "s")
         return "%s is on: %s%s. %s" % (self.steward or "The steward", self._turn_activity(), since, nxt)
+
+    def _bg_wait_over(self, stamp, text):
+        """A code job's coder left a background command running past the limit (a server, a hung tool): the job
+        finishes with what it has, and says why - it never waits forever."""
+        with self._lock:
+            if (self.on_turn_done is None or self.busy or getattr(self, "_bg_wait_stamp", None) != stamp
+                    or not getattr(self, "_bg_tasks", None)):
+                return
+            n = len(self._bg_tasks)
+            self._fire_turn_done({"text": text, "error": "the coder left %d background command(s) running for %d "
+                                  "minutes; the job finished without waiting longer" % (n, _bg_wait_limit() // 60)})
 
     def _turn_identity(self):
         return getattr(self, "_turn_began", None) or getattr(self, "turn_started", 0)
@@ -3719,6 +3744,10 @@ class Engine:
                     if getattr(self, "_bg_tasks", None):
                         self._emit({"t": "sys", "text": "the coder's turn ended with %d background command(s) still "
                                     "running; the job waits for them" % len(self._bg_tasks)})
+                        stamp = self._bg_wait_stamp = time.time()
+                        timer = threading.Timer(_bg_wait_limit(), self._bg_wait_over, args=(stamp, txt))
+                        timer.daemon = True
+                        timer.start()
                     else:
                         self._fire_turn_done({"text": txt, "error": err_text or ""})
 
@@ -4439,6 +4468,14 @@ def _receipt_lock(cdir):
     key = os.path.normcase(str(Path(cdir).resolve()))
     with _RECEIPT_GUARD:
         return _RECEIPT_LOCKS.setdefault(key, threading.Lock())
+
+
+def _bg_wait_limit():
+    """Seconds a code job waits for background commands its coder left running (default 45 min: longer than a skill)."""
+    try:
+        return max(60, int(os.environ.get("ANCHOR_CODE_JOB_BG_WAIT_S", "2700")))
+    except ValueError:
+        return 2700
 
 
 def _take_now_after():

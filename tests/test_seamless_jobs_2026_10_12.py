@@ -49,6 +49,20 @@ def test_a_turn_that_ends_with_a_background_command_running_does_not_finish_the_
     assert len(done) == 1 and "FINISHED" in done[0]["text"], done
 
 
+def test_a_background_command_that_never_ends_does_not_hold_the_job_forever(coder, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    eng, done = coder
+    monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.2)
+    eng._handle({"type": "system", "subtype": "background_tasks_changed",
+                 "tasks": [{"task_id": "srv", "task_type": "local_bash"}]}, eng.proc)
+    eng.turn_text = "Started the dev server."
+    eng._handle(_result("Started the dev server."), eng.proc)
+    assert done == []
+    import time
+    time.sleep(0.6)
+    assert len(done) == 1 and "background command(s) running" in done[0]["error"], done
+
+
 def test_a_turn_with_nothing_in_the_background_finishes_at_once(coder):
     eng, done = coder
     eng.turn_text = "Done."
@@ -107,6 +121,50 @@ def test_every_message_of_his_waiting_in_line_goes_in_the_next_turn_together(ste
     assert steward._deliver_next_queued_locked()
     assert sent == [("So fix the error.\n\nThis plan is fine.", "human")], sent
     assert steward.queue == ["(code job x result - not John) done"], "a machine result keeps its own turn"
+
+
+def test_a_batch_cut_off_by_a_restart_comes_back_message_by_message_never_doubled(steward, monkeypatch):
+    long = "x" * 5000
+    steward.queue = ["(possibly a repeat) This plan is fine."]       # one part is still queued after a failed persist
+    steward._submitted = {"text": ("So fix the error.\n\n" + long)[:4000],
+                          "parts": ["So fix the error.", long, "This plan is fine."]}
+    monkeypatch.setattr(steward_engine_mod(), "_update_state", lambda *a, **k: True)
+    steward._reconcile_submitted_locked({})
+    assert [q.split(") ", 1)[-1] for q in steward.queue] == ["So fix the error.", long, "This plan is fine."], \
+        "each message whole, in order, the one still queued not added again"
+
+
+def steward_engine_mod():
+    from steward_cockpit import steward_engine as se
+    return se
+
+
+def test_a_replaced_coder_process_starts_with_no_background_commands(coder):
+    eng, _ = coder
+    eng._bg_tasks = [{"task_id": "old"}]
+    src = Path(steward_engine_mod().__file__).read_text(encoding="utf-8")
+    assert "self.proc = proc\n        self._bg_tasks = []" in src
+
+
+def test_a_reading_copy_is_never_made_through_a_link_or_over_a_file(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "notes.md").write_text("# Outside\n", encoding="utf-8")
+    tree = tmp_path / "tree"
+    (tree / "d").mkdir(parents=True)
+    try:
+        (tree / "d" / "notes.md").symlink_to(outside / "notes.md")
+        linked = True
+    except OSError:
+        linked = False
+    (tree / "d" / "page.md").write_text("# Page\n", encoding="utf-8")
+    (tree / "d" / "page.html").write_text("keep me", encoding="utf-8")
+    made = code_jobs._make_reading_copies({"outputs": ["d/notes.html", "d/page.html", "d/page.htm"]}, str(tree))
+    assert made == ["d/page.htm"], made
+    assert (tree / "d" / "page.html").read_text(encoding="utf-8") == "keep me", "an existing file is never replaced"
+    assert "Page" in (tree / "d" / "page.htm").read_text(encoding="utf-8")
+    if linked:
+        assert not (outside / "notes.html").exists(), "nothing is written beside a linked target"
 
 
 def test_the_coder_is_told_to_work_in_proportion_and_never_to_write_a_renderer():
