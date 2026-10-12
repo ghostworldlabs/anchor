@@ -437,10 +437,11 @@ class NeverLoseQueueTest(unittest.TestCase):
         sent = []
         self.e._send_locked = lambda text, **kw: (sent.append(text), True)[1]
         self._finish_turn()
-        self.assertEqual(sent, ["one"])
-        self.assertEqual(self.e.queue, ["two"])
+        # 2026-10-12: his waiting messages go together in one turn (one left behind waited out a 26-min turn)
+        self.assertEqual(sent, ["one\n\ntwo"])
+        self.assertEqual(self.e.queue, [])
         entry = eng._read_state_entry(self.e.skey())
-        self.assertEqual(entry.get("pending_queue"), ["two"])
+        self.assertEqual(entry.get("pending_queue"), [])
 
     def test_failed_delivery_stays_in_memory_and_durable_queue(self):
         self.e.queue = ["do not lose this", "then this"]
