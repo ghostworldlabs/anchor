@@ -70,8 +70,9 @@ def main(argv=None):
         src = Path(tmp, "page.html")
         src.write_text(page(md, True), encoding="utf-8")
         profile = Path(tmp, "profile")
+        fresh = Path(tmp, "out.pdf")              # review r2: a failed render never passes off an older PDF as new
         cmd = [browser, "--headless=new", "--disable-gpu", "--no-first-run", "--no-pdf-header-footer",
-               "--user-data-dir=" + str(profile), "--virtual-time-budget=3000", "--print-to-pdf=" + str(pdf),
+               "--user-data-dir=" + str(profile), "--virtual-time-budget=3000", "--print-to-pdf=" + str(fresh),
                src.as_uri()]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
@@ -79,9 +80,11 @@ def main(argv=None):
         except subprocess.TimeoutExpired:
             print("Edge did not finish the PDF within 90 s")
             return 1
-    if not pdf.is_file() or pdf.stat().st_size < 500 or not pdf.read_bytes().startswith(b"%PDF"):
-        print("no PDF was made (Edge exit %s): %s" % (r.returncode, (r.stderr or "").strip()[-300:]))
-        return 1
+        if not fresh.is_file() or fresh.stat().st_size < 500 or not fresh.read_bytes().startswith(b"%PDF"):
+            print("no PDF was made (Edge exit %s): %s" % (r.returncode, (r.stderr or "").strip()[-300:]))
+            return 1
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(fresh, pdf)
     print(pdf)
     if html_out is not None:
         html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),

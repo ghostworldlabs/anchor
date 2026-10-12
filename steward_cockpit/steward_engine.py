@@ -2910,8 +2910,16 @@ class Engine:
                     or not getattr(self, "_bg_tasks", None)):
                 return
             n = len(self._bg_tasks)
+            proc, self.proc = self.proc, None          # review r2: its commands end with it - none writes on after
+            self._bg_tasks = []
+            if proc is not None:
+                self._kill_tree(proc)
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
             self._fire_turn_done({"text": text, "error": "the coder left %d background command(s) running for %d "
-                                  "minutes; the job finished without waiting longer" % (n, _bg_wait_limit() // 60)})
+                                  "minutes; they were ended and the job finished" % (n, _bg_wait_limit() // 60)})
 
     def _turn_identity(self):
         return getattr(self, "_turn_began", None) or getattr(self, "turn_started", 0)
@@ -3388,9 +3396,12 @@ class Engine:
                 return False
             if ev.get("type") == "result" and ev.get("is_error") and ev.get("replay_safe") is True:
                 # never submitted natively: give it back to the queue as-is
-                pending = self._submitted.get("text") or ""
-                if pending and pending not in self.queue:
-                    self.queue.insert(0, pending)
+                parts = [p for p in (self._submitted.get("parts") or []) if isinstance(p, str) and p] \
+                    or [self._submitted.get("text") or ""]
+                missing = [p for p in parts if p and p not in self.queue]     # a batch goes back whole, in order
+                for p in reversed(missing):
+                    self.queue.insert(0, p)
+                if missing:
                     self._persist_queue()
                     self._emit({"t": "sys", "text": "the turn failed before your message reached the model; it is queued again"})
             self._submitted = None
@@ -4047,7 +4058,7 @@ class Engine:
         once per quiet spell and stays awake. True = parked."""
         quiet_since = max(self.last_say, self.last_output, self.woke_at)
         if (self.busy or self.queue or now - quiet_since <= IDLE_SLEEP_SECONDS
-                or self._working_bg()):
+                or self._working_bg() or getattr(self, "_bg_tasks", None)):   # its own background commands are work
             return False
         if self.one_conversation and self._idle_marked == quiet_since:
             return False
