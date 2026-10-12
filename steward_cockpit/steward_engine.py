@@ -179,10 +179,19 @@ WRITE_FOR_JOHN = (
     "non-programmer follows - what it is, what changes for him, what (if anything) he decides. No file paths, "
     "function or test names, IDs, hashes, model names or internal terms in that opening; detail goes below it. A plan "
     "shown for his approval says in plain words what will be built, what is left out, and how you will know it works - "
-    "the builder's plan stays in its file, behind a link. Keep the finish light: one reading copy, checked once; no "
+    "the builder's plan stays in its file, behind a link. Keep the finish light: a PDF or HTML reading copy is ONE "
+    "command that takes seconds - `python C:/dev/Anchor/tools/reading_copy.py <document.md> [--html]` (a code job "
+    "makes a declared one itself from the Markdown of the same name) - never commission or write a renderer; no "
     "extra receipt, hash or provenance files unless he asks. "
 )
-SIZE_OR_HOLD = _size_or_hold() + WRITE_FOR_JOHN
+# 2026-10-12: Book 1's steward slept in 45-second steps for 22 minutes watching its own job while John's message waited
+HAND_OFF = (
+    "Before you start a code job, run its check once on the current files: a check that already fails (and the job "
+    "is not meant to fix) wastes the whole job. ONCE A JOB OR SKILL IS STARTED, END YOUR TURN: tell John in one line "
+    "what runs, and stop. Never sleep, poll or watch a job you started - it wakes you with its result - and John's "
+    "next message must never wait behind you. "
+)
+SIZE_OR_HOLD = _size_or_hold() + HAND_OFF + WRITE_FOR_JOHN
 
 # John 2026-10-10: a cockpit never changes Anchor's own code; he makes those changes from outside Anchor
 ANCHOR_RULE = (
@@ -2316,7 +2325,7 @@ class Engine:
                     receipt = self._queued_receipt()
                     if wait:                     # 2026-10-11: his question is answered within about half a minute
                         receipt += " If it is still busy in %d seconds, it stops and answers you." % wait
-                        timer = threading.Timer(wait, self._auto_take_now, args=(getattr(self, "turn_started", 0),))
+                        timer = threading.Timer(wait, self._auto_take_now, args=(self._turn_identity(),))
                         timer.daemon = True
                         timer.start()
                     self._emit({"t": "sys", "text": receipt, "take_now": True})
@@ -2530,6 +2539,9 @@ class Engine:
             self._turn_words = (words or "") if origin == "human" else ""   # what the receipt quotes: his own words
             self._turn_had_tools = False
             if not self.busy:
+                # 2026-10-12: the turn's identity for the take-now timer - set once per turn; turn_started is restamped
+                # by every write into a running turn, which silently cancelled the timer (his message waited 26 min)
+                self._turn_began = time.time()
                 self._turn_tools = 0
                 self._turn_touched_served = False
                 self._progress_said = False
@@ -2589,10 +2601,20 @@ class Engine:
                 return False
         queued = self.queue[queue_index]
         machine = _is_machine_text(queued)
+        # 2026-10-12: every message of his waiting next in line goes in this one turn - one left behind waited out the
+        # whole next turn (26 min), its take-now timer spent on the turn it first queued behind
+        take = [queue_index]
+        if not machine:
+            while take[-1] + 1 < len(self.queue) and not _is_machine_text(self.queue[take[-1] + 1]):
+                take.append(take[-1] + 1)
+        items = [self.queue[i] for i in take]
+        queued = "\n\n".join(items)
         suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
-        words = self.__dict__.setdefault("_queued_words", {}).pop(queued, "")   # unknown after a restart: not guessed
+        bank = self.__dict__.setdefault("_queued_words", {})
+        words = "\n\n".join(w for w in (bank.pop(x, "") for x in items) if w)   # unknown after a restart: not guessed
         if self._send_locked(queued + suffix, origin="control" if machine else "human", words=words):
-            self.queue.pop(queue_index)
+            for i in reversed(take):
+                self.queue.pop(i)
         if not self._persist_queue():
             self.broken = True
             self._emit({"t": "sys", "text":
@@ -2866,6 +2888,9 @@ class Engine:
         nxt = "Your message is next." if not ahead else "Your message is queued after %d other%s." % (ahead, "" if ahead == 1 else "s")
         return "%s is on: %s%s. %s" % (self.steward or "The steward", self._turn_activity(), since, nxt)
 
+    def _turn_identity(self):
+        return getattr(self, "_turn_began", None) or getattr(self, "turn_started", 0)
+
     def _auto_take_now(self, turn_started):
         """His message is still waiting behind the SAME human turn: take it now, as his "Take this now" would."""
         self.take_now(expected_turn=turn_started)
@@ -2877,7 +2902,7 @@ class Engine:
         with self._lock:
             if not (self.busy and self.queue):
                 return {"ok": False, "error": "nothing is waiting behind a running turn"}
-            if expected_turn is not None and getattr(self, "turn_started", 0) != expected_turn:
+            if expected_turn is not None and self._turn_identity() != expected_turn:
                 return {"ok": False, "error": "that turn already ended"}     # the timer's turn, never a later one
             if expected_turn is not None:
                 self._emit({"t": "sys", "text": "your message has waited - the steward stops this turn and answers you now"})
@@ -3356,6 +3381,10 @@ class Engine:
         t = ev.get("type")
         if self._submitted is not None and t in ("assistant", "stream_event", "result"):
             self._ack_submitted(proc, ev)
+        if t == "system" and ev.get("subtype") == "background_tasks_changed":
+            # 2026-10-12 (calc plan lost): a turn can end while a command it started in the background still runs;
+            # the session wakes when it finishes and works on. The list is the CLI's own count of what still runs.
+            self._bg_tasks = [x for x in (ev.get("tasks") or []) if isinstance(x, dict)]
         if t == "system" and ev.get("subtype") == "init":
             if proc is not self.proc:
                 return
@@ -3684,8 +3713,14 @@ class Engine:
                     self._maybe_drive_locked(was_tick, txt)
                 # R3 (Grok code F4): a code job's coder is finished when its turn ended and nothing follows it (a
                 # failover that keeps working returned above; a queued or driven turn keeps it busy)
+                # ... and nothing it started still runs in the background: then the session wakes again on its own
+                # and its later turn is the job's real end (2026-10-12: a plan finished after its job was failed)
                 if self.on_turn_done is not None and not self.busy and not self.queue:
-                    self._fire_turn_done({"text": txt, "error": err_text or ""})
+                    if getattr(self, "_bg_tasks", None):
+                        self._emit({"t": "sys", "text": "the coder's turn ended with %d background command(s) still "
+                                    "running; the job waits for them" % len(self._bg_tasks)})
+                    else:
+                        self._fire_turn_done({"text": txt, "error": err_text or ""})
 
             # Publish the post-arbitration truth (including a just-started
             # queued/nudge/drive turn) without holding the stdin arbiter lock.

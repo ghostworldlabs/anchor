@@ -1,0 +1,115 @@
+"""John 2026-10-12: jobs hand work out and get it back seamlessly - no job finished while its work still runs, no
+16-minute PDF renderers, no lost plan.
+
+Proven live before these tests were written (scratchpad e2e_bg_job.py, a real Claude coder): on the old engine a job
+whose coder started its work in the background closed after 19 s with nothing and the file appeared after; on this one
+it waited, collected and landed it (69 s)."""
+import io
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from steward_cockpit import code_jobs
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+def coder(tmp_path, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    monkeypatch.setattr(se, "STATE_FILE", tmp_path / "state.json")
+    eng = se.Engine(str(tmp_path), fake=True)
+    eng.cli = "claude"
+    eng.proc = SimpleNamespace(stdin=io.StringIO(), poll=lambda: None)
+    eng.code_job = {"cdir": str(tmp_path), "id": "j1", "repo": str(tmp_path), "worktree": str(tmp_path),
+                    "work_dir": "", "outputs": []}
+    monkeypatch.setattr(eng, "_status_update", lambda **kw: None)
+    done = []
+    eng.on_turn_done = done.append
+    return eng, done
+
+
+def _result(text):
+    return {"type": "result", "subtype": "success", "result": text, "total_cost_usd": 0.0, "duration_ms": 10}
+
+
+def test_a_turn_that_ends_with_a_background_command_running_does_not_finish_the_job(coder):
+    eng, done = coder
+    eng._handle({"type": "system", "subtype": "background_tasks_changed",
+                 "tasks": [{"task_id": "b1", "task_type": "local_bash"}]}, eng.proc)
+    eng.turn_text = "STARTED"
+    eng._handle(_result("STARTED"), eng.proc)
+    assert done == [], "the job waits while its command still runs"
+    eng._handle({"type": "system", "subtype": "background_tasks_changed", "tasks": []}, eng.proc)
+    eng.turn_text = "FINISHED"
+    eng._handle(_result("FINISHED"), eng.proc)
+    assert len(done) == 1 and "FINISHED" in done[0]["text"], done
+
+
+def test_a_turn_with_nothing_in_the_background_finishes_at_once(coder):
+    eng, done = coder
+    eng.turn_text = "Done."
+    eng._handle(_result("Done."), eng.proc)
+    assert len(done) == 1
+
+
+def test_the_reading_copy_tool_makes_a_pdf_and_html_in_seconds(tmp_path):
+    md = tmp_path / "plan.md"
+    md.write_text("# Plan\n\nBuild the history command.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n$x^2$\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "reading_copy.py"), str(md), "--html"],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (tmp_path / "plan.pdf").read_bytes().startswith(b"%PDF")
+    assert "Build the history command." in (tmp_path / "plan.html").read_text(encoding="utf-8")
+
+
+def test_a_declared_reading_copy_the_coder_left_is_made_by_the_job(tmp_path):
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "spine.md").write_text("# Spine\n\nOne.\n", encoding="utf-8")
+    job = {"outputs": ["d/spine.md", "d/spine.pdf", "d/spine.html", "d/other.pdf"]}
+    made = code_jobs._make_reading_copies(job, str(tmp_path))
+    assert sorted(made) == ["d/spine.html", "d/spine.pdf"], made
+    assert (tmp_path / "d" / "spine.pdf").read_bytes().startswith(b"%PDF")
+    assert not (tmp_path / "d" / "other.pdf").exists(), "no Markdown of that name: nothing is invented"
+
+
+@pytest.fixture
+def steward(tmp_path, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    monkeypatch.setattr(se, "STATE_FILE", tmp_path / "state.json")
+    return se.Engine(str(tmp_path), fake=True)
+
+
+def test_his_waiting_message_is_taken_even_after_something_was_written_into_the_turn(steward, monkeypatch):
+    """Seen 10-12: 'This plan is fine' waited 26 min - a write into the running turn restamped turn_started and the
+    take-now timer, checking that stamp, stood down."""
+    calls = []
+    monkeypatch.setattr(steward, "_interrupt_turn_locked", lambda reason: calls.append(reason) or {"ok": True})
+    monkeypatch.setattr(steward, "_wake_locked", lambda fresh, seed: calls.append("wake") or (True, ""))
+    steward.busy, steward.queue = True, ["This plan is fine."]
+    steward._turn_began = steward.turn_started = 1000.0
+    expected = steward._turn_identity()
+    steward.turn_started = 1500.0                 # a nudge or progress line written into the same turn
+    steward._auto_take_now(expected)
+    assert calls == ["John: take this now", "wake"]
+
+
+def test_every_message_of_his_waiting_in_line_goes_in_the_next_turn_together(steward, monkeypatch):
+    sent = []
+    monkeypatch.setattr(steward, "_send_locked", lambda text, origin, words="": sent.append((text, origin)) or True)
+    monkeypatch.setattr(steward, "_persist_queue", lambda: True)
+    monkeypatch.setattr(steward, "effort_on", lambda: False)
+    steward.busy = False
+    steward.queue = ["So fix the error.", "This plan is fine.", "(code job x result - not John) done"]
+    assert steward._deliver_next_queued_locked()
+    assert sent == [("So fix the error.\n\nThis plan is fine.", "human")], sent
+    assert steward.queue == ["(code job x result - not John) done"], "a machine result keeps its own turn"
+
+
+def test_the_coder_is_told_to_work_in_proportion_and_never_to_write_a_renderer():
+    text = code_jobs.coder_brief({"repo": "R", "branch": "B", "brief": "x", "outputs": ["d/p.md", "d/p.pdf"]})
+    assert "reading_copy.py" in text and "Never write your own renderer" in text
+    assert "Work in proportion to the brief" in text and "Never end your turn while a command you started" in text

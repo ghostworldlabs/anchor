@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 // LISTED by name, size and hash, said plainly to be unread, and kept out of the text diff: refusing it outright left
 // every job with a PDF unable to land (Book 1 conflict spine v2, 2026-10-12).
 export function reviewDiff(repo, from, head) {
-  const bytes = (...a) => execFileSync('git', ['-C', repo, ...a], { maxBuffer: 64 * 1024 * 1024 });
+  const bytes = (...a) => execFileSync('git', ['-C', repo, ...a], { maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   const plain = ['--no-ext-diff', '--no-textconv', '--find-renames', from, head];
   const all = numstatRows(bytes('diff', '--numstat', '-z', ...plain).toString('utf8'));
   const binaries = all.filter(r => r.binary);
