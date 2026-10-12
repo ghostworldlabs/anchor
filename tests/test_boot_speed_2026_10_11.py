@@ -31,7 +31,7 @@ def _rec(d, jid, age_days=0.0, **fields):
 def test_first_boot_reads_everything_then_later_boots_read_only_what_changed(jobs):
     _rec(jobs, "old_done", age_days=30, status="done")
     _rec(jobs, "dead_run", status="running", pid=None)
-    assert jr.reconcile_on_startup(defer_handoffs=True) == ["dead_run"], "no mark yet: every record, as before"
+    assert jr.reconcile_on_startup(defer_handoffs=True, at_boot=True) == ["dead_run"], "no mark yet: every record, as before"
     assert (jobs / jr.BOOT_MARK).exists()
     assert json.loads((jobs / "dead_run.json").read_text(encoding="utf-8"))["status"] == jr.STATUS_INTERRUPTED
 
@@ -43,9 +43,30 @@ def test_first_boot_reads_everything_then_later_boots_read_only_what_changed(job
 def test_a_job_left_running_by_the_last_boot_is_looked_at_again_however_old(jobs, monkeypatch):
     _rec(jobs, "survivor", age_days=10, status="running", pid=4242)
     monkeypatch.setattr(jr, "_pid_alive", lambda pid: True)
-    assert jr.reconcile_on_startup(defer_handoffs=True) == []
+    assert jr.reconcile_on_startup(defer_handoffs=True, at_boot=True) == []
     monkeypatch.setattr(jr, "_pid_alive", lambda pid: False)
-    assert jr.reconcile_on_startup(defer_handoffs=True) == ["survivor"], "carried by the mark, though its file is old"
+    assert jr.reconcile_on_startup(defer_handoffs=True, at_boot=True) == ["survivor"], "carried by the mark, though its file is old"
+
+
+def test_a_record_that_cannot_be_read_is_read_again_at_the_next_boot(jobs, monkeypatch):
+    # ChatGPT review: an old running record unreadable for one boot must not drop out of the mark for good.
+    _rec(jobs, "survivor", age_days=10, status="running", pid=4242)
+    monkeypatch.setattr(jr, "_pid_alive", lambda pid: True)
+    jr.reconcile_on_startup(defer_handoffs=True, at_boot=True)
+    real = jr.Path.read_text
+    monkeypatch.setattr(jr.Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(OSError("busy"))
+                        if self.name == "survivor.json" else real(self, *a, **k))
+    jr.reconcile_on_startup(defer_handoffs=True, at_boot=True)
+    monkeypatch.setattr(jr.Path, "read_text", real)
+    monkeypatch.setattr(jr, "_pid_alive", lambda pid: False)
+    assert jr.reconcile_on_startup(defer_handoffs=True, at_boot=True) == ["survivor"]
+
+
+def test_only_a_boot_writes_the_mark(jobs):
+    _rec(jobs, "done", status="done")
+    jr.reconcile_on_startup()
+    jr.reconcile_on_startup(defer_handoffs=True)
+    assert not (jobs / jr.BOOT_MARK).exists(), "only the dashboard's own boot marks (tests, other callers: no mark)"
 
 
 def test_the_log_clean_up_opens_only_records_whose_log_is_old(jobs, monkeypatch):
@@ -66,8 +87,8 @@ def test_the_log_clean_up_opens_only_records_whose_log_is_old(jobs, monkeypatch)
 def test_the_boot_rebuild_reads_no_full_list_once_a_mark_exists(jobs, monkeypatch):
     _rec(jobs, "survivor", age_days=10, status="running", pid=4242, lane="build", folder_path="C:/x")
     monkeypatch.setattr(jr, "_pid_alive", lambda pid: True)
-    jr.reconcile_on_startup(defer_handoffs=True)                      # the boot's first look writes the mark
+    jr.reconcile_on_startup(defer_handoffs=True, at_boot=True)                      # the boot's first look writes the mark
     monkeypatch.setattr(jr, "list_records", lambda: pytest.fail("a boot rebuild read every record"))
     monkeypatch.setattr(jr, "_FOLDER_BUILD", {})
-    out = sup.InlineSupervisor().rebuild(defer_handoffs=True)
+    out = sup.InlineSupervisor().rebuild(at_boot=True)
     assert out["running_jobs"] == ["survivor"] and jr._FOLDER_BUILD == {"C:/x": "survivor"}

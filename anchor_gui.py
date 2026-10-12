@@ -24144,7 +24144,7 @@ def main():
 
     try:
         import job_runner
-        job_runner.reconcile_on_startup(defer_handoffs=True)
+        job_runner.reconcile_on_startup(defer_handoffs=True, at_boot=True)
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
     _boot_step('job records')
@@ -24170,7 +24170,7 @@ def main():
         # concurrency slots (lane serialization + folder-build lock) rebuilt
         # from the durable records. Inline today; the external supervisor
         # (W16) sits behind the same seam. Best-effort — never blocks boot.
-        _summary = _sup.get_supervisor().rebuild(defer_handoffs=True)
+        _summary = _sup.get_supervisor().rebuild(at_boot=True)
         if _summary.get("running_jobs"):
             _logger.info("supervisor.rebuild re-adopted %d running job(s); "
                          "rebuilt %d lane slot(s), %d folder lock(s)"

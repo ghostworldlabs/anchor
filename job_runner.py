@@ -356,10 +356,12 @@ BOOT_MARK = "boot-look.mark"
 _BOOT_MARK_SLACK_S = 300.0
 
 
-def _boot_records() -> list:
-    """The records a boot must look at: written since the last boot's look, plus those it left running.
+def _boot_records(unread=None) -> list:
+    """The records a boot must look at: written since the last boot's look, plus those it left running or
+    could not read.
 
-    No mark (first boot, or an unreadable mark): every record, as before.
+    No mark (first boot, or an unreadable mark): every record, as before. A record that cannot be read is named
+    in ``unread`` (None when the folder itself could not be listed), so the next mark carries it.
     """
     d = jobs_dir()
     try:
@@ -367,11 +369,21 @@ def _boot_records() -> list:
         since = float(mark["since"]) - _BOOT_MARK_SLACK_S
         carried = {str(j) for j in mark.get("running") or []}
     except (OSError, ValueError, KeyError, TypeError):
-        return list_records()
+        records = list_records()
+        if unread is not None:
+            got = {str(r.get("job_id")) for r in records if isinstance(r, dict)}
+            try:
+                unread += [n[:-5] for n in os.listdir(d) if n.endswith(".json")
+                           and not n.endswith((".gate.json", ".cursor.json")) and n[:-5] not in got]
+            except OSError:
+                unread.append(None)
+        return records
     out = []
     try:
         entries = sorted(os.scandir(d), key=lambda e: e.name)
     except OSError:
+        if unread is not None:
+            unread.append(None)
         return []
     for e in entries:
         name = e.name
@@ -382,18 +394,19 @@ def _boot_records() -> list:
                 continue
             out.append(json.loads(Path(e.path).read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
-            continue
+            if unread is not None:
+                unread.append(name[:-5])
     return out
 
 
-def _mark_boot_look(since: float, running: list) -> None:
-    """Record when this boot's look began and the jobs it left running (best-effort)."""
+def _mark_boot_look(since: float, carried: list) -> None:
+    """Record when this boot's look began and the jobs the next boot must read again (best-effort)."""
     try:
         _ensure_jobs_dir()
         p = jobs_dir() / BOOT_MARK
         tmp = p.with_name(BOOT_MARK + ".tmp")
-        tmp.write_text(json.dumps({"since": since, "running": [r.get("job_id") for r in running
-                                                                if r.get("job_id")]}), encoding="utf-8")
+        tmp.write_text(json.dumps({"since": since, "running": sorted({str(j) for j in carried if j})}),
+                       encoding="utf-8")
         tmp.replace(p)
     except OSError:
         pass
@@ -3118,7 +3131,7 @@ def _compact_handoff_receipt(receipt):
     return compact(receipt)
 
 
-def reconcile_on_startup(*, defer_handoffs=False) -> list:
+def reconcile_on_startup(*, defer_handoffs=False, at_boot=False) -> list:
     """Mark every dead-but-"running" persisted job ``interrupted``.
 
     Called at server startup: any job recorded ``running`` whose process is no
@@ -3128,12 +3141,13 @@ def reconcile_on_startup(*, defer_handoffs=False) -> list:
     selectively via :func:`relaunch`; there is deliberately NO auto-relaunch (a
     restart storm must not launch N stale jobs unattended).
 
-    At boot (``defer_handoffs``) only the records written since the last boot's
-    look, or left running by it, are read (``_boot_records``).
+    ``at_boot`` (the dashboard's own boot only): just the records written since
+    the last boot's look, or left running or unread by it, are read
+    (``_boot_records``), and this look is marked for the next boot.
     """
     changed = []
-    look_at = time.time()
-    records = _boot_records() if defer_handoffs else list_records()
+    look_at, unread = time.time(), []
+    records = _boot_records(unread) if at_boot else list_records()
     for rec in records:
         # Field presence marks this protocol's jobs, even when capture failed.
         # Historical jobs must not become new outputs on restart.
@@ -3163,8 +3177,9 @@ def reconcile_on_startup(*, defer_handoffs=False) -> list:
             if attempted and not defer_handoffs:
                 _record_terminal_handoff(terminal)
             changed.append(jid)
-    _mark_boot_look(look_at, [r for r in records
-                              if r.get("status") == STATUS_RUNNING and r.get("job_id") not in changed])
+    if at_boot and None not in unread:          # only a boot marks; an unlisted folder keeps the last mark
+        _mark_boot_look(look_at, [r.get("job_id") for r in records
+                                  if r.get("status") == STATUS_RUNNING and r.get("job_id") not in changed] + unread)
     # Disk hygiene (2026-07 review): reap the durable .log files of long-terminal
     # jobs. The small JSON records are KEPT forever (effort rollups/report views
     # reference them per job_id); only the bulky logs age out. Best-effort.

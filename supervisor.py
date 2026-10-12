@@ -416,7 +416,7 @@ class Supervisor:
     def reconcile(self):
         raise NotImplementedError
 
-    def rebuild(self, defer_handoffs=False):
+    def rebuild(self, at_boot=False):
         raise NotImplementedError
 
 
@@ -529,7 +529,7 @@ class InlineSupervisor(Supervisor):
     def reconcile(self):
         return _jr.reconcile_on_startup()
 
-    def rebuild(self, defer_handoffs=False):
+    def rebuild(self, at_boot=False):
         """Re-adopt in-flight jobs after a dashboard restart.
 
         1. Reconcile dead-but-running records to ``interrupted``.
@@ -538,21 +538,21 @@ class InlineSupervisor(Supervisor):
            and whose pid is alive, so same-lane serialization + the
            folder-build lock survive the restart.
 
-        ``defer_handoffs`` (the dashboard's boot): handoffs are left to the
+        ``at_boot`` (the dashboard's own boot): handoffs are left to the
         background recovery pass and only the records a boot must look at are
         read (2026-10-11 speed), not every record.
 
         Returns a summary dict for the caller/log.
         """
-        if defer_handoffs:
-            interrupted = _jr.reconcile_on_startup(defer_handoffs=True)
+        if at_boot:
+            interrupted = _jr.reconcile_on_startup(defer_handoffs=True, at_boot=True)
         else:
             interrupted = self.reconcile()
         lane_slots = 0
         folder_locks = 0
         running = []
         with _jr._paths.WRITE_LOCK:
-            for rec in (_jr.boot_running_records() if defer_handoffs else _jr.list_records()):
+            for rec in (_jr.boot_running_records() if at_boot else _jr.list_records()):
                 if rec.get("status") != _jr.STATUS_RUNNING:
                     continue
                 jid = rec.get("job_id")
@@ -1053,7 +1053,7 @@ class ExternalSupervisor(Supervisor):
     def reconcile(self):
         return self._call("/reconcile").get("interrupted", [])
 
-    def rebuild(self, defer_handoffs=False):
+    def rebuild(self, at_boot=False):
         return self._call("/rebuild")
 
     # -- W16 live probes -----------------------------------------------------
