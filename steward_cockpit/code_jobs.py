@@ -1637,7 +1637,7 @@ def _finish(cdir, job_id, job, result):
     if not _transition(cdir, job_id, ("finishing",), expect_attempt=job.get("attempt", 1),
                        authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
         return
-    _make_reading_copies(job, wt)                         # a declared PDF/HTML left to package is made, not missed
+    made_copies = _make_reading_copies(job, wt)                       # a declared PDF/HTML left to package is made, not missed
     changed = changed_paths(wt, candidate_base(job))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
@@ -1646,7 +1646,7 @@ def _finish(cdir, job_id, job, result):
         # A packaging check can be the only producer (e.g. unchanged source -> new PDF).
         phase(job, "checking")
         fields["check_ok"], fields["check_output"] = run_check(job, wt)
-        _make_reading_copies(job, wt)                    # review r4: the check may be what wrote the Markdown
+        _make_reading_copies(job, wt, made_copies)                # review r4: the check may be what wrote the Markdown
         checked = True
         phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
         changed = changed_paths(wt, candidate_base(job))
@@ -1685,7 +1685,7 @@ def _finish(cdir, job_id, job, result):
             phase(job, "checking")
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
-                _make_reading_copies(job, wt)            # review r4: the check may be what wrote the Markdown
+                _make_reading_copies(job, wt, made_copies)        # review r4: the check may be what wrote the Markdown
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
             after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
@@ -2225,10 +2225,11 @@ def _output_path(root, name):
 READING_COPY_TOOL = Path(__file__).resolve().parent.parent / "tools" / "reading_copy.py"
 
 
-def _make_reading_copies(job, tree):
+def _make_reading_copies(job, tree, refresh=None):
     """A declared PDF or HTML reading copy the coder did not make is made here, in seconds, from the declared or
     written Markdown of the same name beside it (John 2026-10-12: workers spent 16-19 minutes writing renderers).
-    Never raises; returns the outputs made."""
+    ``refresh``: copies made earlier in this finish - remade when their Markdown changed since (review r5); a copy
+    anyone else made is never touched. Never raises; returns the outputs made."""
     made = []
     for name in job.get("outputs") or []:
         suffix = Path(name).suffix.lower()
@@ -2237,6 +2238,10 @@ def _make_reading_copies(job, tree):
         try:
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
+            if (refresh and name in refresh and target.is_file() and not target.is_symlink() and source.is_file()
+                    and source.stat().st_mtime > target.stat().st_mtime):
+                target.unlink()                          # ours, and stale: made again below
+                refresh.remove(name)
             # review r1: never through a link, never from (or to) outside the job's tree, never over a file
             if (target.exists() or target.is_symlink() or not source.is_file() or source.is_symlink()
                     or not inside(str(source.resolve()), str(Path(tree).resolve()))
@@ -2248,6 +2253,8 @@ def _make_reading_copies(job, tree):
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode == 0 and target.is_file():
                 made.append(name)
+                if refresh is not None and name not in refresh:
+                    refresh.append(name)
         except Exception:
             continue
     return made

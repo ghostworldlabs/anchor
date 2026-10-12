@@ -53,6 +53,7 @@ def test_a_background_command_that_never_ends_does_not_hold_the_job_forever(code
     from steward_cockpit import steward_engine as se
     eng, done = coder
     monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.2)
+    monkeypatch.setattr(se, "_recently_changed", lambda root, s: False)    # nothing advancing
     eng._handle({"type": "system", "subtype": "background_tasks_changed",
                  "tasks": [{"task_id": "srv", "task_type": "local_bash"}]}, eng.proc)
     eng.turn_text = "Started the dev server."
@@ -61,6 +62,32 @@ def test_a_background_command_that_never_ends_does_not_hold_the_job_forever(code
     import time
     time.sleep(0.6)
     assert len(done) == 1 and "background command(s) running" in done[0]["error"], done
+
+
+def test_a_background_command_still_advancing_is_waited_for_not_killed(coder, monkeypatch):
+    from steward_cockpit import steward_engine as se
+    eng, done = coder
+    monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.2)
+    monkeypatch.setattr(se, "_recently_changed", lambda root, s: True)     # its files keep changing
+    eng._handle({"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "long"}]}, eng.proc)
+    eng.turn_text = "STARTED"
+    eng._handle(_result("STARTED"), eng.proc)
+    import time
+    time.sleep(0.7)
+    assert done == [] and eng.proc is not None, "a command still making progress is never cut off"
+
+
+def test_a_copy_made_before_the_check_is_remade_when_the_check_rewrites_its_markdown(tmp_path):
+    import os
+    (tmp_path / "plan.md").write_text("# Old\n", encoding="utf-8")
+    job = {"outputs": ["plan.md", "plan.html"]}
+    made = code_jobs._make_reading_copies(job, str(tmp_path))
+    assert made == ["plan.html"]
+    (tmp_path / "plan.md").write_text("# New plan\n", encoding="utf-8")           # what the check wrote
+    t = (tmp_path / "plan.html").stat().st_mtime
+    os.utime(tmp_path / "plan.md", (t + 5, t + 5))
+    code_jobs._make_reading_copies(job, str(tmp_path), made)
+    assert "New plan" in (tmp_path / "plan.html").read_text(encoding="utf-8")
 
 
 def test_a_coder_that_woke_on_its_own_is_never_ended_by_its_earlier_wait(coder, monkeypatch):

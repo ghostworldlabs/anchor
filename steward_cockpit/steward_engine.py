@@ -2916,6 +2916,12 @@ class Engine:
                     or not getattr(self, "_bg_tasks", None)):
                 return
             n = len(self._bg_tasks)
+            if _recently_changed(self.dir, _bg_wait_limit() / 3):
+                # review r5: still advancing (files in its worktree keep changing) - wait another stretch, never kill
+                timer = threading.Timer(_bg_wait_limit(), self._bg_wait_over, args=(stamp, text))
+                timer.daemon = True
+                timer.start()
+                return
             proc, self.proc = self.proc, None          # review r2: its commands end with it - none writes on after
             self._bg_tasks = []
             if proc is not None:
@@ -4491,6 +4497,23 @@ def _receipt_lock(cdir):
     key = os.path.normcase(str(Path(cdir).resolve()))
     with _RECEIPT_GUARD:
         return _RECEIPT_LOCKS.setdefault(key, threading.Lock())
+
+
+def _recently_changed(root, seconds):
+    """True when a file under ``root`` (outside .git) changed within the last ``seconds`` - a job still advancing."""
+    cutoff = time.time() - seconds
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for name in filenames:
+                try:
+                    if os.path.getmtime(os.path.join(dirpath, name)) >= cutoff:
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return False
 
 
 def _bg_wait_limit():
