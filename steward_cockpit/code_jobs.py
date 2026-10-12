@@ -297,7 +297,7 @@ def integration_required_error(job):
         served = anchor_next.is_served_repo(repo)
     except Exception:
         served = True                                 # unknown: the careful answer
-    if served and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
+    if served:
         return ("Anchor's own code is never changed from a cockpit (John's rule); this job's work is kept for a look "
                 "and John makes the change from outside Anchor")
     if job.get("land_to"):
@@ -378,8 +378,8 @@ FOREMAN_AS_SKILL = ("Foreman runs only as a code job (its own worktree, a passin
 # directly. Here it builds INSIDE the job's worktree, exactly where a coder would, and its result goes through the same
 # finish: the job's own check, a review by a family that wrote none of it, and the locked, verified landing. Foreman
 # runs without --git (the job commits); its documents and foreman.config.json are Anchor's, written in the worktree and
-# never landed. Its sub-agents are not held to the worktree by a fence, so - like any unconfined coder - it never runs
-# on Anchor's own code unless ANCHOR_UNCONFINED_CODERS=1, and a write into the source repository blocks the landing.
+# never landed. Its sub-agents are not held to the worktree by a fence; no code job runs on Anchor's own code, and a
+# write into the source repository blocks the landing.
 FOREMAN_RUN_LIVE = Path(os.environ.get("ANCHOR_FOREMAN_RUN_LIVE") or
                         (Path(os.environ.get("ANCHOR_TRIO_ROOT") or r"C:\dev\trio") / "foreman" / "bin" / "run-live.mjs"))
 FOREMAN_PROFILES = ("slim", "standard")
@@ -1402,32 +1402,15 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         if not held:
             return {"ok": False, "error": "no job started: the repository's commit lock stayed busy (a landing); try again"}
         with _LOCK:      # the worktree and the busy entry: one step
-            # W1a (2026-10-08): a job on Anchor's own repository starts from anchor-next and lands there, in the lander's
-            # own checkout - never in the running Anchor; John's restart makes it live
             land_to, installed = "", False
             try:
                 import anchor_next
-                if anchor_next.is_served_repo(root) and os.environ.get("ANCHOR_SERVED_CODE_JOBS") != "1":
+                if anchor_next.is_served_repo(root):
                     # John 2026-10-10: a cockpit never changes Anchor's own code; he makes those changes from outside
-                    # Anchor (the switch is set only on the service, elevated - by John, and today only by the tests)
+                    # Anchor
                     return {"ok": False, "error": "no job started: Anchor's own code is never changed from a cockpit (John's "
                             "rule) - write what should change in a note for John; he makes Anchor changes from outside Anchor"}
-                if anchor_next.is_served_repo(root) and worker == "foreman" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
-                    return {"ok": False, "error": "no job started: Foreman's sub-agents cannot be confined to the worktree "
-                            "under the service, so a change to Anchor's own code uses a Claude coder"}
-                if anchor_next.is_served_repo(root) and worker == "coder" and family != "claude" and os.environ.get("ANCHOR_UNCONFINED_CODERS") != "1":
-                    # W1a (ChatGPT r2): a job's worktree must be its only writable directory. Claude's coder is held there
-                    # by the fence guard; a ChatGPT/Grok/Gemini coder has no boundary under the service (the Codex sandbox
-                    # cannot start a shell there) - so Anchor's own code goes to a Claude coder (John's choice in the
-                    # morning report; ANCHOR_UNCONFINED_CODERS=1 lifts it)
-                    return {"ok": False, "error": "no job started: a %s coder cannot be confined to its worktree under the "
-                            "service yet, so a change to Anchor's own code uses a Claude coder (--coder claude)" % family}
-                if anchor_next.is_served_repo(root):
-                    ip, why = anchor_next.ensure_integration(root)
-                    if ip is None:
-                        return {"ok": False, "error": "no job started: %s" % why}
-                    land_to = str(ip)
-                elif anchor_next.is_installed_repo(root):
+                if anchor_next.is_installed_repo(root):
                     # 2026-10-10: an INSTALLED skill repository (C:\dev\trio, C:\dev\Skill Foundry, ...) is live code the
                     # next skill run executes. A model pass never installs it: the job lands on that repository's own
                     # anchor-next in the lander's checkout, and a human activates it (anchor_next.activate <repo>)
@@ -1436,7 +1419,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                         return {"ok": False, "error": "no job started: %s" % why}
                     land_to, installed = str(ip), True
             except Exception as e:
-                return {"ok": False, "error": "no job started: could not prepare anchor-next (%s)" % e}
+                return {"ok": False, "error": "no job started: could not tell where the job may land (%s)" % e}
             code, base, err = _git(land_to or root, "rev-parse", "HEAD")
             if code != 0:
                 return {"ok": False, "error": "the repository has no commit to start from: %s" % err}
@@ -1889,8 +1872,8 @@ def land(job, files):
     Returns (landed, note, fields)."""
     import git_safety as _gs
     wt = job["worktree"]
-    # W1a (2026-10-08): the landing target - the lander's checkout of anchor-next for Anchor's own repository (named at
-    # the job's start and checked again here), else the repository itself. The running Anchor is refused by land_locked.
+    # The landing target - the lander's checkout of anchor-next for an installed skill repository (named at the job's
+    # start and checked again here), else the repository itself. The running Anchor is refused by land_locked.
     repo = job.get("land_to") or job["repo"]
     fields = {"verified": False}
     why = destination_error(job["repo"]) or integration_required_error(job) or scope_error(job, wt, files)

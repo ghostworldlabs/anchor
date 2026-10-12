@@ -336,8 +336,7 @@ def land_locked(repo, source_rev, files, message, who="code job", expect_head=""
     try:      # W1a (2026-10-08): the running Anchor is never a landing target, whatever a caller passes
         import anchor_next
         if anchor_next.is_served_checkout(repo):
-            return False, ("not landed: %s is the running Anchor - a change lands on %s and goes live at John's restart"
-                           % (root, anchor_next.BRANCH))
+            return False, ("not landed: %s is the running Anchor - its code is changed only from outside Anchor" % root)
     except Exception as e:
         return False, "not landed: could not tell whether %s is the running Anchor (%s)" % (root, e)
     files = [f.replace("\\", "/") for f in files if f.strip()]

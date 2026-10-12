@@ -313,13 +313,13 @@ def test_foremans_own_files_never_land_whatever_git_ignores():
     assert not code_jobs.never_lands("src/foreman/x.py") and not code_jobs.never_lands("docs/.foreman-job.md")
 
 
-def test_anchors_own_code_is_refused_unless_unconfined_coders_are_allowed(env, monkeypatch):
+def test_anchors_own_code_is_refused(env, monkeypatch):
     repo, cdir, _ = env
     import anchor_next
     monkeypatch.setattr(anchor_next, "is_served_repo", lambda path: True)
-    monkeypatch.setenv("ANCHOR_SERVED_CODE_JOBS", "1")
+    monkeypatch.setenv("ANCHOR_UNCONFINED_CODERS", "1")              # no switch opens Anchor's own code (2026-10-12)
     out = _start(repo, cdir)
-    assert not out["ok"] and "cannot be confined" in out["error"]
+    assert not out["ok"] and "never changed from a cockpit" in out["error"]
 
 
 # ---- never a skill job, never the job runner; the steward is told ----

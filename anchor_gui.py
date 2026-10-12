@@ -472,9 +472,7 @@ def latest_health_report():
     """Return (date_str, status, path, why) for the newest DATED health report, or None.
 
     W3 (2026-10-08): ONE store and one reading for every banner (health_state) - the data directory's
-    health_reports/, only YYYY-MM-DD.md (never README.md, a soak ledger or a candidate's report). ``why`` is the
-    banner's second line: a red report whose fix a candidate check verified says "fix verified on <rev>, live after
-    your restart"; it never clears the red.
+    health_reports/, only YYYY-MM-DD.md (never README.md or a soak ledger). ``why`` is the banner's second line.
     """
     import health_state as _hs
     path, text = _hs.latest()
@@ -17389,9 +17387,8 @@ def _build_doctor_seed():
     return text.encode("ascii", "replace").decode("ascii")
 
 
-REPAIR_OFF = ("The Doctor's code repair is off: it diagnoses and re-checks, it does not edit the running Anchor. A fix "
-              "goes to a code job (it lands on anchor-next); the Doctor then checks that revision, and the banner says "
-              "'fix verified, live after your restart'.")
+REPAIR_OFF = ("The Doctor's code repair is off: it diagnoses and re-checks, it does not edit the running Anchor. "
+              "Anchor's own code is changed only from outside Anchor (John's rule, 2026-10-10).")
 
 
 def handle_doctor_session_start(handler, path, body):
@@ -17453,9 +17450,8 @@ def handle_doctor_session_start(handler, path, body):
     # truthy string such as "false" must not silently turn Diagnose into write.
     resolve = body.get("resolve") is True
     if resolve:
-        # W3 (2026-10-08): the Doctor's code repair is OFF until it works on its own branch and lands through the
-        # queue (a later night) - a Resolve session edited the running Anchor in place, unreviewed. It diagnoses; a
-        # fix goes to a code job, lands on anchor-next, and the Doctor checks that revision before the restart.
+        # W3 (2026-10-08): the Doctor's code repair is OFF - a Resolve session edited the running Anchor in place,
+        # unreviewed. It diagnoses; Anchor's own code is changed only from outside Anchor (John, 2026-10-10).
         handler._send_json({"ok": False, "status": "repair_off", "failureNonBlocking": True,
                             "error": REPAIR_OFF}, 409)
         return
@@ -17875,14 +17871,6 @@ def handle_doctor_resolve_all(handler, path, body):
            "playbook": playbook}
     if decision == "rerun":
         out["rerun"] = _doctor_start_healthcheck_run()
-    try:   # W3: a fix waiting on anchor-next is checked at its own revision, on a private port
-        import anchor_next as _an
-        if _an.waiting():
-            out["candidate"] = _doctor_start_candidate_check()
-    except Exception as exc:
-        out["candidate"] = {"ok": False, "error": str(exc)}
-    if decision == "rerun":
-        pass
     elif decision == "session":
         out["seed_issue"] = {
             "issueId": "resolve-all", "component": "all", "all": True,
@@ -17892,77 +17880,12 @@ def handle_doctor_resolve_all(handler, path, body):
     handler._send_json(out)
 
 
-_DOCTOR_CAND = {"thread": None}
-
-
-def _doctor_start_candidate_check():
-    """W3 (2026-10-08): one background check of anchor-next's head in a throwaway worktree on a private port
-    (health_state.check_candidate): never 8777, never the process killer, never the lander's or the running checkout.
-    Its pass is what lets the red banner say 'fix verified, live after your restart'."""
-    import health_state as _hs
-    with _DOCTOR_HC_LOCK:
-        t = _DOCTOR_CAND.get("thread")
-        if t is not None and t.is_alive():
-            return {"ok": True, "already_running": True}
-        log_path = _paths.logs_dir() / "doctor-candidate-check.log"
-
-        def run():
-            try:
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(log_path, "wb") as fh:
-                    _hs.check_candidate(log=fh)
-            except Exception:
-                pass
-        t = threading.Thread(target=run, name="doctor-candidate-check", daemon=True)
-        _DOCTOR_CAND["thread"] = t
-        t.start()
-        return {"ok": True, "started": True, "log": str(log_path)}
-
-
-_RECHECK_LOCK = threading.Lock()
-_RECHECK_TRIES = [0]
-
-
-def _health_recheck_if_owed():
-    """W3: after the restart that made a verified fix live, ONE re-run of the check against the code the service
-    runs AND the running service itself - only its pass clears the banner. Started from the server's start (never
-    from a page render, never inside a health check's own throwaway server); claimed, durably, only once the run has
-    actually launched (ChatGPT W3 r1)."""
-    if os.environ.get("ANCHOR_HEALTHCHECK") == "1":
-        return
-    launched = False
-    try:
-        import health_state as _hs
-        with _RECHECK_LOCK:
-            if not _hs.recheck_needed():
-                return
-            receipt = _doctor_start_healthcheck_run()
-            if receipt.get("ok") and not receipt.get("already_running"):
-                _hs.mark_rechecked(time.strftime("%Y%m%d-%H%M%S"))
-                launched = True
-    except Exception:
-        pass
-    if not launched:                       # ChatGPT W3 r2: a failed launch is tried again, with a bounded backoff
-        _RECHECK_TRIES[0] += 1
-        if _RECHECK_TRIES[0] <= 6:
-            _schedule_health_recheck(delay_s=120 * _RECHECK_TRIES[0])
-
-
 def _health_sig_for_boot():
     try:
         import health_state as _hs
         return _hs.signature()
     except Exception:
         return ""
-
-
-def _schedule_health_recheck(delay_s=90):
-    """Called once when the service starts listening: the owed re-check, after the boot settles."""
-    if os.environ.get("ANCHOR_HEALTHCHECK") == "1":
-        return
-    t = threading.Timer(delay_s, _health_recheck_if_owed)
-    t.daemon = True
-    t.start()
 
 
 def _doctor_start_healthcheck_run():
@@ -18441,8 +18364,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
         writePlaybook(p);
-        if (p.candidate && p.candidate.ok) term.write('[doctor] A fix waits on anchor-next: checking that revision on a private port. '
-          + 'If it passes, the banner says "fix verified, live after your restart"; it clears only when the running Anchor passes.\r\n');
         if (p.decision === 'rerun') {
           if (!p.rerun || !p.rerun.ok) {
             term.write('[doctor] Verification could not start: ' + ((p.rerun && p.rerun.error) || 'no run receipt') + '\r\n');
@@ -18455,7 +18376,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           pollTail(0);
         } else if (p.decision === 'session' && p.seed_issue) {
           term.write('[doctor] ' + (p.issues || []).length + ' issue(s) need work - starting ONE read-only doctor session to diagnose them. '
-            + 'Code repair is off: a fix goes to a code job, lands on anchor-next, and is checked there before your restart.\r\n');
+            + 'Code repair is off: Anchor\'s own code is changed only from outside Anchor.\r\n');
           BANNER_ISSUE = p.seed_issue;
           window.runDiagnose({ fromBanner: true, resolve: false });
         } else {
@@ -18534,8 +18455,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
         writePlaybook(p);
-        if (p.candidate && p.candidate.ok) term.write('[doctor] A fix waits on anchor-next: checking that revision on a private port. '
-          + 'If it passes, the banner says "fix verified, live after your restart"; it clears only when the running Anchor passes.\r\n');
         if (p.decision === 'rerun') {
           term.write('[doctor] This looks like a known stale or load result, not live damage. '
             + 'Re-running the health check myself; the red banner clears when the report is clean.\r\n');
@@ -24454,7 +24373,6 @@ def main():
     _logger.info("Server ready — accepting connections on %s (boot reconcile %.1fs)",
                  url, _boot_dt)
     print(f"  Ready — accepting connections (boot reconcile {_boot_dt:.1f}s).")
-    _schedule_health_recheck()   # W3: the re-check a verified fix's restart owes (never from a render)
 
     try:
         server.serve_forever()

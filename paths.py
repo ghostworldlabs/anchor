@@ -50,7 +50,7 @@ HEALTH_REPORTS_DIRNAME = "health_reports"
 
 
 def code_jobs_dir() -> Path:
-    """Where code jobs, the lander's checkout of anchor-next and candidate checks keep their working copies.
+    """Where code jobs and the lander's checkouts of anchor-next keep their working copies.
 
     John, 2026-10-08: temporary builds live under C:\\dev, which is backed up routinely - beside the Anchor checkout,
     never inside it: ``<the checkout's parent>/Anchor-code-jobs`` (C:\\dev\\Anchor-code-jobs). ``ANCHOR_CODE_JOBS_DIR``

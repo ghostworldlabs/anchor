@@ -1,25 +1,21 @@
-"""anchor_next - "landed" and "live" are two places (W1a of the overnight plan of 2026-10-08, John's decision D1 that day:
-Anchor-revision cockpits "make changes to the Anchor code ... like you did ... work on a separate branch, isolated and
-then once done do a clean merge"; "Land on its own is fine and does not go live until restart").
+"""anchor_next - "landed" and "live" are two places for an INSTALLED SKILL REPOSITORY (2026-10-10).
 
-A code job on Anchor's own repository lands on the integration branch ``anchor-next``, in a checkout the lander owns
-(under the code-jobs folder, never C:\\dev\\Anchor). The running checkout - the one the service serves from - is
-never a landing target, whatever a caller passes (git_safety.land_locked refuses it). The only way a landed change
-reaches John's screen is his restart, in this order (restart_anchor.ps1):
+The installed skill repositories are the checkouts the installed skills run from - the skill roots a skill job may
+start (C:\\dev\\trio, C:\\dev\\Skill Foundry\\skills), the repository Foreman's run-live.mjs belongs to, the SKILLS_ROOT
+registry and the Claude adapter farm's targets. A code job there lands on that repository's own integration branch
+``anchor-next``, in a checkout the lander owns (under the code-jobs folder), and is NOT installed: the checked-out code
+keeps running until a human activates it (``python anchor_next.py activate <repository>``). ``activate`` brings the
+repository's own new commits into ``anchor-next`` in the lander's checkout, then fast-forwards the checkout to it. If an
+uncommitted file would be overwritten, or the two branches conflict, it stops before anything changes and lists why -
+never a reset.
 
-    check (nothing changes)  ->  drain  ->  stop the service  ->  activate  ->  start
+The RUNNING Anchor is neither: its code is never changed from a cockpit (John, 2026-10-10) - he changes it from outside
+Anchor. ``served_root`` / ``is_served_repo`` / ``is_served_checkout`` name it so every caller can refuse it
+(code_jobs, git_safety.land_locked, the fence).
 
-``activate`` brings the running branch's own new commits (the stewards' record checkpoints) into ``anchor-next`` in
-the lander's checkout, then fast-forwards the running checkout to it. If an uncommitted file in the running checkout
-would be overwritten, or the two branches conflict, it stops before anything changes and lists why - never a reset.
+Every function never raises; stdlib only. CLI: ``python anchor_next.py status|check|activate <repository>``.
 
-Every function never raises; stdlib only. CLI: ``python anchor_next.py status|check|activate [<repository>]``.
-
-The same two places hold for an INSTALLED SKILL REPOSITORY (2026-10-10): the checkouts the installed skills run from -
-the skill roots a skill job may start (C:\\dev\\trio, C:\\dev\\Skill Foundry\\skills), the repository Foreman's run-live.mjs
-belongs to, the SKILLS_ROOT registry and the Claude adapter farm's targets. A code job there lands on that repository's
-own ``anchor-next`` in the lander's checkout and is NOT installed: the checked-out code keeps running until a human
-activates it (``python anchor_next.py activate <repository>``). ``is_installed_repo`` is the one predicate every caller
+``is_installed_repo`` is the one predicate every caller
 uses, keyed on the owning git common directory, so a worktree or a junction alias of an installed repository is the
 same repository. Discovery fails CLOSED (``InstalledUnknown``): a configured source that is present but unreadable, or
 a root whose git identity cannot be read, refuses every direct landing instead of reading as "nothing installed".
@@ -286,7 +282,7 @@ def integration_dir(repo, common=""):
 
 def ensure_integration(repo):
     """(path, "") - the lander's own checkout of ``anchor-next`` for this repository, made when missing (the branch
-    starts at the running checkout's HEAD) - or (None, why). A checkout that is not on the branch, or holds changes
+    starts at the repository's HEAD) - or (None, why). A checkout that is not on the branch, or holds changes
     nobody committed, is refused, never cleaned: it is the lander's, and something else wrote there. Whatever sits at
     the expected path must be a checkout of THIS repository (the same git common directory) - another repository
     there, even on a branch named anchor-next, is refused, never trusted by its path or its branch name (bounded
@@ -294,6 +290,11 @@ def ensure_integration(repo):
     mine = common_dir(repo)
     if not mine:
         return None, "not a git repository: %s" % repo
+    try:
+        if is_served_repo(repo):
+            return None, "%s is the running Anchor - its code is changed only from outside Anchor" % repo
+    except ServedUnknown as e:
+        return None, "could not tell whether %s is the running Anchor (%s)" % (repo, e)
     path = integration_dir(repo, mine)
     try:
         present = (path / ".git").exists()
@@ -302,9 +303,9 @@ def ensure_integration(repo):
     if not present:
         code, _, _ = _git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + BRANCH, timeout=60)
         if code != 0:
-            code, head, err = _git(served_root() if is_served_repo(repo) else repo, "rev-parse", "HEAD", timeout=60)
+            code, head, err = _git(repo, "rev-parse", "HEAD", timeout=60)
             if code != 0:
-                return None, "could not read the running checkout's HEAD: %s" % err[:200]
+                return None, "could not read the repository's HEAD: %s" % err[:200]
             code, _, err = _git(repo, "branch", BRANCH, head, timeout=60)
             if code != 0:
                 return None, "could not make the %s branch: %s" % (BRANCH, err[:200])
@@ -334,9 +335,9 @@ def head_of(repo, rev="HEAD"):
     return out if code == 0 else ""
 
 
-def waiting(repo=None):
-    """The commits landed on anchor-next that the running checkout does not carry yet: [(sha, subject)]."""
-    root = Path(repo) if repo else served_root()
+def waiting(repo):
+    """The commits landed on anchor-next that the checkout does not carry yet: [(sha, subject)]."""
+    root = Path(repo)
     code, out, _ = _git(root, "log", "--format=%H%x09%s", "HEAD.." + BRANCH, timeout=120)
     if code != 0:
         return []
@@ -391,12 +392,12 @@ def _collides(incoming, dirty):
     return sorted(out)
 
 
-def check(repo=None):
-    """What the restart would do, changing nothing: {"ok", "waiting", "blockers", "conflicts", "why", "incoming"}. A
-    blocker is a path the fast-forward would write that the running checkout holds uncommitted, untracked or ignored
-    (or a folder/file in its way); a conflict is a path where the running branch's own new commits and anchor-next
+def check(repo):
+    """What the activation would do, changing nothing: {"ok", "waiting", "blockers", "conflicts", "why", "incoming"}. A
+    blocker is a path the fast-forward would write that the checkout holds uncommitted, untracked or ignored (or a
+    folder/file in its way); a conflict is a path where the checked-out branch's own new commits and anchor-next
     disagree."""
-    root = Path(repo) if repo else served_root()
+    root = Path(repo)
     out = {"ok": False, "waiting": waiting(root), "blockers": [], "conflicts": [], "why": "", "incoming": []}
     if not head_of(root, "refs/heads/" + BRANCH):
         out.update(ok=True, why="nothing has landed on %s; nothing to activate" % BRANCH)
@@ -480,16 +481,23 @@ def _restore(root, head, want, incoming, before):
     return unverified + [d for d in drift if not any(d == u.split(" (")[0] for u in unverified)]
 
 
-def activate(repo=None):
-    """The restart's one change, run while the service is STOPPED: anchor-next takes the running branch's own new
-    commits (a merge in the lander's checkout), then the running checkout is fast-forwarded to it, never overwriting
-    an ignored file. Under the repository's commit lock. {"ok", "from", "to", "why", "blockers", "conflicts",
-    "unverified"}. On a refusal the checkout is verified to hold what it held at the check; when it cannot be
-    verified, ``unverified`` lists why and the service must NOT be started on it (ChatGPT W1a r1: git may write files
-    before it fails to move HEAD)."""
+def activate(repo):
+    """The human's step that installs what landed: anchor-next takes the checked-out branch's own new commits (a merge
+    in the lander's checkout), then the checkout is fast-forwarded to it, never overwriting an ignored file. Under the
+    repository's commit lock. {"ok", "from", "to", "why", "blockers", "conflicts", "unverified"}. On a refusal the
+    checkout is verified to hold what it held at the check; when it cannot be verified, ``unverified`` lists why and
+    it must be looked at before it is used (ChatGPT W1a r1: git may write files before it fails to move HEAD)."""
     import git_safety as _gs
-    root = Path(repo) if repo else served_root()
+    root = Path(repo)
     out = {"ok": False, "from": head_of(root), "to": "", "why": "", "blockers": [], "conflicts": [], "unverified": []}
+    try:
+        served = is_served_repo(root)
+    except ServedUnknown as e:
+        out["why"] = "could not tell whether %s is the running Anchor (%s); nothing changed" % (root, e)
+        return out
+    if served:
+        out["why"] = "%s is the running Anchor - its code is installed from outside Anchor; nothing changed" % root
+        return out
     if not head_of(root, "refs/heads/" + BRANCH):
         out.update(ok=True, to=out["from"], why="nothing has landed on %s" % BRANCH)
         return out
@@ -535,13 +543,15 @@ def activate(repo=None):
 
 
 def _main(argv):
-    cmd = argv[1] if len(argv) > 1 else "status"
-    # an optional repository: the running Anchor when omitted, else an INSTALLED skill repository (its activation is
-    # the human's explicit step after a code job landed there - a model pass never installs skill code)
-    repo = argv[2] if len(argv) > 2 else None
+    # the repository: an INSTALLED skill repository (its activation is the human's explicit step after a code job
+    # landed there - a model pass never installs skill code)
+    if len(argv) < 3 or argv[1] not in ("status", "check", "activate"):
+        print("usage: python anchor_next.py status|check|activate <repository>")
+        return 2
+    cmd, repo = argv[1], argv[2]
     if cmd == "status":
         w = waiting(repo)
-        print("%d change(s) landed on %s wait for %s" % (len(w), BRANCH, "activation in " + repo if repo else "a restart"))
+        print("%d change(s) landed on %s wait for activation in %s" % (len(w), BRANCH, repo))
         for sha, subj in w[:20]:
             print("  %s %s" % (sha[:10], subj[:100]))
         return 0
@@ -549,12 +559,9 @@ def _main(argv):
         r = check(repo)
         print(json.dumps(r, indent=1))
         return 0 if r["ok"] else 3
-    if cmd == "activate":
-        r = activate(repo)
-        print(json.dumps(r, indent=1))
-        return 0 if r["ok"] else (4 if r.get("unverified") else 3)     # 4: do not start on this checkout
-    print("usage: python anchor_next.py status|check|activate [<repository>]")
-    return 2
+    r = activate(repo)
+    print(json.dumps(r, indent=1))
+    return 0 if r["ok"] else (4 if r.get("unverified") else 3)     # 4: look at this checkout before it is used
 
 
 if __name__ == "__main__":

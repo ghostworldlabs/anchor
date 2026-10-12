@@ -1664,8 +1664,8 @@ class Engine:
             self.fenced = fenced
             if fenced:
                 persona += FENCE_NOTE
-            # W1a (2026-10-08): no writer edits the running Anchor's code in place - it lands on anchor-next through a
-            # code job. A steward whose folder is inside the running checkout: Claude's fence refuses code files there
+            # W1a (2026-10-08): no writer edits the running Anchor's code in place - John changes it from outside Anchor
+            # (2026-10-10). A steward whose folder is inside the running checkout: Claude's fence refuses code files there
             # (the deny rules below, before any write); a provider with no proven boundary there (ChatGPT's sandbox is
             # unproven under the service; Grok, Gemini) runs read-only - it talks and reads, a code job changes code.
             in_served = not self.general and _in_served(self.dir)

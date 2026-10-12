@@ -65,12 +65,7 @@ ANCHOR_DIR = SCRIPT_DIR  # this script must live in the Anchor root (CODE dir)
 import paths as _paths
 DATA_DIR = _paths.data_dir()
 REPORTS_DIR = _paths.health_reports_dir()
-TEST_PORT = int(os.environ.get("ANCHOR_HEALTHCHECK_PORT") or 8778)   # 0: an OS-assigned free port (a candidate check)
-# W3 (2026-10-08): what this run checks. "running" (default): the code the service runs - the daily self-test and the
-# Doctor's re-run. "candidate": a revision landed on anchor-next, checked from its own throwaway worktree
-# (health_state.check_candidate); its report goes to ANCHOR_HEALTH_REPORT_OUT and never becomes the dated report.
-TARGET = "candidate" if os.environ.get("ANCHOR_HEALTHCHECK_TARGET") == "candidate" else "running"
-REPORT_OUT = os.environ.get("ANCHOR_HEALTH_REPORT_OUT") or ""
+TEST_PORT = int(os.environ.get("ANCHOR_HEALTHCHECK_PORT") or 8778)   # 0: an OS-assigned free port
 # Readiness deadline for the throwaway server. "Boot" = bind + the FULL boot
 # reconcile (registry PID probes, worktree reap, daemons…) — main() only
 # listen()s once that finishes, and under 5 AM load it has taken 80s+. Per the
@@ -174,7 +169,6 @@ class Report:
             f"# Anchor Health Report â€” {TODAY}",
             "",
             f"Status: {status_line}",
-            f"Target: {TARGET}",
             f"Revision: {RUN_REVISION or _revision()}",
             f"Run: {RUN_ID}",
             f"Service-Boot: {SERVICE_BOOT}",
@@ -460,7 +454,7 @@ def check_server_and_endpoints(report: Report):
     # back to an OS-assigned free port so the boot/endpoint/round-trip checks
     # can still run. check_synthetic_roundtrip reads TEST_PORT too, so updating
     # the global keeps both in sync.
-    if TEST_PORT == 0:                      # W3: a private, OS-assigned port (a candidate check)
+    if TEST_PORT == 0:                      # W3: a private, OS-assigned port
         TEST_PORT = _find_free_port(8779)
     elif _port_in_use(TEST_PORT):
         fallback = _find_free_port(TEST_PORT)
@@ -6215,8 +6209,7 @@ def _issue_paths_in(lines):
 
 
 def _previous_issue_paths():
-    """What failed is asked again: the GET paths in the newest dated report's Issues, AND - while a verified fix waits
-    to be settled - the ones the candidate answered (ChatGPT final review: a newer report must never drop them)."""
+    """What failed is asked again: the GET paths in the newest dated report's Issues."""
     lines = []
     try:
         rd = REPORTS_DIR
@@ -6224,44 +6217,15 @@ def _previous_issue_paths():
         body = dated[0].read_text(encoding="utf-8", errors="replace") if dated else ""
         m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)
         lines += (m.group(1) if m else "").splitlines()
-        cand = json.loads((rd / "candidate.json").read_text(encoding="utf-8")) if (rd / "candidate.json").is_file() else {}
-        if isinstance(cand, dict) and not cand.get("settled"):
-            lines += list((cand.get("answers") or {}).get("issues") or [])
     except Exception:
-        pass
-    try:     # a candidate check is handed the issues it answers (health_state.check_candidate)
-        lines += list(json.loads(os.environ.get("ANCHOR_HEALTH_AFFECTED") or "[]"))
-    except ValueError:
         pass
     return _issue_paths_in(lines)
 
 
-def check_affected_on_candidate(report: Report):
-    """ChatGPT final review: a candidate's pass must REPLAY the failures it claims to answer - every affected GET,
-    asked of the candidate's own private server with its own credentials, 2xx/3xx only."""
-    if TARGET != "candidate":
-        return
-    import urllib.request
-    tok = (os.environ.get("ANCHOR_TOKEN") or "").strip()
-    for path in _previous_issue_paths():
-        req = urllib.request.Request("http://127.0.0.1:%d%s" % (TEST_PORT, path),
-                                     headers=({"Authorization": "Bearer " + tok} if tok else {}))
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                code = r.getcode()
-        except urllib.error.HTTPError as e:
-            code = e.code
-        except Exception as e:
-            code = type(e).__name__
-        report.check("the candidate answers GET %s" % path, isinstance(code, int) and 200 <= code < 400, "answered %s" % code)
-
-
 def check_running_service(report: Report):
-    """W3 (ChatGPT r1, 2026-10-08): a pass of the RUNNING target requires the running service itself - on
-    ANCHOR_HEALTHCHECK_LIVE_PORT (the Doctor's re-run and the owed re-check set it), else 8777 - to answer and to run
-    the revision this report checked (its build id names its HEAD). A candidate check never asks it."""
-    if TARGET == "candidate":
-        return
+    """W3 (ChatGPT r1, 2026-10-08): a pass requires the running service itself - on ANCHOR_HEALTHCHECK_LIVE_PORT (the
+    Doctor's re-run sets it), else 8777 - to answer and to run the revision this report checked (its build id names
+    its HEAD)."""
     import urllib.request
     port = int(os.environ.get("ANCHOR_HEALTHCHECK_LIVE_PORT") or 8777)
     name = "the running service answers on %d" % port
@@ -6340,10 +6304,10 @@ def _publish(report, path):
             time.sleep(0.2)
     try:
         target = path
-        live = _live_boot() if TARGET != "candidate" else ""
-        if TARGET != "candidate" and not report.has_issues and (not SERVICE_BOOT or live != SERVICE_BOOT):
+        live = _live_boot()
+        if not report.has_issues and (not SERVICE_BOOT or live != SERVICE_BOOT):
             fd_ok = False      # a PASS needs the instance it probed confirmed still running (ChatGPT confirmation round)
-        elif TARGET != "candidate" and SERVICE_BOOT and live not in ("", SERVICE_BOOT):
+        elif SERVICE_BOOT and live not in ("", SERVICE_BOOT):
             fd_ok = False      # the service restarted under this run: its observations are another instance's
         else:
             fd_ok = fd is not None
@@ -6394,10 +6358,8 @@ def cleanup_stale_processes(report: Report):
         return
 
     # W3 (2026-10-08): the RUNNING service (8777) is never killed by a health check - not the daily run, not a
-    # Doctor re-run, never a candidate check: a service up more than a day is normal, and killing it threw every open
-    # cockpit out. Only an explicit ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE=1 (outside a candidate check) restores it.
-    if TARGET == "candidate":
-        return                                  # a candidate check never runs the killer at all (ChatGPT W3 r1)
+    # Doctor re-run: a service up more than a day is normal, and killing it threw every open cockpit out. Only an
+    # explicit ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE=1 restores it.
     ports = {str(TEST_PORT)} - {"8777"}         # 8777 is never a TEST port, whatever the configuration says
     if os.environ.get("ANCHOR_HEALTHCHECK_KILL_STALE_SERVICE") == "1":
         ports.add("8777")
@@ -7144,7 +7106,6 @@ def main():
 
         server_proc = check_server_and_endpoints(report)
         check_running_service(report)          # W3: a running report's pass needs the RUNNING service too
-        check_affected_on_candidate(report)    # W3: a candidate's pass replays the failures it answers
         check_route_table_walk(report, server_proc)
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)
@@ -7239,12 +7200,9 @@ def main():
             except Exception:
                 pass
 
-    report_path = Path(REPORT_OUT) if REPORT_OUT else REPORTS_DIR / f"{TODAY}.md"
+    report_path = REPORTS_DIR / f"{TODAY}.md"
     try:
-        if REPORT_OUT:
-            report.write(report_path)
-        else:
-            _publish(report, report_path)
+        _publish(report, report_path)
     except Exception as e:
         # Last-ditch fallback: write to a fixed path so we don't lose the result
         fallback = DATA_DIR / "logs" / "healthcheck-error.log"

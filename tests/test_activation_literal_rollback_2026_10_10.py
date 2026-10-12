@@ -46,7 +46,10 @@ def literal_candidate(tmp_path, monkeypatch):
     _git(repo, "checkout", "-f", "master")
     assert (repo / "page.js").read_bytes() == BASELINE
     assert _git(repo, "status", "--porcelain") == ""
-    monkeypatch.setenv("ANCHOR_SERVED_ROOT", str(repo))
+    served = tmp_path / "Anchor-served"                # the running Anchor is never activated (2026-10-12): elsewhere
+    served.mkdir()
+    _git(served, "init", "-b", "master")
+    monkeypatch.setenv("ANCHOR_SERVED_ROOT", str(served))
     monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
     return repo, baseline_head, candidate_head, candidate_blob
 

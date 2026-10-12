@@ -45,26 +45,6 @@ function Get-PortOwners {
   return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-# 0. W1a (2026-10-08): "landed" and "live" are two places. Code jobs land on the branch anchor-next; this restart is
-#    what makes them live: check -> drain -> stop -> activate (anchor-next takes the running branch's own commits, then
-#    C:\dev\Anchor fast-forwards to it) -> start. The check changes nothing; if an uncommitted file here would be
-#    overwritten, or the branches conflict, the restart stops now and lists why - never a reset.
-Write-Host "`n==> 0/3 What this restart makes live (anchor-next)" -ForegroundColor Cyan
-if ($Py) {
-  Push-Location $AnchorDir
-  try {
-    & $Py "anchor_next.py" status 2>&1 | ForEach-Object { "    $_" }
-    & $Py "anchor_next.py" check 2>&1 | ForEach-Object { "    $_" }
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host "[STOP] The landed changes cannot be made live as things stand (above). Nothing was changed; the service was not stopped." -ForegroundColor Red
-      Write-Host "RESULT: RESTART STOPPED BEFORE ANY CHANGE" -ForegroundColor Red; exit 3
-    }
-    Write-Host "[ok] Nothing blocks the activation." -ForegroundColor Green
-  } finally { Pop-Location }
-} else {
-  Write-Host "[FAIL] python not found; the activation cannot be checked - nothing changed." -ForegroundColor Red; exit 2
-}
-
 # 1. WARM DRAIN (while the service is still up) - park every live session warm.
 Write-Host "`n==> 1/3 Warm drain (park live sessions, persist docs + cache summaries)" -ForegroundColor Cyan
 if ($Cold) {
@@ -96,8 +76,7 @@ if ($Cold) {
 Write-Host "`n==> 2/3 Restarting 'anchor'" -ForegroundColor Cyan
 $OldPids = @(Get-PortOwners)
 & $Nssm stop anchor 2>&1 | ForEach-Object { "    $_" }
-# W1a (ChatGPT r1): the activation runs only on a CONFIRMED stopped service - the service reports Stopped AND nothing
-# listens on the port - never on an empty port list alone (a service still booting has no listener yet).
+# The start waits for a CONFIRMED stopped service - the service reports Stopped AND nothing listens on the port.
 $deadline = (Get-Date).AddSeconds(60)
 do {
   $svc = (Get-Service anchor -ErrorAction SilentlyContinue).Status
@@ -105,22 +84,9 @@ do {
   if (-not $stopped) { Start-Sleep -Milliseconds 500 }
 } while (-not $stopped -and (Get-Date) -lt $deadline)
 if (-not $stopped) {
-  Write-Host "[FAIL] The service did not stop (status: $svc; listeners: $((Get-PortOwners) -join ',')). Nothing was activated; it keeps running the build it had." -ForegroundColor Red
+  Write-Host "[FAIL] The service did not stop (status: $svc; listeners: $((Get-PortOwners) -join ',')). It keeps running the build it had." -ForegroundColor Red
   Write-Host "RESULT: RESTART FAILED - NOTHING CHANGED" -ForegroundColor Red; exit 1
 }
-# W1a: the one change, with the service stopped. Exit 3: refused, the checkout verified as it was - the old build
-# starts. Exit 4: the checkout could not be verified - the service is NOT started on it.
-Push-Location $AnchorDir
-try {
-  & $Py "anchor_next.py" activate 2>&1 | ForEach-Object { "    $_" }
-  $act = $LASTEXITCODE
-} finally { Pop-Location }
-if ($act -ne 0 -and $act -ne 3) {   # only success (0) or a VERIFIED refusal (3) may start the service (ChatGPT W1a r2)
-  Write-Host "[FAIL] The activation was refused and C:\dev\Anchor could not be verified as it was (above). The service is NOT started; John or the steward looks first." -ForegroundColor Red
-  Write-Host "RESULT: RESTART STOPPED - SERVICE LEFT STOPPED" -ForegroundColor Red; exit 4
-}
-if ($act -ne 0) { Write-Host "[warn] The activation was refused (above); the checkout was verified unchanged - starting the build that was running." -ForegroundColor Yellow }
-else { Write-Host "[ok] C:\dev\Anchor now carries anchor-next." -ForegroundColor Green }
 & $Nssm start anchor 2>&1 | ForEach-Object { "    $_" }
 # The port shows LISTENING only once the server's boot reconcile is done (it
 # binds at once but listen()s when ready) — under load that has taken 80s+.
