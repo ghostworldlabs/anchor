@@ -163,7 +163,7 @@ def _size_or_hold():
         "SIZE THE WORK first and say the size in one line with why: SMALL (reversible, about three files or fewer) is a "
         "code job - its coder writes, one reviewer of another family checks it, and it lands when that passes. A "
         "FEATURE (several files, worth a plan of waves) is a FOREMAN code job: write the plan in your folder (`## Wave "
-        "N` sections, each saying what it builds and how it is tested); " + crucible + "Show John the plan, change it "
+        "N` sections, each saying what it builds and how it is tested); " + crucible + "Show John the plan in plain words, change it "
         "on his word, and only on his approval start it: `python C:/dev/Anchor/tools/steward_code_job.py start "
         "--worker foreman --repo <repo> --brief-file <brief> --plan-file <plan> --check \"<the test command>\"` - "
         "Foreman builds it slim in the job's own worktree, and it lands like any code job, only after the check and "
@@ -172,7 +172,17 @@ def _size_or_hold():
     )
 
 
-SIZE_OR_HOLD = _size_or_hold()
+# John 2026-10-12: "This plan is pure jargon" (calc history plan) and a 71-minute Book 1 outline whose last 19 minutes
+# were receipts, hashes and provenance packaging. Every duty carries the sizing block, so this rides with it.
+WRITE_FOR_JOHN = (
+    "WRITE FOR JOHN: every plan, report or journal entry he will read OPENS with a few plain sentences a "
+    "non-programmer follows - what it is, what changes for him, what (if anything) he decides. No file paths, "
+    "function or test names, IDs, hashes, model names or internal terms in that opening; detail goes below it. A plan "
+    "shown for his approval says in plain words what will be built, what is left out, and how you will know it works - "
+    "the builder's plan stays in its file, behind a link. Keep the finish light: one reading copy, checked once; no "
+    "extra receipt, hash or provenance files unless he asks. "
+)
+SIZE_OR_HOLD = _size_or_hold() + WRITE_FOR_JOHN
 
 # John 2026-10-10: a cockpit never changes Anchor's own code; he makes those changes from outside Anchor
 ANCHOR_RULE = (

@@ -56,7 +56,6 @@ def _review_input(repo, base, head):
 
 @pytest.mark.parametrize("content, refused", [
     (b"text\n", None),
-    (b"\x89PNG\r\n\x1a\n\x00\x00binary", "binary file"),
     (b"caf\xe9 latin-1\n", "not valid UTF-8"),
 ])
 def test_the_reviewer_is_given_exact_text_or_nothing(repo, content, refused):
@@ -68,6 +67,29 @@ def test_the_reviewer_is_given_exact_text_or_nothing(repo, content, refused):
         assert not out["ok"] and refused in out["error"], out
     else:
         assert out["ok"] and "+text" in out["diff"], out
+
+
+def test_a_binary_file_is_listed_for_the_reviewer_not_refused(repo):
+    """Book 1 v2 (2026-10-12): a job with a PDF reading copy could not land - the reviewer refused the whole change.
+    Now the text goes as its exact diff and the binary file is listed by name and size, said plainly to be unread."""
+    base = g(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "spine.md").write_text("# Spine\n", encoding="utf-8")
+    (repo / "reading copy.pdf").write_bytes(b"%PDF-1.7\n\x00\x00binary")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "change")
+    out = _review_input(repo, base, "HEAD")
+    assert out["ok"], out
+    diff = out["diff"]
+    assert "+# Spine" in diff and "Binary files" not in diff, diff
+    assert "BINARY FILES" in diff and "NOT read by you" in diff, diff
+    assert "- reading copy.pdf: added, 17 bytes, blob " in diff, diff
+
+
+def test_a_binary_only_change_is_still_listed(repo):
+    base = g(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "c.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00binary")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "change")
+    out = _review_input(repo, base, "HEAD")
+    assert out["ok"] and out["diff"].startswith("BINARY FILES") and "- c.png: added" in out["diff"], out
 
 
 def test_a_review_that_exits_with_an_error_is_never_a_pass(repo, tmp_path, monkeypatch):
