@@ -29,7 +29,12 @@ export function reviewDiff(repo, from, head) {
     throw new Error('the diff is not valid UTF-8 - the reviewer would not see its exact bytes');
   }
   if (!binaries.length) return text;
-  const size = (rev, p) => { try { return Number(bytes('cat-file', '-s', `${rev}:${p}`).toString().trim()); } catch { return null; } };
+  const size = (rev, p) => {                    // a blob's size; a folder now at that path counts as no file
+    try {
+      if (bytes('cat-file', '-t', `${rev}:${p}`).toString().trim() !== 'blob') return null;
+      return Number(bytes('cat-file', '-s', `${rev}:${p}`).toString().trim());
+    } catch { return null; }
+  };
   const hash = (rev, p) => { try { return bytes('rev-parse', `${rev}:${p}`).toString().trim().slice(0, 12); } catch { return null; } };
   const rows = binaries.map(b => {
     const was = b.from ? size(from, b.from) : null, now = b.to ? size(head, b.to) : null;
