@@ -369,8 +369,22 @@ def land_locked(repo, source_rev, files, message, who="code job", expect_head=""
                 if path.exists() or _untracked(repo, f) or _index_blob(repo, f):
                     return False, "not landed: %s exists in %s but not in HEAD (someone else's new file)" % (f, root)
             plan.append((f, src, cur))
+        prewrite = {}
         written = []
         try:
+            for f, src, cur in plan:
+                # the exact bytes before the write (a clean CRLF checkout differs from its LF HEAD blob), read before any
+                # write is recorded, so a failed read can never invent a rollback image (283fc40, 2026-10-11)
+                path = root / f
+                existed = path.exists()
+                before = path.read_bytes() if existed else b""
+                if existed != bool(cur):
+                    raise RuntimeError("%s changed on disk before the land" % f)
+                if existed:
+                    code, seen, _ = _git(repo, "hash-object", "--path=" + f, "--stdin", input_bytes=before)
+                    if code != 0 or seen != cur:
+                        raise RuntimeError("%s changed on disk before the land" % f)
+                prewrite[f] = (existed, before)
             for f, src, cur in plan:
                 path = root / f
                 written.append((f, cur))          # recorded BEFORE the write: any failure below puts it back (R2 N3)
@@ -401,24 +415,20 @@ def land_locked(repo, source_rev, files, message, who="code job", expect_head=""
             # only by compare-and-swap: a save racing the land can neither enter the commit nor be overwritten (R3)
             _commit_blobs(repo, source_rev, plan, message, head)
         except Exception as e:
-            # put every written file back exactly as HEAD had it (each was equal to HEAD before the write) - but only a
-            # file that still holds what THIS land wrote: a concurrent writer's fresh bytes are never overwritten
+            # put every written file back to its exact bytes before the write - but only a file that still holds what THIS
+            # land wrote: a concurrent writer's fresh bytes are never overwritten
             srcs = {f: src for f, src, _ in plan}
             for f, cur in written:
                 try:
                     p = root / f
                     src = srcs.get(f, "")
-                    old = b""
-                    if cur:                           # fetched first: the check and the swap below sit back to back
-                        c, old = _git_bytes(repo, "cat-file", "blob", cur)
-                        if c != 0:
-                            continue
+                    existed, old = prewrite[f]
                     ours = b""
                     if src:
                         c, ours = _git_bytes(repo, "cat-file", "blob", src)
                         if c != 0:
                             continue
-                    if cur:
+                    if existed:
                         tmp = p.with_name(p.name + ".unland-tmp")
                         tmp.write_bytes(old)
                         if (p.exists() and p.read_bytes() == ours) if src else not p.exists():
@@ -430,6 +440,17 @@ def land_locked(repo, source_rev, files, message, who="code job", expect_head=""
                     _git(repo, "reset", "-q", "--", f)                # index entry of THIS path only, back to HEAD
                 except Exception:
                     pass
+            unverified = []                           # say so when a file is not back as it was (283fc40, 2026-10-11)
+            for f, _ in written:
+                try:
+                    existed, before = prewrite[f]
+                    p = root / f
+                    if not ((p.is_file() and p.read_bytes() == before) if existed else not p.exists()):
+                        unverified.append(f)
+                except Exception:
+                    unverified.append(f)
+            if unverified:
+                return False, "not landed: %s (rollback unverified for %s; snapshot %s)" % (e, ", ".join(unverified), snap)
             return False, "not landed: %s (nothing changed; snapshot %s)" % (e, snap)
         # the shared index: these paths now = the new HEAD. A held index.lock (an editor's git status) makes the reset
         # fail, so retry; if it never succeeds, say so - a stale entry would stage a revert of this land (Grok R4 #2)

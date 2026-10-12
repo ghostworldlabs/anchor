@@ -1,0 +1,94 @@
+"""John 2026-10-11 (#7): the small fixes rescued from the shelved WIP 283fc40 (minus its self-update framework), on
+plain git: a failed land puts each file back to its exact bytes (a CRLF checkout stays CRLF), and says so when a file
+could not be put back instead of claiming nothing changed."""
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+import git_safety as gs
+from tests.test_git_safety_2026_10_05 import _job_commit, g, repo  # noqa: F401  (repo is a fixture)
+
+
+def _fail_commit(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("commit failed")
+    monkeypatch.setattr(gs, "_commit_blobs", boom)
+
+
+def test_a_failed_land_puts_a_crlf_checkout_back_byte_for_byte(repo, monkeypatch):
+    g(repo, "config", "core.autocrlf", "true")
+    src = _job_commit(repo, {"a.txt": "two\n"})
+    (repo / "a.txt").write_bytes(b"one\r\n")              # the checkout convention: clean, same content as HEAD
+    _fail_commit(monkeypatch)
+    ok, note = gs.land(repo, src, ["a.txt"], "job")
+    assert not ok and "nothing changed" in note, note
+    assert (repo / "a.txt").read_bytes() == b"one\r\n", "not HEAD's LF blob: the bytes that were there"
+
+
+def test_a_failed_land_that_cannot_put_a_file_back_says_so(repo, monkeypatch):
+    src = _job_commit(repo, {"a.txt": "two\n"})
+    real = gs._git
+
+    def racing(r, *args, **kw):
+        if args[:1] == ("write-tree",) and "anchor-land" in ((kw.get("env") or {}).get("GIT_INDEX_FILE") or ""):
+            (Path(r) / "a.txt").write_bytes(b"his fresh edit\n")
+            raise RuntimeError("boom")
+        return real(r, *args, **kw)
+    monkeypatch.setattr(gs, "_git", racing)
+    ok, note = gs.land(repo, src, ["a.txt"], "job")
+    monkeypatch.setattr(gs, "_git", real)
+    assert not ok and "rollback unverified for a.txt" in note and "nothing changed" not in note, note
+    assert (repo / "a.txt").read_bytes() == b"his fresh edit\n", "his bytes are still left alone"
+
+
+REVIEW_DIFF = (Path(__file__).resolve().parent.parent / "tools" / "review_diff.mjs").as_uri()
+
+
+def _review_input(repo, base, head):
+    script = ("import {reviewDiff} from %s; try { console.log(JSON.stringify({ok: true, diff: reviewDiff(%s, %s, %s)})) }"
+              " catch (e) { console.log(JSON.stringify({ok: false, error: e.message})) }"
+              % tuple(json.dumps(x) for x in (REVIEW_DIFF, str(repo), base, head)))
+    r = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60)
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("content, refused", [
+    (b"text\n", None),
+    (b"\x89PNG\r\n\x1a\n\x00\x00binary", "binary file"),
+    (b"caf\xe9 latin-1\n", "not valid UTF-8"),
+])
+def test_the_reviewer_is_given_exact_text_or_nothing(repo, content, refused):
+    base = g(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "c.dat").write_bytes(content)
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "change")
+    out = _review_input(repo, base, "HEAD")
+    if refused:
+        assert not out["ok"] and refused in out["error"], out
+    else:
+        assert out["ok"] and "+text" in out["diff"], out
+
+
+def test_a_review_that_exits_with_an_error_is_never_a_pass(repo, tmp_path, monkeypatch):
+    from steward_cockpit import code_jobs
+    fake = tmp_path / "half_review.py"
+    fake.write_text("import json, sys\nprint(json.dumps({'ok': True, 'family': 'chatgpt', 'verdict': 'PASS',"
+                    " 'findings': []}))\nsys.exit(3)\n", encoding="utf-8")
+    monkeypatch.setenv("ANCHOR_REVIEW_CMD", json.dumps([__import__("sys").executable, str(fake)]))
+    head = g(repo, "rev-parse", "HEAD").stdout.strip()
+    rec = code_jobs.run_review({"id": "rv1", "brief": "b", "base": head, "authors": ["claude"]}, repo, head)
+    assert rec["ok"] is False and "exit 3" in rec["error"], rec
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="the check script is a .cmd on Windows only")
+def test_the_windows_check_script_has_plain_crlf_line_ends(repo, monkeypatch):
+    from steward_cockpit import code_jobs
+    seen = {}
+
+    def capture(job, tree, argv, **kw):
+        seen["bytes"] = Path(argv[-1]).read_bytes()
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    monkeypatch.setattr(code_jobs, "run_command", capture)
+    ok, _ = code_jobs.run_check({"id": "ck1", "check": "echo one\necho two"}, repo)
+    assert ok and seen["bytes"] == b"@echo off\r\necho one\r\necho two\r\n", seen

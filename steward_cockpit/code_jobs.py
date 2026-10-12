@@ -978,7 +978,7 @@ def run_check(job, tree):
             if os.name == "nt":
                 script = d / ("%s-%s.cmd" % (job["id"], uuid.uuid4().hex[:6]))
                 script.write_text("@echo off\r\n" + check.replace("\r\n", "\n").replace("\n", "\r\n") + "\r\n",
-                                  encoding="utf-8")
+                                  encoding="utf-8", newline="")     # already CRLF: text mode made it CR CR LF
                 argv = ["cmd.exe", "/d", "/c", "call", str(script)]
             else:
                 script = d / ("%s-%s.sh" % (job["id"], uuid.uuid4().hex[:6]))
@@ -1252,6 +1252,9 @@ def run_review(job, tree, head, delta_from=""):
         rec = None
     if not isinstance(rec, dict):
         return {"ok": False, "error": "the review gave no record (exit %s): %s" % (r.returncode, (r.stderr or "")[-300:])}
+    if r.returncode != 0:                     # a record from a review that did not finish is never a pass (283fc40)
+        rec.update(ok=False, error=rec.get("error") or
+                   "the review process did not complete successfully (exit %s)" % r.returncode)
     rec["at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     rec["delta_from"] = delta_from or None
     if not rec.get("ok") and rec.get("family") and _LIMIT_WORDS.search(str(rec.get("error") or "")):

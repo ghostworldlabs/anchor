@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { reviewDiff } from './review_diff.mjs';
 
 const MAX_DIFF = 400_000;
 const FAMILIES = ['claude', 'chatgpt', 'grok', 'gemini'];
@@ -78,7 +79,7 @@ async function main() {
 
   const treeHash = git(repo, 'rev-parse', head + '^{tree}');
   const from = arg('delta-from') || base;
-  const diff = git(repo, 'diff', '--no-color', '--find-renames', from, head);
+  const diff = reviewDiff(repo, from, head);
   if (!diff.trim()) throw new Error('the candidate has no change to review');
   if (diff.length > MAX_DIFF) throw new Error(`the diff is ${diff.length} characters - too large for one review; split the job`);
   // fcj review r5: the brief is read WHOLE or the review refuses - never sliced (a cut brief could drop a requirement)

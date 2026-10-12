@@ -430,11 +430,12 @@ def _blob(root, rev, path):
     return out if code == 0 else ""
 
 
-def _on_disk(root, path):
-    """The blob id the file on disk would have (git's own filters), "" when absent."""
+def _on_disk(root, path, *, raw=False):
+    """The blob id the file on disk would have (git's own filters, or its literal bytes when ``raw``), "" when absent."""
     if not (Path(root) / path).is_file():
         return ""
-    code, out, _ = _git(root, "--literal-pathspecs", "hash-object", "--path=" + path, "--", path, timeout=60)
+    options = ("--no-filters",) if raw else ("--path=" + path,)
+    code, out, _ = _git(root, "--literal-pathspecs", "hash-object", *options, "--", path, timeout=60)
     return out if code == 0 else "?"
 
 
@@ -446,10 +447,16 @@ def _restore(root, head, want, incoming, before):
     paths only, by literal path. Returns what could not be verified ([] = restored and verified)."""
     unverified, restored = [], []
     for path in incoming:
+        if _collides([path], before):
+            # a byte match never makes a pre-existing local change ours: activation refuses this overlap, and the
+            # rollback keeps that rule even after an interrupted refusal (283fc40, 2026-10-11)
+            unverified.append(path + " (pre-existing local change - kept as it is)")
+            continue
         old, new, now = _blob(root, head, path), _blob(root, want, path), _on_disk(root, path)
         if now == old:
             continue
-        if now == new:
+        # a candidate can hold literal CRLF bytes: only its exact bytes count as ours, never a new normalized edit
+        if now == new or (new and _on_disk(root, path, raw=True) == new):
             if old:
                 code, _, _ = _git(root, "--literal-pathspecs", "checkout", head, "--", path, timeout=120)
                 if code != 0:
