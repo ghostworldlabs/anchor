@@ -102,6 +102,18 @@ def test_a_binary_file_replaced_by_a_folder_of_text_is_refused_not_hidden(repo):
     assert not out["ok"] and "share a path" in out["error"], out
 
 
+def test_a_text_file_moved_under_a_deleted_binary_is_refused_not_hidden(repo):
+    (repo / "foo").write_bytes(b"\x00\x01binary")
+    (repo / "bar.py").write_text("".join("line %d\n" % i for i in range(40)), encoding="utf-8")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "binary foo, text bar")
+    base = g(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "foo").unlink(); (repo / "foo").mkdir()
+    (repo / "bar.py").rename(repo / "foo" / "main.py")
+    g(repo, "add", "-A"); g(repo, "commit", "-qm", "move bar under foo")
+    out = _review_input(repo, base, "HEAD")
+    assert not out["ok"] and "share a path" in out["error"], out
+
+
 def test_a_review_that_exits_with_an_error_is_never_a_pass(repo, tmp_path, monkeypatch):
     from steward_cockpit import code_jobs
     fake = tmp_path / "half_review.py"

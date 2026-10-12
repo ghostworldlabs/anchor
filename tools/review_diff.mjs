@@ -16,7 +16,8 @@ export function reviewDiff(repo, from, head) {
   // an excluded path also excludes what lies under it (a binary file "foo" replaced by a folder "foo/"): the text
   // rows left must be exactly the text rows of the whole change, or a text change would vanish unreviewed
   const kept = numstatRows(bytes('diff', '--numstat', '-z', ...plain, ...only).toString('utf8'));
-  if (kept.some(r => r.binary) || kept.length !== all.length - binaries.length) {
+  const pairs = rows => rows.map(r => JSON.stringify([r.from, r.to])).sort().join('\n');
+  if (kept.some(r => r.binary) || pairs(kept) !== pairs(all.filter(r => !r.binary))) {
     throw new Error('a binary file and a text file share a path in this change - the reviewer could not be shown it exactly');
   }
   const raw = bytes('diff', '--no-color', ...plain, ...only);
