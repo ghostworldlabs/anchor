@@ -349,6 +349,61 @@ def list_records() -> list:
     return out
 
 
+# John 2026-10-11 (#5 speed): a boot read every record (20k+ files, cold from disk: 90-130 s before Anchor
+# answered). A record a boot must look at was written since the last boot looked, or was left running by it;
+# the rest were settled by an earlier boot. The mark says when the last look began and what it left running.
+BOOT_MARK = "boot-look.mark"
+_BOOT_MARK_SLACK_S = 300.0
+
+
+def _boot_records() -> list:
+    """The records a boot must look at: written since the last boot's look, plus those it left running.
+
+    No mark (first boot, or an unreadable mark): every record, as before.
+    """
+    d = jobs_dir()
+    try:
+        mark = json.loads((d / BOOT_MARK).read_text(encoding="utf-8"))
+        since = float(mark["since"]) - _BOOT_MARK_SLACK_S
+        carried = {str(j) for j in mark.get("running") or []}
+    except (OSError, ValueError, KeyError, TypeError):
+        return list_records()
+    out = []
+    try:
+        entries = sorted(os.scandir(d), key=lambda e: e.name)
+    except OSError:
+        return []
+    for e in entries:
+        name = e.name
+        if not name.endswith(".json") or name.endswith((".gate.json", ".cursor.json")):
+            continue
+        try:
+            if e.stat().st_mtime < since and name[:-5] not in carried:
+                continue
+            out.append(json.loads(Path(e.path).read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return out
+
+
+def _mark_boot_look(since: float, running: list) -> None:
+    """Record when this boot's look began and the jobs it left running (best-effort)."""
+    try:
+        _ensure_jobs_dir()
+        p = jobs_dir() / BOOT_MARK
+        tmp = p.with_name(BOOT_MARK + ".tmp")
+        tmp.write_text(json.dumps({"since": since, "running": [r.get("job_id") for r in running
+                                                                if r.get("job_id")]}), encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
+def boot_running_records() -> list:
+    """The records still marked running, read the cheap way a boot reads (for the supervisor's rebuild)."""
+    return [r for r in _boot_records() if r.get("status") == STATUS_RUNNING]
+
+
 def _update_record(job_id: str, **fields) -> dict:
     """Read-modify-write a record under the lock. Returns the new record."""
     with _paths.WRITE_LOCK:
@@ -3072,9 +3127,14 @@ def reconcile_on_startup(*, defer_handoffs=False) -> list:
     resume). Returns the list of reconciled job_ids — callers may relaunch
     selectively via :func:`relaunch`; there is deliberately NO auto-relaunch (a
     restart storm must not launch N stale jobs unattended).
+
+    At boot (``defer_handoffs``) only the records written since the last boot's
+    look, or left running by it, are read (``_boot_records``).
     """
     changed = []
-    for rec in list_records():
+    look_at = time.time()
+    records = _boot_records() if defer_handoffs else list_records()
+    for rec in records:
         # Field presence marks this protocol's jobs, even when capture failed.
         # Historical jobs must not become new outputs on restart.
         attempted = "refinement_context" in rec or "refinement_handoff" in rec
@@ -3103,6 +3163,8 @@ def reconcile_on_startup(*, defer_handoffs=False) -> list:
             if attempted and not defer_handoffs:
                 _record_terminal_handoff(terminal)
             changed.append(jid)
+    _mark_boot_look(look_at, [r for r in records
+                              if r.get("status") == STATUS_RUNNING and r.get("job_id") not in changed])
     # Disk hygiene (2026-07 review): reap the durable .log files of long-terminal
     # jobs. The small JSON records are KEPT forever (effort rollups/report views
     # reference them per job_id); only the bulky logs age out. Best-effort.
@@ -3194,8 +3256,15 @@ def gc_old_job_logs(retention_days=None) -> int:
         return 0
     cutoff = time.time() - retention_days * 86400.0
     reaped = 0
-    for rec in list_records():
-        if rec.get("status") == STATUS_RUNNING:
+    # A log is written until its job finishes, so only a log last written before the cutoff can belong to a job
+    # that finished before it: open just those records, not every record (2026-10-11 speed).
+    try:
+        old_logs = [e.name[:-4] for e in os.scandir(jobs_dir())
+                    if e.name.endswith(".log") and e.stat().st_mtime <= cutoff]
+    except OSError:
+        return 0
+    for rec in (load_record(jid) for jid in old_logs):
+        if not isinstance(rec, dict) or rec.get("status") == STATUS_RUNNING:
             continue
         fin = rec.get("finished_at") or rec.get("started_at") or 0
         try:
