@@ -6,6 +6,7 @@ John 2026-10-12: agents spent 16-19 minutes writing a PDF renderer for every pla
 renderer: Anchor's own Markdown page (report_viewer, math included), printed by the Edge already on this machine.
 Prints the written path(s); exit 1 with the reason when it could not."""
 import argparse
+import re
 import os
 import shutil
 import subprocess
@@ -30,6 +31,9 @@ def page(md_path, for_print):
     text = md_path.read_text(encoding="utf-8", errors="replace")
     title = next((ln.lstrip("# ").strip() for ln in text.splitlines() if ln.startswith("#")), md_path.stem)
     html = report_viewer.reader_html(text, title=title, katex_url_prefix=report_viewer.VENDOR_KATEX_DIR.as_uri())
+    # review r7: the reader renders ![alt](src) as "!" + a link; a reading copy shows the figure itself
+    html = re.sub(r'!<a href="([^"]+)" rel="noopener noreferrer">([^<]*)</a>',
+                  r'<img src="\1" alt="\2" style="max-width:100%">', html)
     if not for_print:
         return html
     # review r4: the print page is a temp file - its relative links resolve against the document's own folder

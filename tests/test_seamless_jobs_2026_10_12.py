@@ -127,6 +127,15 @@ def test_the_reading_copy_tool_makes_a_pdf_and_html_in_seconds(tmp_path):
     assert "Build the history command." in (tmp_path / "plan.html").read_text(encoding="utf-8")
 
 
+def test_a_reading_copy_shows_figures_not_links(tmp_path):
+    md = tmp_path / "doc.md"
+    md.write_text("# Doc\n\n![The chart](figs/chart.png)\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "reading_copy.py"), str(md), "--no-pdf", "--html"],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert '<img src="figs/chart.png" alt="The chart"' in (tmp_path / "doc.html").read_text(encoding="utf-8")
+
+
 def test_a_declared_reading_copy_the_coder_left_is_made_by_the_job(tmp_path):
     (tmp_path / "d").mkdir()
     (tmp_path / "d" / "spine.md").write_text("# Spine\n\nOne.\n", encoding="utf-8")
