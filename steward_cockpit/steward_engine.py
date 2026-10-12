@@ -2909,29 +2909,26 @@ class Engine:
         return "%s is on: %s%s. %s" % (self.steward or "The steward", self._turn_activity(), since, nxt)
 
     def _bg_wait_over(self, stamp, text):
-        """A code job's coder left a background command running past the limit (a server, a hung tool): the job
-        finishes with what it has, and says why - it never waits forever."""
+        """A code job's coder left a background command running past the limit: the job SAYS so on its record (the
+        steward and the job's status show it; Stop ends it) and keeps waiting - a long skill is never cut off, and a
+        hung command is never silent (review r6: no evidence tells a slow skill from a hang, so nothing is killed)."""
         with self._lock:
             if (self.on_turn_done is None or self.busy or getattr(self, "_bg_wait_stamp", None) != stamp
                     or not getattr(self, "_bg_tasks", None)):
                 return
             n = len(self._bg_tasks)
-            if _recently_changed(self.dir, _bg_wait_limit() / 3):
-                # review r5: still advancing (files in its worktree keep changing) - wait another stretch, never kill
-                timer = threading.Timer(_bg_wait_limit(), self._bg_wait_over, args=(stamp, text))
-                timer.daemon = True
-                timer.start()
-                return
-            proc, self.proc = self.proc, None          # review r2: its commands end with it - none writes on after
-            self._bg_tasks = []
-            if proc is not None:
-                self._kill_tree(proc)
-                try:
-                    proc.wait(timeout=10)
-                except Exception:
-                    pass
-            self._fire_turn_done({"text": text, "error": "the coder left %d background command(s) running for %d "
-                                  "minutes; they were ended and the job finished" % (n, _bg_wait_limit() // 60)})
+            mins = int((time.time() - stamp) // 60)
+            job = self.code_job or {}
+            try:
+                from steward_cockpit import code_jobs as _cjw
+                _cjw._note_stuck(job.get("cdir"), job.get("id"), "waiting %d min for %d background command(s) the "
+                                 "coder left running; Stop ends them and keeps the work" % (mins, n))
+            except Exception:
+                pass
+            self._emit({"t": "sys", "text": "still waiting for %d background command(s) after %d min" % (n, mins)})
+            timer = threading.Timer(_bg_wait_limit(), self._bg_wait_over, args=(stamp, text))
+            timer.daemon = True
+            timer.start()
 
     def _turn_identity(self):
         return getattr(self, "_turn_began", None) or getattr(self, "turn_started", 0)
@@ -4499,25 +4496,8 @@ def _receipt_lock(cdir):
         return _RECEIPT_LOCKS.setdefault(key, threading.Lock())
 
 
-def _recently_changed(root, seconds):
-    """True when a file under ``root`` (outside .git) changed within the last ``seconds`` - a job still advancing."""
-    cutoff = time.time() - seconds
-    try:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d != ".git"]
-            for name in filenames:
-                try:
-                    if os.path.getmtime(os.path.join(dirpath, name)) >= cutoff:
-                        return True
-                except OSError:
-                    continue
-    except OSError:
-        pass
-    return False
-
-
 def _bg_wait_limit():
-    """Seconds a code job waits for background commands its coder left running (default 45 min: longer than a skill)."""
+    """Seconds between notices that a code job still waits for background commands its coder left running."""
     try:
         return max(60, int(os.environ.get("ANCHOR_CODE_JOB_BG_WAIT_S", "2700")))
     except ValueError:

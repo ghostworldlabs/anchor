@@ -49,32 +49,22 @@ def test_a_turn_that_ends_with_a_background_command_running_does_not_finish_the_
     assert len(done) == 1 and "FINISHED" in done[0]["text"], done
 
 
-def test_a_background_command_that_never_ends_does_not_hold_the_job_forever(coder, monkeypatch):
+def test_a_long_background_command_is_never_killed_and_never_silent(coder, monkeypatch):
+    """Review r6: nothing tells a slow skill from a hang, so the job keeps waiting - and says so on its record, where
+    the steward and the job status show it and Stop ends it."""
     from steward_cockpit import steward_engine as se
+    from steward_cockpit import code_jobs as cj
     eng, done = coder
+    notes = []
     monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.2)
-    monkeypatch.setattr(se, "_recently_changed", lambda root, s: False)    # nothing advancing
-    eng._handle({"type": "system", "subtype": "background_tasks_changed",
-                 "tasks": [{"task_id": "srv", "task_type": "local_bash"}]}, eng.proc)
-    eng.turn_text = "Started the dev server."
-    eng._handle(_result("Started the dev server."), eng.proc)
-    assert done == []
-    import time
-    time.sleep(0.6)
-    assert len(done) == 1 and "background command(s) running" in done[0]["error"], done
-
-
-def test_a_background_command_still_advancing_is_waited_for_not_killed(coder, monkeypatch):
-    from steward_cockpit import steward_engine as se
-    eng, done = coder
-    monkeypatch.setattr(se, "_bg_wait_limit", lambda: 0.2)
-    monkeypatch.setattr(se, "_recently_changed", lambda root, s: True)     # its files keep changing
+    monkeypatch.setattr(cj, "_note_stuck", lambda cdir, jid, why: notes.append(why))
     eng._handle({"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "long"}]}, eng.proc)
     eng.turn_text = "STARTED"
     eng._handle(_result("STARTED"), eng.proc)
     import time
     time.sleep(0.7)
-    assert done == [] and eng.proc is not None, "a command still making progress is never cut off"
+    assert done == [] and eng.proc is not None, "never cut off"
+    assert notes and "background command(s) the coder left running; Stop ends them" in notes[0], notes
 
 
 def test_a_copy_made_before_the_check_is_remade_when_the_check_rewrites_its_markdown(tmp_path):
