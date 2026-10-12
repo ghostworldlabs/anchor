@@ -6,6 +6,8 @@ John 2026-10-12: agents spent 16-19 minutes writing a PDF renderer for every pla
 renderer: Anchor's own Markdown page (report_viewer, math included), printed by the Edge already on this machine.
 Prints the written path(s); exit 1 with the reason when it could not."""
 import argparse
+import base64
+import mimetypes
 import re
 import os
 import shutil
@@ -35,7 +37,22 @@ def page(md_path, for_print):
     html = re.sub(r'!<a href="([^"]+)" rel="noopener noreferrer">([^<]*)</a>',
                   r'<img src="\1" alt="\2" style="max-width:100%">', html)
     if not for_print:
-        return html
+        # review r8: Anchor opens the HTML copy through a file route, where a relative figure path breaks - local
+        # figures from the document's own folder ride inside the copy
+        folder = md_path.resolve().parent
+
+        def embed(m):
+            src = m.group(1)
+            try:
+                f = (folder / src).resolve()
+                f.relative_to(folder)
+                kind = mimetypes.guess_type(f.name)[0] or ""
+                if kind.startswith("image/") and f.is_file() and f.stat().st_size <= 8 * 1024 * 1024:
+                    return '<img src="data:%s;base64,%s"' % (kind, base64.b64encode(f.read_bytes()).decode("ascii"))
+            except (OSError, ValueError):
+                pass
+            return m.group(0)
+        return re.sub(r'<img src="([^":]+)"', embed, html)
     # review r4: the print page is a temp file - its relative links resolve against the document's own folder
     base = '<base href="%s/">\n' % md_path.resolve().parent.as_uri()
     return html.replace("<head>\n", "<head>\n" + base, 1).replace("</head>", PRINT_CSS, 1)
