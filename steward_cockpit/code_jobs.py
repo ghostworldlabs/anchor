@@ -1870,6 +1870,9 @@ def _finish(cdir, job_id, job, result):
             elif missing:
                 note = "not landed: declared reading outputs missing or unsafe (%s); finish packaging in the kept worktree %s" % (
                     ", ".join(missing), wt)
+            elif stale_owned(job, wt, made_copies, files):    # five r13: a copy that could not be remade never lands
+                note = ("not landed: %s could not be made again from its changed inputs (is it open elsewhere?); the "
+                        "work is kept at %s" % (", ".join(stale_owned(job, wt, made_copies, files)), wt))
             elif stale_worker:
                 note = ("not landed: the check changed what %s is made from, so that copy may be out of date; remake it "
                         "from the current Markdown; the work is kept at %s" % (", ".join(stale_worker), wt))
@@ -2594,6 +2597,13 @@ def _make_reading_copies(job, tree, refresh=None):
         except Exception:
             continue
     return made
+
+
+def stale_owned(job, wt, ours, files):
+    """Anchor's own landing copies whose inputs no longer match the fingerprint of their last render."""
+    prints = job.get("copy_prints") or {}
+    return [n for n in ours if n in set(files) and n in prints
+            and inputs_print(wt, str(Path(n).with_suffix(".md")).replace(chr(92), "/")) != prints[n]]
 
 
 def worker_copy_prints(job, wt, ours):

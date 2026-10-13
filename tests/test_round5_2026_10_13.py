@@ -718,3 +718,26 @@ def test_an_inherited_copy_remade_after_its_check_redrew_the_figure_lands(projec
     done = await_job(root / "A", out["job"])
     assert done["landed"], done["land_note"]
     assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p>redrawn</p>" + chr(10)
+
+
+def test_a_copy_anchor_could_not_remake_never_lands(project, monkeypatch):
+    root, workers, factory = project
+    real_run = subprocess.run
+    def render(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        Path(args[args.index("--html") + 1]).write_text("<p>first</p>" + chr(10), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", render)
+    real_unlink = Path.unlink
+    def locked(self, *a, **kw):
+        if self.name == "report.html":
+            raise PermissionError("open in another program")
+        return real_unlink(self, *a, **kw)
+    monkeypatch.setattr(Path, "unlink", locked)
+    redraw = [sys.executable, "-c", "import pathlib; pathlib.Path('B/report.md').write_text('# changed by the check')"]
+    out = cj.start(root / "A", root / "B", "write B/report.md", redraw, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    workers[0].produce({"B/report.md": "# R" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert not done["landed"] and "B/report.html could not be made again" in done["land_note"]
