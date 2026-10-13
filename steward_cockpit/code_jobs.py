@@ -832,6 +832,13 @@ def _redo_refusal(jobs, escalates):
     twin = next((j for j, r in jobs.items() if r.get("escalates") == escalates), None)
     if twin:
         return "%s is already redone by %s; inspect that job" % (escalates, twin)
+    try:                                              # five r11 #2: the same confirmed-exit test a re-filing uses
+        from steward_cockpit import code_job_handoff as handoff
+        state = handoff.observe(orig)["state"]
+    except Exception:
+        state = "unknown"
+    if state not in (("completed", "dead") if orig.get("status") == "stopped" else ("completed",)):
+        return "%s's worker is not confirmed ended (%s); inspect it first" % (escalates, state)
     return None
 
 
@@ -1814,9 +1821,11 @@ def _finish(cdir, job_id, job, result):
             note = "not landed: nothing the coder wrote changed; the worktree is kept at %s" % wt
         else:
             phase(job, "checking")
+            before = worker_copy_prints(job, wt, made_copies)
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
                 _make_reading_copies(job, wt, made_copies)        # review r4: the check may be what wrote the Markdown
+            stale_worker = stale_worker_copies(job, wt, before)
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
                   anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}))
             after = changed_paths(wt, candidate_base(job))
@@ -1861,6 +1870,9 @@ def _finish(cdir, job_id, job, result):
             elif missing:
                 note = "not landed: declared reading outputs missing or unsafe (%s); finish packaging in the kept worktree %s" % (
                     ", ".join(missing), wt)
+            elif stale_worker:
+                note = ("not landed: the check changed what %s is made from, so that copy may be out of date; remake it "
+                        "from the current Markdown; the work is kept at %s" % (", ".join(stale_worker), wt))
             elif late:
                 fields["unexpected"] = sorted(set(fields["unexpected"]) | set(late))
                 note = ("not landed: the check or the coder left changes outside the coder's own files (%s); everything "
@@ -2218,12 +2230,17 @@ def land(job, files):
             saved = False  # the terminal write still carries this exact pair; never run an unrecorded check
         if not saved:
             return False, "not landed: the integrated recovery snapshot could not be saved; work is kept at " + wt, fields
+        before = worker_copy_prints(job, wt, job.get("anchor_copies") or [])
         ok, out = run_check(job, wt)
         fields["integration_check_ok"] = ok is True        # final review 10-10: the stage line reads the final gate
         if ok is not True:                                 # a missing check is a failure too (W1a)
             return False, "not landed: the check did not pass after bringing in newer changes; the work is kept at %s" % wt, fields
         # five r10: the check just run may have redrawn a figure Anchor's copies are made from - those copies are made
         # again from the final bytes and committed, so the delta review below sees exactly what lands
+        stale_worker = stale_worker_copies(job, wt, before)
+        if stale_worker:                                   # five r11 #1: never overwritten, never delivered stale
+            return False, ("not landed: the check after integration changed what %s is made from, so that copy may be "
+                           "out of date; the work is kept at %s" % (", ".join(stale_worker), wt)), fields
         redrawn, why = _refresh_owned_copies(job, wt, files)
         if why:
             return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
@@ -2577,6 +2594,25 @@ def _make_reading_copies(job, tree, refresh=None):
         except Exception:
             continue
     return made
+
+
+def worker_copy_prints(job, wt, ours):
+    """Fingerprints of the inputs of every declared reading copy the WORKER made (not Anchor), taken before a check -
+    so a check that changes what such a copy is made from is caught (five r11 #1). Never raises."""
+    out = {}
+    for name in job.get("outputs") or []:
+        try:
+            if Path(name).suffix.lower() in (".pdf", ".html", ".htm") and name not in set(ours) \
+                    and _output_path(wt, name).is_file():
+                out[name] = inputs_print(wt, str(Path(name).with_suffix(".md")).replace(chr(92), "/"))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def stale_worker_copies(job, wt, before):
+    return [n for n, p in (before or {}).items()
+            if inputs_print(wt, str(Path(n).with_suffix(".md")).replace(chr(92), "/")) != p]
 
 
 def _refresh_owned_copies(job, wt, files):

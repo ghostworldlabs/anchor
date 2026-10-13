@@ -669,3 +669,28 @@ def test_a_figure_redrawn_by_the_integration_check_refreshes_anchors_copy_before
     assert done["landed"], done["land_note"]
     html = (root / "B" / "report.html").read_text(encoding="utf-8")
     assert html.startswith("<p>drawn at ") and html != "<p>drawn at 2</p>" + chr(10)   # not the first check's figure
+
+
+def test_a_check_that_redraws_the_figure_of_the_workers_own_copy_keeps_the_work(project):
+    root, workers, factory = project
+    (root / ".gitignore").write_text("*.png" + chr(10), encoding="utf-8")
+    git(root, "add", ".gitignore")
+    git(root, "commit", "-qm", "ignore figures")
+    draw = [sys.executable, "-c", "import pathlib; pathlib.Path('B/fig.png').write_text('redrawn')"]
+    out = cj.start(root / "A", root / "B", "write B/report.md and its copy", draw, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    workers[0].produce({"B/report.md": "# R ![f](fig.png)" + chr(10), "B/fig.png": "drawn by the worker",
+                        "B/report.html": "<p>the worker's copy</p>" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert not done["landed"] and "the check changed what B/report.html is made from" in done["land_note"]
+
+
+def test_a_redo_waits_until_the_original_worker_is_confirmed_ended(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    small = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, size="small")
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    await_job(root / "A", small["job"])
+    monkeypatch.setattr(ch, "observe", lambda job: {"state": "unknown"})
+    out = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, escalates=small["job"])
+    assert not out["ok"] and "not confirmed ended (unknown)" in out["error"]
