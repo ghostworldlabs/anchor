@@ -190,14 +190,18 @@ def test_an_inherited_copy_is_remade_when_a_figure_beside_its_markdown_changed(p
     (wt / "B" / "fig.png").write_bytes(b"new figure")
     assert cj.inherited_stale(*args)
     (wt / "B" / "fig.png").write_bytes(b"old figure")
-    (wt / "B" / "fig2.png").write_bytes(b"a new figure")
-    assert cj.inherited_stale(*args)
+    (wt / "B" / "fig2.png").write_bytes(b"a figure the document does not use")
+    assert not cj.inherited_stale(*args)                                  # five r3 #3: only the images it names
+    (wt / "assets").mkdir()
+    (wt / "assets" / "chart.png").write_bytes(b"chart")
+    (wt / "B" / "report.md").write_text("# Same" + chr(10) + "![f](fig.png)" + chr(10), encoding="utf-8")
+    assert cj.copy_inputs(wt, "B/report.md") == ["B/report.md", "B/fig.png"]
 
 
 def test_a_copy_anchor_made_is_made_again_when_the_check_redraws_a_figure(tmp_path):
     md = tmp_path / "doc" / "report.md"
     md.parent.mkdir()
-    md.write_text("# R" + chr(10), encoding="utf-8")
+    md.write_text("# R" + chr(10) + "![f](img/fig.png)" + chr(10), encoding="utf-8")
     pdf = tmp_path / "doc" / "report.pdf"
     pdf.write_bytes(b"%PDF made")
     fig = tmp_path / "doc" / "img" / "fig.png"
@@ -207,9 +211,13 @@ def test_a_copy_anchor_made_is_made_again_when_the_check_redraws_a_figure(tmp_pa
     os.utime(md, (100, 100))
     os.utime(fig, (100, 100))
     os.utime(pdf, (200, 200))
-    assert cj._newest_input(md, pdf) == 100
+    assert cj._newest_input(md, pdf, tmp_path) == 100
     os.utime(fig, (300, 300))                                             # the check redrew the figure
-    assert cj._newest_input(md, pdf) == 300 > pdf.stat().st_mtime
+    assert cj._newest_input(md, pdf, tmp_path) == 300 > pdf.stat().st_mtime
+    other = tmp_path / "doc" / "unrelated.png"
+    other.write_bytes(b"x")
+    os.utime(other, (900, 900))                                           # a file the document does not use
+    assert cj._newest_input(md, pdf, tmp_path) == 300
 
 
 def test_two_racing_redos_of_one_small_job_start_only_one(project, tmp_path, monkeypatch):
@@ -437,7 +445,82 @@ def test_a_reading_copy_is_made_again_when_integration_brings_a_newer_figure(pro
     (root / "B" / "fig.png").write_bytes(b"new figure")               # newer work lands while the job runs
     git(root, "add", "B/fig.png")
     git(root, "commit", "-qm", "newer figure")
-    workers[0].produce({"B/report.md": "# Report" + chr(10)})
+    workers[0].produce({"B/report.md": "# Report ![f](fig.png)" + chr(10)})
     done = await_job(root / "A", out["job"])
     assert done["landed"], done["land_note"]
-    assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p># Report | new figure</p>" + chr(10)
+    assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p># Report ![f](fig.png) | new figure</p>" + chr(10)
+    assert done["anchor_copies"] == ["B/report.html"]
+
+
+def _figure_project(root):
+    (root / "B" / "fig.png").write_bytes(b"old figure")
+    git(root, "add", "B/fig.png")
+    git(root, "commit", "-qm", "figure")
+
+
+def _newer_figure(root):
+    (root / "B" / "fig.png").write_bytes(b"new figure")
+    git(root, "add", "B/fig.png")
+    git(root, "commit", "-qm", "newer figure")
+
+
+def test_integration_never_overwrites_the_workers_own_copy_and_keeps_the_work(project):
+    root, workers, factory = project
+    _figure_project(root)
+    out = cj.start(root / "A", root / "B", "write B/report.md and B/report.html", PASS, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    _newer_figure(root)
+    workers[0].produce({"B/report.md": "# R ![f](fig.png)" + chr(10), "B/report.html": "<p>the worker's own</p>" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert not done["landed"] and "may be out of date" in done["land_note"] and "B/fig.png" in done["land_note"]
+    assert not (root / "B" / "report.html").exists()
+
+
+def test_a_remade_copy_identical_to_the_old_one_does_not_block_landing(project, monkeypatch):
+    root, workers, factory = project
+    _figure_project(root)
+    real_run = subprocess.run
+    def same_render(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        Path(args[args.index("--html") + 1]).write_text("<p>same</p>" + chr(10), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", same_render)
+    out = cj.start(root / "A", root / "B", "write B/report.md", PASS, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    _newer_figure(root)
+    workers[0].produce({"B/report.md": "# R ![f](fig.png)" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert done["landed"], done["land_note"]
+
+
+def test_a_small_job_being_redone_is_not_refiled(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    small = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, size="small")
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    await_job(root / "A", small["job"])
+    redo = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, escalates=small["job"])
+    assert redo["ok"]
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    out = ch.recover(root / "A", small["job"], check=PASS)
+    assert not out["ok"] and "being redone at standard by %s" % redo["job"] in out["error"]
+
+
+def test_a_miss_at_the_integration_gates_counts_against_the_small_tier():
+    small = {"tier": "small: sonnet high", "id": "j"}
+    assert cj.small_missed(small, {"integration_check_ok": False}, "", "x")
+    assert cj.small_missed(small, {"delta_review": {"ok": True, "verdict": "FAIL"}}, "", "x")
+    assert not cj.small_missed(small, {"delta_review": {"ok": False, "error": "seat"}}, "", "x")
+
+
+def test_the_result_the_steward_reads_names_the_tier_and_the_served_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    job = {"id": "j", "status": "done", "repo": "C:/r", "land_note": "not landed", "size": "small",
+           "tier": "standard (small unavailable: no small tier for gemini)", "model_served": "gemini-x"}
+    monkeypatch.setattr(cj, "stage_line", lambda j: "made")
+    said = []
+    monkeypatch.setattr(ch, "save_result", lambda cdir, j, text: said.append(text) or None)
+    cj._materialize_report(tmp_path, job)
+    text = said[0]
+    assert "Tier: standard (small unavailable: no small tier for gemini); model served gemini-x." in text

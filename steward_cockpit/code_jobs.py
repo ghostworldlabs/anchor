@@ -1867,6 +1867,7 @@ def _finish(cdir, job_id, job, result):
                 note = ("not landed: %s changed during the job outside the landing (%s) - something wrote into it "
                         "directly; check those files; the work is kept at %s" % (job["repo"], ", ".join(served[:8]), wt))
             else:
+                job["anchor_copies"] = fields["anchor_copies"] = list(made_copies)    # five r3 #1: ours to remake
                 commit_err = _commit_manifest(wt, job, files)
                 if commit_err:
                     note, status, error = "not landed: %s; the worktree is kept at %s" % (commit_err, wt), "failed", commit_err
@@ -1923,7 +1924,9 @@ def small_missed(job, fields, err, note):
     if not str(job.get("tier") or "").startswith("small") or fields.get("landed") or job.get("status") == "stopped":
         return False
     rec = fields.get("review") or {}
-    return bool(fields.get("check_ok") is False
+    delta = fields.get("delta_review") or {}
+    return bool(fields.get("check_ok") is False or fields.get("integration_check_ok") is False
+                or (isinstance(delta, dict) and delta.get("ok") and delta.get("verdict") not in (None, "PASS"))
                 or (err and not _LIMIT_WORDS.search(err))
                 or (isinstance(rec, dict) and rec.get("ok") and rec.get("verdict") not in (None, "PASS"))
                 or note == "nothing changed" or note.startswith("not landed: nothing the coder wrote"))
@@ -2455,6 +2458,10 @@ def _materialize_report(cdir, job):
     if job.get("check"):
         lines.append("Check: %s." % handoff.check_state(job).replace("_", " ") + ((" Output tail: " + job.get("check_output", "")[-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
+    if job.get("size") == "small" or job.get("escalates"):
+        lines.append("Tier: %s%s%s." % (job.get("tier") or "standard",
+                                         ("; model served " + job["model_served"]) if job.get("model_served") else "",
+                                         ("; redo of small job " + job["escalates"]) if job.get("escalates") else ""))
     if job.get("speed"):
         lines.append("Time: " + job["speed"] + " (a worker that wrote helper scripts by hand is a Foundry tool candidate)")
     lines.append("Stage: " + stage_line(job) + " (say the job's state in these words)")
@@ -2526,7 +2533,7 @@ def _make_reading_copies(job, tree, refresh=None):
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
             if (refresh and name in refresh and target.is_file() and not target.is_symlink() and source.is_file()
-                    and _newest_input(source, target) > target.stat().st_mtime):
+                    and _newest_input(source, target, tree) > target.stat().st_mtime):
                 target.unlink()                          # ours, and stale: made again below
                 refresh.remove(name)
             if inherited_stale(job, tree, name, target, source):
@@ -2554,16 +2561,20 @@ def _remake_after_integration(job, wt, cand, merged, files):
     reading copy this job delivers, so the copy is made again from the integrated inputs and committed; the check and
     the delta review that follow see it. Returns (paths remade, why not) - a copy that cannot be remade keeps the work."""
     remade = []
+    ours = set(job.get("anchor_copies") or [])
     for name in job.get("outputs") or []:
         if Path(name).suffix.lower() not in (".pdf", ".html", ".htm") or name not in set(files):
             continue
         md = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
-        folder = str(Path(md).parent).replace(chr(92), "/")
-        code, out, _ = _git(wt, "diff", "--name-only", cand, merged, "--", "." if folder in ("", ".") else folder)
+        inputs = copy_inputs(wt, md)
+        code, out, _ = _git(wt, "diff", "--name-only", cand, merged, "--", *inputs)
         if code != 0:
-            return [], "the integrated changes to %s could not be read" % folder
-        if not ({ln.strip() for ln in out.splitlines() if ln.strip()} - {name}):
+            return [], "the integrated changes to %s could not be read" % md
+        if not out.strip():
             continue
+        if name not in ours:                          # five r3 #1: the worker's own copy is never overwritten
+            return [], ("newer work changed %s after the worker made %s, so that copy may be out of date; remake it "
+                        "from the current Markdown" % (", ".join(out.split()[:3]), name))
         try:
             target = _output_path(wt, name)
             if not target.with_suffix(".md").is_file():
@@ -2576,6 +2587,8 @@ def _remake_after_integration(job, wt, cand, merged, files):
         remade.append(name)
     if remade:
         code, _, err = _git(wt, "add", "-f", "--", *remade)
+        if code == 0 and _git(wt, "diff", "--cached", "--quiet")[0] == 0:
+            return [], None                           # five r3 #2: made again, byte for byte the same - nothing to commit
         if code == 0:
             code, _, err = _git(wt, "commit", "-q", "-m", "Reading copies made again after integration: " + ", ".join(remade))
         if code != 0:
@@ -2583,18 +2596,18 @@ def _remake_after_integration(job, wt, cand, merged, files):
     return remade, None
 
 
-def _newest_input(source, target, cap=500):
-    """The newest change among a reading copy's inputs: its Markdown and the files in the Markdown's folder (the
-    renderer reads local figures) - so a check that redraws a figure after the first render gets a fresh copy
-    (five r1 #1). The copy itself is left out; at most ``cap`` files are looked at."""
+def _newest_input(source, target, tree=None):
+    """The newest change among a reading copy's inputs - its Markdown and the local images it names - so a check
+    that redraws a figure after the first render gets a fresh copy (five r1 #1, r3 #3). The copy itself is left out."""
     newest = source.stat().st_mtime
-    seen = 0
-    for p in source.parent.rglob("*"):
-        if seen >= cap:
-            break
+    if tree is None:
+        return newest
+    root = Path(tree)
+    md = source.resolve().relative_to(root.resolve()).as_posix()
+    for rel in copy_inputs(tree, md)[1:]:
+        p = root / rel
         try:
-            if p.is_file() and not p.is_symlink() and p != target and ".git" not in p.parts:
-                seen += 1
+            if p.is_file() and not p.is_symlink() and p.resolve() != target.resolve():
                 newest = max(newest, p.stat().st_mtime)
         except OSError:
             continue
@@ -2631,22 +2644,41 @@ def inherited_stale(job, tree, name, target, source):
         code, now, _ = _git(tree, "hash-object", "--", str(target))
         if code != 0 or now.strip() != was:
             return False
-        code, md_now, _ = _git(tree, "hash-object", "--", str(source))
-        if code == 0 and md_now.strip() != (_blob(tree, base, md) or ""):
-            return True
-        # plan r2 #2: a figure beside the Markdown changed (the renderer reads local images): anything else in the
-        # Markdown's folder that this job added or changed, the copy itself aside
-        folder = str(Path(md).parent).replace(chr(92), "/")
-        code, out, _ = _git(tree, "diff", "--name-only", base, "--", "." if folder in ("", ".") else folder)
+        inputs = copy_inputs(tree, md)                 # plan r2 #2 / five r3 #3: the Markdown and the images it names
+        code, out, _ = _git(tree, "diff", "--name-only", base, "--", *inputs)
         if code != 0:
             return False
-        code2, extra, _ = _git(tree, "ls-files", "--others", "--exclude-standard", "--", "." if folder in ("", ".") else folder)
+        code2, extra, _ = _git(tree, "ls-files", "--others", "--exclude-standard", "--", *inputs)
         if code2 != 0:
             return False
-        changed = {ln.strip() for ln in (out + chr(10) + extra).splitlines() if ln.strip()}
-        return bool(changed - {name, md})
+        return bool({ln.strip() for ln in (out + chr(10) + extra).splitlines() if ln.strip()})
     except Exception:
         return False
+
+
+_IMAGE_REF = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+[^)]*)?\)|<img[^>]+src\s*=\s*[\"']([^\"']+)[\"']", re.I)
+
+
+def copy_inputs(tree, md):
+    """What a reading copy is made from: its Markdown (repository-relative ``md``) and the local images it names -
+    ![..](path) and <img src> - resolved beside it and kept inside the tree (five r3 #3: ../assets/chart.png counts).
+    Links, data: URIs and anything outside the tree are not inputs. Never raises."""
+    out = [md]
+    try:
+        root = Path(tree).resolve()
+        text = (root / md).read_text(encoding="utf-8", errors="replace")
+        for m in _IMAGE_REF.finditer(text):
+            ref = (m.group(1) or m.group(2) or m.group(3) or "").split("#")[0].split("?")[0]
+            if not ref or ":" in ref or ref.startswith(("/", "//")):
+                continue
+            p = ((root / md).parent / ref).resolve()
+            if p.is_relative_to(root) and p != root:
+                rel = p.relative_to(root).as_posix()
+                if rel not in out:
+                    out.append(rel)
+    except Exception:
+        pass
+    return out[:200]
 
 
 def missing_reading_outputs(job, tree):

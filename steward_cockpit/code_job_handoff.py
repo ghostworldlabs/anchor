@@ -364,6 +364,9 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
                 or (orphan and (current.get("claim") != job.get("claim") or current.get("command") != job.get("command")))
                 or current.get("landed") or current.get("placed")):
             return {"ok": False, "error": "job changed while recovery was being prepared"}
+        redo = next((j for j, r in cj.read_jobs(cdir).items() if r.get("escalates") == job_id), None)
+        if redo:                                      # five r3 #4: under the lock the redo's start also takes
+            return {"ok": False, "error": "%s is being redone at standard by %s; inspect that job" % (job_id, redo)}
         if maintenance.is_active():
             return {"ok": False, "error": "Anchor entered maintenance"}
         history = list(current.get("attempts") or []) + [{k: current.get(k) for k in (
