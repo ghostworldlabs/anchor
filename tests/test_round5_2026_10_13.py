@@ -531,3 +531,34 @@ def test_copy_inputs_read_figure_names_as_the_renderer_does(tmp_path):
     (tmp_path / "doc" / "plot one.png").write_bytes(b"x")
     (tmp_path / "doc" / "r.md").write_text("![p](plot%20one.png) ![q](<plot one.png>)", encoding="utf-8")
     assert "doc/plot one.png" in cj.copy_inputs(tmp_path, "doc/r.md")
+
+
+def test_a_refiling_remakes_the_copy_an_earlier_attempt_made_when_its_check_rewrites_the_markdown(project, monkeypatch):
+    root, workers, factory = project
+    real_run = subprocess.run
+    def render(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        src = Path(args[2])
+        Path(args[args.index("--html") + 1]).write_text("<p>%s</p>" % src.read_text(encoding="utf-8").strip() + chr(10),
+                                                         encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", render)
+    out = cj.start(root / "A", root / "B", "write B/report.md", FAIL, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    workers[0].produce({"B/report.md": "first" + chr(10)})
+    first = await_job(root / "A", out["job"])
+    assert first["anchor_copies"] == ["B/report.html"] and not first["landed"]
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    fix = [sys.executable, "-c", "import time,pathlib; time.sleep(1.1); pathlib.Path('B/report.md').write_text('fixed\\n')"]
+    assert ch.recover(root / "A", out["job"], check=fix)["ok"]
+    done = await_job(root / "A", out["job"], attempt=2)
+    assert done["landed"], done["land_note"]
+    assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p>fixed</p>" + chr(10)
+
+
+def test_copy_inputs_keep_an_encoded_hash_in_a_figure_name(tmp_path):
+    (tmp_path / "doc").mkdir()
+    (tmp_path / "doc" / "chart#1.png").write_bytes(b"x")
+    (tmp_path / "doc" / "r.md").write_text("![c](chart%231.png)", encoding="utf-8")
+    assert "doc/chart#1.png" in cj.copy_inputs(tmp_path, "doc/r.md")

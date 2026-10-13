@@ -1765,7 +1765,8 @@ def _finish(cdir, job_id, job, result):
     if not _transition(cdir, job_id, ("finishing",), expect_attempt=job.get("attempt", 1),
                        authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
         return
-    made_copies = _make_reading_copies(job, wt)                       # a declared PDF/HTML left to package is made, not missed
+    made_copies = list(job.get("anchor_copies") or [])                # five r5 #1: copies an earlier attempt made stay ours
+    _make_reading_copies(job, wt, made_copies)                        # a declared PDF/HTML left to package is made, not missed
     changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"],
@@ -1897,6 +1898,7 @@ def _finish(cdir, job_id, job, result):
                      % (job["repo"], ", ".join(served[:8])))
     if small_missed(job, fields, err, note):
         note += "; small tier missed - start it again at standard with --escalates %s" % job["id"]
+    fields["anchor_copies"] = list(made_copies)
     fields["recovery_snapshot"] = handoff.snapshot(job)
     # review r3 #2: timed BEFORE the outcome, so no report can go out without it; the job is still "finishing" (durable,
     # recoverable) and the profile is capped at 5 s and never raises
@@ -2659,6 +2661,12 @@ def inherited_stale(job, tree, name, target, source):
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+[^)]*)?\)|<img[^>]+src\s*=\s*[\"']([^\"']+)[\"']", re.I)
 
 
+def _html_unquote(text):
+    import html as _html
+    import urllib.parse as _up
+    return _up.unquote(_html.unescape(text))
+
+
 def copy_inputs(tree, md):
     """What a reading copy is made from: its Markdown (repository-relative ``md``) and the local images it names -
     ![..](path) and <img src> - resolved beside it and kept inside the tree (five r3 #3: ../assets/chart.png counts).
@@ -2669,17 +2677,20 @@ def copy_inputs(tree, md):
         text = (root / md).read_text(encoding="utf-8", errors="replace")
         refs = [m.group(1) or m.group(2) or m.group(3) or "" for m in _IMAGE_REF.finditer(text)]
         try:                                          # five r4 #1: the renderer's own reading of the figures -
-            import html as _html                      # its Markdown parser, then unescaped and %-decoded as
-            import urllib.parse as _up                # tools/reading_copy.py does ("plot one.png", "plot%20one.png")
-            import report_viewer
+            import report_viewer                      # its Markdown parser, then unescaped and %-decoded as
+                                                      # tools/reading_copy.py does ("plot one.png", "plot%20one.png")
             page = report_viewer.reader_html(text, title="inputs", katex_url_prefix="")
             refs += re.findall(r'!<a href="([^"]+)" rel="noopener noreferrer">', page)
             refs += re.findall(r'<img[^>]*?src="([^"]+)"', page)
-            refs = [_up.unquote(_html.unescape(r)) for r in refs] + refs
         except Exception:
             pass
-        for raw in refs:
-            ref = raw.split("#")[0].split("?")[0]
+        names = []
+        for raw in refs:                              # five r5 #2: chart%231.png is the file chart#1.png
+            for form in (raw, raw.split("#")[0].split("?")[0]):
+                for name in (form, _html_unquote(form)):
+                    if name not in names:
+                        names.append(name)
+        for ref in names:
             if not ref or ":" in ref or ref.startswith(("/", "//")):
                 continue
             p = ((root / md).parent / ref).resolve()
