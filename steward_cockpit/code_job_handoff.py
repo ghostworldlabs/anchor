@@ -364,9 +364,16 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
                 or (orphan and (current.get("claim") != job.get("claim") or current.get("command") != job.get("command")))
                 or current.get("landed") or current.get("placed")):
             return {"ok": False, "error": "job changed while recovery was being prepared"}
-        redo = next((j for j, r in cj.read_jobs(cdir).items() if r.get("escalates") == job_id), None)
-        if redo:                                      # five r3 #4: under the lock the redo's start also takes
-            return {"ok": False, "error": "%s is being redone at standard by %s; inspect that job" % (job_id, redo)}
+        jobs_now = cj.read_jobs(cdir)
+        def busy_or_landed(r):
+            return bool(r) and (r.get("status") in cj.LIVE or r.get("landed") or r.get("placed") or r.get("finalizer_active"))
+        redo = next((j for j, r in jobs_now.items() if r.get("escalates") == job_id and busy_or_landed(r)), None)
+        if redo:                                      # five r3 #4 / r15: only while the redo runs or once it landed -
+            return {"ok": False, "error": "%s is being redone at standard by %s, or that redo landed; inspect that job"
+                    % (job_id, redo)}                 # a redo that ended unlanded leaves the original recoverable
+        if current.get("escalates") and busy_or_landed(jobs_now.get(current["escalates"])):
+            return {"ok": False, "error": "the small job this redoes (%s) is running or landed; inspect it first"
+                    % current["escalates"]}
         if maintenance.is_active():
             return {"ok": False, "error": "Anchor entered maintenance"}
         history = list(current.get("attempts") or []) + [{k: current.get(k) for k in (

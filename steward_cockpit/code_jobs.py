@@ -2609,6 +2609,8 @@ def stale_owned(job, wt, ours, files):
     for n in job.get("outputs") or []:
         if n in out or Path(n).suffix.lower() not in (".pdf", ".html", ".htm"):
             continue
+        if n in ours and n in prints:                 # five r15: made by Anchor from these very inputs - fresh, even
+            continue                                  # when byte-identical to the base's copy
         try:
             target = _output_path(wt, n)
             if inherited_stale(job, wt, n, target, target.with_suffix(".md")):

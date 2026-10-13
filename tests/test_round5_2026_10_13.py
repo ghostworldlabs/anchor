@@ -505,6 +505,24 @@ def test_a_small_job_being_redone_is_not_refiled(project, tmp_path, monkeypatch)
     monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
     out = ch.recover(root / "A", small["job"], check=PASS)
     assert not out["ok"] and "being redone at standard by %s" % redo["job"] in out["error"]
+    workers[1].produce({"B/result.py": "answer = 43" + chr(10)})          # the redo lands
+    assert await_job(root / "A", redo["job"])["landed"]
+    assert "or that redo landed" in ch.recover(root / "A", small["job"], check=PASS)["error"]
+
+
+def test_a_redo_that_ended_unlanded_leaves_the_original_recoverable(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    small = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, size="small")
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    await_job(root / "A", small["job"])
+    redo = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, escalates=small["job"])
+    workers[1].produce({"B/result.py": "answer = 43" + chr(10)})
+    await_job(root / "A", redo["job"])
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    assert ch.recover(root / "A", small["job"], check=PASS)["ok"]
+    assert await_job(root / "A", small["job"], attempt=2)["landed"]
+    assert "running or landed" in ch.recover(root / "A", redo["job"], check=PASS)["error"]
 
 
 def test_a_miss_at_the_integration_gates_counts_against_the_small_tier():
@@ -761,3 +779,18 @@ def test_a_locked_inherited_copy_beside_changed_markdown_never_lands(project, mo
     done = await_job(root / "A", out["job"])
     assert not done["landed"] and "B/report.html could not be made again" in done["land_note"]
     assert (root / "B" / "report.md").read_text(encoding="utf-8") == "# Old" + chr(10)
+
+
+def test_an_identical_remake_by_anchor_is_fresh_not_stale(project):
+    root, workers, factory = project
+    (root / "B" / "report.md").write_text("# Same" + chr(10), encoding="utf-8")
+    (root / "B" / "report.html").write_text("<p>Same</p>" + chr(10), encoding="utf-8")
+    git(root, "add", "B/report.md", "B/report.html")
+    git(root, "commit", "-qm", "report")
+    out = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, outputs=["B/report.md", "B/report.html"])
+    job = cj.read_jobs(root / "A")[out["job"]]
+    wt = Path(job["worktree"])
+    (wt / "B" / "report.md").write_text("# Same" + chr(10) + chr(10), encoding="utf-8")   # a blank line: same page
+    job["copy_prints"] = {"B/report.html": cj.inputs_print(wt, "B/report.md")}
+    assert cj.stale_owned(job, wt, ["B/report.html"], ["B/report.md", "B/report.html"]) == []
+    assert cj.stale_owned(job, wt, [], ["B/report.md"]) == ["B/report.html"]          # not Anchor's: stale
