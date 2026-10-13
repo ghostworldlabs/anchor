@@ -1775,16 +1775,15 @@ def _finish(cdir, job_id, job, result):
             note += ("; ALSO: %s changed during the job outside any landing (%s) - check those files"
                      % (job["repo"], ", ".join(served[:8])))
     fields["recovery_snapshot"] = handoff.snapshot(job)
+    # review r3 #2: timed BEFORE the outcome, so no report can go out without it; the job is still "finishing" (durable,
+    # recoverable) and the profile is capped at 5 s and never raises
+    speed = speed_line(dict(job, **fields), wt)
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        expect_attempt=job.get("attempt", 1),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), phase="outcome", phase_at=time.time(),
-                       **fields)
+                       speed=speed, **fields)
     if done is None:
         return
-    # the outcome is durable first; the time line (at most a few seconds, never fatal) rides the report (review r2 #4)
-    timed = _transition(cdir, job_id, (done["status"],), expect_attempt=done.get("attempt", 1),
-                        speed=speed_line(done, wt))
-    done = timed or done
     if not keep and done["status"] != "stopped":
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
