@@ -2655,14 +2655,19 @@ def inherited_stale(job, tree, name, target, source):
         code, now, _ = _git(tree, "hash-object", "--", str(target))
         if code != 0 or now.strip() != was:
             return False
-        inputs = copy_inputs(tree, md)                 # plan r2 #2 / five r3 #3: the Markdown and the images it names
-        code, out, _ = _git(tree, "diff", "--name-only", base, "--", *inputs)
-        if code != 0:
-            return False
-        code2, extra, _ = _git(tree, "ls-files", "--others", "--exclude-standard", "--", *inputs)
-        if code2 != 0:
-            return False
-        return bool({ln.strip() for ln in (out + chr(10) + extra).splitlines() if ln.strip()})
+        # plan r2 #2 / five r3 #3 / r8 #1: the Markdown and every image it names, each compared by its bytes with the
+        # base - tracked, untracked or ignored alike
+        for rel in copy_inputs(tree, md):
+            path = Path(tree) / rel
+            now_blob = None
+            if path.is_file():
+                code, out, _ = _git(tree, "hash-object", "--", str(path))
+                if code != 0:
+                    return False
+                now_blob = out.strip()
+            if now_blob != _blob(tree, base, rel):
+                return True
+        return False
     except Exception:
         return False
 
@@ -2722,7 +2727,7 @@ def copy_inputs(tree, md):
                     out.append(rel)
     except Exception:
         pass
-    return out[:200]
+    return out                                        # five r8 #2: every input, never a cut list
 
 
 def missing_reading_outputs(job, tree):

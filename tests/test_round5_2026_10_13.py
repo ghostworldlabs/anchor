@@ -618,3 +618,25 @@ def test_a_figure_swapped_with_its_old_timestamp_still_refreshes_anchors_copy(tm
     assert len(renders) == 2 and (doc / "report.html").read_text(encoding="utf-8") == "<p>1</p>"
     cj._make_reading_copies(job, tmp_path, made)
     assert len(renders) == 2                                    # unchanged inputs: not made again
+
+
+def test_an_ignored_figure_made_by_the_job_refreshes_the_inherited_copy(project):
+    root, workers, factory = project
+    (root / ".gitignore").write_text("*.png" + chr(10), encoding="utf-8")
+    (root / "B" / "report.md").write_text("# R ![f](fig.png)" + chr(10), encoding="utf-8")
+    (root / "B" / "report.pdf").write_bytes(b"%PDF old")
+    git(root, "add", ".gitignore", "B/report.md", "B/report.pdf")
+    git(root, "commit", "-qm", "report")
+    out = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, outputs=["B/report.pdf", "B/fig.png"])
+    job = cj.read_jobs(root / "A")[out["job"]]
+    wt = Path(job["worktree"])
+    args = (job, wt, "B/report.pdf", wt / "B" / "report.pdf", wt / "B" / "report.md")
+    assert not cj.inherited_stale(*args)
+    (wt / "B" / "fig.png").write_bytes(b"a figure git ignores")
+    assert cj.inherited_stale(*args)
+
+
+def test_every_figure_of_a_large_document_is_an_input(tmp_path):
+    (tmp_path / "r.md").write_text(" ".join("![f](f%d.png)" % i for i in range(300)), encoding="utf-8")
+    inputs = cj.copy_inputs(tmp_path, "r.md")
+    assert len(inputs) >= 301 and "f299.png" in inputs
