@@ -1581,10 +1581,11 @@ def coder_brief(job):
             "%s on branch %s. Do the work in the brief below completely, at your best; you may use sub-agents if "
             "the brief asks for a swarm. Do not ask questions back: if something is genuinely John's to decide, "
             "stop and say so in your final message. %s"
-            "Work in proportion to the brief: a small fix is the edit plus the stated check, done in minutes. Do not "
-            "build screenshot rigs, inspection or verification scripts, hash, receipt or provenance files, or extra "
-            "checks the brief does not ask for - the job runs the check and another family reviews the result. Never "
-            "end your turn while a command you started still runs: wait for it. "
+            "Work in proportion to the brief: a small fix is the edit plus the stated check, done in minutes. Use the "
+            "FOUNDRY TOOLS in your rules for chores (screenshots: look; waiting on something you started: wait) and "
+            "do not build screenshot rigs, inspection or verification scripts, hash, receipt or provenance files, or "
+            "extra checks the brief does not ask for - the job runs the check and another family reviews the result. "
+            "Never end your turn while a command you started still runs: wait for it. "
             "Use your file tools (only the files your tools write will land; anything else that "
             "changes keeps the work from landing), run the checks that apply, and end with a plain summary of what "
             "you changed and how you checked it. Do not commit; the job commits your files, a reviewer of another "
@@ -1621,6 +1622,18 @@ def finish(cdir, job_id, result):
                     expect_attempt=job.get("attempt", 1), finalizer_active=False)
 
 
+def _with_declared_ignored(job, wt, changed):
+    """2026-10-12: a declared output git ignores (a PDF under a *.pdf rule) is part of the change - it lands, added
+    by force by its literal path - instead of leaving the job with "nothing landable changed"."""
+    if changed is None:
+        return None
+    declared = set(job.get("outputs") or [])
+    if not declared:
+        return changed
+    extra = [p for p in ignored_outputs(wt) if p in declared and not never_lands(p) and p not in changed]
+    return sorted(set(changed) | set(extra))
+
+
 def _finish(cdir, job_id, job, result):
     from steward_cockpit import code_job_handoff as handoff
     wt, repo = job["worktree"], job["repo"]
@@ -1638,7 +1651,7 @@ def _finish(cdir, job_id, job, result):
                        authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
         return
     made_copies = _make_reading_copies(job, wt)                       # a declared PDF/HTML left to package is made, not missed
-    changed = changed_paths(wt, candidate_base(job))
+    changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
     checked = False
@@ -1649,7 +1662,7 @@ def _finish(cdir, job_id, job, result):
         _make_reading_copies(job, wt, made_copies)                # review r4: the check may be what wrote the Markdown
         checked = True
         phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
-        changed = changed_paths(wt, candidate_base(job))
+        changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
         note, status, error = "not landed: git could not list the changes; the worktree is kept at %s" % wt, "failed", "git status failed"
@@ -1695,7 +1708,23 @@ def _finish(cdir, job_id, job, result):
                 files = files + made
                 fields["files"] = files
                 late = [x for x in late if x not in made]
-            late += [p + " (ignored by git)" for p in _not_runtime(ignored_outputs(wt))]
+            # 2026-10-12 (MBA job 66e90d: a hand-built browser profile, 2,292 ignored files, refused a finished fix):
+            # a file git ignores that the job DECLARED lands (added by force, by literal path); one nobody declared is
+            # scratch - it stays in the kept worktree, named in the note, and never refuses the deliverable
+            ignored = _not_runtime(ignored_outputs(wt))
+            unreadable = [p for p in ignored if p.startswith("(")]
+            declared = set(job.get("outputs") or [])
+            forced = [p for p in ignored if p in declared and not never_lands(p) and p not in unreadable]
+            scratch = [p for p in ignored if p not in declared and p not in unreadable]
+            if forced:
+                files = files + [p for p in forced if p not in files]
+            if scratch:
+                files = [p for p in files if p not in set(scratch)]
+            if forced or scratch:
+                fields["files"] = files
+            job["force_add"] = forced
+            job["scratch_kept"] = fields["scratch_kept"] = scratch
+            late += unreadable + [p + " (ignored by git)" for p in ignored if p in declared and p not in forced]
             served = _locked_served_changes(job)
             missing = missing_reading_outputs(job, wt)
             fields["missing_outputs"] = missing
@@ -1747,12 +1776,56 @@ def _finish(cdir, job_id, job, result):
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        expect_attempt=job.get("attempt", 1),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), phase="outcome", phase_at=time.time(),
-                       **fields)
+                       speed=speed_line(job, wt), **fields)
     if done is None:
         return
     if not keep and done["status"] != "stopped":
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
+
+
+def speed_line(job, wt):
+    """One plain line on where the job's time went (John 2026-10-12: a slide back to minutes shows the same day):
+    the whole job, the worker's own share from its session logs (the Foundry time-profile tool), and the rest - check,
+    review, landing. Also appended to <jobs>/speed.jsonl. Never raises and never holds the job up long."""
+    try:
+        from steward_cockpit import foundry_tools
+        now = time.time()
+        born = job.get("worker_birth") or 0
+        ended = job.get("worker_completed_at") or now
+        total = (now - born) / 60 if born else None
+        worker, line, helpers = None, "", []
+        tool = foundry_tools.index_path().parent / "time-profile" / "tool.py"
+        if tool.is_file() and born:
+            since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(born - 60))
+            r = subprocess.run([sys.executable, str(tool), "--worktree", str(wt), "--since", since, "--json"],
+                               capture_output=True, text=True, timeout=30,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode == 0 and r.stdout.strip().startswith("{"):
+                prof = json.loads(r.stdout)
+                if prof.get("steps"):
+                    worker, line, helpers = prof, prof.get("line", ""), prof.get("helpers_written") or []
+        parts = []
+        if total is not None:
+            parts.append("%.0f min in all" % total)
+        if born:
+            parts.append("worker %.0f min" % ((ended - born) / 60))
+            parts.append("check, review and landing %.0f min" % (max(0.0, now - ended) / 60))
+        if line:
+            parts.append("worker detail: " + line)
+        text = "; ".join(parts) or "no timing recorded"
+        try:
+            with open(jobs_base() / "speed.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"job": job["id"], "attempt": job.get("attempt", 1), "at": now,
+                                    "minutes": round(total, 1) if total is not None else None,
+                                    "worker_minutes": round((ended - born) / 60, 1) if born else None,
+                                    "steps": (worker or {}).get("steps"), "helpers_written": helpers[:20],
+                                    "by_category": (worker or {}).get("by_category"), "line": text}) + "\n")
+        except OSError:
+            pass
+        return text
+    except Exception as exc:
+        return "timing could not be read (%s)" % str(exc)[:120]
 
 
 def _unlanded(wt, manifest):
@@ -1765,6 +1838,28 @@ def _unlanded(wt, manifest):
     left += paths
     left += [p + " (ignored by git)" for p in ignored_outputs(wt)]
     return left
+
+
+def audit_clean(job):
+    """True when this attempt's end-of-job audit ran and found nothing written into the repository from outside: it
+    saved its recovery record (the audit runs just before, on every path) and named no outside change."""
+    return (job.get("status") in ("done", "failed", "stopped") and bool(job.get("recovery_snapshot"))
+            and not job.get("served_tree_changed"))
+
+
+def audit_point(job):
+    """The repository's HEAD and watched dirty files right now, read under its commit lock - where a re-filing's
+    audit starts when the last audit was clean and no coder of this job runs any more. None when unreadable."""
+    import git_safety as _gs
+    repo = job.get("land_to") or job["repo"]
+    with _gs.repo_lock(repo, wait_s=120, who="re-filing audit point for code job " + job["id"]) as held:
+        if not held:
+            return None
+        code, head, _ = _git(job["repo"], "rev-parse", "HEAD")
+        dirt = dirty_snapshot(job["repo"])
+        if code != 0 or not head or dirt is None:
+            return None
+        return {"head": head, "dirt": dirt, "at": time.time()}
 
 
 def _locked_served_changes(job):
@@ -1783,6 +1878,9 @@ def _served_tree_changes(job):
     a file dirty at the start and now clean or gone) or COMMITTED since the job's base (consensus C2), except commits a
     verified code-job landing recorded."""
     before = job.get("repo_dirt")
+    since = job.get("audit_from")          # a re-filing after a clean audit with the coder proven ended (2026-10-12)
+    if isinstance(since, dict) and isinstance(since.get("dirt"), dict) and since.get("head"):
+        before = since["dirt"]
     now = dirty_snapshot(job["repo"])
     if before is None:
         return ["(no record of the repository's changes at the start)"]
@@ -1795,6 +1893,8 @@ def _served_tree_changes(job):
         cur = dirty_snapshot_paths(job["repo"], gone)
         changed |= {p for p in gone if cur.get(p) != before[p]}
     base = job.get("base")
+    if isinstance(since, dict) and isinstance(since.get("dirt"), dict) and since.get("head"):
+        base = since["head"]
     if base:
         verified = landed_commits()
         code, out, _ = _git_raw(job["repo"], "-c", "core.quotepath=false", "log", "--format=%x00%H", "--name-only",
@@ -1827,10 +1927,13 @@ def _commit_manifest(wt, job, files):
     files = _not_runtime(files)
     present = [p for p in files if (Path(wt) / p).exists()]
     gone = [p for p in files if p not in present]
-    if present:
-        code, _, err = _git(wt, "--literal-pathspecs", "add", "--", *present, timeout=600)
-        if code != 0:
-            return "git add failed: " + err[:250]
+    forced = [p for p in present if p in set(job.get("force_add") or [])]   # declared outputs git ignores
+    plain = [p for p in present if p not in forced]
+    for group, args in ((plain, ("add",)), (forced, ("add", "-f"))):
+        if group:
+            code, _, err = _git(wt, "--literal-pathspecs", *args, "--", *group, timeout=600)
+            if code != 0:
+                return "git add failed: " + err[:250]
     if gone:
         code, _, err = _git(wt, "--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", *gone, timeout=600)
         if code != 0:
@@ -1916,7 +2019,7 @@ def land(job, files):
     code, _, _ = _git(wt, "merge-base", "--is-ancestor", head, cand)
     if code != 0:                                          # newer commits in the repository: integrate in the job's tree
         phase(job, "integrating")
-        code, _, _ = _git(wt, "merge", "--no-edit", head, timeout=600)
+        code, _, _ = _git(wt, "merge", "--no-edit", "--no-overwrite-ignore", head, timeout=600)
         if code != 0:
             _git(wt, "merge", "--abort")
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
@@ -1978,6 +2081,8 @@ def land(job, files):
             return False, ("not landed: the job's branch moved after review (%s, reviewed %s); everything is kept at %s"
                            % (now_head[:12], cand[:12], wt)), fields
         left = _not_runtime(_unlanded(wt, files))      # a second check after integration made nothing extra (W1: runtime records aside)
+        kept = {p + " (ignored by git)" for p in job.get("scratch_kept") or []}
+        left = [p for p in left if p not in kept]      # scratch named at the finish stays behind in the kept worktree
         if left:
             fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
             return False, ("not landed: changes outside the coder's own files appeared before placement (%s); "
@@ -2170,6 +2275,8 @@ def _materialize_report(cdir, job):
     if job.get("check"):
         lines.append("Check: %s." % handoff.check_state(job).replace("_", " ") + ((" Output tail: " + job.get("check_output", "")[-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
+    if job.get("speed"):
+        lines.append("Time: " + job["speed"] + " (a worker that wrote helper scripts by hand is a Foundry tool candidate)")
     lines.append("Stage: " + stage_line(job) + " (say the job's state in these words)")
     if job.get("landed"):
         products = handoff.products(job)

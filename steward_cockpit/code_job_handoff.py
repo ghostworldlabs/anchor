@@ -330,6 +330,15 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
         return {"ok": False, "error": why}
     import proc_probe
     orphan = orphaned_finalizer(job)
+    # 2026-10-12 (Book 1 v3): the last attempt's audit was clean and its coder is proven ended (recovery_error), so
+    # whatever changed in the repository since then is not this job's coder - a steward editing its own AGENTS.md
+    # after the job ended. The re-filing's audit starts from now (read under the repo lock, released before the
+    # record lock below); anything its own check writes into the repository is still caught.
+    audit_from = None
+    if cj.audit_clean(job) and not orphan:
+        audit_from = cj.audit_point(job)
+        if audit_from is None:
+            return {"ok": False, "error": "the repository's state could not be read for the re-filing's audit; try again"}
     # No repo lock here or during the check/review. All placements keep their existing repo -> record lock order.
     with cj._LOCK:
         current = owned_job(cdir, job_id)
@@ -344,7 +353,8 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
             return {"ok": False, "error": "Anchor entered maintenance"}
         history = list(current.get("attempts") or []) + [{k: current.get(k) for k in (
             "attempt", "finished", "check", "outputs", "check_ok", "review", "delta_review", "land_note", "error", "handoff",
-            "command", "claim", "supervision", "stopped_by", "stop_requested", "stop_requested_by")}]
+            "command", "claim", "supervision", "stopped_by", "stop_requested", "stop_requested_by",
+            "served_tree_changed", "audit_from")}]
         claimed = cj._transition(cdir, job_id, (current["status"],), status="finishing", finishing_at=time.time(),
             expect_attempt=job.get("attempt", 1), finalizer_active=True,
             finished="", attempt=job.get("attempt", 1) + 1, attempts=history, check=revised_check, outputs=revised_outputs,
@@ -352,7 +362,8 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
             handoff=None, phase="checking", phase_at=time.time(), error="", check_ok=None,
             stopped_by=None, stop_requested=None, stop_requested_by=None, kept_worktree="",
             worker_completed_at=current.get("worker_completed_at") or time.time(),   # a stopped coder is proven ended above
-            integration_check_ok=None, review=None, delta_review=None, supervision=None, command=None)
+            integration_check_ok=None, review=None, delta_review=None, supervision=None, command=None,
+            served_tree_changed=None, audit_from=audit_from or current.get("audit_from"))
         busy = cj._busy_read()
         busy[job_id] = {"job": job_id, "cdir": str(cdir), "repo": cj._norm(job["repo"])}
         try:

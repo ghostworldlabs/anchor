@@ -27,6 +27,21 @@ function out(obj, code = 0) {
   process.exit(code);
 }
 
+const CAUSES = {
+  schema_nonconforming: 'its answer was not in the required review form',
+  invalid_json: 'its answer was not readable', invalid_final: 'its answer was not readable',
+  malformed_jsonl: 'its answer was not readable',
+  turn_timeout: 'it ran out of time', rpc_timeout: 'it ran out of time', open_timeout: 'it did not start in time',
+  usage_limit_reached: 'it hit a usage limit', session_limit: 'it hit a usage limit',
+  authentication_required: 'it is not logged in', subscription_auth_required: 'it is not logged in',
+  spawn_error: 'it could not start', capability_unavailable: 'it is not available on this machine',
+};
+function seatCause(seat) {
+  const codes = (seat.attempts || []).map(a => a && a.error && a.error.code).filter(Boolean);
+  const code = codes[codes.length - 1] || (seat.error && seat.error.code) || seat.status || 'unknown';
+  return `${CAUSES[code] || 'the seat failed'} (${code}); retry later, or choose another Reviewer seat on the dashboard`;
+}
+
 let attempted = null;     // the reviewer family asked, so a quota failure can be remembered against it
 function fail(error) {
   out({ ok: false, family: attempted, error: String(error && error.message ? error.message : error).slice(0, 600) }, 2);
@@ -96,12 +111,26 @@ async function main() {
     '', 'BRIEF:', brief || '(none given)', '', `DIFF (${from}..${head}):`, diff,
   ].join('\n');
 
+  // 2026-10-12 (Book 1 jobs 07bd1c, 45f140): the Reviewer seat failed closed on a malformed answer and two finished
+  // jobs stayed unlanded. A review is read-only, so a seat failure is retried once on the SAME seat; a second
+  // failure is reported with its real cause in plain words. Never another family here, never unreviewed.
   let receipt = null;
-  const result = await drivers.runAgent({
-    prompt, schema: SCHEMA, role: 'review', label: 'review:code-job',
-    driver: drivers.familyToDriverName(reviewer), freshContext: true,
-    onReceipt: (r) => { receipt = r; },
-  });
+  let result = null;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      result = await drivers.runAgent({
+        prompt, schema: SCHEMA, role: 'review', label: 'review:code-job',
+        driver: drivers.familyToDriverName(reviewer), freshContext: true,
+        onReceipt: (r) => { receipt = r; },
+      });
+      break;
+    } catch (error) {
+      const seat = error && error.receipt;
+      if (!seat || seat.status === 'aborted') throw error;
+      if (attempt >= 2) throw new Error(`the reviewer (${reviewer}) could not give a review twice - ${seatCause(seat)}`);
+      await new Promise(r => setTimeout(r, Number(process.env.ANCHOR_REVIEW_RETRY_MS || 15000)));
+    }
+  }
   const served = (receipt && receipt.served) || {};
   const family = String(served.family || '').toLowerCase();
   if (!family) throw new Error('the review seat did not report which family served it');

@@ -180,9 +180,11 @@ WRITE_FOR_JOHN = (
     "function or test names, IDs, hashes, model names or internal terms in that opening; detail goes below it. A plan "
     "shown for his approval says in plain words what will be built, what is left out, and how you will know it works - "
     "the builder's plan stays in its file, behind a link. Keep the finish light: a PDF or HTML reading copy is ONE "
-    "command that takes seconds - `python C:/dev/Anchor/tools/reading_copy.py <document.md> [--html]` (a code job "
-    "makes a declared one itself from the Markdown of the same name) - never commission or write a renderer; no "
-    "extra receipt, hash or provenance files unless he asks. "
+    "command that takes seconds (reading-copy in FOUNDRY TOOLS; a code job makes a declared one itself from the "
+    "Markdown of the same name) - never commission or write a renderer. A job brief names the deliverable and its "
+    "one check: never require receipt, hash, manifest, provenance or delivery-check files that only repeat what "
+    "Anchor already records (it fingerprints every delivered file); keep evidence the work itself or John's rules "
+    "need. "
 )
 # 2026-10-12: Book 1's steward slept in 45-second steps for 22 minutes watching its own job while John's message waited
 HAND_OFF = (
@@ -2775,11 +2777,14 @@ class Engine:
             return False
 
     def _contract(self):
+        # 2026-10-12: the Foundry tools are read from their index each time the rules are built, so a new tool
+        # reaches every steward and job with no Anchor change
+        from steward_cockpit import foundry_tools
         if self.code_job:
-            return CODER_CONTRACT
+            return CODER_CONTRACT + foundry_tools.block(steward=False)
         if self.effort_on():
-            return EFFORT_DUTY + CONTRACT + EFFORT_RULES
-        return SMALL_DUTY + CONTRACT
+            return EFFORT_DUTY + CONTRACT + EFFORT_RULES + foundry_tools.block()
+        return SMALL_DUTY + CONTRACT + foundry_tools.block()
 
     def _fire_turn_done(self, result):
         cb, self.on_turn_done = self.on_turn_done, None
