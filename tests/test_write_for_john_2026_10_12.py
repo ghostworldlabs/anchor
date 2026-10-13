@@ -14,4 +14,6 @@ def test_every_duty_says_to_end_the_turn_once_a_job_is_started():
 
 
 def test_the_finish_is_kept_light():
-    assert "no extra receipt, hash or provenance files unless he asks" in se.WRITE_FOR_JOHN
+    # round 4 (2026-10-12): only receipts that repeat what Anchor already records are dropped
+    assert "never require receipt, hash, manifest, provenance or delivery-check files" in se.WRITE_FOR_JOHN
+    assert "keep evidence the work itself or John's rules" in se.WRITE_FOR_JOHN

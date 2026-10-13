@@ -1108,7 +1108,9 @@ def test_an_ignored_output_a_check_makes_keeps_the_worktree(tmp_path, monkeypatc
     monkeypatch.setitem(globals(), "_git_repo_orig", _git_repo)
     monkeypatch.setitem(globals(), "_git_repo", with_gitignore)
     repo, job = _job(tmp_path, monkeypatch, check='python -c "open(' + "'report.pdf','w'" + ').write(' + "'x'" + ')"')
-    assert job["landed"] is False and "report.pdf (ignored by git)" in job["land_note"]
+    # round 4 (2026-10-12, MBA job 66e90d): an ignored file nobody declared is scratch - it never refuses the
+    # deliverable, and it is never lost: it stays in the kept worktree, named
+    assert job["landed"] is True and job["scratch_kept"] == ["report.pdf"], job["land_note"]
     assert (_P(job["kept_worktree"]) / "report.pdf").is_file()
 
 
