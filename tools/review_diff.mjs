@@ -59,3 +59,14 @@ function numstatRows(numstat) {
   }
   return out;
 }
+
+// 2026-10-13 (MBA job, a 485,869-character diff): an oversized change is refused with its five largest files named,
+// so the steward knows how to split it. Never raises: the refusal stands without the names.
+export function largest(repo, from, head) {
+  try {
+    const rows = execFileSync('git', ['-C', repo, 'diff', '--numstat', '--no-renames', from, head], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').map(l => l.split('\t'))
+      .filter(r => r.length >= 3 && r[0] !== '-').map(r => [r.slice(2).join('\t'), Number(r[0]) + Number(r[1])])
+      .sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return rows.length ? '; largest: ' + rows.map(([p, n]) => `${p} (${n} lines)`).join(', ') : '';
+  } catch { return ''; }
+}

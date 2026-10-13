@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { reviewDiff } from './review_diff.mjs';
+import { reviewDiff, largest } from './review_diff.mjs';
 
 const MAX_DIFF = 400_000;
 const FAMILIES = ['claude', 'chatgpt', 'grok', 'gemini'];
@@ -96,7 +96,8 @@ async function main() {
   const from = arg('delta-from') || base;
   const diff = reviewDiff(repo, from, head);
   if (!diff.trim()) throw new Error('the candidate has no change to review');
-  if (diff.length > MAX_DIFF) throw new Error(`the diff is ${diff.length} characters - too large for one review; split the job`);
+  if (diff.length > MAX_DIFF) throw new Error(`the diff is ${diff.length} characters (one review reads ${MAX_DIFF} at most)`
+    + `${largest(repo, from, head)}; split the job`);
   // fcj review r5: the brief is read WHOLE or the review refuses - never sliced (a cut brief could drop a requirement)
   const brief = arg('brief-file') && fs.existsSync(arg('brief-file')) ? fs.readFileSync(arg('brief-file'), 'utf8') : '';
   if ([...brief].length > 16000) throw new Error(`the brief is ${[...brief].length} characters - longer than the reviewer reads whole`);

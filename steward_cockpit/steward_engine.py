@@ -184,7 +184,10 @@ WRITE_FOR_JOHN = (
     "Markdown of the same name) - never commission or write a renderer. A job brief names the deliverable and its "
     "one check: never require receipt, hash, manifest, provenance or delivery-check files that only repeat what "
     "Anchor already records (it fingerprints every delivered file); keep evidence the work itself or John's rules "
-    "need. "
+    "need. The check tests the work (tests, a build, a render), never a receipt. A declared PDF or HTML reading copy "
+    "is Anchor's to make from the Markdown: do not ask the worker to make it, open it in a browser, or check its "
+    "pages or phone layout unless John asked for that check. Split a change of more than about 300 KB of text into several jobs (one review reads "
+    "400,000 characters at most). "
 )
 # 2026-10-12: Book 1's steward slept in 45-second steps for 22 minutes watching its own job while John's message waited
 HAND_OFF = (
@@ -248,6 +251,14 @@ explicit waits, repeated failures, verified exit and missing visibility. A quiet
 interval calls for inspection, never automatic termination or a replacement job.
 Use the existing log and saved output before proposing intervention; only actual
 completion and passing gates establish delivery. Estimates are not cutoffs.
+Size every job (John 2026-10-13): add --size small when it is one bounded
+deliverable of at most 5 files, with no new design decision, reversible, and not
+Anchor's own code - it runs one model tier down at a lower effort; otherwise leave
+the standard size. When a small job's result says "small tier missed", start it
+again with --size standard --escalates <that job's id>. Tiers change only by John's
+word: never edit tiers.json or the dashboard settings. The Campaign steward keeps
+the job ledger (`python C:/dev/foundry-tools/ft.py ledger`) and brings John at most
+one recommendation at a time.
 """
 SMALL_DUTY += DELEGATION_DUTY
 EFFORT_DUTY += DELEGATION_DUTY
@@ -1414,7 +1425,16 @@ class Engine:
         skill runs launch with their own policy). The cap is ANCHOR_STEWARD_EFFORT (default "high"); a workbench
         terminal keeps the family's highest. Lowering it is a model refresh that keeps the native session."""
         family, selection = self._current_selection_uncapped(settings, target)
-        return family, _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT)
+        return family, self._apply_tier(family, _cap_effort(selection, None if self.general else STEWARD_CONVERSATION_EFFORT))
+
+    def _apply_tier(self, family, selection):
+        """Round 5 (John 2026-10-13): a small code job runs its family's small tier - the model and effort code_jobs
+        checked against tiers.json and the family's catalog - on this engine only. Another family (a failover) keeps
+        its own selection; the dashboard's settings are never written."""
+        over = getattr(self, "tier_override", None)
+        if not isinstance(over, dict) or not isinstance(selection, dict) or over.get("family") != family:
+            return selection
+        return {**selection, "model": over["model"], "effort": over["effort"], "selection_evidence": "small_tier"}
 
     def _current_selection_uncapped(self, settings, target):
         """Resolve the model for the dashboard-selected family. When that is the
@@ -1644,7 +1664,8 @@ class Engine:
                 try:
                     bound_settings = {**settings, "provider_preferences": {**settings["provider_preferences"],
                                      "quality": {target: self.provider_quality} if self.provider_quality else {}}}
-                    self.model_selection = selection = _provider_setup.resolve_quality(target, bound_settings, self.provider_connection)
+                    self.model_selection = selection = self._apply_tier(
+                        target, _provider_setup.resolve_quality(target, bound_settings, self.provider_connection))
                 except (ValueError, RuntimeError) as exc:
                     self._emit({"t": "sys", "text": "Selected provider source is unavailable: " + str(exc)})
                     return False, "selected provider source unavailable"
@@ -4076,6 +4097,13 @@ class Engine:
         the 10-minute status keeps flowing while it runs. The Campaign's own
         steward (W5, 2026-10-01: one conversation) takes the same checkpoint
         once per quiet spell and stays awake. True = parked."""
+        if self.one_conversation and now - getattr(self, "_ledger_tried", 0) >= 3600:
+            self._ledger_tried = now                  # round 5: the Campaign steward is handed a due ledger on its own
+            try:                                      # tick too, not only when another job finishes (plan r2 #6)
+                from steward_cockpit import job_ledger
+                job_ledger.nudge_later(engine=self)
+            except Exception:
+                pass
         quiet_since = max(self.last_say, self.last_output, self.woke_at)
         if (self.busy or self.queue or now - quiet_since <= IDLE_SLEEP_SECONDS
                 or self._working_bg() or getattr(self, "_bg_tasks", None)):   # its own background commands are work

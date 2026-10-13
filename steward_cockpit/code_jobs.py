@@ -34,6 +34,7 @@ hold, and the review gate.
 from __future__ import annotations
 
 import json
+import shlex
 import hashlib
 import logging
 import os
@@ -816,6 +817,53 @@ CODE_JOB_FAMILIES = ("claude", "chatgpt")
 NO_MANIFEST = "%s cannot run a code job yet: its bridge does not report which files it wrote, so its work could never land"
 
 
+SIZES = ("small", "standard")
+CLAUDE_TIER_MODELS = ("sonnet", "opus", "haiku")    # the Claude CLI's aliases; its catalog shows only "best"
+
+
+def tiers_path():
+    from steward_cockpit import foundry_tools
+    return Path(os.environ.get("ANCHOR_TIERS_FILE") or foundry_tools.index_path().parent / "tiers.json")
+
+
+def small_tier(family, discover=None):
+    """John 2026-10-13: "smaller jobs on a model below frontier (one tier down) and at a lower effort". The small tier
+    for ``family`` from John's tiers.json, checked against what the family really offers: (selection, None) or
+    (None, why). Anchor and stewards only read the file; nothing here changes the dashboard's settings."""
+    import model_policy
+    try:
+        data = json.loads(tiers_path().read_text(encoding="utf-8"))
+        want = (data.get("small") or {}).get(family)
+    except (OSError, ValueError, AttributeError) as e:
+        return None, "the tier file could not be read (%s)" % str(e)[:80]
+    if not isinstance(want, dict):
+        return None, "no small tier for %s" % family
+    model, effort = str(want.get("model") or ""), str(want.get("effort") or "")
+    if effort not in model_policy.EFFORT_ORDER:
+        return None, "effort %r is not a known level" % effort
+    if family not in ("claude", "chatgpt"):
+        return None, "no small tier for %s" % family
+    if family == "claude" and model not in CLAUDE_TIER_MODELS:
+        return None, "Claude model %r is not one of %s" % (model, ", ".join(CLAUDE_TIER_MODELS))
+    try:
+        rows, _ = (discover or model_policy.discover)(family)
+    except Exception as e:
+        return None, "the %s models could not be listed (%s)" % (family, str(e)[:80])
+    # Claude's catalog is one moving alias ("best") with the efforts the CLI accepts; ChatGPT lists each model
+    row = rows[0] if family == "claude" and rows else next((r for r in rows if r.get("model") == model), None)
+    if row is None:
+        return None, "%s offers no model %r" % (family, model)
+    levels = {e.get("effort") if isinstance(e, dict) else e for e in row.get("efforts") or []}
+    if effort not in levels:
+        return None, "%s has no %r effort" % (model, effort)
+    sel = {"family": family, "model": model, "effort": effort}
+    try:
+        model_policy.launch_args(sel)
+    except Exception as e:
+        return None, "the tier does not make a valid launch (%s)" % str(e)[:80]
+    return sel, None
+
+
 def choose_coder(requested=""):
     """(family, None) or (None, reason): the job's own choice, else the Coder seat, else the Terminal seat - never a
     family known to be exhausted. Reads the dashboard settings; writes nothing."""
@@ -994,6 +1042,31 @@ def run_check(job, tree):
                 script.unlink()
             except OSError:
                 pass
+
+
+def check_names_absent(job, tree):
+    """Files a failed check names that are not in the job's tree (2026-10-13: two MBA jobs were kept because their
+    checks tested an evidence.zip the worker never made). It states the fact only: the file may be a declared output
+    the worker missed or an input the check needs. A list check's arguments are taken as given; a string check is
+    split on spaces outside quotes. Never raises."""
+    try:
+        check = job.get("check")
+        if isinstance(check, list):
+            words = [str(a) for a in check[1:]]
+        else:
+            words = [w.strip(chr(34) + chr(39)) for w in shlex.split(str(check or ""), posix=False)[1:]]
+        absent = []
+        for w in words:
+            name = w.replace(chr(92), "/")
+            if (not name or name.startswith("-") or "://" in name or ":" in name or name.startswith("/")
+                    or not ("/" in name or Path(name).suffix) or any(c in name for c in "*?<>|%$")):
+                continue
+            if (Path(tree) / name).exists():
+                continue
+            absent.append(name)
+        return absent
+    except Exception:
+        return []
 
 
 # ── The manifest: what the coder's tools wrote ─────────────────────────────────────────────────────────────────────
@@ -1327,7 +1400,7 @@ def declared_outputs(outputs):
 
 
 def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None,
-          worker="coder", plan="", profile="slim", work_dir=None):
+          worker="coder", plan="", profile="slim", work_dir=None, size="standard", escalates=""):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
     family choice (else the Coder seat); ``check`` is an argument list or the full command text. ``worker="foreman"``
@@ -1371,6 +1444,29 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             return {"ok": False, "error": why}
     else:
         return {"ok": False, "error": "a code job's worker is a coder or foreman, not %s" % worker}
+    size = str(size or "standard").strip().lower()
+    if size not in SIZES:
+        return {"ok": False, "error": "no job started: a job's size is small or standard, not %s" % size}
+    escalates = str(escalates or "").strip()
+    if escalates and not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", escalates):
+        return {"ok": False, "error": "no job started: --escalates names a job id (like 20261013-070623-b2a758)"}
+    if escalates:                                  # plan r2 #3: one standard redo per ended, unlanded small job
+        prior = read_jobs(cdir)
+        orig = prior.get(escalates)
+        if not orig or not str(orig.get("tier") or "").startswith("small"):
+            return {"ok": False, "error": "no job started: %s is not a small-tier job of this effort" % escalates}
+        if orig.get("status") in LIVE or orig.get("landed"):
+            return {"ok": False, "error": "no job started: %s is still running or already landed" % escalates}
+        twin = next((j for j, r in prior.items() if r.get("escalates") == escalates), None)
+        if twin:
+            return {"ok": False, "error": "no job started: %s is already redone by %s; inspect that job" % (escalates, twin)}
+    tier, tier_note = None, "standard"
+    if size == "small":
+        if worker != "coder":
+            tier_note = "standard (small unavailable: Foreman runs its own seats)"
+        else:
+            tier, why = small_tier(family)
+            tier_note = ("small: %s %s" % (tier["model"], tier["effort"])) if tier else "standard (small unavailable: %s)" % why
     outputs, why = declared_outputs(outputs)
     if why:
         return {"ok": False, "error": why}
@@ -1441,7 +1537,9 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                    "repo_dirt": served_dirt,
                    "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
                    "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
-                   "started_by": str(actor or "the steward")}
+                   "started_by": str(actor or "the steward"), "size": size, "tier": tier_note}
+            if escalates:
+                job["escalates"] = escalates
             # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
             # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
             label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
@@ -1454,6 +1552,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                 _FOREMAN_PROCS[job_id] = _Starting()     # registered with the record: never taken for a lost Foreman
             try:
                 _write_job(cdir, job)
+                _index_job(job)
                 b = _busy_read()
                 b[job_id] = {"job": job_id, "cdir": str(cdir), "repo": _norm(root)}
                 _busy_write(b)
@@ -1516,6 +1615,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         eng.code_job = {"cdir": str(cdir), "id": job_id, "repo": str(root),
                         "worktree": str(wt), "work_dir": work_dir, "outputs": outputs}
         eng.job_observation = {}
+        eng.tier_override = tier                      # round 5: this job's engine only; the dashboard is never written
         try:   # this job's family, for this engine only (the dashboard's preferences are never written)
             import anchor_settings
             eng.policy_override = {"family": family, "revision": anchor_settings.get_launch_settings()["settings_revision"],
@@ -1524,6 +1624,7 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             pass
         eng.on_turn_done = lambda result: threading.Thread(
             target=finish, args=(cdir, job_id, dict(result or {}, manifest=manifest_of(eng, wt), authors=authors_of(eng),
+                                                    model_served=(getattr(eng, "model_selection", None) or {}).get("model_served"),
                                                     failed_over=list((getattr(eng, "policy_override", None) or {}).get("failed_families") or []))),
             name="code-job-" + job_id, daemon=True).start()
         ok, why = eng.wake(fresh=True, seed=coder_brief(job))
@@ -1653,7 +1754,8 @@ def _finish(cdir, job_id, job, result):
     made_copies = _make_reading_copies(job, wt)                       # a declared PDF/HTML left to package is made, not missed
     changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
-              "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"]}
+              "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"],
+              "model_served": (result or {}).get("model_served") or None}
     checked = False
     if changed == [] and not err and missing_reading_outputs(job, wt):
         # A packaging check can be the only producer (e.g. unchanged source -> new PDF).
@@ -1735,6 +1837,10 @@ def _finish(cdir, job_id, job, result):
                         "--check); the work is kept at %s" % wt)
             elif fields["check_ok"] is not True:
                 note = "not landed: the check failed in the job's tree; the work is kept at %s" % wt
+                absent = check_names_absent(job, wt)
+                if absent:
+                    note += ("; the check names %s, which is not in the job's tree - read the brief before recovering "
+                             "with another check" % ", ".join(absent[:3]))
             elif missing:
                 note = "not landed: declared reading outputs missing or unsafe (%s); finish packaging in the kept worktree %s" % (
                     ", ".join(missing), wt)
@@ -1774,6 +1880,8 @@ def _finish(cdir, job_id, job, result):
         if not fields.get("landed"):
             note += ("; ALSO: %s changed during the job outside any landing (%s) - check those files"
                      % (job["repo"], ", ".join(served[:8])))
+    if small_missed(job, fields, err, note):
+        note += "; small tier missed - start it again at standard with --escalates %s" % job["id"]
     fields["recovery_snapshot"] = handoff.snapshot(job)
     # review r3 #2: timed BEFORE the outcome, so no report can go out without it; the job is still "finishing" (durable,
     # recoverable) and the profile is capped at 5 s and never raises
@@ -1787,6 +1895,24 @@ def _finish(cdir, job_id, job, result):
     if not keep and done["status"] != "stopped":
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
+    try:
+        from steward_cockpit import job_ledger
+        job_ledger.nudge_later()                  # round 5: the Campaign steward keeps the books
+    except Exception:
+        pass
+
+
+def small_missed(job, fields, err, note):
+    """A small-tier job that did not land for a reason in the work itself: its check failed, its reviewer read it and
+    did not pass it, its worker failed, or it made nothing. A review seat that failed, a usage limit, a stop or a
+    restart is not the tier's miss (round 5 plan, C4)."""
+    if not str(job.get("tier") or "").startswith("small") or fields.get("landed") or job.get("status") == "stopped":
+        return False
+    rec = fields.get("review") or {}
+    return bool(fields.get("check_ok") is False
+                or (err and not _LIMIT_WORDS.search(err))
+                or (isinstance(rec, dict) and rec.get("ok") and rec.get("verdict") not in (None, "PASS"))
+                or note == "nothing changed" or note.startswith("not landed: nothing the coder wrote"))
 
 
 def speed_line(job, wt):
@@ -1811,9 +1937,13 @@ def speed_line(job, wt):
                 if prof.get("steps"):
                     worker, line, helpers = prof, prof.get("line", ""), prof.get("helpers_written") or []
         parts = []
-        if total is not None:
+        refiled = (job.get("claim") or {}).get("at") if job.get("attempts") else None
+        if refiled:                   # 2026-10-13 (Book 1 v3 "1043 min in all"): a re-filing is timed from its claim
+            parts.append("re-filed: check, review and landing %.0f min" % (max(0.0, now - refiled) / 60))
+            total = None
+        elif total is not None:
             parts.append("%.0f min in all" % total)
-        if born:
+        if born and not refiled:
             parts.append("worker %.0f min" % ((ended - born) / 60))
             parts.append("check, review and landing %.0f min" % (max(0.0, now - ended) / 60))
         if line:
@@ -1822,6 +1952,7 @@ def speed_line(job, wt):
         try:
             with open(jobs_base() / "speed.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps({"job": job["id"], "attempt": job.get("attempt", 1), "at": now,
+                                    "steward_dir": job.get("steward_dir") or "", "refiled": bool(refiled),
                                     "minutes": round(total, 1) if total is not None else None,
                                     "worker_minutes": round((ended - born) / 60, 1) if born else None,
                                     "steps": (worker or {}).get("steps"), "helpers_written": helpers[:20],
@@ -2378,6 +2509,8 @@ def _make_reading_copies(job, tree, refresh=None):
                     and source.stat().st_mtime > target.stat().st_mtime):
                 target.unlink()                          # ours, and stale: made again below
                 refresh.remove(name)
+            if inherited_stale(job, tree, name, target, source):
+                target.unlink()                          # the base's copy of an older Markdown: made again below
             # review r1: never through a link, never from (or to) outside the job's tree, never over a file
             if (target.exists() or target.is_symlink() or not source.is_file() or source.is_symlink()
                     or not inside(str(source.resolve()), str(Path(tree).resolve()))
@@ -2394,6 +2527,54 @@ def _make_reading_copies(job, tree, refresh=None):
         except Exception:
             continue
     return made
+
+
+def _index_job(job):
+    """Round 5 (plan r2 #5): one pointer line per started job, so the ledger finds every job's own record - a job that
+    failed before its timing line included. Never raises."""
+    try:
+        with open(jobs_base() / "jobs-index.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"job": job["id"], "steward_dir": job.get("steward_dir") or "", "at": time.time()}) + "\n")
+    except Exception:
+        pass
+
+
+def _blob(tree, rev, rel):
+    code, out, _ = _git(tree, "rev-parse", "%s:%s" % (rev, rel))
+    return out.strip() if code == 0 else None
+
+
+def inherited_stale(job, tree, name, target, source):
+    """2026-10-13 (round 5, plan r1 #6): a declared copy the job inherited unchanged from its base, beside Markdown
+    this job changed, is the old version - remade, never delivered stale. A copy the worker changed is its own and is
+    never touched; anything unreadable leaves the file alone."""
+    try:
+        if not target.is_file() or target.is_symlink() or not source.is_file():
+            return False
+        base = candidate_base(job)
+        md = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
+        was = _blob(tree, base, name)
+        if not was:
+            return False
+        code, now, _ = _git(tree, "hash-object", "--", str(target))
+        if code != 0 or now.strip() != was:
+            return False
+        code, md_now, _ = _git(tree, "hash-object", "--", str(source))
+        if code == 0 and md_now.strip() != (_blob(tree, base, md) or ""):
+            return True
+        # plan r2 #2: a figure beside the Markdown changed (the renderer reads local images): anything else in the
+        # Markdown's folder that this job added or changed, the copy itself aside
+        folder = str(Path(md).parent).replace(chr(92), "/")
+        code, out, _ = _git(tree, "diff", "--name-only", base, "--", "." if folder in ("", ".") else folder)
+        if code != 0:
+            return False
+        code2, extra, _ = _git(tree, "ls-files", "--others", "--exclude-standard", "--", "." if folder in ("", ".") else folder)
+        if code2 != 0:
+            return False
+        changed = {ln.strip() for ln in (out + chr(10) + extra).splitlines() if ln.strip()}
+        return bool(changed - {name, md})
+    except Exception:
+        return False
 
 
 def missing_reading_outputs(job, tree):

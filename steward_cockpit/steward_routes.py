@@ -1853,7 +1853,8 @@ def handle_post(cdir, verb, body):
                             actor=str(body.get("actor") or "the steward"), skill=str(body.get("skill") or ""),
                             outputs=body.get("outputs") or [], worker=str(body.get("worker") or "coder"),
                             plan=str(body.get("plan") or ""), profile=str(body.get("profile") or "slim"),
-                            work_dir=body.get("work_dir"))
+                            work_dir=body.get("work_dir"), size=str(body.get("size") or "standard"),
+                            escalates=str(body.get("escalates") or ""))
             if out.get("ok") and eng is not None:
                 what = ("%s job" % str(body.get("skill")).strip()) if str(body.get("skill") or "").strip() else "code job"
                 eng._emit({"t": "sys", "text": "%s %s started on %s - coder %s, in its own worktree; it lands only "

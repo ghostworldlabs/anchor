@@ -52,6 +52,10 @@ def main():
     ap.add_argument("--outside-ok", action="append", default=[],
                     help="recover: a repository file you know changed outside the job for its own reasons (e.g. your "
                          "AGENTS.md); pinned to its bytes now; repeatable")
+    ap.add_argument("--size", default="standard", choices=("small", "standard"),
+                    help="start: small = one bounded deliverable, at most 5 files, no new design, reversible, not "
+                         "Anchor's code - it runs one model tier down (John's tiers.json)")
+    ap.add_argument("--escalates", default="", help="start: the small job this one redoes at standard")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args()
     pid, rel = project_for(os.getcwd())
@@ -62,7 +66,8 @@ def main():
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
         body.update(repo=str(Path(a.repo).resolve()), brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
-                    outputs=a.output, worker=a.worker, profile=a.profile, work_dir=a.work_dir,
+                    outputs=a.output, worker=a.worker, profile=a.profile, work_dir=a.work_dir, size=a.size,
+                    escalates=a.escalates,
                     plan=Path(a.plan_file).read_text(encoding="utf-8") if a.plan_file else "")
     if a.action == "stop":
         body["actor"] = "the steward"
