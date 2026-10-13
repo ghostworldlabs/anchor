@@ -194,6 +194,45 @@ def test_an_inherited_copy_is_remade_when_a_figure_beside_its_markdown_changed(p
     assert cj.inherited_stale(*args)
 
 
+def test_a_copy_anchor_made_is_made_again_when_the_check_redraws_a_figure(tmp_path):
+    md = tmp_path / "doc" / "report.md"
+    md.parent.mkdir()
+    md.write_text("# R" + chr(10), encoding="utf-8")
+    pdf = tmp_path / "doc" / "report.pdf"
+    pdf.write_bytes(b"%PDF made")
+    fig = tmp_path / "doc" / "img" / "fig.png"
+    fig.parent.mkdir()
+    fig.write_bytes(b"figure")
+    import os
+    os.utime(md, (100, 100))
+    os.utime(fig, (100, 100))
+    os.utime(pdf, (200, 200))
+    assert cj._newest_input(md, pdf) == 100
+    os.utime(fig, (300, 300))                                             # the check redrew the figure
+    assert cj._newest_input(md, pdf) == 300 > pdf.stat().st_mtime
+
+
+def test_two_racing_redos_of_one_small_job_start_only_one(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    small = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, size="small")
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    await_job(root / "A", small["job"])
+    real = cj.read_jobs
+    calls = []
+    def racing(cdir):
+        out = dict(real(cdir))
+        calls.append(1)
+        if len(calls) > 1:                         # another redo was written between the check and the lock
+            out["20990101-000000-abcdef"] = {"escalates": small["job"], "status": "running"}
+        return out
+    monkeypatch.setattr(cj, "read_jobs", racing)
+    out = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, escalates=small["job"])
+    assert not out["ok"] and "already redone by 20990101-000000-abcdef" in out["error"]
+    assert not any(p.name not in (small["job"],) for p in (tmp_path / "jobs").iterdir()
+                   if p.is_dir() and p.name[:2] == "20" and p.name != small["job"])
+
+
 def test_an_inherited_copy_beside_unchanged_markdown_is_left_alone(project):
     root, workers, factory = project
     (root / "B" / "report.md").write_text("# Same\n", encoding="utf-8")
@@ -232,10 +271,18 @@ class _Steward:
         return {"ok": self.ok}
 
 
-def _rows(tmp_path, n):
+def _rows(tmp_path, n, status="done"):
+    """n more jobs in the start index, each with its own record (as Anchor writes them)."""
+    steward = tmp_path / "steward"
+    path = steward / cj.JOBS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    recs = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     with open(tmp_path / "jobs" / "jobs-index.jsonl", "a", encoding="utf-8") as f:
-        for i in range(n):
-            f.write(json.dumps({"job": "j%d" % i, "at": time.time()}) + "\n")
+        for _ in range(n):
+            jid = "j%d" % len(recs)
+            recs[jid] = {"id": jid, "status": status}
+            f.write(json.dumps({"job": jid, "steward_dir": str(steward), "at": time.time()}) + chr(10))
+    path.write_text(json.dumps(recs), encoding="utf-8")
 
 
 def test_the_ledger_goes_to_the_campaign_steward_after_ten_jobs_and_never_while_it_sleeps(tmp_path, monkeypatch):
@@ -246,6 +293,7 @@ def test_the_ledger_goes_to_the_campaign_steward_after_ten_jobs_and_never_while_
     eng = _Steward()
     assert not job_ledger.nudge(now=1000.0, engine=eng)                    # first sight starts the count
     _rows(tmp_path, 9)
+    _rows(tmp_path, 5, status="running")                                     # still at work: not counted yet
     assert not job_ledger.nudge(now=1001.0, engine=eng) and not eng.sent
     _rows(tmp_path, 1)
     asleep = _Steward(alive=False)

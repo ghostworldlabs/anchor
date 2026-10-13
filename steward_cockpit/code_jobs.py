@@ -1532,6 +1532,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             served_dirt = dirty_snapshot(root)
             if served_dirt is None:
                 return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
+            twin = next((j for j, r in read_jobs(cdir).items() if escalates and r.get("escalates") == escalates), None)
+            if twin:                                  # five r1 #2: two redos raced; this one never starts
+                _cleanup({"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt)}, keep_branch=False)
+                return {"ok": False, "error": "no job started: %s is already redone by %s; inspect that job"
+                        % (escalates, twin)}
             job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief,
                    "work_dir": work_dir, "attempt": 1, "phase": "producing", "phase_at": time.time(),
                    "repo_dirt": served_dirt,
@@ -2506,7 +2511,7 @@ def _make_reading_copies(job, tree, refresh=None):
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
             if (refresh and name in refresh and target.is_file() and not target.is_symlink() and source.is_file()
-                    and source.stat().st_mtime > target.stat().st_mtime):
+                    and _newest_input(source, target) > target.stat().st_mtime):
                 target.unlink()                          # ours, and stale: made again below
                 refresh.remove(name)
             if inherited_stale(job, tree, name, target, source):
@@ -2527,6 +2532,24 @@ def _make_reading_copies(job, tree, refresh=None):
         except Exception:
             continue
     return made
+
+
+def _newest_input(source, target, cap=500):
+    """The newest change among a reading copy's inputs: its Markdown and the files in the Markdown's folder (the
+    renderer reads local figures) - so a check that redraws a figure after the first render gets a fresh copy
+    (five r1 #1). The copy itself is left out; at most ``cap`` files are looked at."""
+    newest = source.stat().st_mtime
+    seen = 0
+    for p in source.parent.rglob("*"):
+        if seen >= cap:
+            break
+        try:
+            if p.is_file() and not p.is_symlink() and p != target and ".git" not in p.parts:
+                seen += 1
+                newest = max(newest, p.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
 
 
 def _index_job(job):

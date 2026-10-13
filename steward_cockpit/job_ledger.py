@@ -24,13 +24,29 @@ def _base():
 
 
 def finished_count():
-    """Jobs started so far (the jobs index Anchor appends at every start): the ledger is due as work accumulates,
-    whether or not a job reached its timing line."""
+    """Jobs that have ended (five r1 #3): every job in the jobs index Anchor appends at each start, read from its own
+    record - one that failed before its timing line counts, one still running does not (yet)."""
+    from steward_cockpit import code_jobs
+    by_dir = {}
     try:
-        with open(_base() / "jobs-index.jsonl", "rb") as f:
-            return sum(1 for line in f if line.strip())
+        with open(_base() / "jobs-index.jsonl", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict) and r.get("job") and r.get("steward_dir"):
+                    by_dir.setdefault(r["steward_dir"], set()).add(r["job"])
     except OSError:
         return 0
+    ended = 0
+    for d, ids in by_dir.items():
+        try:
+            recs = code_jobs.read_jobs(Path(d))
+        except Exception:
+            continue
+        ended += sum(1 for j in ids if j in recs and recs[j].get("status") not in code_jobs.LIVE)
+    return ended
 
 
 def _state_path():
