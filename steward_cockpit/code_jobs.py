@@ -2667,8 +2667,19 @@ def copy_inputs(tree, md):
     try:
         root = Path(tree).resolve()
         text = (root / md).read_text(encoding="utf-8", errors="replace")
-        for m in _IMAGE_REF.finditer(text):
-            ref = (m.group(1) or m.group(2) or m.group(3) or "").split("#")[0].split("?")[0]
+        refs = [m.group(1) or m.group(2) or m.group(3) or "" for m in _IMAGE_REF.finditer(text)]
+        try:                                          # five r4 #1: the renderer's own reading of the figures -
+            import html as _html                      # its Markdown parser, then unescaped and %-decoded as
+            import urllib.parse as _up                # tools/reading_copy.py does ("plot one.png", "plot%20one.png")
+            import report_viewer
+            page = report_viewer.reader_html(text, title="inputs", katex_url_prefix="")
+            refs += re.findall(r'!<a href="([^"]+)" rel="noopener noreferrer">', page)
+            refs += re.findall(r'<img[^>]*?src="([^"]+)"', page)
+            refs = [_up.unquote(_html.unescape(r)) for r in refs] + refs
+        except Exception:
+            pass
+        for raw in refs:
+            ref = raw.split("#")[0].split("?")[0]
             if not ref or ":" in ref or ref.startswith(("/", "//")):
                 continue
             p = ((root / md).parent / ref).resolve()

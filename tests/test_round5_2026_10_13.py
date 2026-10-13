@@ -524,3 +524,10 @@ def test_the_result_the_steward_reads_names_the_tier_and_the_served_model(tmp_pa
     cj._materialize_report(tmp_path, job)
     text = said[0]
     assert "Tier: standard (small unavailable: no small tier for gemini); model served gemini-x." in text
+
+
+def test_copy_inputs_read_figure_names_as_the_renderer_does(tmp_path):
+    (tmp_path / "doc").mkdir()
+    (tmp_path / "doc" / "plot one.png").write_bytes(b"x")
+    (tmp_path / "doc" / "r.md").write_text("![p](plot%20one.png) ![q](<plot one.png>)", encoding="utf-8")
+    assert "doc/plot one.png" in cj.copy_inputs(tmp_path, "doc/r.md")
