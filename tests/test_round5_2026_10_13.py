@@ -694,3 +694,27 @@ def test_a_redo_waits_until_the_original_worker_is_confirmed_ended(project, tmp_
     monkeypatch.setattr(ch, "observe", lambda job: {"state": "unknown"})
     out = cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, escalates=small["job"])
     assert not out["ok"] and "not confirmed ended (unknown)" in out["error"]
+
+
+def test_an_inherited_copy_remade_after_its_check_redrew_the_figure_lands(project, monkeypatch):
+    root, workers, factory = project
+    (root / "B" / "report.md").write_text("# R ![f](fig.png)" + chr(10), encoding="utf-8")
+    (root / "B" / "fig.png").write_bytes(b"old")
+    (root / "B" / "report.html").write_text("<p>old</p>" + chr(10), encoding="utf-8")
+    git(root, "add", "B/report.md", "B/fig.png", "B/report.html")
+    git(root, "commit", "-qm", "report")
+    real_run = subprocess.run
+    def render(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        fig = Path(args[2]).parent / "fig.png"
+        Path(args[args.index("--html") + 1]).write_text("<p>%s</p>" % fig.read_text() + chr(10), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", render)
+    draw = [sys.executable, "-c", "import pathlib; pathlib.Path('B/fig.png').write_text('redrawn')"]
+    out = cj.start(root / "A", root / "B", "tidy", draw, engine_factory=factory,
+                   outputs=["B/report.html", "B/fig.png", "B/note.txt"])
+    workers[0].produce({"B/note.txt": "a note" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert done["landed"], done["land_note"]
+    assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p>redrawn</p>" + chr(10)

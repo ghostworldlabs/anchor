@@ -1825,7 +1825,7 @@ def _finish(cdir, job_id, job, result):
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
                 _make_reading_copies(job, wt, made_copies)        # review r4: the check may be what wrote the Markdown
-            stale_worker = stale_worker_copies(job, wt, before)
+            stale_worker = [n for n in stale_worker_copies(job, wt, before) if n not in made_copies]   # r12: remade = fresh
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
                   anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}))
             after = changed_paths(wt, candidate_base(job))
