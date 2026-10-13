@@ -821,6 +821,20 @@ SIZES = ("small", "standard")
 CLAUDE_TIER_MODELS = ("sonnet", "opus", "haiku")    # the Claude CLI's aliases; its catalog shows only "best"
 
 
+def _redo_refusal(jobs, escalates):
+    """Why ``escalates`` cannot be redone now, or None: it must be a small-tier job of this effort that ended without
+    landing, not being re-filed, and not redone already."""
+    orig = jobs.get(escalates)
+    if not orig or not str(orig.get("tier") or "").startswith("small"):
+        return "%s is not a small-tier job of this effort" % escalates
+    if orig.get("status") in LIVE or orig.get("landed") or orig.get("finalizer_active"):
+        return "%s is still running, being re-filed, or already landed" % escalates
+    twin = next((j for j, r in jobs.items() if r.get("escalates") == escalates), None)
+    if twin:
+        return "%s is already redone by %s; inspect that job" % (escalates, twin)
+    return None
+
+
 def tiers_path():
     from steward_cockpit import foundry_tools
     return Path(os.environ.get("ANCHOR_TIERS_FILE") or foundry_tools.index_path().parent / "tiers.json")
@@ -1451,15 +1465,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     if escalates and not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", escalates):
         return {"ok": False, "error": "no job started: --escalates names a job id (like 20261013-070623-b2a758)"}
     if escalates:                                  # plan r2 #3: one standard redo per ended, unlanded small job
-        prior = read_jobs(cdir)
-        orig = prior.get(escalates)
-        if not orig or not str(orig.get("tier") or "").startswith("small"):
-            return {"ok": False, "error": "no job started: %s is not a small-tier job of this effort" % escalates}
-        if orig.get("status") in LIVE or orig.get("landed"):
-            return {"ok": False, "error": "no job started: %s is still running or already landed" % escalates}
-        twin = next((j for j, r in prior.items() if r.get("escalates") == escalates), None)
-        if twin:
-            return {"ok": False, "error": "no job started: %s is already redone by %s; inspect that job" % (escalates, twin)}
+        if size != "standard":
+            return {"ok": False, "error": "no job started: a redo of a small job runs at standard size"}
+        why = _redo_refusal(read_jobs(cdir), escalates)
+        if why:
+            return {"ok": False, "error": "no job started: " + why}
     tier, tier_note = None, "standard"
     if size == "small":
         if worker != "coder":
@@ -1532,11 +1542,10 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             served_dirt = dirty_snapshot(root)
             if served_dirt is None:
                 return {"ok": False, "error": "could not record the repository's own changes before starting; no job started"}
-            twin = next((j for j, r in read_jobs(cdir).items() if escalates and r.get("escalates") == escalates), None)
-            if twin:                                  # five r1 #2: two redos raced; this one never starts
+            why = _redo_refusal(read_jobs(cdir), escalates) if escalates else None
+            if why:                                   # five r1 #2 / r2 #2: raced with another redo or a re-filing
                 _cleanup({"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt)}, keep_branch=False)
-                return {"ok": False, "error": "no job started: %s is already redone by %s; inspect that job"
-                        % (escalates, twin)}
+                return {"ok": False, "error": "no job started: " + why}
             job = {"id": job_id, "repo": str(root), "branch": branch, "worktree": str(wt), "base": base, "brief": brief,
                    "work_dir": work_dir, "attempt": 1, "phase": "producing", "phase_at": time.time(),
                    "repo_dirt": served_dirt,
@@ -1760,7 +1769,7 @@ def _finish(cdir, job_id, job, result):
     changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"],
-              "model_served": (result or {}).get("model_served") or None}
+              "model_served": (result or {}).get("model_served") or job.get("model_served") or None}
     checked = False
     if changed == [] and not err and missing_reading_outputs(job, wt):
         # A packaging check can be the only producer (e.g. unchanged source -> new PDF).
@@ -1958,7 +1967,8 @@ def speed_line(job, wt):
             with open(jobs_base() / "speed.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps({"job": job["id"], "attempt": job.get("attempt", 1), "at": now,
                                     "steward_dir": job.get("steward_dir") or "", "refiled": bool(refiled),
-                                    "minutes": round(total, 1) if total is not None else None,
+                                    "minutes": (round(total, 1) if total is not None else
+                                                round(max(0.0, now - refiled) / 60, 1) if refiled else None),
                                     "worker_minutes": round((ended - born) / 60, 1) if born else None,
                                     "steps": (worker or {}).get("steps"), "helpers_written": helpers[:20],
                                     "by_category": (worker or {}).get("by_category"), "line": text}) + "\n")
@@ -2180,6 +2190,11 @@ def land(job, files):
             _git(wt, "merge", "--abort")
             return False, "not landed: the work conflicts with newer changes in %s; it is kept at %s" % (repo, wt), fields
         code, merged, _ = _git(wt, "rev-parse", "HEAD")
+        remade, why = _remake_after_integration(job, wt, cand, merged, files)
+        if why:
+            return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
+        if remade:
+            code, merged, _ = _git(wt, "rev-parse", "HEAD")
         from steward_cockpit import code_job_handoff as handoff
         # Pair the upstream comparison boundary with the exact integrated tree
         # before another command can change it. Preserve it on later failures.
@@ -2532,6 +2547,40 @@ def _make_reading_copies(job, tree, refresh=None):
         except Exception:
             continue
     return made
+
+
+def _remake_after_integration(job, wt, cand, merged, files):
+    """Review five r2 #1: newer changes brought in by integration touched the Markdown (or a figure beside it) of a
+    reading copy this job delivers, so the copy is made again from the integrated inputs and committed; the check and
+    the delta review that follow see it. Returns (paths remade, why not) - a copy that cannot be remade keeps the work."""
+    remade = []
+    for name in job.get("outputs") or []:
+        if Path(name).suffix.lower() not in (".pdf", ".html", ".htm") or name not in set(files):
+            continue
+        md = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
+        folder = str(Path(md).parent).replace(chr(92), "/")
+        code, out, _ = _git(wt, "diff", "--name-only", cand, merged, "--", "." if folder in ("", ".") else folder)
+        if code != 0:
+            return [], "the integrated changes to %s could not be read" % folder
+        if not ({ln.strip() for ln in out.splitlines() if ln.strip()} - {name}):
+            continue
+        try:
+            target = _output_path(wt, name)
+            if not target.with_suffix(".md").is_file():
+                return [], "%s changed in newer work but its Markdown is gone; make the copy again" % name
+            target.unlink()
+        except (OSError, ValueError) as e:
+            return [], "%s could not be made again after integration (%s)" % (name, e)
+        if name not in _make_reading_copies(dict(job, outputs=[name]), wt):
+            return [], "%s could not be made again from the integrated Markdown" % name
+        remade.append(name)
+    if remade:
+        code, _, err = _git(wt, "add", "-f", "--", *remade)
+        if code == 0:
+            code, _, err = _git(wt, "commit", "-q", "-m", "Reading copies made again after integration: " + ", ".join(remade))
+        if code != 0:
+            return [], "the remade reading copies could not be committed (%s)" % err[:160]
+    return remade, None
 
 
 def _newest_input(source, target, cap=500):

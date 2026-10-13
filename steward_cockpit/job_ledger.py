@@ -69,7 +69,7 @@ def _write_state(rows, at):
 
 
 def due(rows, state, now):
-    """Is a ledger note due? First sight only starts the count."""
+    """Is a ledger note due? (No state yet: nothing is due until the count has started.)"""
     if state is None:
         return False
     new = rows - int(state.get("rows") or 0)
@@ -110,9 +110,9 @@ def nudge(now=None, engine=None):
         with _LOCK:
             now = time.time() if now is None else now
             rows, state = finished_count(), _read_state()
-            if state is None:
-                _write_state(rows, now)
-                return False
+            if state is None:                     # five r2 #6: count from zero - the first jobs are reported too
+                _write_state(0, now)
+                state = {"rows": 0, "at": now}
             if not due(rows, state, now):
                 return False
             eng = engine if engine is not None else campaign_engine()

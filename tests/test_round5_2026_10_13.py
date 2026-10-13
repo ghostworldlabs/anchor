@@ -254,7 +254,7 @@ def test_a_refilings_time_line_counts_from_its_claim(tmp_path, monkeypatch):
     line = cj.speed_line(job, tmp_path)
     assert line.startswith("re-filed: check, review and landing 2 min") and "in all" not in line
     row = json.loads((tmp_path / "jobs" / "speed.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-    assert row["refiled"] and row["steward_dir"] == "C:/x" and row["minutes"] is None
+    assert row["refiled"] and row["steward_dir"] == "C:/x" and row["minutes"] == 2.0   # its own minutes only
     first = cj.speed_line({"id": "j2", "worker_birth": now - 600, "worker_completed_at": now - 60}, tmp_path)
     assert first.startswith("10 min in all; worker 9 min")
 
@@ -291,7 +291,7 @@ def test_the_ledger_goes_to_the_campaign_steward_after_ten_jobs_and_never_while_
     monkeypatch.setattr(job_ledger, "_is_campaign", lambda eng: True)
     (tmp_path / "jobs").mkdir()
     eng = _Steward()
-    assert not job_ledger.nudge(now=1000.0, engine=eng)                    # first sight starts the count
+    assert not job_ledger.nudge(now=1000.0, engine=eng)                    # first sight starts the count at zero
     _rows(tmp_path, 9)
     _rows(tmp_path, 5, status="running")                                     # still at work: not counted yet
     assert not job_ledger.nudge(now=1001.0, engine=eng) and not eng.sent
@@ -377,3 +377,67 @@ def test_the_cli_sends_size_and_escalates(monkeypatch, tmp_path):
                                       "--size", "small", "--escalates", "20261013-070623-b2a758"])
     cli.main()
     assert sent[-1]["size"] == "small" and sent[-1]["escalates"] == "20261013-070623-b2a758"
+
+
+def test_the_first_finished_job_is_reported_after_seven_days_not_swallowed(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setattr(job_ledger, "ledger_text", lambda: "LEDGER")
+    monkeypatch.setattr(job_ledger, "_is_campaign", lambda eng: True)
+    (tmp_path / "jobs").mkdir()
+    _rows(tmp_path, 1)                                                     # finished before the ledger ever looked
+    eng = _Steward()
+    assert not job_ledger.nudge(now=1000.0, engine=eng)
+    assert job_ledger.nudge(now=1000.0 + 8 * 86400, engine=eng) and eng.sent[0][0].endswith("-1")
+
+
+def test_a_redo_runs_standard_and_waits_while_the_small_job_is_refiled(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    small = cj.start(root / "A", root / "B", "x", FAIL, engine_factory=factory, size="small")
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    await_job(root / "A", small["job"])
+    assert "runs at standard size" in cj.start(root / "A", root / "B", "x", PASS, engine_factory=factory, size="small",
+                                               escalates=small["job"])["error"]
+    jobs = cj.read_jobs(root / "A")
+    assert "being re-filed" in cj._redo_refusal({**jobs, small["job"]: dict(jobs[small["job"]], finalizer_active=True)},
+                                                small["job"])
+
+
+def test_a_refiling_keeps_the_served_model_the_worker_reported(project, tmp_path, monkeypatch):
+    root, workers, factory = project
+    _tiers(tmp_path, monkeypatch, {"claude": {"model": "sonnet", "effort": "high"}})
+    out = cj.start(root / "A", root / "B", "Produce result", FAIL, engine_factory=factory, size="small")
+    workers[0].model_selection = {"model": "sonnet", "model_served": "claude-sonnet-5-5"}
+    workers[0].produce({"B/result.py": "answer = 42" + chr(10)})
+    first = await_job(root / "A", out["job"])
+    assert first["model_served"] == "claude-sonnet-5-5"
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    assert ch.recover(root / "A", out["job"], check=PASS)["ok"]
+    done = await_job(root / "A", out["job"], attempt=2)
+    assert done["landed"] and done["model_served"] == "claude-sonnet-5-5"
+
+
+def test_a_reading_copy_is_made_again_when_integration_brings_a_newer_figure(project, monkeypatch):
+    root, workers, factory = project
+    (root / "B" / "fig.png").write_bytes(b"old figure")
+    git(root, "add", "B/fig.png")
+    git(root, "commit", "-qm", "figure")
+    real_run = subprocess.run
+    def fake_run(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        src = Path(args[2])
+        out = Path(args[args.index("--html") + 1])
+        fig = (src.parent / "fig.png").read_bytes().decode()
+        out.write_text("<p>%s | %s</p>" % (src.read_text(encoding="utf-8").strip(), fig) + chr(10), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", fake_run)
+    out = cj.start(root / "A", root / "B", "write B/report.md", PASS, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    (root / "B" / "fig.png").write_bytes(b"new figure")               # newer work lands while the job runs
+    git(root, "add", "B/fig.png")
+    git(root, "commit", "-qm", "newer figure")
+    workers[0].produce({"B/report.md": "# Report" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert done["landed"], done["land_note"]
+    assert (root / "B" / "report.html").read_text(encoding="utf-8") == "<p># Report | new figure</p>" + chr(10)
