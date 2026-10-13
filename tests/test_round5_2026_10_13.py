@@ -794,3 +794,10 @@ def test_an_identical_remake_by_anchor_is_fresh_not_stale(project):
     job["copy_prints"] = {"B/report.html": cj.inputs_print(wt, "B/report.md")}
     assert cj.stale_owned(job, wt, ["B/report.html"], ["B/report.md", "B/report.html"]) == []
     assert cj.stale_owned(job, wt, [], ["B/report.md"]) == ["B/report.html"]          # not Anchor's: stale
+
+
+def test_an_owned_copy_unchanged_from_the_base_is_still_checked_against_its_inputs(tmp_path):
+    (tmp_path / "B").mkdir()
+    (tmp_path / "B" / "report.md").write_text("# R", encoding="utf-8")
+    job = {"outputs": ["B/report.md", "B/report.html"], "copy_prints": {"B/report.html": "an older fingerprint"}}
+    assert cj.stale_owned(job, tmp_path, ["B/report.html"], ["B/report.md"]) == ["B/report.html"]

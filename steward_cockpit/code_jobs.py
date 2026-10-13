@@ -2248,6 +2248,7 @@ def land(job, files):
         if why:
             return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
         if redrawn:
+            files = list(files) + [n for n in redrawn if n not in set(files)]   # declared outputs: they land too
             code, merged, _ = _git(wt, "rev-parse", "HEAD")
             integrated_snapshot = handoff.snapshot(job)
             if integrated_snapshot.get("error") or not phase(job, "checking", recovery_snapshot=integrated_snapshot,
@@ -2604,7 +2605,7 @@ def stale_owned(job, wt, ours, files):
     longer match the fingerprint of their last render, and any declared copy still identical to the base's while what
     it is made from changed (a locked file that could not be made again)."""
     prints = job.get("copy_prints") or {}
-    out = [n for n in ours if n in set(files) and n in prints
+    out = [n for n in ours if n in prints            # five r16: every owned copy, changed in the job or not
            and inputs_print(wt, str(Path(n).with_suffix(".md")).replace(chr(92), "/")) != prints[n]]
     for n in job.get("outputs") or []:
         if n in out or Path(n).suffix.lower() not in (".pdf", ".html", ".htm"):
@@ -2643,9 +2644,7 @@ def _refresh_owned_copies(job, wt, files):
     """Anchor's own landing copies whose inputs' bytes differ from their last render are made again and committed.
     Returns (paths remade, why not)."""
     stale = []
-    for name in job.get("anchor_copies") or []:
-        if name not in set(files):
-            continue
+    for name in job.get("anchor_copies") or []:      # five r16: every owned copy, changed in the job or not
         md = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
         if inputs_print(wt, md) != (job.get("copy_prints") or {}).get(name):
             stale.append(name)
