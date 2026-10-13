@@ -1871,8 +1871,11 @@ def handle_post(cdir, verb, body):
             elif action == "collect":
                 out = _ch.collect(cdir, jid, body.get("handoff_id"))
             else:
+                ok_paths = body.get("outside_ok") or []
+                if not isinstance(ok_paths, list) or not all(isinstance(x, str) for x in ok_paths):
+                    return {"ok": False, "error": "outside_ok is a list of repository-relative paths"}, 400
                 out = _ch.recover(cdir, jid, check=body.get("check"), outputs=body.get("outputs"),
-                                  actor=str(body.get("actor") or "the steward"))
+                                  actor=str(body.get("actor") or "the steward"), outside_ok=ok_paths[:20])
             return out, 200 if out.get("ok") else 409
         return {"ok": True, "jobs": list(_cj.read_jobs(cdir).values())[-20:]}, 200
     if verb == "skill_job":

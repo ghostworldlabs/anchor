@@ -206,3 +206,51 @@ def test_a_reviewer_that_fails_twice_is_reported_in_plain_words(tmp_path):
     assert not rec["ok"] and calls == 2
     assert "not in the required review form" in rec["error"] and "schema_nonconforming" in rec["error"]
     assert "Reviewer seat" in rec["error"]
+
+
+def test_a_snapshot_alone_is_not_a_clean_audit():
+    base = {"status": "done", "attempt": 2, "recovery_snapshot": {"files": {}}}
+    assert not cj.audit_clean(base)                                   # no mark: the audit may never have run
+    assert not cj.audit_clean(dict(base, audit_ok_attempt=1))          # an earlier attempt's mark
+    assert cj.audit_clean(dict(base, audit_ok_attempt=2))
+    assert not cj.audit_clean(dict(base, audit_ok_attempt=2, status="stopped"))
+
+
+def _refused_for_the_stewards_edit(root, workers, factory, monkeypatch):
+    """Book 1 v3 as it stands: re-filed once on the old build, refused for the steward's own AGENTS.md edit."""
+    cdir, jid, first = _first_attempt_unlanded(root, workers, factory)
+    _steward_edits_its_instructions(root)
+    jobs = cj.read_jobs(cdir)
+    jobs[jid].pop("audit_ok_attempt", None)                           # a record from before this build
+    jobs[jid]["served_tree_changed"] = ["B/AGENTS.md (committed abc)"]
+    cj._write_job(cdir, jobs[jid])
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    return cdir, jid
+
+
+def test_a_named_and_pinned_outside_file_lets_the_refiling_land(project, monkeypatch):
+    root, workers, factory = project
+    cdir, jid = _refused_for_the_stewards_edit(root, workers, factory, monkeypatch)
+    assert ch.recover(cdir, jid, check=PASS)["ok"]
+    assert not await_job(cdir, jid, attempt=2)["landed"]              # unnamed: still refused
+    assert ch.recover(cdir, jid, check=PASS, outside_ok=["B/AGENTS.md"])["ok"]
+    done = await_job(cdir, jid, attempt=3)
+    assert done["landed"], done["land_note"]
+
+
+def test_a_pinned_outside_file_that_changes_again_still_refuses(project, monkeypatch):
+    root, workers, factory = project
+    cdir, jid = _refused_for_the_stewards_edit(root, workers, factory, monkeypatch)
+    target = (root / "B" / "AGENTS.md").as_posix()
+    again = [sys.executable, "-c", "open(%r, 'a').write('changed after it was named')" % target]
+    assert ch.recover(cdir, jid, check=again, outside_ok=["B/AGENTS.md"])["ok"]
+    done = await_job(cdir, jid, attempt=2)
+    assert not done["landed"] and "changed during the job" in done["land_note"]
+
+
+def test_outside_ok_never_names_the_jobs_own_file_or_a_path_outside_the_repo(project, monkeypatch):
+    root, workers, factory = project
+    cdir, jid = _refused_for_the_stewards_edit(root, workers, factory, monkeypatch)
+    assert "job's own file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"] or \
+        "not a file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"]
+    assert "repository-relative" in ch.recover(cdir, jid, check=PASS, outside_ok=["../x"])["error"]

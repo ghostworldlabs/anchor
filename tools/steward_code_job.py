@@ -49,6 +49,9 @@ def main():
                     help="foreman: Foreman builds it in the job's worktree, gated by --check (a test command)")
     ap.add_argument("--plan-file", default="", help="Foreman: the plan John approved (## Wave N sections)")
     ap.add_argument("--profile", default="slim", choices=("slim", "standard"), help="Foreman: slim unless John said standard")
+    ap.add_argument("--outside-ok", action="append", default=[],
+                    help="recover: a repository file you know changed outside the job for its own reasons (e.g. your "
+                         "AGENTS.md); pinned to its bytes now; repeatable")
     ap.add_argument("--port", default=os.environ.get("ANCHOR_PORT", "8777"))
     a = ap.parse_args()
     pid, rel = project_for(os.getcwd())
@@ -71,6 +74,8 @@ def main():
             body["check"] = json.loads(a.check_argv) if a.check_argv else a.check
         if a.output:
             body["outputs"] = a.output
+        if a.outside_ok:
+            body["outside_ok"] = a.outside_ok
     if a.handoff_id:
         body["handoff_id"] = a.handoff_id
     if a.job:

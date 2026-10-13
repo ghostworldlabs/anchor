@@ -304,8 +304,10 @@ def orphaned_finalizer(job):
     return True
 
 
-def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
-    """Recheck and land saved bytes asynchronously; never start a producer."""
+def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outside_ok=None):
+    """Recheck and land saved bytes asynchronously; never start a producer. ``outside_ok`` names repository files
+    the caller knows changed outside the job for its own reasons (a steward's AGENTS.md); each is pinned to its bytes
+    now and stops counting as an outside write only while it stays exactly so."""
     from steward_cockpit import maintenance
     if maintenance.is_active():
         return {"ok": False, "error": "Anchor is in maintenance; recovery stays pending"}
@@ -334,6 +336,17 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
     # whatever changed in the repository since then is not this job's coder - a steward editing its own AGENTS.md
     # after the job ended. The re-filing's audit starts from now (read under the repo lock, released before the
     # record lock below); anything its own check writes into the repository is still caught.
+    pinned = {}
+    for rel in outside_ok or []:
+        rel = str(rel).replace(chr(92), "/").strip()
+        if not rel or rel.startswith("/") or ":" in rel or ".." in rel.split("/"):
+            return {"ok": False, "error": "outside-ok paths are repository-relative: %r" % rel}
+        digest = cj.file_hash(job["repo"], rel)
+        if digest is None:
+            return {"ok": False, "error": "outside-ok path is not a file in the repository: %s" % rel}
+        if rel in set(job.get("files") or []) | set(job.get("outputs") or []):
+            return {"ok": False, "error": "outside-ok cannot name the job's own file: %s" % rel}
+        pinned[rel] = digest
     audit_from = None
     if cj.audit_clean(job) and not orphan:
         audit_from = cj.audit_point(job)
@@ -354,7 +367,7 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
         history = list(current.get("attempts") or []) + [{k: current.get(k) for k in (
             "attempt", "finished", "check", "outputs", "check_ok", "review", "delta_review", "land_note", "error", "handoff",
             "command", "claim", "supervision", "stopped_by", "stop_requested", "stop_requested_by",
-            "served_tree_changed", "audit_from")}]
+            "served_tree_changed", "audit_from", "audit_ok_attempt", "outside_ok")}]
         claimed = cj._transition(cdir, job_id, (current["status"],), status="finishing", finishing_at=time.time(),
             expect_attempt=job.get("attempt", 1), finalizer_active=True,
             finished="", attempt=job.get("attempt", 1) + 1, attempts=history, check=revised_check, outputs=revised_outputs,
@@ -363,7 +376,8 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward"):
             stopped_by=None, stop_requested=None, stop_requested_by=None, kept_worktree="",
             worker_completed_at=current.get("worker_completed_at") or time.time(),   # a stopped coder is proven ended above
             integration_check_ok=None, review=None, delta_review=None, supervision=None, command=None,
-            served_tree_changed=None, audit_from=audit_from or current.get("audit_from"))
+            served_tree_changed=None, audit_ok_attempt=None, audit_from=audit_from or current.get("audit_from"),
+            outside_ok=pinned or None)
         busy = cj._busy_read()
         busy[job_id] = {"job": job_id, "cdir": str(cdir), "repo": cj._norm(job["repo"])}
         try:

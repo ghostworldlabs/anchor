@@ -1767,6 +1767,8 @@ def _finish(cdir, job_id, job, result):
         fields["unexpected"] = sorted(set(fields.get("unexpected") or [])
                                       | {p + " (ignored by git)" for p in ignored_outputs(wt)})
     served = _locked_served_changes(job)              # on every path: did anything write into the source repository?
+    if not served:                                    # an affirmative, attempt-bound clean audit (review r1 #1)
+        fields["audit_ok_attempt"] = job.get("attempt", 1)
     if served:
         fields["served_tree_changed"] = served
         if not fields.get("landed"):
@@ -1799,7 +1801,7 @@ def speed_line(job, wt):
         if tool.is_file() and born:
             since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(born - 60))
             r = subprocess.run([sys.executable, str(tool), "--worktree", str(wt), "--since", since, "--json"],
-                               capture_output=True, text=True, timeout=30,
+                               capture_output=True, text=True, timeout=8,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode == 0 and r.stdout.strip().startswith("{"):
                 prof = json.loads(r.stdout)
@@ -1841,10 +1843,19 @@ def _unlanded(wt, manifest):
 
 
 def audit_clean(job):
-    """True when this attempt's end-of-job audit ran and found nothing written into the repository from outside: it
-    saved its recovery record (the audit runs just before, on every path) and named no outside change."""
-    return (job.get("status") in ("done", "failed", "stopped") and bool(job.get("recovery_snapshot"))
+    """True only when THIS attempt's end-of-job audit ran to its end and found nothing written into the repository
+    from outside - an affirmative mark the finish writes for its own attempt (a snapshot alone proves nothing: it is
+    saved before the audit, after an interrupted finish, and for a stopped job)."""
+    return (job.get("status") in ("done", "failed") and job.get("audit_ok_attempt") == job.get("attempt", 1)
             and not job.get("served_tree_changed"))
+
+
+def file_hash(repo, path):
+    """sha256 of a repository file's bytes now; None when it is not a readable file."""
+    try:
+        return hashlib.sha256((Path(repo) / path).read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def audit_point(job):
@@ -1906,6 +1917,12 @@ def _served_tree_changes(job):
                 lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
                 if lines and lines[0] not in verified:
                     changed |= {"%s (committed %s)" % (p, lines[0][:10]) for p in lines[1:] if watched(p)}
+    ok = job.get("outside_ok") or {}                  # named at the re-filing, each pinned to its bytes then
+    if isinstance(ok, dict) and ok:
+        def _path(entry):
+            return entry.split(" (committed ", 1)[0]
+        changed = {c for c in changed if not (_path(c) in ok and ok[_path(c)]
+                                              and file_hash(job["repo"], _path(c)) == ok[_path(c)])}
     return sorted(changed)
 
 
@@ -2081,8 +2098,15 @@ def land(job, files):
             return False, ("not landed: the job's branch moved after review (%s, reviewed %s); everything is kept at %s"
                            % (now_head[:12], cand[:12], wt)), fields
         left = _not_runtime(_unlanded(wt, files))      # a second check after integration made nothing extra (W1: runtime records aside)
-        kept = {p + " (ignored by git)" for p in job.get("scratch_kept") or []}
-        left = [p for p in left if p not in kept]      # scratch named at the finish stays behind in the kept worktree
+        # ignored scratch nobody declared - named at the finish or made since (a repeated check) - stays behind in the
+        # kept worktree; the cleanup inventory after placement still lists it, so the worktree is kept (review r1 #2)
+        tag = " (ignored by git)"
+        mine = set(job.get("outputs") or []) | set(files)
+        late_scratch = [p[:-len(tag)] for p in left if p.endswith(tag) and p[:-len(tag)] not in mine]
+        if late_scratch:
+            job["scratch_kept"] = sorted(set(job.get("scratch_kept") or []) | set(late_scratch))
+            fields["scratch_kept"] = job["scratch_kept"]
+        left = [p for p in left if not (p.endswith(tag) and p[:-len(tag)] not in mine)]
         if left:
             fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
             return False, ("not landed: changes outside the coder's own files appeared before placement (%s); "
