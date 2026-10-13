@@ -741,3 +741,23 @@ def test_a_copy_anchor_could_not_remake_never_lands(project, monkeypatch):
     workers[0].produce({"B/report.md": "# R" + chr(10)})
     done = await_job(root / "A", out["job"])
     assert not done["landed"] and "B/report.html could not be made again" in done["land_note"]
+
+
+def test_a_locked_inherited_copy_beside_changed_markdown_never_lands(project, monkeypatch):
+    root, workers, factory = project
+    (root / "B" / "report.md").write_text("# Old" + chr(10), encoding="utf-8")
+    (root / "B" / "report.html").write_text("<p>Old</p>" + chr(10), encoding="utf-8")
+    git(root, "add", "B/report.md", "B/report.html")
+    git(root, "commit", "-qm", "report")
+    real_unlink = Path.unlink
+    def locked(self, *a, **kw):
+        if self.name == "report.html":
+            raise PermissionError("open in another program")
+        return real_unlink(self, *a, **kw)
+    monkeypatch.setattr(Path, "unlink", locked)
+    out = cj.start(root / "A", root / "B", "revise B/report.md", PASS, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    workers[0].produce({"B/report.md": "# New" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert not done["landed"] and "B/report.html could not be made again" in done["land_note"]
+    assert (root / "B" / "report.md").read_text(encoding="utf-8") == "# Old" + chr(10)

@@ -2600,10 +2600,22 @@ def _make_reading_copies(job, tree, refresh=None):
 
 
 def stale_owned(job, wt, ours, files):
-    """Anchor's own landing copies whose inputs no longer match the fingerprint of their last render."""
+    """Declared reading copies that would land or stay stale (five r13/r14): Anchor's own copies whose inputs no
+    longer match the fingerprint of their last render, and any declared copy still identical to the base's while what
+    it is made from changed (a locked file that could not be made again)."""
     prints = job.get("copy_prints") or {}
-    return [n for n in ours if n in set(files) and n in prints
-            and inputs_print(wt, str(Path(n).with_suffix(".md")).replace(chr(92), "/")) != prints[n]]
+    out = [n for n in ours if n in set(files) and n in prints
+           and inputs_print(wt, str(Path(n).with_suffix(".md")).replace(chr(92), "/")) != prints[n]]
+    for n in job.get("outputs") or []:
+        if n in out or Path(n).suffix.lower() not in (".pdf", ".html", ".htm"):
+            continue
+        try:
+            target = _output_path(wt, n)
+            if inherited_stale(job, wt, n, target, target.with_suffix(".md")):
+                out.append(n)
+        except (OSError, ValueError):
+            continue
+    return out
 
 
 def worker_copy_prints(job, wt, ours):
