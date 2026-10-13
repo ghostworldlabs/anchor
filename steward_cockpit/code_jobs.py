@@ -827,7 +827,7 @@ def _redo_refusal(jobs, escalates):
     orig = jobs.get(escalates)
     if not orig or not str(orig.get("tier") or "").startswith("small"):
         return "%s is not a small-tier job of this effort" % escalates
-    if orig.get("status") in LIVE or orig.get("landed") or orig.get("finalizer_active"):
+    if orig.get("status") in LIVE or orig.get("landed") or orig.get("placed") or orig.get("finalizer_active"):
         return "%s is still running, being re-filed, or already landed" % escalates
     twin = next((j for j, r in jobs.items() if r.get("escalates") == escalates), None)
     if twin:
@@ -1778,7 +1778,8 @@ def _finish(cdir, job_id, job, result):
         fields["check_ok"], fields["check_output"] = run_check(job, wt)
         _make_reading_copies(job, wt, made_copies)                # review r4: the check may be what wrote the Markdown
         checked = True
-        phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
+        phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
+                  anchor_copies=list(made_copies))
         changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
@@ -1816,7 +1817,8 @@ def _finish(cdir, job_id, job, result):
             if not checked:
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
                 _make_reading_copies(job, wt, made_copies)        # review r4: the check may be what wrote the Markdown
-            phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"])
+            phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
+                  anchor_copies=list(made_copies))
             after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
@@ -2208,7 +2210,8 @@ def land(job, files):
         fields.update(integrated_base=head, recovery_snapshot=integrated_snapshot)
         try:
             saved = not integrated_snapshot.get("error") and phase(job, "checking", integrated_base=head,
-                                                                    recovery_snapshot=integrated_snapshot)
+                                                                    recovery_snapshot=integrated_snapshot,
+                                                                    anchor_copies=list(job.get("anchor_copies") or []))
         except Exception:
             saved = False  # the terminal write still carries this exact pair; never run an unrecorded check
         if not saved:

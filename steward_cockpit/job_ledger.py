@@ -61,10 +61,10 @@ def _read_state():
         return None
 
 
-def _write_state(rows, at):
+def _write_state(rows, at, pending=None):
     p = _state_path()
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"rows": rows, "at": at}), encoding="utf-8")
+    tmp.write_text(json.dumps({"rows": rows, "at": at, "pending": pending}), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -118,12 +118,15 @@ def nudge(now=None, engine=None):
             eng = engine if engine is not None else campaign_engine()
             if eng is None or not eng.alive():
                 return False                      # asleep: the count stands, the next finish tries again
-            text = ledger_text()
-            ident = "attention:ledger:%s-%d" % (time.strftime("%Y%m%d", time.localtime(now)), rows)
-            res = eng.enqueue_job_result(ident, "THE JOB LEDGER (every %d jobs or 7 days)\n" % EVERY_JOBS + text + RULE)
+            pend = state.get("pending") if isinstance(state.get("pending"), dict) else None
+            if pend is None:                      # five r6 #3: the note is fixed before it is sent, so a retry after
+                pend = {"id": "attention:ledger:%d" % rows, "rows": rows,      # a lost save repeats it exactly
+                        "text": "THE JOB LEDGER (every %d jobs or 7 days)\n" % EVERY_JOBS + ledger_text() + RULE}
+                _write_state(state.get("rows") or 0, state.get("at") or now, pend)
+            res = eng.enqueue_job_result(pend["id"], pend["text"])
             if not (isinstance(res, dict) and res.get("ok")):
                 return False
-            _write_state(rows, now)
+            _write_state(pend["rows"], now)
             return True
     except Exception:
         return False

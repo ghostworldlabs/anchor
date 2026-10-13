@@ -310,7 +310,7 @@ def test_the_ledger_goes_to_the_campaign_steward_after_ten_jobs_and_never_while_
     assert not job_ledger.nudge(now=1003.0, engine=refused)                 # not accepted: the count stands
     assert job_ledger.nudge(now=1004.0, engine=eng)
     ident, text = eng.sent[0]
-    assert ident.startswith("attention:ledger:") and ident.endswith("-10")
+    assert ident == "attention:ledger:10"
     assert "LEDGER" in text and "at most ONE recommendation" in text and "Never change tiers.json" in text
     assert not job_ledger.nudge(now=1005.0, engine=eng) and len(eng.sent) == 1
     monkeypatch.setattr(job_ledger, "_is_campaign", lambda e: False)
@@ -395,7 +395,7 @@ def test_the_first_finished_job_is_reported_after_seven_days_not_swallowed(tmp_p
     _rows(tmp_path, 1)                                                     # finished before the ledger ever looked
     eng = _Steward()
     assert not job_ledger.nudge(now=1000.0, engine=eng)
-    assert job_ledger.nudge(now=1000.0 + 8 * 86400, engine=eng) and eng.sent[0][0].endswith("-1")
+    assert job_ledger.nudge(now=1000.0 + 8 * 86400, engine=eng) and eng.sent[0][0] == "attention:ledger:1"
 
 
 def test_a_redo_runs_standard_and_waits_while_the_small_job_is_refiled(project, tmp_path, monkeypatch):
@@ -562,3 +562,31 @@ def test_copy_inputs_keep_an_encoded_hash_in_a_figure_name(tmp_path):
     (tmp_path / "doc" / "chart#1.png").write_bytes(b"x")
     (tmp_path / "doc" / "r.md").write_text("![c](chart%231.png)", encoding="utf-8")
     assert "doc/chart#1.png" in cj.copy_inputs(tmp_path, "doc/r.md")
+
+
+def test_a_note_whose_save_was_lost_is_sent_again_word_for_word(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CODE_JOBS_DIR", str(tmp_path / "jobs"))
+    texts = iter(["LEDGER ONE", "LEDGER TWO"])
+    monkeypatch.setattr(job_ledger, "ledger_text", lambda: next(texts))
+    monkeypatch.setattr(job_ledger, "_is_campaign", lambda eng: True)
+    (tmp_path / "jobs").mkdir()
+    _rows(tmp_path, 10)
+    eng = _Steward()
+    real = job_ledger._write_state
+    calls = []
+    def lose_the_final_save(rows, at, pending=None):
+        calls.append(rows)
+        if rows == 10 and pending is None:
+            raise OSError("disk full")
+        real(rows, at, pending)
+    monkeypatch.setattr(job_ledger, "_write_state", lose_the_final_save)
+    assert not job_ledger.nudge(now=1000.0, engine=eng)                  # sent, but its save was lost
+    monkeypatch.setattr(job_ledger, "_write_state", real)
+    assert job_ledger.nudge(now=2000.0, engine=eng)
+    assert eng.sent[0] == eng.sent[1] and "LEDGER ONE" in eng.sent[1][1]  # same identity, same words: deduplicated
+    assert not job_ledger.nudge(now=3000.0, engine=eng) and len(eng.sent) == 2
+
+
+def test_placed_work_is_never_redone():
+    jobs = {"s": {"tier": "small: sonnet high", "status": "failed", "placed": True}}
+    assert "already landed" in cj._redo_refusal(jobs, "s")
