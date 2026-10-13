@@ -640,3 +640,32 @@ def test_every_figure_of_a_large_document_is_an_input(tmp_path):
     (tmp_path / "r.md").write_text(" ".join("![f](f%d.png)" % i for i in range(300)), encoding="utf-8")
     inputs = cj.copy_inputs(tmp_path, "r.md")
     assert len(inputs) >= 301 and "f299.png" in inputs
+
+
+def test_a_figure_redrawn_by_the_integration_check_refreshes_anchors_copy_before_the_last_review(project, monkeypatch):
+    root, workers, factory = project
+    (root / ".gitignore").write_text("*.png" + chr(10), encoding="utf-8")
+    git(root, "add", ".gitignore")
+    git(root, "commit", "-qm", "ignore figures")
+    real_run = subprocess.run
+    def render(args, **kw):
+        if str(cj.READING_COPY_TOOL) not in [str(a) for a in args]:
+            return real_run(args, **kw)
+        src = Path(args[2])
+        fig = src.parent / "fig.png"
+        Path(args[args.index("--html") + 1]).write_text(
+            "<p>%s</p>" % (fig.read_bytes().decode() if fig.is_file() else "none") + chr(10), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", render)
+    draw = [sys.executable, "-c", "import pathlib,subprocess; n = subprocess.run(['git','rev-list','--count','HEAD'],"
+            "capture_output=True,text=True).stdout.strip(); pathlib.Path('B/fig.png').write_text('drawn at ' + n)"]
+    out = cj.start(root / "A", root / "B", "write B/report.md", draw, engine_factory=factory,
+                   outputs=["B/report.md", "B/report.html"])
+    (root / "B" / "notes.txt").write_text("newer" + chr(10), encoding="utf-8")   # newer work: the job integrates
+    git(root, "add", "B/notes.txt")
+    git(root, "commit", "-qm", "newer work")
+    workers[0].produce({"B/report.md": "# R ![f](fig.png)" + chr(10)})
+    done = await_job(root / "A", out["job"])
+    assert done["landed"], done["land_note"]
+    html = (root / "B" / "report.html").read_text(encoding="utf-8")
+    assert html.startswith("<p>drawn at ") and html != "<p>drawn at 2</p>" + chr(10)   # not the first check's figure

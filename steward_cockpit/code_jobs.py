@@ -2222,6 +2222,18 @@ def land(job, files):
         fields["integration_check_ok"] = ok is True        # final review 10-10: the stage line reads the final gate
         if ok is not True:                                 # a missing check is a failure too (W1a)
             return False, "not landed: the check did not pass after bringing in newer changes; the work is kept at %s" % wt, fields
+        # five r10: the check just run may have redrawn a figure Anchor's copies are made from - those copies are made
+        # again from the final bytes and committed, so the delta review below sees exactly what lands
+        redrawn, why = _refresh_owned_copies(job, wt, files)
+        if why:
+            return False, "not landed: %s; the work is kept at %s" % (why, wt), fields
+        if redrawn:
+            code, merged, _ = _git(wt, "rev-parse", "HEAD")
+            integrated_snapshot = handoff.snapshot(job)
+            if integrated_snapshot.get("error") or not phase(job, "checking", recovery_snapshot=integrated_snapshot,
+                                                             copy_prints=dict(job.get("copy_prints") or {})):
+                return False, "not landed: the refreshed snapshot could not be saved; work is kept at " + wt, fields
+            fields.update(recovery_snapshot=integrated_snapshot)
         missing = missing_reading_outputs(job, wt)
         if missing:
             fields.update(integration_check_ok=False, missing_outputs=missing)
@@ -2567,6 +2579,37 @@ def _make_reading_copies(job, tree, refresh=None):
     return made
 
 
+def _refresh_owned_copies(job, wt, files):
+    """Anchor's own landing copies whose inputs' bytes differ from their last render are made again and committed.
+    Returns (paths remade, why not)."""
+    stale = []
+    for name in job.get("anchor_copies") or []:
+        if name not in set(files):
+            continue
+        md = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
+        if inputs_print(wt, md) != (job.get("copy_prints") or {}).get(name):
+            stale.append(name)
+    if not stale:
+        return [], None
+    for name in stale:
+        try:
+            _output_path(wt, name).unlink()
+        except (OSError, ValueError) as e:
+            return [], "%s could not be made again (%s)" % (name, e)
+    made = _make_reading_copies(job, wt)
+    lost = [n for n in stale if n not in made]
+    if lost:
+        return [], "%s could not be made again from the final Markdown" % ", ".join(lost)
+    code, _, err = _git(wt, "add", "-f", "--", *stale)
+    if code == 0 and _git(wt, "diff", "--cached", "--quiet")[0] == 0:
+        return [], None                               # made again, byte for byte the same
+    if code == 0:
+        code, _, err = _git(wt, "commit", "-q", "-m", "Reading copies made again from final inputs: " + ", ".join(stale))
+    if code != 0:
+        return [], "the remade reading copies could not be committed (%s)" % err[:160]
+    return stale, None
+
+
 def _remake_after_integration(job, wt, cand, merged, files):
     """Review five r2 #1: newer changes brought in by integration touched the Markdown (or a figure beside it) of a
     reading copy this job delivers, so the copy is made again from the integrated inputs and committed; the check and
@@ -2593,7 +2636,7 @@ def _remake_after_integration(job, wt, cand, merged, files):
             target.unlink()
         except (OSError, ValueError) as e:
             return [], "%s could not be made again after integration (%s)" % (name, e)
-        if name not in _make_reading_copies(dict(job, outputs=[name]), wt):
+        if name not in _make_reading_copies(job, wt):     # five r10: the fingerprint is recorded on the job itself
             return [], "%s could not be made again from the integrated Markdown" % name
         remade.append(name)
     if remade:
