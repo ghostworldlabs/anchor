@@ -1778,9 +1778,13 @@ def _finish(cdir, job_id, job, result):
     done = _transition(cdir, job_id, ("finishing",), status=status, finished=time.strftime("%Y-%m-%d %H:%M:%S"),
                        expect_attempt=job.get("attempt", 1),
                        error=error, land_note=note, kept_worktree=(wt if keep else ""), phase="outcome", phase_at=time.time(),
-                       speed=speed_line(job, wt), **fields)
+                       **fields)
     if done is None:
         return
+    # the outcome is durable first; the time line (at most a few seconds, never fatal) rides the report (review r2 #4)
+    timed = _transition(cdir, job_id, (done["status"],), expect_attempt=done.get("attempt", 1),
+                        speed=speed_line(done, wt))
+    done = timed or done
     if not keep and done["status"] != "stopped":
         _cleanup(done, keep_branch=False)
     _report(cdir, done)
@@ -1801,7 +1805,7 @@ def speed_line(job, wt):
         if tool.is_file() and born:
             since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(born - 60))
             r = subprocess.run([sys.executable, str(tool), "--worktree", str(wt), "--since", since, "--json"],
-                               capture_output=True, text=True, timeout=8,
+                               capture_output=True, text=True, timeout=5,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode == 0 and r.stdout.strip().startswith("{"):
                 prof = json.loads(r.stdout)
@@ -2102,11 +2106,13 @@ def land(job, files):
         # kept worktree; the cleanup inventory after placement still lists it, so the worktree is kept (review r1 #2)
         tag = " (ignored by git)"
         mine = set(job.get("outputs") or []) | set(files)
-        late_scratch = [p[:-len(tag)] for p in left if p.endswith(tag) and p[:-len(tag)] not in mine]
+        def _scratch(p):                               # an unreadable listing is never scratch (review r2 #3)
+            return p.endswith(tag) and not p.startswith("(") and p[:-len(tag)] not in mine
+        late_scratch = [p[:-len(tag)] for p in left if _scratch(p)]
         if late_scratch:
             job["scratch_kept"] = sorted(set(job.get("scratch_kept") or []) | set(late_scratch))
             fields["scratch_kept"] = job["scratch_kept"]
-        left = [p for p in left if not (p.endswith(tag) and p[:-len(tag)] not in mine)]
+        left = [p for p in left if not _scratch(p)]
         if left:
             fields["unexpected"] = sorted(set(fields.get("unexpected") or []) | set(left))
             return False, ("not landed: changes outside the coder's own files appeared before placement (%s); "

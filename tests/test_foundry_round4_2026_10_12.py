@@ -251,6 +251,20 @@ def test_a_pinned_outside_file_that_changes_again_still_refuses(project, monkeyp
 def test_outside_ok_never_names_the_jobs_own_file_or_a_path_outside_the_repo(project, monkeypatch):
     root, workers, factory = project
     cdir, jid = _refused_for_the_stewards_edit(root, workers, factory, monkeypatch)
-    assert "job's own file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"] or \
-        "not a file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"]
+    (root / "B" / "result.py").write_text("a coder wrote this straight into the repository\n", encoding="utf-8")
+    assert "job's own file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"]
+    jobs = cj.read_jobs(cdir)                          # review r2 #1: a stopped job's manifest is its own file too
+    jobs[jid]["files"], jobs[jid]["outputs"] = [], []
+    cj._write_job(cdir, jobs[jid])
+    assert "job's own file" in ch.recover(cdir, jid, check=PASS, outside_ok=["B/result.py"])["error"]
     assert "repository-relative" in ch.recover(cdir, jid, check=PASS, outside_ok=["../x"])["error"]
+
+
+def test_an_unreadable_ignored_listing_is_never_taken_for_scratch(project, monkeypatch):
+    root, workers, factory = project
+    cdir = root / "A"
+    out = cj.start(cdir, root / "B", "Produce result", PASS, engine_factory=factory)
+    monkeypatch.setattr(cj, "ignored_outputs", lambda tree: ["(git could not list ignored files)"])
+    workers[0].produce({"B/result.py": "answer = 42\n"})
+    done = await_job(cdir, out["job"])
+    assert not done["landed"] and "could not list ignored files" in done["land_note"], done["land_note"]

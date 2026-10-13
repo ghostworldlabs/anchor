@@ -344,7 +344,9 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
         digest = cj.file_hash(job["repo"], rel)
         if digest is None:
             return {"ok": False, "error": "outside-ok path is not a file in the repository: %s" % rel}
-        if rel in set(job.get("files") or []) | set(job.get("outputs") or []):
+        owned = (set(job.get("files") or []) | set(job.get("outputs") or []) | set(job.get("manifest") or [])
+                 | set(revised_outputs or []) | set(((job.get("recovery_snapshot") or {}).get("files") or {}).keys()))
+        if rel in owned:
             return {"ok": False, "error": "outside-ok cannot name the job's own file: %s" % rel}
         pinned[rel] = digest
     audit_from = None
