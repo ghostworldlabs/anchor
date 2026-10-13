@@ -590,3 +590,31 @@ def test_a_note_whose_save_was_lost_is_sent_again_word_for_word(tmp_path, monkey
 def test_placed_work_is_never_redone():
     jobs = {"s": {"tier": "small: sonnet high", "status": "failed", "placed": True}}
     assert "already landed" in cj._redo_refusal(jobs, "s")
+
+
+def test_a_figure_swapped_with_its_old_timestamp_still_refreshes_anchors_copy(tmp_path, monkeypatch):
+    import os
+    import shutil
+    doc = tmp_path / "B"
+    doc.mkdir()
+    (doc / "report.md").write_text("# R ![f](fig.png)", encoding="utf-8")
+    (doc / "fig.png").write_bytes(b"old figure")
+    renders = []
+    def render(args, **kw):
+        Path(args[args.index("--html") + 1]).write_text("<p>%d</p>" % len(renders), encoding="utf-8")
+        renders.append(1)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(cj.subprocess, "run", render)
+    monkeypatch.setattr(cj, "inherited_stale", lambda *a: False)
+    job = {"outputs": ["B/report.md", "B/report.html"]}
+    made = []
+    cj._make_reading_copies(job, tmp_path, made)
+    assert made == ["B/report.html"] and len(renders) == 1
+    new = tmp_path / "new.png"
+    new.write_bytes(b"new figure")
+    os.utime(new, (1, 1))                                       # older than everything: copy2 keeps it
+    shutil.copy2(new, doc / "fig.png")
+    cj._make_reading_copies(job, tmp_path, made)
+    assert len(renders) == 2 and (doc / "report.html").read_text(encoding="utf-8") == "<p>1</p>"
+    cj._make_reading_copies(job, tmp_path, made)
+    assert len(renders) == 2                                    # unchanged inputs: not made again

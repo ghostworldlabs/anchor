@@ -1779,7 +1779,7 @@ def _finish(cdir, job_id, job, result):
         _make_reading_copies(job, wt, made_copies)                # review r4: the check may be what wrote the Markdown
         checked = True
         phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
-                  anchor_copies=list(made_copies))
+                  anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}))
         changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     keep = True                                            # the worktree stays unless the work is safely placed
     if changed is None:
@@ -1818,7 +1818,7 @@ def _finish(cdir, job_id, job, result):
                 fields["check_ok"], fields["check_output"] = run_check(job, wt)
                 _make_reading_copies(job, wt, made_copies)        # review r4: the check may be what wrote the Markdown
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
-                  anchor_copies=list(made_copies))
+                  anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}))
             after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
@@ -1901,6 +1901,7 @@ def _finish(cdir, job_id, job, result):
     if small_missed(job, fields, err, note):
         note += "; small tier missed - start it again at standard with --escalates %s" % job["id"]
     fields["anchor_copies"] = list(made_copies)
+    fields["copy_prints"] = dict(job.get("copy_prints") or {})
     fields["recovery_snapshot"] = handoff.snapshot(job)
     # review r3 #2: timed BEFORE the outcome, so no report can go out without it; the job is still "finishing" (durable,
     # recoverable) and the profile is capped at 5 s and never raises
@@ -2211,7 +2212,8 @@ def land(job, files):
         try:
             saved = not integrated_snapshot.get("error") and phase(job, "checking", integrated_base=head,
                                                                     recovery_snapshot=integrated_snapshot,
-                                                                    anchor_copies=list(job.get("anchor_copies") or []))
+                                                                    anchor_copies=list(job.get("anchor_copies") or []),
+                                                                    copy_prints=dict(job.get("copy_prints") or {}))
         except Exception:
             saved = False  # the terminal write still carries this exact pair; never run an unrecorded check
         if not saved:
@@ -2537,8 +2539,11 @@ def _make_reading_copies(job, tree, refresh=None):
         try:
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
+            md_rel = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
+            printed = (job.get("copy_prints") or {}).get(name)
             if (refresh and name in refresh and target.is_file() and not target.is_symlink() and source.is_file()
-                    and _newest_input(source, target, tree) > target.stat().st_mtime):
+                    and (inputs_print(tree, md_rel) != printed if printed      # five r7: the inputs' bytes decide
+                         else _newest_input(source, target, tree) > target.stat().st_mtime)):
                 target.unlink()                          # ours, and stale: made again below
                 refresh.remove(name)
             if inherited_stale(job, tree, name, target, source):
@@ -2554,6 +2559,7 @@ def _make_reading_copies(job, tree, refresh=None):
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode == 0 and target.is_file():
                 made.append(name)
+                job.setdefault("copy_prints", {})[name] = inputs_print(tree, md_rel)
                 if refresh is not None and name not in refresh:
                     refresh.append(name)
         except Exception:
@@ -2662,6 +2668,19 @@ def inherited_stale(job, tree, name, target, source):
 
 
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))(?:\s+[^)]*)?\)|<img[^>]+src\s*=\s*[\"']([^\"']+)[\"']", re.I)
+
+
+def inputs_print(tree, md):
+    """One fingerprint of a reading copy's inputs - their paths and bytes - taken when Anchor makes the copy, so a
+    check that swaps a figure while keeping its old timestamp still gets a fresh copy (five r7). Never raises."""
+    h = hashlib.sha256()
+    for rel in copy_inputs(tree, md):
+        h.update(rel.encode("utf-8") + b"\0")
+        try:
+            h.update(hashlib.sha256((Path(tree) / rel).read_bytes()).digest())
+        except OSError:
+            h.update(b"missing")
+    return h.hexdigest()
 
 
 def _html_unquote(text):
