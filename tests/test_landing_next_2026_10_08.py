@@ -371,7 +371,7 @@ def test_every_coder_launch_on_the_running_anchors_repository_is_claudes(monkeyp
 
 
 def test_temporary_builds_live_under_c_dev_beside_the_checkout(monkeypatch):
-    """John, 2026-10-08: temporary builds go in a C:\dev folder (backed up), never inside C:\dev\Anchor."""
+    r"""John, 2026-10-08: temporary builds go in a C:\dev folder (backed up), never inside C:\dev\Anchor."""
     import paths
     monkeypatch.delenv("ANCHOR_CODE_JOBS_DIR", raising=False)
     d = paths.code_jobs_dir()

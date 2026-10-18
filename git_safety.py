@@ -181,8 +181,8 @@ def snapshot(repo, reason=""):
     if code != 0:
         return ""
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    env2 = dict(os.environ, GIT_AUTHOR_NAME="anchor-safety", GIT_AUTHOR_EMAIL="safety@anchor.local",
-                GIT_COMMITTER_NAME="anchor-safety", GIT_COMMITTER_EMAIL="safety@anchor.local")
+    env2 = dict(os.environ, GIT_AUTHOR_NAME="anchor-safety", GIT_AUTHOR_EMAIL="anchor@localhost",
+                GIT_COMMITTER_NAME="anchor-safety", GIT_COMMITTER_EMAIL="anchor@localhost")
     code, idx_commit, _ = _git(repo, "commit-tree", index_tree, "-p", head, "-m", "anchor snapshot %s: the index" % stamp, env=env2)
     if code != 0:
         return ""
@@ -312,7 +312,7 @@ def _commit_blobs(repo, source_rev, plan, message, head):
         code, tree, err = _git(repo, "write-tree", env=env)
         if code != 0 or not tree:
             raise RuntimeError("could not write the tree: " + err[:200])
-        code, commit, err = _git(repo, "-c", "user.name=Anchor lander", "-c", "user.email=lander@anchor.local",
+        code, commit, err = _git(repo, "-c", "user.name=Anchor lander", "-c", "user.email=anchor@localhost",
                                  "commit-tree", tree, "-p", head, "-m", message)
         if code != 0 or not commit:
             raise RuntimeError("git commit-tree failed: " + err[:200])

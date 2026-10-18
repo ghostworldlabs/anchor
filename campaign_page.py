@@ -71,26 +71,27 @@ def _part_row(i, p, today, tick_allowed):
     link = ('<a class="mchip proj" href="%s" target="_blank" rel="noopener">%s &rarr; cockpit</a>' % (esc(p["href"]), esc(p["target"] or p["kind"]))) if p["href"] else ""
     park = (('<button class="mchip" data-act="unpark" data-part="%s">unpark</button>' % pid) if p["status"] == "parked" else
             ('<button class="mchip" data-act="park" data-part="%s">park</button>' % pid)) if not ref else ""
+    done_btn = ('<button type="button" class="mchip done-act" data-act="mark_done" data-part="%s" title="Mark this step done in its record">&#10003; Done</button>' % pid) if (not done and not p["broken"] and p["status"] != "parked" and p["kind"] in ("task", "step")) else ""
     tick = (('<button class="tick%s" data-act="tick" data-part="%s" aria-label="mark done"%s></button>' % (
         " on" if done else "", pid, "" if (tick_allowed and not ref) else ' disabled title="a tick waits on your word on the close law"'))
             if not ref else (('<a class="tickpad%s" href="%s" target="_blank" rel="noopener" title="done or parked in its own record &mdash; open it"></a>' % (" on" if done else "", esc(p["href"])))
                              if p["href"] else '<span class="tickpad" title="a referenced part is closed in its own record"></span>'))
     name = ('<span class="rt" data-act="name" data-part="%s">%s</span>' % (pid, esc(p["text"]))) if not ref else ('<span class="rt">%s</span>' % esc(p["text"]))
     return ('<li class="row%s%s" data-part="%s">%s<div class="rb">%s<div class="rm">'
-            '<span class="mchip kind">%s</span>%s%s%s%s%s'
+            '<span class="mchip kind">%s</span>%s%s%s%s%s%s'
             '</div></div></li>' % (
                 " done" if done else "", " pparked" if p["status"] == "parked" else "", pid, tick, name,
-                esc(KIND_WORDS.get(p["kind"], p["kind"])), date_chip, flag_chip, state_chip, link, park))
+                esc(KIND_WORDS.get(p["kind"], p["kind"])), date_chip, flag_chip, state_chip, done_btn, link, park))
 
 
 def _part_light(p, working):
     """A project part's own light: needs him · working (a live session on it) · waiting · done · idle."""
     if p.get("done"):
         return "done"
+    if (p.get("pid") and p["pid"] in (working or set())) or str(p.get("state") or "").lower().startswith("working"):
+        return "working"
     if p.get("needs_you"):
         return "needs"
-    if p.get("pid") and p["pid"] in (working or set()):
-        return "working"
     if str(p.get("state") or "").lower().startswith("waiting") or p.get("status") == "waiting":
         return "waiting"
     return "idle"
@@ -100,14 +101,23 @@ def _cockpits(i, ctx):
     """The goal's cockpits on the tile's face (his 13:5x word: a goal holds one, several, or no project yet): each
     project part by name with its own light; "at the desk" when the goal has no project."""
     working = ctx.get("working") or set()
+    facts = ctx.get("facts") or {}
     projs = [p for p in i["parts"] if p["kind"] in ("project", "effort") and not p["broken"]]
     if not projs:
         return '<div class="gcock"><span class="dim">at the desk &mdash; no project yet</span></div>'
     glyphs = {"needs": "&#9873;", "working": "&#9679;", "waiting": "&#9679;", "idle": "&#9675;", "done": "&#10003;"}
-    return '<div class="gcock">%s</div>' % " &middot; ".join(
-        '<span class="gpc %s" title="%s">%s <i>%s</i>%s</span>' % (_part_light(p, working), esc(p["state"] or p["status"] or ""), esc(p["target"] or p["text"]), glyphs[_part_light(p, working)],
-                                                                    ('<b class="seat %s">%s</b>' % (p["seat"], "active" if p["seat"] == "active" else "on deck")) if p.get("seat") else "")
-        for p in projs[:4]) + ((' <span class="dim">+%d</span>' % (len(projs) - 4)) if len(projs) > 4 else "")
+    more = (' <span class="dim">+%d</span>' % (len(projs) - 4)) if len(projs) > 4 else ""
+    chips = []
+    for p in projs[:4]:
+        pf = facts.get(str(p.get("pid") or "")) if isinstance(facts, dict) else None
+        st_tot = int(pf.get("steps_total") or 0) if isinstance(pf, dict) else 0
+        st_done = int(pf.get("steps_done") or 0) if isinstance(pf, dict) else 0
+        step_badge = ('<b class="psteps" title="Live cockpit roadmap progress">%d/%d steps</b>' % (st_done, st_tot)) if st_tot > 0 else ""
+        seat_badge = ('<b class="seat %s">%s</b>' % (p["seat"], "active" if p["seat"] == "active" else "on deck")) if p.get("seat") else ""
+        chips.append('<span class="gpc %s" title="%s">%s <i>%s</i>%s%s</span>' % (
+            _part_light(p, working), esc(p["state"] or p["status"] or ""), esc(p["target"] or p["text"]),
+            glyphs[_part_light(p, working)], seat_badge, step_badge))
+    return '<div class="gcock">%s%s</div>' % (" &middot; ".join(chips), more)
 
 
 def _gtile(i, ctx, band, draggable=True):
@@ -126,13 +136,13 @@ def _gtile(i, ctx, band, draggable=True):
         '<div class="ihead"><button class="iname" data-open="%s" title="open its place">%s</button>'
         '<span class="gtier">tier %s</span><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
         '<div class="ggoal" title="%s">%s</div>%s%s'
-        '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span><span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
+        '<div class="gfacts"><span class="gprog"><span class="bar"><i style="width:%d%%"></i></span>%d of %d</span>%s<span class="%s">%s</span><span class="gdl %s">%s</span>%s</div></article>'
     ) % (" needs" if i["needs"] else "", " bone" if i["status"] in ("done", "parked") else "", "true" if draggable else "false", esc(i["id"]), band, AREA_COLOURS.get(i["area"], "#8b93a6"),
          esc(i["id"]), esc(i["name"]), i["tier"] or "?",
          initiative_light(i, ctx.get("working") or set()), glyph, word,
          esc(i["done_when"]), esc(i["done_when"]) or '<span class="dim">no goal written yet</span>',
          _cockpits(i, ctx), _ifthen(i) + _premortem(i, ctx),
-         pct, done, n, "" if i.get("pace") else "dim", ("pace " + esc(_short(i["pace"]))) if i.get("pace") else "no pace",
+         pct, done, n, ('<span class="gpips">%s</span>' % "".join('<i class="gp %s"></i>' % ("d" if p.get("done") else ("n" if p.get("needs_you") else "t")) for p in (i.get("parts") or ())[:8])) if i.get("parts") else "", "" if i.get("pace") else "dim", ("pace " + esc(_short(i["pace"]))) if i.get("pace") else "no pace",
          dcls, (("overdue " if dcls == "over" else "next ") + esc(_short(nd))) if nd else "no deadline",
          (' <span class="am">&#9873; %s</span>' % _needs(len(i["needs"]))) if i["needs"] else "")
 
@@ -237,7 +247,7 @@ def _place(i, ctx):
     n, done = len(i["parts"]), int(i.get("done_count") or 0)
     waits = [p for p in i["needs"]]
     nxt = i["next"]
-    dated = sorted([p for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked")], key=lambda p: p["date"])
+    dated = sorted([p for p in i["parts"] if p["date"] and not p["broken"] and not p.get("closed", p["status"] in ("done", "parked"))], key=lambda p: p["date"])
     stands = "%s%s%s%s%s." % (
         ("%d of %d part%s done" % (done, n, "" if n == 1 else "s")) if n else "no parts yet",
         ('; <span class="am">%d wait%s on you &mdash; %s</span>' % (len(waits), "s" if len(waits) == 1 else "", esc(waits[0]["text"]))) if waits else "",
@@ -284,7 +294,7 @@ def _place(i, ctx):
         '<div class="gconv">%s<ul class="ex gthread" data-thread="%s">%s</ul>'
         '<div class="composer gcomp"><label class="sr" for="gsay-%s">Tell the steward about this goal</label>'
         '<textarea id="gsay-%s" class="gsay" data-goal="%s" rows="2" placeholder="add a part: &hellip; &middot; pace by Oct 10 &middot; tier 2 &middot; goal: &hellip; &middot; summarize &middot; or just talk"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; inside this goal nothing needs its name &middot; the steward answers here as it writes</span><button class="send gsend" data-goal="%s">Send</button></div>'
+        '<div class="comp-row"><span class="hint">Enter sends &middot; Shift+Enter new line &middot; inside this goal nothing needs its name &middot; the steward answers here as it writes</span><button class="send gsend" data-goal="%s">Send</button></div>'
         '<div class="chips"><button data-say="write the guide">write the guide</button><button data-say="update the guide">update the guide</button><button data-say="summarize where this goal stands">summarize</button><button data-say="what is the next step?">what is the next step?</button><button data-say="what is starving here?">what is starving?</button></div></div></div>'
         '</div></div></article>'
     ) % (esc(i["id"]), esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), esc(i["name"]),
@@ -471,7 +481,7 @@ def look_ahead(ctx):
     inits = [i for i in ctx["initiatives"] if i["status"] not in ("done", "parked")]
     today = ctx["today"]
     dated = sorted(((_hr._iso(p["date"]), p, i) for i in inits for p in i["parts"]
-                    if p["date"] and not p["broken"] and p["status"] not in ("done", "parked") and _hr._iso(p["date"])), key=lambda x: x[0])
+                    if p["date"] and not p["broken"] and not p.get("closed", p["status"] in ("done", "parked")) and _hr._iso(p["date"])), key=lambda x: x[0])
     soon = [(d, p, i) for d, p, i in dated if today <= d <= today + timedelta(days=7)]
     items = []
     if soon:
@@ -519,14 +529,6 @@ def _lead(ctx):
     """The brief's lead when a set exists: the head as the High Seat reads it - a part that needs him in an active
     initiative, else the tiers, else the pick-up while the set runs - with an open to its tile."""
     return None      # Grok (the W2 trim): the set-first lead went with the Active band; the High Seat's head keeps head_act
-    inits = ctx["initiatives"]
-    working = ctx.get("working") or set()
-    head = _ha.head_act(inits, [], today=ctx["today"])
-    pk = _ha.pick_up(inits, [], working=working, today=ctx["today"])
-    name = (head or {}).get("initiative") or (pk or {}).get("initiative") or ""
-    hit = next((i for i in inits if i["name"] == name), None)
-    goto = (' <button class="goto" data-goto="%s">open</button>' % esc(hit["id"])) if hit else ""
-    return esc(_ha.head_sentence(head, pickup=pk)) + goto
 
 
 def _panel(ctx):
@@ -547,10 +549,50 @@ def _panel(ctx):
         '<button class="mini" id="loginGo">Log in</button><span class="lb-msg" id="loginMsg"></span></div>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it runs the %s: move &hellip; to tier 2, add a part to &hellip;, &hellip; by Oct 10"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
+        '<div class="comp-row"><span class="hint">Enter sends &middot; Shift+Enter new line &middot; the steward answers above as it writes; when it changes the record the board reloads with the receipt</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '</aside>'
     ) % (look_ahead(ctx), conversation_view(st["label"], ctx.get("pid") or "", "campaign", "", "the " + mode_name(st)), esc(st["label"]), esc(mode_name(st)))
+
+
+# ── Wave 7 / Wave 12 / Wave 15: Strategic Foresight & Portfolio Alignment Strip ────────────────
+
+from high_seat_core import star_foresight_cards
+
+
+def _star_foresight_strip(ctx):
+    cards = star_foresight_cards(ctx)
+    html_cards = []
+    for c in cards:
+        acts = []
+        if c.get("goal_id"):
+            acts.append('<button type="button" class="fs-btn primary" data-goto="%s">Open Goal &rarr;</button>' % esc(c["goal_id"]))
+        if c.get("part_id"):
+            acts.append('<button type="button" class="fs-btn done" data-act="mark_done" data-part="%s">&#10003; Mark Next Step Done</button>' % esc(c["part_id"]))
+        if c.get("seat_step_id"):
+            s_id = esc(c["seat_step_id"])
+            acts.append('<button type="button" class="fs-btn" data-seat="active" data-step="%s" title="Seat this goal\'s next initiative on Active">&#9654; Seat in Active</button>' % s_id)
+            acts.append('<button type="button" class="fs-btn" data-seat="deck" data-step="%s" title="Place this goal\'s next initiative On Deck">&rarr; On Deck</button>' % s_id)
+        if c["kind"] == "chain" and c.get("goal_id"):
+            acts.append('<button type="button" class="fs-btn" data-ifthen="%s" data-text="%s">Revise If-Then</button>' % (esc(c["goal_id"]), esc(c.get("if_then") or "")))
+        if c["kind"] == "portfolio":
+            acts.append('<button type="button" class="fs-btn" id="fsCalBtn">&#128197; 5-Week Ruler</button>')
+        html_cards.append(
+            '<article class="fs-card %s" data-fs-kind="%s">'
+            '<div class="fs-top"><span class="fs-kicker">%s</span><span class="fs-badge">%s</span></div>'
+            '<div class="fs-title">%s</div>'
+            '<div class="fs-body">%s</div>'
+            '<div class="fs-acts">%s</div>'
+            '</article>' % (
+                esc(c["kind"]), esc(c["kind"]), c["kicker"], c["badge"],
+                c["title"], c["body_html"], "".join(acts))
+        )
+    return (
+        '<section class="foresight-strip" id="starForesight" aria-label="Strategic Foresight &amp; Portfolio Alignment">'
+        '<div class="fs-head"><span class="fs-h-title">&#10022; Strategic Foresight &amp; Portfolio Alignment</span>'
+        '<span class="fs-h-sub">10-week horizon &middot; Tier-1 pace &amp; dependency chains &middot; live cockpit roll-up</span></div>'
+        '<div class="fs-grid">%s</div></section>' % "".join(html_cards)
+    )
 
 
 # ── the page ───────────────────────────────────────────────────────────────────────────────────
@@ -570,18 +612,22 @@ def render_campaign_html(ctx, open_id=None) -> str:
     n_dated = sum(1 for i in live for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked"))
     n_needs = sum(len(i["needs"]) for i in live)
     board = (
-        '<section class="board" aria-label="The %s" data-place="%s"><div class="colk"><h3 id="viewTitle">The goals</h3>'
+        '<section class="board" aria-label="The %s" data-place="%s">%s<div class="colk"><h3 id="viewTitle">The goals</h3>'
         '<span class="c" id="boardCount">%d goals &middot; Tier 1 %d &middot; Tier 2 %d &middot; seed goals %d &middot; the boneyard %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close the goal</button></div>'
         '%s%s%s%s'
         '<p class="boardfoot" id="boardFoot">Drag a goal into another tier or into Seed goals; there is no order inside a tier. Click a name for its place &mdash; every change is one line with undo.</p></section>'
-    ) % (esc(mode_name(st)), esc(open_id or ""), len(live), sum(1 for i in live if i["tier"] == 1), sum(1 for i in live if i["tier"] == 2), n_seedy, n_bone, n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
+    ) % (esc(mode_name(st)), esc(open_id or ""), _star_foresight_strip(ctx), len(live), sum(1 for i in live if i["tier"] == 1), sum(1 for i in live if i["tier"] == 2), n_seedy, n_bone, n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _areas(ctx), _bands(ctx), _places(ctx), _calendar(ctx))
+    desk_href = ("/steward/v1?pid=%s&amp;dir=Small%%20items" % esc(ctx["desk_pid"])) if ctx.get("desk_pid") else "/desk"
+    cave_label = esc(st.get("high_seat_name") or "Cave of Wonders")
     hdr = (
         '<div class="hdr"><h2 class="modeh">%s</h2>'
+        '<a class="tool cave" href="/high-seat" title="Return to the %s">&#127963; %s</a>'
+        '<a class="tool desk" href="%s" title="Open the Desktop ad-hoc AI cockpit for quick admin tasks">&#128421; Desktop (Ad-Hoc AI Cockpit)</a>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
         '<a class="tool" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">%s — AI Cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(mode_name(st)),
+    ) % (esc(mode_name(st)), cave_label, cave_label, desk_href,
          _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(mode_name(st)), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'

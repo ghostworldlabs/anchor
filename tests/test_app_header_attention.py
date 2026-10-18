@@ -347,7 +347,7 @@ def test_legacy_review_requires_explicit_designation_without_managed_override(ui
     fixture, page = ui
     fixture.change(light="green", pin=True, legacy=True, label=label, owner_phase=owner_phase)
     tile = fixture.open(page, EFFORT)
-    expect(tile.locator(".activity-dot")).to_have_class("activity-dot orange" if attention else "activity-dot green")   # W4: attention shows orange
+    expect(tile.locator(".activity-dot")).to_have_class("activity-dot green")   # John 2026-10-15: working is always green
     page.locator("#strip .tile.cave").click()
     card = page.frames[1].locator("#card-p-one")
     for locator in (tile, card):
@@ -400,7 +400,7 @@ def test_cave_edge_pixels_readiness_highlight_hover_inline_and_resolution(ui):
     assert_flashing(card)
     fixture.change(light="green", review=True)
     fixture.refresh(page)
-    expect(card.locator(".tlight")).to_have_class("tlight orange")   # W4 (2026-10-05): a review waiting on him wins over working
+    expect(card.locator(".tlight")).to_have_class("tlight green")   # John (2026-10-15): working status is always a green light
     expect(card).to_have_class(re.compile(r"\bready\b"))
     assert_flashing(card)
     card.locator(".t-go").click()
@@ -461,8 +461,8 @@ def test_green_attention_polls_dropped_frames_failure_resolution_and_exact_sessi
     expect(tile).to_have_class(re.compile(r"\bready\b"))
     assert_thin_attention(tile)
     assert_flashing(dot, dot=True)
-    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(251, 191, 36)"   # W4: the dot is orange while something waits on him
-    expect(dot).to_have_attribute("aria-label", "needs your attention")   # W4: the dot says the one thing
+    assert dot.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgb(74, 222, 128)"   # John 2026-10-15: the dot is green while working
+    expect(dot).to_have_attribute("aria-label", "working; needs your attention")
     original_id = tile.get_attribute("data-id")
     fixture.open(page, "Other effort")
     tile = page.locator(f'#strip [data-id="{original_id}"]')

@@ -249,14 +249,14 @@ class PlansForwardTest(unittest.TestCase):
 
 
 class EnterSendsTest(unittest.TestCase):
-    """2026-10-07 (John, evidence E5 - a late dictated "new line" sent a fragment; supersedes 2026-09-04's Enter
-    sends): Enter is always a new line; Ctrl+Enter (Cmd+Enter) or the Send button sends; never mid-composition."""
+    """2026-10-13 / 2026-10-14 (John): CLI-style Enter sends immediately in an AI cockpit;
+    Shift+Enter makes a new line; never mid-composition."""
 
-    def test_ctrl_enter_sends_and_enter_stays_a_newline(self):
+    def test_enter_sends_and_shift_enter_stays_a_newline(self):
         js = (STATIC / "shared.js").read_text(encoding="utf-8")
         blk = js.split("function wireComposer()")[1].split("function wireChrome()")[0]
         self.assertIn('if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;', blk)
-        self.assertIn("if (!(e.ctrlKey || e.metaKey)) return;", blk)
+        self.assertIn("if (e.shiftKey) return;", blk)
         self.assertIn("e.preventDefault(); submit();", blk)
         self.assertIn('if (send) send.onclick = submit;', blk)   # the button stays
 

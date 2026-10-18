@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { foldRefinements, refinementDigest, currentProductApprovals } from './refinement-state.mjs';
-import { appendRoadmapEventThroughSpine } from './ledger-spine.mjs';
+import { appendRoadmapEventThroughSpine, repairRoadmapProjectionsThroughSpine } from './ledger-spine.mjs';
 import { demandClose } from './ledger-spine.mjs';
-import { loadProjectRoadmap, buildRoadmapProjection } from './roadmap.mjs';
-import { writeFileAtomicSync, withFileLock } from './durable-write.mjs';
+import { loadProjectRoadmap, buildRoadmapProjection, validateRoadmap, appendRoadmapEvent } from './roadmap.mjs';
+import { writeFileAtomicSync } from './durable-write.mjs';
 import { approvedDeliverables, publishApprovedDeliverables, approvedProjectionStatus } from './approved-deliverables.mjs';
 
 export const REFINEMENT_SCHEMA = 'ecgberht-refinement-v1';
@@ -142,18 +142,22 @@ export function publishRefinementProjections(root, roadmap) {
   if(!state.managed) return {consistent:true};
   const status=refinementProjectionStatus(root,roadmap);
   if(status.error) return {ok:false,...status};
+  const updated_documents=[];
   for(const [name,key] of Object.entries(DOCS)) {
+    if(status.documents[name]==='current') continue;
     const current=readDocument(root,name), parts=splitManaged(current.baseline,key);
     const region=renderRefinementDocument(state,name);
     const text=parts.absent ? current.baseline+(current.baseline.endsWith('\n')||!current.baseline?'':'\n')+'\n'+region+'\n' : parts.prefix+region+parts.suffix;
     writeFileAtomicSync(contained(root,name,false),text);
+    updated_documents.push(name);
   }
   try {
     const navigation=Object.fromEntries(buildRoadmapProjection(roadmap.roadmap_events).projection
       .filter(s=>s.navigation).map(s=>[s.id,s.navigation]));
     const finished=publishApprovedDeliverables(root,state,navigation);
-    return {ok:true,consistent:true,generation:state.generation,finished};
+    return {ok:true,consistent:true,generation:state.generation,updated_documents,finished};
   } catch(e) { return {ok:true,consistent:false,generation:state.generation,
+    updated_documents,
     finished:{consistent:false,error:e.code||'approved-projection-failed',detail:e.message}}; }
 }
 
@@ -216,14 +220,53 @@ export function prepareRefinementEvent(root, roadmap, event) {
   } catch(e) { return fail(e.code || 'invalid-refinement-operation',e.message); }
 }
 
+/** Separate event warnings admitted by the normal writer from projection drift. */
+export function refinementRoadmapStatus(roadmap) {
+  const validated=validateRoadmap(roadmap),events=roadmap.roadmap_events;
+  const issues=validated.issues || [];
+  const adoption=events.findIndex(e=>e?.kind==='refinement_update' && e.operation?.action==='adopt');
+  const boundaryValid=adoption>=0 && events[adoption].seq===adoption+1 &&
+    events[adoption].operation.expected_seq===adoption;
+  const replays=new Map();
+  const invalid_issues=issues.filter(issue=>{
+    if(!boundaryValid || !Number.isInteger(issue.at_index) || issue.at_index<0 || issue.at_index>=events.length) return true;
+    // Adoption accepted this prefix under the existing legacy writer contract.
+    // Preserve its warnings; neither repair nor read certifies it as clean.
+    if(issue.at_index<adoption) return false;
+    if(issue.code==='event_seq_break') return true;
+    let replay=replays.get(issue.at_index);
+    if(!replay) {
+      const prefix=events.slice(0,issue.at_index);
+      // Force validation, rather than the writer's client-ID retry shortcut.
+      const {client_event_id,...event}=events[issue.at_index];
+      replay=appendRoadmapEvent({...roadmap,roadmap_events:prefix,
+        roadmap_projection:buildRoadmapProjection(prefix).projection},event);
+      replays.set(issue.at_index,replay);
+    }
+    // Managed status overlays can make a writer-admitted flip warn in the full
+    // fold. Only the same warning reproduced by the normal append law is safe.
+    return !replay.ok || replay.idempotent ||
+      !replay.issues.some(candidate=>refinementDigest(candidate)===refinementDigest(issue));
+  });
+  if(adoption>=0 && !boundaryValid) invalid_issues.push({code:'adoption_sequence_mismatch',at_index:adoption});
+  return {consistent:validated.ok && invalid_issues.length===0,clean:validated.clean===true,
+    ...(validated.error ? {error:validated.error} : invalid_issues.length ? {error:'roadmap-events-invalid'} : {}),
+    ...(validated.drift ? {drift:validated.drift} : {}),issues,invalid_issues};
+}
+
 export function refinementResult(root, roadmap) {
   const state=foldRefinements(roadmap.roadmap_events);
   const navigation=Object.fromEntries(buildRoadmapProjection(roadmap.roadmap_events).projection
     .filter(s=>s.navigation).map(s=>[s.id,s.navigation]));
   const documents=refinementProjectionStatus(root,roadmap);
+  const roadmap_projection_status=refinementRoadmapStatus(roadmap);
+  const refinement_projection_status={consistent:!state.managed ||
+    (roadmap.refinement_projection!=null && refinementDigest(roadmap.refinement_projection)===refinementDigest(state))};
   const finished=state.managed ? approvedProjectionStatus(root,state,navigation) : null;
   return {ok:true,state,sequence:roadmap.roadmap_events.length,projection_status:documents,
-    consistent:documents.consistent && (!finished || finished.consistent),
+    roadmap_projection_status,refinement_projection_status,
+    consistent:roadmap_projection_status.consistent && refinement_projection_status.consistent &&
+      documents.consistent && (!finished || finished.consistent),
     approved_products:approvedDeliverables(state,navigation),
     current_approvals:Object.fromEntries(Object.entries(state.slices).map(([id,slice])=>[id,currentProductApprovals(slice)])),
     finished_projection:finished,
@@ -241,15 +284,7 @@ export function verbRefinementUpdate(opts={}) {
     if(!loaded.ok || !loaded.exists) return fail(loaded.exists?'backing-store-unreadable':'empty-but-valid');
     if(input.action==='read') return refinementResult(root,loaded.roadmap);
     if(input.action==='repair') {
-      // Derived-document repair: no event or acceptance mutation. Re-read
-      // inside the existing writer lock; never overwrite an external edit.
-      return withFileLock(path.join(root,'roadmap.json'),()=>{
-        const current=loadProjectRoadmap(root);
-        if(!current.ok || !current.exists) return fail('backing-store-unreadable');
-        const result=publishRefinementProjections(root,current.roadmap);
-        if(!result.ok) return result;
-        return refinementResult(root,current.roadmap);
-      });
+      return repairRoadmapProjectionsThroughSpine(root,{timeoutMs:opts.timeoutMs});
     }
     if(input.action==='operation_status') {
       const found=loaded.roadmap.roadmap_events.find(e=>e.kind==='refinement_update'&&e.operation?.operation_id===input.operation_id);

@@ -65,7 +65,7 @@ EFFORT_FACE = """# Ecgberht — Face (campaign memory)
 
 
 def desk_dir():
-    return Path(os.environ.get("ANCHOR_DESK_DIR") or r"C:\dev\Desk")
+    return Path(os.environ.get("ANCHOR_DESK_DIR") or (Path(__file__).resolve().parent.parent / "Desk"))
 
 
 def small_dir(root=None):

@@ -215,6 +215,7 @@
     <span class="cptotal" style="flex-basis:100%; text-align:right" data-total></span>
   </div>
   <div class="cpgoal" data-goal></div>
+  <div class="steward-next-top" data-steward-next-top style="margin:0 0 12px;border-radius:10px"></div>
   <details data-other-usage style="margin:0 0 16px;font-size:13px;color:var(--dim)">
     <summary>Other recorded runs</summary>
     <p>Separate lane and terminal records may overlap cockpit history. These amounts are shown separately.</p>
@@ -274,10 +275,10 @@
         <button data-sort-type>type</button>
         <button data-sort-date>date</button>
       </div>
-      <div class="dropzone" data-dropzone>drop files here to load them into this folder
-        — or <label style="text-decoration:underline;cursor:pointer">pick one<input
-        type="file" data-upfile multiple style="display:none"></label>
-        <span data-upmsg></span></div>
+      <div class="dropzone cockpit-dropbar" data-dropzone data-cockpit-drop>📥 drop files here to load them into <code data-drop-dir>this folder</code>
+        — or <label class="cockpit-droppick" style="text-decoration:underline;cursor:pointer">pick one<input
+        type="file" data-upfile data-cockpit-dropfile multiple style="display:none"></label>
+        <span class="cockpit-dropmsg" data-upmsg data-cockpit-dropmsg></span></div>
       <div class="crumb" data-crumb></div>
       <div data-filelist></div>
     </div>
@@ -406,8 +407,9 @@ const usageLine = (u) => {
 async function refresh() {
   try {
     const j = await (await fetch("/api/efforts")).json();
-    if (j.project === "Campaign") {
-      const q = new URLSearchParams(location.search);
+    const q = new URLSearchParams(location.search);
+    const singleRoot = Array.isArray(j.efforts) && j.efforts.length === 1 && !j.efforts[0].rel && !q.has("dir") && q.get("chooser") !== "1";
+    if (j.project === "Campaign" || singleRoot) {
       const target = new URL("/steward/v1", location.origin);
       target.searchParams.set("pid", window.STEWARD_PID || "");
       target.searchParams.set("dir", q.get("dir") || "");
@@ -469,6 +471,29 @@ async function refresh() {
     wbsum.textContent = "terminals · Gandalf · boneyard\n" + usageLine(j.usage.terms);
     const root = j.efforts.find(e => e.rel === "") || j.efforts[0];
     if (root) document.querySelector("[data-goal]").textContent = root.goal_brief;
+    const dropDir = document.querySelector("[data-drop-dir]");
+    if (dropDir) dropDir.textContent = (j.project || "project") + (SUB ? "/" + SUB : " (root)");
+    const topNext = document.querySelector("[data-steward-next-top]");
+    if (topNext) {
+      const lead = j.efforts.find(e => e.attention === "needs_you" || e.light === "orange")
+        || j.efforts.find(e => e.light === "green") || root || j.efforts[0];
+      topNext.textContent = "";
+      if (lead) {
+        const bar = el("div", "snt-bar");
+        const main = el("div", "snt-main");
+        const pName = ((j && j.steward && !/^steward$/i.test(String(j.steward).trim())) ? j.steward : (window.STEWARD_NAME || "Aladdin"));
+        main.appendChild(el("span", "snt-eyebrow", "⚡ " + pName.toUpperCase() + " — NEXT STEP · " + (lead.name || "Root")));
+        main.appendChild(el("span", "snt-text", lead.next_step || lead.goal_brief || ("Open " + lead.name + " to drive the next step (" + (lead.steps_done || 0) + "/" + (lead.steps_total || 0) + " steps).")));
+        bar.appendChild(main);
+        const acts = el("div", "snt-actions");
+        const openBtn = el("button", "snt-btn primary", "▶ Open & Run Next Step");
+        openBtn.type = "button";
+        openBtn.onclick = () => openEffort(lead.rel || "");
+        acts.appendChild(openBtn);
+        bar.appendChild(acts);
+        topNext.appendChild(bar);
+      }
+    }
     window._plates = j.plates || [];
     const psum = document.querySelector("[data-wpsum]");
     if (psum) psum.textContent = window._plates.length
@@ -483,10 +508,10 @@ async function refresh() {
       r.appendChild(el("span", "en", e.name));
       r.appendChild(el("span", "eg", e.goal_brief || "(no goal yet)"));
       r.appendChild(el("span", "em", e.steps_done + "/" + e.steps_total));
-      const bcls = e.attention === "needs_you" ? "red"
+      const bcls = (e.attention === "needs_you" || e.light === "orange") ? "amber"
         : e.light === "green" ? "green"
         : e.light === "red" ? "red" : "grey";
-      const btxt = e.attention === "needs_you" ? "needs you"
+      const btxt = (e.attention === "needs_you" || e.light === "orange") ? "needs you"
         : e.light === "green" ? "running"
         : e.light === "red" ? "stuck" : "quiet";
       r.appendChild(el("span", "badge " + bcls, btxt));
@@ -607,7 +632,7 @@ function openEffort(rel, step) {
 // once with the step forwarded; once per load. An explicit effort directory is its cockpit address.
 (function () {
   const q = new URLSearchParams(location.search);
-  if (!q.has("step") && q.get("open") !== "effort" && !q.get("dir")) return;
+  if (!q.has("step") && q.get("open") !== "effort") return;
   const open = () => { if (window._resumedOnce) return; window._resumedOnce = true; openEffort(q.get("dir") || "", q.get("step") || ""); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", open); else open();
 })();
@@ -995,6 +1020,14 @@ setInterval(loadShelves, 20000);
         try { const im = window.SkillIcons && window.SkillIcons.img(name, 18); if (im) b.appendChild(im); } catch (e) {}
         b.appendChild(document.createTextNode(name));
         b.onclick = () => {
+          if (String(name).toLowerCase() === "anvil" && !ACTIVE) {
+            const p = new URLSearchParams(location.search || "");
+            p.set("v", "12");
+            if (!p.get("pid") && window.STEWARD_PID) p.set("pid", window.STEWARD_PID);
+            if (!p.get("token") && window.STEWARD_TOKEN) p.set("token", window.STEWARD_TOKEN);
+            window.location.href = "/steward-static/anvil.html?" + p.toString();
+            return;
+          }
           if (!ACTIVE) { alert("open a terminal first (＋ Terminal)"); return; }
           fetch("/api/say", { method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1055,7 +1088,8 @@ async function loadDeliv() {
        page shim rewrites window.open("/report…") to /steward/report…,
        which serve_page_doc 404s (wave-1 reviewer finding, 2026-09-05).
        Hostile cells arrive route:null and stay text. */
-    const fn = el(it.route ? "a" : "span", "fn", "• " + it.what);
+    const isClickable = !!(it.route || (it.openable && it.path));
+    const fn = el(isClickable ? "a" : "span", "fn", "• " + it.what);
     try { const S = window.SkillIcons; const im = S && S.img(S.forItem(it, null) || "", 14); if (im) fn.insertBefore(im, fn.firstChild); } catch (e) {}
     fn.title = it.path || "";
     if (it.route) {
@@ -1067,26 +1101,31 @@ async function loadDeliv() {
       fn.target = "_blank";
       fn.rel = "noopener";
     } else if (it.openable && it.path) {
-      const isText = /\.(md|txt|csv|json|log)$/i.test(it.path);
-      /* (2026-09-04, John) every deliverable opens well: text in the Reader;
-         PDF / images inline; Word / PowerPoint / Excel as a text preview page
-         with a download that opens the native app; anything else downloads. */
+      const isMd = /\.(md|markdown)$/i.test(it.path);
       const isOffice = /\.(docx|pptx|xlsx)$/i.test(it.path);
-      fn.onclick = () => {
-        if (isText) {
-          window.open("/report?dir=" + encodeURIComponent(it.dir || "") +
-                      "&path=" + encodeURIComponent(it.path));
-        } else {
-          window.open("/api/steward/deliverable-file?pid=" +
-            encodeURIComponent(window.STEWARD_PID || "") +
-            "&dir=" + encodeURIComponent(it.dir || "") +
-            "&path=" + encodeURIComponent(it.path) +
-            (isOffice ? "&view=1" : "") +
-            (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : ""));
-        }
-      };
+      fn.href = "/api/steward/deliverable-file?pid=" +
+        encodeURIComponent(window.STEWARD_PID || "") +
+        "&dir=" + encodeURIComponent(it.dir || "") +
+        "&path=" + encodeURIComponent(it.path) +
+        (isOffice ? "&view=1" : "") +
+        (isMd ? "&render=1" : "") +
+        (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+      fn.target = "_blank";
+      fn.rel = "noopener";
     }
     row.appendChild(fn);
+    if (it.path) {
+      const dl = el("a", "ddl-inline", "\u2b07");
+      dl.href = "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") +
+        "&dir=" + encodeURIComponent(it.dir || "") +
+        "&path=" + encodeURIComponent(it.path) +
+        "&download=1" +
+        (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+      dl.setAttribute("download", "");
+      dl.title = "Download " + (it.path || it.what || "file");
+      dl.onclick = (ev) => ev.stopPropagation();
+      row.appendChild(dl);
+    }
     row.appendChild(el("span", "fm", (it.effort || "") + (it.date ? " · " + it.date : "")));
     list.appendChild(row);
   });
@@ -1179,6 +1218,17 @@ function renderFiles(q) {
     };
     if (f.dir) fn.onclick = openInApp; else if (appBtn) appBtn.onclick = openInApp;
     row.appendChild(fn);
+    if (!f.dir) {
+      const rel = q ? f.name : (SUB ? SUB + "/" : "") + f.name;
+      const dl = el("a", "ddl-inline", "\u2b07");
+      dl.href = "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") +
+        "&dir=&path=" + encodeURIComponent(rel) + "&download=1" +
+        (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+      dl.setAttribute("download", f.name);
+      dl.title = "Download " + f.name;
+      dl.onclick = (ev) => ev.stopPropagation();
+      row.appendChild(dl);
+    }
     if (appBtn) row.appendChild(appBtn);
     row.appendChild(el("span", "fm",
       new Date(f.mtime * 1000).toISOString().slice(0, 10) +
@@ -1228,12 +1278,14 @@ function conflictChoice(file, info) {
 }
 async function uploadOne(file) {
   const msg = document.querySelector("[data-upmsg]");
+  const topMsg = document.querySelector("[data-cockpit-dropmsg]");
+  const setMsg = (t) => { if (msg) msg.textContent = t; if (topMsg) topMsg.textContent = t.replace(/^\s*·\s*/, ""); };
   if (file.size > 30000000) {
-    msg.textContent = " · " + file.name + " is over the 30 MB limit";
+    setMsg(" · " + file.name + " is over the 30 MB limit");
     return;
   }
   try {
-    msg.textContent = " · loading " + file.name + "…";
+    setMsg(" · loading " + file.name + "…");
     const buf = await file.arrayBuffer();
     let bin = ""; const bytes = new Uint8Array(buf);
     for (let i = 0; i < bytes.length; i += 0x8000)
@@ -1252,19 +1304,19 @@ async function uploadOne(file) {
     for (let review = 0; !result.ok && result.exists && review < 3; review++) {
       const choice = await conflictChoice(file, result);
       if (choice === "skip") {
-        msg.textContent = " · skipped " + file.name;
+        setMsg(" · skipped " + file.name);
         return;
       }
       result = await send(choice,
         choice === "replace" ? result.version : undefined);
     }
-    msg.textContent = result.ok ? " · loaded " + result.name
-      : " · " + (result.error || "failed");
+    setMsg(result.ok ? " · ✓ landed " + result.name : " · " + (result.error || "failed"));
   } catch (error) {
-    msg.textContent = " · " + file.name + " failed (connection or read error)";
+    setMsg(" · " + file.name + " failed (connection or read error)");
   }
 }
 const dz = document.querySelector("[data-dropzone]");
+const topDz = document.querySelector("[data-cockpit-drop]");
 let uploadQueue = Promise.resolve();
 function enqueueUploads(files) {
   for (const file of Array.from(files || [])) {
@@ -1282,6 +1334,38 @@ dz.addEventListener("drop", (e) => {
 document.querySelector("[data-upfile]").addEventListener("change", (ev) => {
   enqueueUploads(ev.target.files);
   ev.target.value = "";
+});
+if (topDz) {
+  topDz.addEventListener("dragover", (e) => { e.preventDefault(); topDz.classList.add("hot"); });
+  topDz.addEventListener("dragleave", () => topDz.classList.remove("hot"));
+  topDz.addEventListener("drop", (e) => {
+    e.preventDefault(); topDz.classList.remove("hot");
+    enqueueUploads(e.dataTransfer.files);
+  });
+}
+const topUp = document.querySelector("[data-cockpit-dropfile]");
+if (topUp) {
+  topUp.addEventListener("change", (ev) => {
+    enqueueUploads(ev.target.files);
+    ev.target.value = "";
+  });
+}
+document.body.addEventListener("dragover", (e) => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
+    e.preventDefault();
+    if (topDz) topDz.classList.add("hot");
+  }
+});
+document.body.addEventListener("dragleave", (e) => {
+  if (!e.relatedTarget && topDz) topDz.classList.remove("hot");
+});
+document.body.addEventListener("drop", (e) => {
+  if (e.defaultPrevented) return;
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    e.preventDefault();
+    if (topDz) topDz.classList.remove("hot");
+    enqueueUploads(e.dataTransfer.files);
+  }
 });
 
 window.addEventListener("anchor-notebooks-changed", () => {

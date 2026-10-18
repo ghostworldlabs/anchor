@@ -34,11 +34,10 @@ def _integer(value: Any) -> bool:
 def _default_cli_candidates() -> list[Path]:
     candidates = [
         Path(__file__).resolve().parents[1] / "vendor" / "bundled-skills" / "ecgberht" / "bin" / "ecgberht.mjs",
+        Path(__file__).resolve().parents[2] / "Ecgberht" / "bin" / "ecgberht.mjs",
         Path.home() / ".agents" / "skills" / "ecgberht" / "bin" / "ecgberht.mjs",
         Path.home() / ".claude" / "skills" / "ecgberht" / "bin" / "ecgberht.mjs",
     ]
-    if os.name == "nt":
-        candidates.append(Path("C:/dev/Ecgberht/bin/ecgberht.mjs"))
     return candidates
 
 

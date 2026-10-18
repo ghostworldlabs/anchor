@@ -107,8 +107,17 @@ def normalize_catalog(family, raw):
                 continue
             row(model, info.get("reasoning_efforts", []), index, None, "provider_catalog_order")
     elif family == "gemini":
-        for index, entry in enumerate(raw.get("models", [])):
-            row(entry["model"], entry["efforts"], index, None, "provider_catalog_order")
+        models = list(raw.get("models", []))
+        def _gemini_key(item):
+            idx, entry = item
+            name = str(entry.get("model", "")).lower()
+            is_small = 1 if any(t in name for t in ("flash", "lite", "nano")) else 0
+            m = re.match(r"^gemini-(\d+(?:\.\d+)*)", name)
+            ver = tuple(-int(x) for x in m.group(1).split(".")) if m else ()
+            return (is_small, ver, idx)
+        ranks = {orig_idx: new_rank for new_rank, (orig_idx, _) in enumerate(sorted(enumerate(models), key=_gemini_key))}
+        for index, entry in enumerate(models):
+            row(entry["model"], entry["efforts"], ranks[index], None, "provider_catalog_order")
     elif family == "claude":
         # `best` is the provider's moving frontier alias, not a product-name pin.
         rows.append({"model": "best", "efforts": raw.get("efforts", []), "rank": 0,

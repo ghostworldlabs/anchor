@@ -30,11 +30,13 @@
     return w || nativeOpen.call(window, url, target, features);
   };
 
-  document.addEventListener("click", function (ev) {
+  function onDocClick(ev, isCapture) {
     if (ev.defaultPrevented || ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
     var a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
     if (!a || a.hasAttribute("download")) return;
     var href = a.getAttribute("href") || "";
+    if (!href || href === "#" || /^javascript:/i.test(href)) return;
+    if (isCapture && typeof a.onclick === "function") return;
     try { if (app.download(a.href, window)) { ev.preventDefault(); return; } } catch (e) { /* the link goes as it was */ }
     if (/^(ms-\w+|mailto|tel|file):/i.test(href)) {          // an app link: Windows opens it, never the frame
       ev.preventDefault(); nativeOpen.call(window, href, "_blank"); return;
@@ -44,7 +46,9 @@
     var w = null;
     try { w = app.open(a.href, a.getAttribute("target"), window); } catch (e) { w = null; }
     if (w) ev.preventDefault();
-  }, false);
+  }
+  document.addEventListener("click", function (ev) { onDocClick(ev, true); }, true);
+  document.addEventListener("click", function (ev) { onDocClick(ev, false); }, false);
 
   try {
     var opener = app.openerOf(window);

@@ -6,7 +6,39 @@
 // Report links belong to the Anchor origin the reader is using. Historical
 // steward replies hard-coded the author's loopback host, which is another
 // machine when opened remotely. Keep external paper URLs untouched.
+function mdFileHref(rawPath) {
+  if (!window.STEWARD_PID) return null;
+  let p = String(rawPath || "").trim().replace(/\\/g, "/");
+  if (/^file:\/\/\//i.test(p)) {
+    try { p = decodeURIComponent(new URL(p).pathname).replace(/^\/([A-Za-z]:\/)/, "$1"); }
+    catch (_) { p = p.replace(/^file:\/\/\/+/i, ""); }
+  }
+  const dirRel = String(window.STEWARD_DIR || "");
+  if (/^[A-Za-z]:\//.test(p)) {
+    // Extract relative path inside the project/effort if possible
+    const marker = p.match(/(?:\/|^)((?:BA 815|\.ecgberht|deliverables|planning|lectures|homework|quiz|syllabus|ta-feedback|code-job-outputs|chapters|story-arc|editorial|Finished Deliverables|skills|foundry-tools|steward_cockpit|tools|docs|tests)\/.+)$/i);
+    if (marker) p = marker[1];
+    else return null;
+  }
+  if (typeof window.__resolveDeliverablePath === "function") {
+    const resolved = window.__resolveDeliverablePath(p);
+    if (resolved) p = resolved;
+  }
+  if (!p || p.startsWith("/") || /(?:^|\/)\.\.(?:\/|$)/.test(p)) return null;
+  const isMd = /\.(md|markdown|txt)$/i.test(p);
+  const isOffice = /\.(docx|pptx|xlsx)$/i.test(p);
+  return "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID) +
+    "&dir=" + encodeURIComponent(dirRel) +
+    "&path=" + encodeURIComponent(p) +
+    (isOffice ? "&view=1" : "") +
+    (isMd ? "&render=1" : "") +
+    (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+}
 function mdReportHref(raw) {
+  if (/^file:\/\/\//i.test(String(raw || "").trim())) {
+    const mapped = mdFileHref(raw);
+    if (mapped) return mapped;
+  }
   const current = new URL(window.location.href);
   let dest;
   try { dest = new URL(raw, current.origin); }
@@ -15,7 +47,8 @@ function mdReportHref(raw) {
   // ABSOLUTE Anchor URL - loopback, this page's own host on another port or scheme, or the tailnet name - is opened
   // on the origin the reader is using (a reply written at the desk opens on the iPad)
   const internal = /^\/artifact\/[^/]+(\/.+)?$/.test(dest.pathname) || /^\/report\//.test(dest.pathname) ||
-    dest.pathname === "/api/steward/deliverable-file";
+    dest.pathname === "/api/steward/deliverable-file" || dest.pathname === "/steward/v1" ||
+    /^\/project\/[^/]+/.test(dest.pathname) || dest.pathname === "/high-seat" || dest.pathname === "/desk" || dest.pathname === "/doctor";
   const loop = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(dest.hostname) && (dest.port === "8777" || dest.port === "");
   // review r1: only loopback or THIS page's own host name - never any *.ts.net machine or a look-alike
   // final review 10-10: the same host on ANOTHER service's port is that service's, never Anchor's
@@ -36,9 +69,9 @@ function mdRender(container, text) {
   const el = (t, c, x) => { const n = document.createElement(t);
     if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
   // [label](target): the target may hold spaces, balanced ( ) or the <...> form (2026-10-07: "Calendar
-  // (accepted).ics" or "MBA Teaching AI/..." broke the link at the first space or ")"). Only report links and http(s)
-  // become links; anything else stays text. Bare paths are never auto-linked.
-  const LINKABLE = /^(?:https?:\/\/|\/artifact\/|\/report\/|\/foundry\?|\/api\/steward\/deliverable-file\?)/;
+  // (accepted).ics" or "MBA Teaching AI/..." broke the link at the first space or ")"). Only report links, file:///
+  // links and http(s) become links; anything else stays text. Bare paths are never auto-linked.
+  const LINKABLE = /^(?:https?:\/\/|file:\/\/\/|\/artifact\/|\/report\/|\/foundry\?|\/api\/steward\/deliverable-file\?|\/steward\/v1\?|\/project\/|\/high-seat|\/desk|\/doctor)/i;
   function splitLinks(s) {
     const out = []; let i = 0;
     while (i < s.length) {
@@ -58,27 +91,63 @@ function mdRender(container, text) {
       if (target.startsWith("<") && target.endsWith(">")) target = target.slice(1, -1).trim();
       if (depth || !LINKABLE.test(target)) { out.push(s.slice(i, k + 2)); i = k + 2; continue; }
       if (j > i) out.push(s.slice(i, j));
-      out.push({label: s.slice(j + 1, k), target});
+      out.push({label: s.slice(j + 1, k).replace(/^`+|`+$/g, ""), target});
       i = m;
     }
     if (i < s.length) out.push(s.slice(i));
     return out;
   }
+function mdDownloadHref(href) {
+  const h = String(href || "");
+  if (!h || (!h.startsWith("/api/steward/deliverable-file?") && !h.startsWith("/artifact/"))) return null;
+  const cleaned = h.replace(/([?&])(render|view)=1(&|$)/g, (m, p1, _k, p3) => p3 ? p1 : "");
+  return cleaned + (cleaned.includes("?") ? "&" : "?") + "download=1";
+}
   function inline(node, s) {
     splitLinks(String(s)).forEach(seg => {
       if (typeof seg !== "string") {
-        const a = el("a", "", seg.label); a.href = mdReportHref(seg.target);
-        a.target = "_blank"; a.rel = "noopener noreferrer"; node.appendChild(a); return;
+        const href = mdReportHref(seg.target);
+        const a = el("a", "md-file-link", seg.label); a.href = href;
+        a.target = "_blank"; a.rel = "noopener noreferrer"; node.appendChild(a);
+        const dlHref = mdDownloadHref(href);
+        if (dlHref) {
+          const dl = el("a", "md-dl", "⬇"); dl.href = dlHref;
+          dl.target = "_blank"; dl.rel = "noopener noreferrer";
+          dl.title = "Download file";
+          node.appendChild(dl);
+        }
+        return;
       }
       seg.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).forEach(p => {
         if (/^\*\*[^*]+\*\*$/.test(p)) node.appendChild(el("strong", "", p.slice(2, -2)));
-        else if (/^`[^`]+`$/.test(p)) node.appendChild(el("code", "", p.slice(1, -1)));
+        else if (/^`[^`]+`$/.test(p)) {
+          const inner = p.slice(1, -1).trim();
+          const isDocPath = !/^\s*-/.test(inner) && !/\s{2,}/.test(inner) &&
+            /\.(?:md|markdown|pdf|html?|docx|pptx|xlsx|csv|txt|json|py|m?js|css|zip)$/i.test(inner);
+          const href = isDocPath ? mdFileHref(inner) : null;
+          if (href) {
+            const a = el("a", "md-file-link"); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+            a.title = "Open " + inner;
+            a.appendChild(el("code", "", inner));
+            node.appendChild(a);
+            const dlHref = mdDownloadHref(href);
+            if (dlHref) {
+              const dl = el("a", "md-dl", "⬇"); dl.href = dlHref;
+              dl.target = "_blank"; dl.rel = "noopener noreferrer";
+              dl.title = "Download " + inner;
+              node.appendChild(dl);
+            }
+          } else {
+            node.appendChild(el("code", "", p.slice(1, -1)));
+          }
+        }
         else if (p) node.appendChild(document.createTextNode(p));
       });
     });
   }
   container.textContent = "";
-  const lines = String(text || "").split("\n");
+  const cleanedText = String(text || "").replace(/<!--\s*(?:producer-handoff-|steward-receipt-|ecgberht-)[\s\S]*?-->/gi, "").trimEnd();
+  const lines = cleanedText.split("\n");
   let i = 0, list = null, quote = null;
   const flush = () => { list = null; quote = null; };
   while (i < lines.length) {

@@ -64,7 +64,7 @@
   function titleOf(win, fallback) {
     try {
       var t = (win.document.title || "").trim();
-      if (win.location.pathname === "/steward/v1" && t === "Steward \u2014 V1") return fallback;
+      if (win.location.pathname === "/steward/v1" && (t === "Steward \u2014 V1" || t === "Aladdin \u2014 AI Cockpit")) return fallback;
       if (t) return t;
       var p = win.location.pathname;
       return p && p !== "blank" ? decodeURIComponent(p.split("/").filter(Boolean).pop() || fallback) : fallback;
@@ -76,6 +76,9 @@
     if (!t) return;
     arm(f.contentWindow);
     if (shownIn(t.id) < 0) { t.hiddenSaid = true; tellVisibility(f, true); }
+    var isSplit = !!(two && shownIn(t.id) >= 0);
+    t.splitSaid = isSplit;
+    tellSplit(f, isSplit);
     var url = addressOf(f.contentWindow);
     if (url) t.url = url;
     var route = resolve(url);
@@ -263,6 +266,7 @@
         active = from;
       }
       layout(); render();
+      if (cockpitTarget(t)) refreshFeedback();
       return t.frame.contentWindow;
     },
     download: function (u, fromWin) {
@@ -281,7 +285,23 @@
       var t = tileOfWindow(win);
       return t && t.frame && t.frame.contentWindow === win && t.opener && t.opener !== win ? t.opener : null;
     },
-    closeWindow: function (win) { var t = tileOfWindow(win); if (t) closeTile(t.id); }
+    closeWindow: function (win) { var t = tileOfWindow(win); if (t) closeTile(t.id); },
+    closeDeliverable: function (u, fromWin) {
+      var r = resolve(u, fromWin);
+      if (!r) return false;
+      var key = pageKey(r), wantPath = r.q.get("path");
+      var removed = false;
+      tiles.slice().forEach(function (t) {
+        if (t.kind !== "doc") return;
+        var ru = resolve(t.url), ra = resolve(t.asked);
+        if ((ru && pageKey(ru) === key) || (ra && pageKey(ra) === key) ||
+            (wantPath && ((ru && ru.q.get("path") === wantPath) || (ra && ra.q.get("path") === wantPath)))) {
+          closeTile(t.id);
+          removed = true;
+        }
+      });
+      return removed;
+    }
   };
 
   // a caller's w.close() on a window that is still blank (a failed create) closes its tile
@@ -337,9 +357,19 @@
     });
   }
 
+  function hidePane(k) {                                       // the 1-pane toggle or a non-deliverable pane's x: the pane goes, its tile stays
+    if (!two) return;
+    var gone = panes[k];
+    panes[0] = panes[k === 0 ? 1 : 0];
+    panes[1] = gone;                                           // remembered for the toggle; not shown
+    two = false; active = 0;
+    if (gone) leave(gone);
+    layout(); render(); settle();
+  }
+
   function setTwo(on) {
     if (on === two) return;
-    if (!on) { closePane(two ? (active === 0 ? 1 : 0) : 1); return; }
+    if (!on) { hidePane(two ? (active === 0 ? 1 : 0) : 1); return; }
     var next = null;
     if (panes[1] && panes[1] !== panes[0] && byId(panes[1])) next = panes[1];
     if (!next) {
@@ -352,14 +382,11 @@
     show(next, 1);
   }
 
-  function closePane(k) {                                      // a pane's x: the pane goes, its tile stays a tile
+  function closePane(k) {                                      // a pane's x: a deliverable (doc) under review is removed from the top row of tiles
     if (!two) return;
-    var gone = panes[k];
-    panes[0] = panes[k === 0 ? 1 : 0];
-    panes[1] = gone;                                           // remembered for the toggle; not shown
-    two = false; active = 0;
-    if (gone) leave(gone);
-    layout(); render(); settle();
+    var t = byId(panes[k]);
+    if (t && t.kind === "doc") { closeTile(t.id); return; }
+    hidePane(k);
   }
 
   function closeTile(id) {
@@ -407,6 +434,16 @@
     })(f.contentWindow, 0);
   }
 
+  function tellSplit(f, split) {
+    (function walk(w, depth) {
+      try {
+        w.__anchorSplit = split;
+        w.dispatchEvent(new w.CustomEvent("anchor-app-split", { detail: { split: split } }));
+        for (var i = 0; depth < 4 && i < w.frames.length; i++) walk(w.frames[i], depth + 1);
+      } catch (e) { /* not ours */ }
+    })(f.contentWindow, 0);
+  }
+
   function layout() {
     document.body.classList.toggle("two", two);
     tiles.forEach(function (t) {
@@ -414,6 +451,8 @@
       var k = shownIn(t.id);
       t.frame.hidden = k < 0;
       if (t.hiddenSaid !== (k < 0)) { t.hiddenSaid = k < 0; tellVisibility(t.frame, k < 0); }
+      var isSplit = !!(two && k >= 0);
+      if (t.splitSaid !== isSplit) { t.splitSaid = isSplit; tellSplit(t.frame, isSplit); }
       t.frame.dataset.pane = k < 0 ? "" : String(k);
       t.frame.classList.toggle("active", two && k === active);
     });
@@ -590,7 +629,17 @@
   // The Setup page's "Return to Cave" posts anchor-setup-close to its parent; shown as a tile, that parent is
   // this shell - bring the Cave back to that pane. The Setup tile stays a tile; nothing is launched or closed.
   window.addEventListener("message", function (ev) {
-    if (ev.origin !== location.origin || !ev.data || ev.data.type !== "anchor-setup-close") return;
+    if (ev.origin !== location.origin || !ev.data) return;
+    if (ev.data.proto === "anchor-cockpit-state") {
+      var ct = tileOfWindow(ev.source);
+      if (ct && cockpitTarget(ct) && window.AnchorCockpitFeedback) {
+        ct.feedbackKey = window.AnchorCockpitFeedback.identity(cockpitTarget(ct));
+        ct.feedback = { light: ev.data.light || "gray", ready: !!ev.data.ready, reason: ev.data.reason || "" };
+        paintFeedback(ct);
+      }
+      return;
+    }
+    if (ev.data.type !== "anchor-setup-close") return;
     for (var i = 0; i < tiles.length; i++) {
       if (tiles[i].frame && tiles[i].frame.contentWindow === ev.source) {
         var k = shownIn(tiles[i].id);

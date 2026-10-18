@@ -80,6 +80,11 @@ export const ROADMAP_EVENT_KINDS = Object.freeze([
   'kickoff_proposal',
   'kickoff_confirm',
   'refinement_update',
+  // W4 of the steward revision (2026-09-28, v9): a repair PROPOSED after an acceptance and its resolution on his
+  // word (project-level ledger events); a step moved in the plan's order on his word (folded)
+  'repair_proposal',
+  'repair_resolve',
+  'reorder',
 ]);
 
 /** Project-level kinds that do not fold into roadmap_projection steps. */
@@ -100,6 +105,8 @@ export const ROADMAP_PROJECT_LEVEL_KINDS = Object.freeze([
   'kickoff_proposal',
   'kickoff_confirm',
   'refinement_update',
+  'repair_proposal',
+  'repair_resolve',
 ]);
 
 /** Named bound — appends beyond this refuse with events-bound-exceeded. */
@@ -122,6 +129,10 @@ export const ROADMAP_PROJECTION_FIELDS = Object.freeze([
   'status',
   'done_when',
   'waiting_on',
+  'due',
+  'ref',
+  'tier',
+  'area',
   'commissioned_as',
   'part',
   'gate',
@@ -151,12 +162,30 @@ export const ROADMAP_SET_FIELDS = Object.freeze([
   'name',
   'done_when',
   'waiting_on',
+  'due',
+  'ref',
+  'tier',
+  'area',
   'part',
   'gate',
   'component_ids',
   'end_to_end_slice',
   'kickoff_version',
   'kickoff_proposal_hash',
+  // the active set (2026-09-29, John: "the active group"): an initiative he works on now, its place in the set,
+  // and the pace — the date he drives the effort toward. Set only by his act (receipted step_set); read by the
+  // High Seat's head and tile. A part's own date stays `due`.
+  'active',
+  'active_order',
+  'pace',
+  // the seats (2026-09-30, John's three levels): a goal's component he works interactively — a project's cockpit,
+  // one cockpit within a project (effort:), or a desk task — sits in its goal (no seat), ON DECK, or ACTIVE, in his
+  // order. Set only by his act or his word (receipted step_set); read by the High Seat's head and shelves.
+  'seat',
+  'seat_order',
+  // the Star Chart (the Campaign mode, 2026-10-03): a Tier-1 goal's one if-then next step, in his words ("If it is
+  // Monday 9:00, then I send the trust questions"). Set only by his act or his word (receipted step_set).
+  'if_then',
 ]);
 
 /** Receipt fields a status_flip event must carry (when defaults to event.at). */
@@ -235,6 +264,53 @@ export function emptyRoadmap(project_id = null) {
  * Normalize a projection step to the locked field set (stable order).
  * @param {object} step
  */
+/** W0 (High Seat, 2026-09-26): an optional calendar date on a step — ISO YYYY-MM-DD only, nothing else. */
+export const ROADMAP_DUE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+export function normalizeDue(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!ROADMAP_DUE_PATTERN.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? null : s;
+}
+
+/**
+ * W0b (High Seat, 2026-09-26): three more optional step fields, validated by value like `part`.
+ *  ref  — a part that points at another record: project:<pid> · step:<pid>/<sid> · deliverable:<pid>/<row> · calendar:<id>.
+ *         A step with a ref carries no due and is never flipped here (its own record owns date and state).
+ *  tier — an initiative's priority tier, 1 · 2 · 3, on its heading step.
+ *  area — an initiative's life area, one of six tags, on its heading step.
+ */
+export const ROADMAP_REF_PREFIXES = Object.freeze(['project', 'step', 'deliverable', 'calendar', 'effort']);   // effort:<pid>/<dir> — one cockpit within a project (2026-09-30)
+export const ROADMAP_AREA_TAGS = Object.freeze(['family', 'professional', 'writing', 'research', 'tools', 'personal']);
+export function normalizeRef(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  const m = /^([a-z]+):(\S+)$/.exec(s);
+  if (!m || !ROADMAP_REF_PREFIXES.includes(m[1])) return null;
+  if ((m[1] === 'step' || m[1] === 'deliverable' || m[1] === 'effort') && !/^[^/]+\/[^/]+$/.test(m[2])) return null;
+  if (m[1] === 'effort') { const dir = m[2].split('/')[1]; if (dir === '.' || dir === '..' || /\\/.test(dir)) return null; }   // one directory inside the project, never a step out (Grok, W2b)
+  return s;
+}
+export function normalizeTier(v) {
+  const n = typeof v === 'string' && /^\s*[123]\s*$/.test(v) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 1 && n <= 3 ? n : null;
+}
+export function normalizeArea(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  return ROADMAP_AREA_TAGS.includes(s) ? s : null;
+}
+const REF_FIELD_NORMALIZERS = Object.freeze({
+  ref: [normalizeRef, 'invalid_ref'],
+  tier: [normalizeTier, 'invalid_tier'],
+  area: [normalizeArea, 'unknown_area_tag'],
+});
+function otherStepWithRef(steps, id, ref) {
+  for (const [oid, os] of steps) if (oid !== id && os && os.ref === ref) return oid;
+  return null;
+}
+
 export function normalizePartTag(raw) {
   const v = String(raw || '').trim().toLowerCase();
   return ROADMAP_PART_TAGS.includes(v) ? v : null;
@@ -269,6 +345,17 @@ export function normalizeProjectionStep(step = {}) {
       ? step.kickoff_proposal_hash.trim()
       : null;
   }
+  if (step.due != null) normalized.due = step.due;
+  if (step.ref != null) normalized.ref = step.ref;
+  if (step.tier != null) normalized.tier = step.tier;
+  if (step.area != null) normalized.area = step.area;
+  if (step.active === true) normalized.active = true;
+  if (Number.isInteger(step.active_order)) normalized.active_order = step.active_order;
+  if (step.pace != null) normalized.pace = step.pace;
+  if (step.seat === 'active' || step.seat === 'deck') normalized.seat = step.seat;
+  if (Number.isInteger(step.seat_order)) normalized.seat_order = step.seat_order;
+  // the Star Chart (2026-10-03): a goal's if-then step survives the projection; null or blank clears it (Grok code R1 F1)
+  if (typeof step.if_then === 'string' && step.if_then.trim()) normalized.if_then = step.if_then.trim();
   if (step.navigation != null) normalized.navigation = structuredClone(step.navigation);
   if (step.refinement) normalized.refinement = step.refinement;
   return normalized;
@@ -326,6 +413,22 @@ export function buildRoadmapProjection(events = []) {
         part: normalizePartTag(ev.part),
         gate: typeof ev.gate === 'string' && ev.gate.trim() ? ev.gate.trim() : null,
       };
+      if (ev.due != null) {
+        const due = normalizeDue(ev.due);
+        if (due) created.due = due;
+        else issues.push({ code: 'invalid_due', at_index: idx, step_id: id, due: ev.due });
+      }
+      for (const [key, [norm, bad]] of Object.entries(REF_FIELD_NORMALIZERS)) {
+        if (ev[key] == null) continue;
+        const val = norm(ev[key]);
+        if (val == null) { issues.push({ code: bad, at_index: idx, step_id: id, [key]: ev[key] }); continue; }
+        if (key === 'ref') {
+          const dup = otherStepWithRef(steps, id, val);
+          if (dup) { issues.push({ code: 'duplicate_ref', at_index: idx, step_id: id, ref: val, other_step_id: dup }); continue; }
+          if (created.due != null) { issues.push({ code: 'due_on_ref_step', at_index: idx, step_id: id, ref: val }); delete created.due; }
+        }
+        created[key] = val;
+      }
       if (Array.isArray(ev.component_ids)
           || ev.end_to_end_slice != null
           || ev.kickoff_version != null
@@ -371,6 +474,27 @@ export function buildRoadmapProjection(events = []) {
           else step.navigation = structuredClone(fields.navigation);
           continue;
         }
+        if (key === 'due') {
+          if (fields.due == null) { delete step.due; continue; }
+          if (step.ref != null) { issues.push({ code: 'due_on_ref_step', at_index: idx, step_id: id, ref: step.ref }); continue; }
+          const due = normalizeDue(fields.due);
+          if (due) step.due = due;
+          else issues.push({ code: 'invalid_due', at_index: idx, step_id: id, due: fields.due });
+          continue;
+        }
+        if (key in REF_FIELD_NORMALIZERS) {
+          if (fields[key] == null) { delete step[key]; continue; }
+          const [norm, bad] = REF_FIELD_NORMALIZERS[key];
+          const val = norm(fields[key]);
+          if (val == null) { issues.push({ code: bad, at_index: idx, step_id: id, [key]: fields[key] }); continue; }
+          if (key === 'ref') {
+            const dup = otherStepWithRef(steps, id, val);
+            if (dup) { issues.push({ code: 'duplicate_ref', at_index: idx, step_id: id, ref: val, other_step_id: dup }); continue; }
+            if (step.due != null) { issues.push({ code: 'ref_on_dated_step', at_index: idx, step_id: id, ref: val }); continue; }
+          }
+          step[key] = val;
+          continue;
+        }
         if (key === 'part') {
           if (fields.part != null && !normalizePartTag(fields.part)) {
             issues.push({ code: 'unknown_part_tag', at_index: idx, step_id: id, part: fields.part });
@@ -391,6 +515,43 @@ export function buildRoadmapProjection(events = []) {
         }
         if (key === 'end_to_end_slice') {
           step.end_to_end_slice = fields.end_to_end_slice === true;
+          continue;
+        }
+        if (key === 'active') {
+          // the active set: on or off, never a third state; off drops the order with it
+          const on = fields.active === true || fields.active === 'on' || fields.active === 'true';
+          if (on) step.active = true; else { delete step.active; delete step.active_order; }
+          continue;
+        }
+        if (key === 'active_order') {
+          const n = fields.active_order;
+          if (n == null || n === '') { delete step.active_order; continue; }
+          const v = typeof n === 'number' ? n : parseInt(String(n), 10);
+          if (Number.isInteger(v) && v >= 0) step.active_order = v;
+          else issues.push({ code: 'invalid_active_order', at_index: idx, step_id: id, active_order: n });
+          continue;
+        }
+        if (key === 'pace') {
+          if (fields.pace == null || fields.pace === '') { delete step.pace; continue; }
+          const d = normalizeDue(fields.pace);
+          if (d) step.pace = d;
+          else issues.push({ code: 'invalid_pace', at_index: idx, step_id: id, pace: fields.pace });
+          continue;
+        }
+        if (key === 'seat') {
+          // the seat: active, deck, or none (back in its goal) — none drops the order with it
+          const v = fields.seat;
+          if (v == null || v === '' || v === 'none' || v === 'off') { delete step.seat; delete step.seat_order; continue; }
+          if (v === 'active' || v === 'deck') { step.seat = v; continue; }
+          issues.push({ code: 'invalid_seat', at_index: idx, step_id: id, seat: v });
+          continue;
+        }
+        if (key === 'seat_order') {
+          const n = fields.seat_order;
+          if (n == null || n === '') { delete step.seat_order; continue; }
+          const v = typeof n === 'number' ? n : parseInt(String(n), 10);
+          if (Number.isInteger(v) && v >= 0) step.seat_order = v;
+          else issues.push({ code: 'invalid_seat_order', at_index: idx, step_id: id, seat_order: n });
           continue;
         }
         if (key === 'kickoff_version') {
@@ -438,6 +599,11 @@ export function buildRoadmapProjection(events = []) {
         });
         return;
       }
+      if (step.ref != null) {
+        issues.push({ code: 'status_flip_on_ref_step', at_index: idx, step_id: id, ref: step.ref,
+          message: 'a referenced part is flipped in its own record, never here (not applied)' });
+        return;
+      }
       step.status = ev.to;
       return;
     }
@@ -460,6 +626,20 @@ export function buildRoadmapProjection(events = []) {
     // elaboration_*): ledger
     // history only — no roadmap_projection fold. Detail is reconstructed by
     // the owning surface (Face compile / progressive elaboration).
+    if (kind === 'reorder') {
+      // W4 (2026-09-28): his own act — a step moved before or after another in the plan's order; the projection
+      // is the Map's insertion order, so the move is a re-insertion
+      const step = steps.get(id);
+      if (!step) { issues.push({ code: 'reorder_unknown_step', at_index: idx, step_id: id }); return; }
+      const anchor = ev.before != null ? String(ev.before) : (ev.after != null ? String(ev.after) : null);
+      if (!anchor || anchor === String(id) || !steps.has(anchor)) { issues.push({ code: 'reorder_bad_anchor', at_index: idx, step_id: id, anchor }); return; }
+      const entries = [...steps.entries()].filter(([k]) => k !== id);
+      const at = entries.findIndex(([k]) => k === anchor);
+      entries.splice(ev.before != null ? at : at + 1, 0, [id, step]);
+      steps.clear();
+      for (const [k, v] of entries) steps.set(k, v);
+      return;
+    }
     if (ROADMAP_PROJECT_LEVEL_KINDS.includes(kind)) {
       return;
     }
@@ -742,6 +922,19 @@ export function appendRoadmapEvent(roadmapInput, event, opts = {}) {
         statuses: [...ROADMAP_STEP_STATUSES],
       };
     }
+    if (event.due != null && !normalizeDue(event.due)) {
+      return { ok: false, error: 'invalid_due', spelling: SPELLING, step_id, due: event.due, expected: 'YYYY-MM-DD' };
+    }
+    for (const [key, [norm, bad]] of Object.entries(REF_FIELD_NORMALIZERS)) {
+      if (event[key] != null && norm(event[key]) == null) {
+        return { ok: false, error: bad, spelling: SPELLING, step_id, [key]: event[key] };
+      }
+    }
+    if (event.ref != null) {
+      const dup = otherStepWithRef(current, step_id, normalizeRef(event.ref));
+      if (dup) return { ok: false, error: 'duplicate_ref', spelling: SPELLING, step_id, ref: event.ref, other_step_id: dup };
+      if (event.due != null) return { ok: false, error: 'due_on_ref_step', spelling: SPELLING, step_id, ref: event.ref, message: 'a referenced part takes its date from its own record' };
+    }
   } else {
     if (!nonEmpty(step_id) || !current.has(step_id)) {
       return { ok: false, error: 'unknown_step', spelling: SPELLING, step_id: step_id ?? null };
@@ -771,6 +964,10 @@ export function appendRoadmapEvent(roadmapInput, event, opts = {}) {
       };
     }
     const cur = current.get(step_id);
+    if (cur && cur.ref != null) {
+      return { ok: false, error: 'status_flip_on_ref_step', spelling: SPELLING, step_id, ref: cur.ref,
+        message: 'a referenced part is flipped in its own record, never here' };
+    }
     if (event.from != null && event.from !== cur.status) {
       return {
         ok: false,
@@ -787,6 +984,46 @@ export function appendRoadmapEvent(roadmapInput, event, opts = {}) {
     const fields =
       event.fields && typeof event.fields === 'object' ? event.fields : {};
     if ('navigation' in fields && !validNavigation(fields.navigation)) return {ok:false,error:'invalid_navigation'};
+    if (fields.due != null && !normalizeDue(fields.due)) {
+      return { ok: false, error: 'invalid_due', spelling: SPELLING, step_id, due: fields.due, expected: 'YYYY-MM-DD' };
+    }
+    if (fields.pace != null && fields.pace !== '' && !normalizeDue(fields.pace)) {
+      return { ok: false, error: 'invalid_pace', spelling: SPELLING, step_id, pace: fields.pace, expected: 'YYYY-MM-DD or none' };
+    }
+    if (fields.active_order != null && fields.active_order !== '') {
+      const v = typeof fields.active_order === 'number' ? fields.active_order : parseInt(String(fields.active_order), 10);
+      if (!Number.isInteger(v) || v < 0) {
+        return { ok: false, error: 'invalid_active_order', spelling: SPELLING, step_id, active_order: fields.active_order, expected: 'an integer from 0' };
+      }
+    }
+    if (fields.active != null && ![true, false, 'on', 'off', 'true', 'false'].includes(fields.active)) {
+      return { ok: false, error: 'invalid_active', spelling: SPELLING, step_id, active: fields.active, expected: 'on or off' };
+    }
+    if (fields.seat != null && fields.seat !== '' && !['none', 'off', 'active', 'deck'].includes(fields.seat)) {
+      return { ok: false, error: 'invalid_seat', spelling: SPELLING, step_id, seat: fields.seat, expected: 'active, deck or none' };
+    }
+    if (fields.seat_order != null && fields.seat_order !== '') {
+      const v = typeof fields.seat_order === 'number' ? fields.seat_order : parseInt(String(fields.seat_order), 10);
+      if (!Number.isInteger(v) || v < 0) {
+        return { ok: false, error: 'invalid_seat_order', spelling: SPELLING, step_id, seat_order: fields.seat_order, expected: 'an integer from 0' };
+      }
+    }
+    for (const [key, [norm, bad]] of Object.entries(REF_FIELD_NORMALIZERS)) {
+      if (fields[key] != null && norm(fields[key]) == null) {
+        return { ok: false, error: bad, spelling: SPELLING, step_id, [key]: fields[key] };
+      }
+    }
+    {
+      const cur = current.get(step_id) || {};
+      if (fields.ref != null) {
+        const dup = otherStepWithRef(current, step_id, normalizeRef(fields.ref));
+        if (dup) return { ok: false, error: 'duplicate_ref', spelling: SPELLING, step_id, ref: fields.ref, other_step_id: dup };
+        if (cur.due != null || fields.due != null) return { ok: false, error: 'ref_on_dated_step', spelling: SPELLING, step_id, ref: fields.ref, message: 'a referenced part takes its date from its own record' };
+      }
+      if (fields.due != null && cur.ref != null && !('ref' in fields && fields.ref == null)) {
+        return { ok: false, error: 'due_on_ref_step', spelling: SPELLING, step_id, ref: cur.ref, message: 'a referenced part takes its date from its own record' };
+      }
+    }
     const forbidden = Object.keys(fields).filter(
       (k) => !ROADMAP_SET_FIELDS.includes(k),
     );
@@ -811,6 +1048,17 @@ export function appendRoadmapEvent(roadmapInput, event, opts = {}) {
     }
   }
 
+  if (kind === 'reorder') {
+    const have = new Set(roadmap.roadmap_projection.map((s) => String(s.id)));
+    const anchor = event.before != null ? String(event.before) : (event.after != null ? String(event.after) : null);
+    if (!nonEmpty(step_id) || !have.has(String(step_id)) || !anchor || anchor === String(step_id) || !have.has(anchor)) {
+      return { ok: false, error: 'reorder_invalid', spelling: SPELLING, step_id: step_id ?? null, anchor,
+               message: 'reorder needs an existing step_id and an existing before/after step that is not itself.' };
+    }
+    if (!(event.receipt && typeof event.receipt === 'object' && nonEmpty(event.receipt.who))) {
+      return { ok: false, error: 'reorder_needs_receipt', spelling: SPELLING, step_id, message: 'reorder is his act: it carries a receipt (who, why).' };
+    }
+  }
   if (kind === 'commission_bind' && !nonEmpty(event.commissioned_as)) {
     return {
       ok: false,
@@ -1213,6 +1461,10 @@ export function verbRoadmapPropose(opts = {}) {
     status: 'proposed',
     done_when: opts.done_when ?? null,
     waiting_on: opts.waiting_on ?? null,
+    ...(opts.due != null ? { due: opts.due } : {}),
+    ...(opts.ref != null ? { ref: opts.ref } : {}),
+    ...(opts.tier != null ? { tier: opts.tier } : {}),
+    ...(opts.area != null ? { area: opts.area } : {}),
     at: opts.as_of ?? undefined,
     ...(opts.client_event_id ? { client_event_id: opts.client_event_id } : {}),
   };
@@ -1277,7 +1529,7 @@ export function verbRoadmapPropose(opts = {}) {
  * roadmap-set — events only:
  * - --status <to> flips status (receipt --who/--reason required; refuse without)
  * - --commissioned-as binds a commission (TW3 hook path)
- * - --name/--done-when/--waiting-on emit step_set
+ * - --name/--done-when/--waiting-on/--due/--ref/--tier/--area emit step_set
  * @param {object} opts
  */
 export function verbRoadmapSet(opts = {}) {
@@ -1369,6 +1621,17 @@ export function verbRoadmapSet(opts = {}) {
     if (opts.name != null) fields.name = opts.name;
     if (opts.done_when != null) fields.done_when = opts.done_when;
     if (opts.waiting_on != null) fields.waiting_on = opts.waiting_on;
+    if (opts.due != null) fields.due = (opts.due === 'none' || opts.due === '') ? null : opts.due;
+    for (const key of ['ref', 'tier', 'area']) {
+      if (opts[key] != null) fields[key] = (opts[key] === 'none' || opts[key] === '') ? null : opts[key];
+    }
+    // the active set (2026-09-29): --active on|off · --active-order N|none · --pace YYYY-MM-DD|none
+    if (opts.active != null) fields.active = !(opts.active === 'off' || opts.active === 'false' || opts.active === false);
+    if (opts.active_order != null) fields.active_order = (opts.active_order === 'none' || opts.active_order === '') ? null : opts.active_order;
+    if (opts.pace != null) fields.pace = (opts.pace === 'none' || opts.pace === '') ? null : opts.pace;
+    // the seats (2026-09-30): --seat-in active|deck|none · --seat-order N|none (--seat alone is the model seat)
+    if (opts.seat_in != null) fields.seat = (opts.seat_in === 'none' || opts.seat_in === '' || opts.seat_in === 'off') ? null : opts.seat_in;
+    if (opts.seat_order != null) fields.seat_order = (opts.seat_order === 'none' || opts.seat_order === '') ? null : opts.seat_order;
     if (!Object.keys(fields).length) {
       return {
         ok: false,
@@ -1378,7 +1641,7 @@ export function verbRoadmapSet(opts = {}) {
         primary: 'roadmap-set',
         project_path,
         message:
-          'roadmap-set needs a change: --status (+ --who/--reason), --commissioned-as, or --name/--done-when/--waiting-on.',
+          'roadmap-set needs a change: --status (+ --who/--reason), --commissioned-as, or --name/--done-when/--waiting-on/--due/--ref/--tier/--area/--active/--active-order/--pace.',
       };
     }
     event = {

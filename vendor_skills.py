@@ -54,6 +54,13 @@ SKILL_SOURCES = [
     ("financial-analyst", "ANCHOR_FOUNDRY_DIR", "skills/financial-analyst"),
     ("tidy-idy", "ANCHOR_FOUNDRY_DIR", "skills/tidy-idy"),
     ("zombie-hunter", "ANCHOR_FOUNDRY_DIR", "skills/zombie-hunter"),
+    ("anvil", "ANCHOR_FOUNDRY_DIR", "skills/anvil"),
+    ("aegis", "ANCHOR_FOUNDRY_DIR", "skills/aegis"),
+    ("superjump", "ANCHOR_FOUNDRY_DIR", "skills/superjump"),
+    ("chekhov", "ANCHOR_FOUNDRY_DIR", "skills/chekhov"),
+    ("einstein", "ANCHOR_FOUNDRY_DIR", "skills/einstein"),
+    ("figure-designer", "ANCHOR_FOUNDRY_DIR", "skills/figure-designer"),
+    ("agy-dispatch", "ANCHOR_FOUNDRY_DIR", "skills/agy-dispatch"),
     # v1.2.3: the Ecgberht steward. Repo root IS the skill (the gandalf shape).
     # Anchor already shipped its HOST CONTRACTS (the chamber_* modules) while
     # the skill itself stayed home — collaborators had steward-shaped Anchor
@@ -164,6 +171,16 @@ _DENY_BASENAMES_BY_SKILL = {
         "next-ux-and-anchor-orchestration.md",
         "review-brief-for-external-model.md", "review-fable-2026-07-25.md",
         "vision-correction-2026-07-25.md",
+    },
+    "chekhov": {
+        "agents.md", "author-plan-review-2026-09-10.md",
+        "book1-result-2026-09-10.md", "book2-result-2026-09-10.md",
+        "book23-result-2026-09-10-refinement2.md", "book23-result-2026-09-10.md",
+        "book3-result-2026-09-10.md", "grasscatcher.md",
+        "implementation-plan.md", "release-notes.md",
+        "repair-report-2026-09-09.md", "test-report-2026-09-09.md",
+        "w7-handoff.md", "_census.log", "foreman.config.json",
+        "hardening-gate-result.json",
     },
 }
 

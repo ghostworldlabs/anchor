@@ -6,12 +6,30 @@ import { execFileSync } from 'node:child_process';
 // rather than sent lossy - rescued from WIP 283fc40, 2026-10-11). A binary file - a PDF reading copy, an image - is
 // LISTED by name, size and hash, said plainly to be unread, and kept out of the text diff: refusing it outright left
 // every job with a PDF unable to land (Book 1 conflict spine v2, 2026-10-12).
-export function reviewDiff(repo, from, head) {
+const RUNTIME_RECORDS = /(?:^|\/)\.ecgberht\/|(?:^|\/)\.anchor\/|(?:^|\/)(?:ECGBERHT|DELIVERABLES|STATUS[^/]*)\.md$|(?:^|\/)(?:strip|roadmap)\.json$|(?:^|\/)journal\/|(?:^|\/)code-job-outputs\//i;
+
+export function reviewDiff(repo, from, head, options = {}) {
   const bytes = (...a) => execFileSync('git', ['-C', repo, ...a], { maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   const plain = ['--no-ext-diff', '--no-textconv', '--find-renames', from, head];
-  const all = numstatRows(bytes('diff', '--numstat', '-z', ...plain).toString('utf8'));
+  const rawRows = numstatRows(bytes('diff', '--numstat', '-z', ...plain).toString('utf8'));
+  let candPaths = null;
+  if (options.deltaBase && options.deltaBase !== from) {
+    try {
+      const cRows = numstatRows(bytes('diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--find-renames', options.deltaBase, from).toString('utf8'));
+      if (cRows.length) candPaths = new Set(cRows.flatMap(r => [r.from, r.to]).filter(Boolean));
+    } catch { candPaths = null; }
+  }
+  const isIgnoredDelta = r => {
+    const p = r.to || r.from || '';
+    if (options.excludeRuntime && RUNTIME_RECORDS.test(p)) return true;
+    if (candPaths && !candPaths.has(r.to) && !candPaths.has(r.from)) return true;
+    return false;
+  };
+  const runtimeRows = (options.excludeRuntime || candPaths) ? rawRows.filter(isIgnoredDelta) : [];
+  const all = (options.excludeRuntime || candPaths) ? rawRows.filter(r => !isIgnoredDelta(r)) : rawRows;
+  if ((options.excludeRuntime || candPaths) && !all.length) return '';
   const binaries = all.filter(r => r.binary);
-  const exclude = binaries.flatMap(b => [b.from, b.to]).filter(Boolean).map(p => `:(exclude,literal)${p}`);
+  const exclude = [...binaries, ...runtimeRows].flatMap(b => [b.from, b.to]).filter(Boolean).map(p => `:(exclude,literal)${p}`);
   const only = ['--', '.', ...exclude];
   // an excluded path also excludes what lies under it (a binary file "foo" replaced by a folder "foo/"): the text
   // rows left must be exactly the text rows of the whole change, or a text change would vanish unreviewed

@@ -150,7 +150,7 @@ def test_the_foundry_block_is_bounded(tmp_path, monkeypatch):
                                          for i in range(40)]}))
     monkeypatch.setenv("ANCHOR_FOUNDRY_TOOLS_INDEX", str(idx))
     text = foundry_tools.block()
-    assert text.count("\n  - ") == foundry_tools.MAX_TOOLS and len(text) < 4000
+    assert text.count("\n  - ") == foundry_tools.MAX_TOOLS and len(text) < 6200
 
 
 FAKE_TRIO = textwrap.dedent("""

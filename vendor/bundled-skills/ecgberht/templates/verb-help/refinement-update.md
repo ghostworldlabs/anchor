@@ -9,6 +9,22 @@ roadmap event ledger. Read one JSON request from stdin.
 Usage: `node bin/ecgberht.mjs refinement-update --project <path>`
 
 Read actions: `capabilities`, `read`, `operation_status`.
+Repair: `'{"action":"repair"}' | node bin/ecgberht.mjs refinement-update --project <path>`
+(PowerShell). No operation ID or sequence is needed. Under the existing writer
+lock, repair reloads unchanged events and rebuilds only the roadmap/refinement
+projections and authenticated lagging document/approved-folder projections.
+Current documents and immutable revisions stay untouched. Invalid event folds
+and edited managed regions are refused; approved-folder conflicts remain visible.
+Adoption preserves inherited event warnings. Later warnings are tolerated only
+when the normal writer admits the event and reproduces the same warning against
+its preceding history. `roadmap_projection_status.clean` stays `false` with the
+original `issues`; `invalid_issues` identifies warnings that still require refusal.
+Stable historical warnings do not make an otherwise matching projection drift.
+The result includes `repair.repaired_fields`, `repair.persisted`,
+`repair.updated_documents`, `repair.finished`, and `events_rewritten: false`
+inside `repair`. `consistent` includes roadmap drift; incomplete repair returns
+`ok: false` with its actual error and any completed projection writes.
+
 Mutations require a stable `operation_id` and the read result's `expected_seq`.
 Actions: `adopt`, `open_slice`, `begin`, `feedback`, `resolve_feedback`, `publish`,
 `present`, `accept`, `close`, `view`, `reconcile`, `producer_handoff`, `resolve_handoff`.
@@ -55,7 +71,8 @@ Include any additional recorded changes or reasons in the evidence. Naming a sli
 Retry an interrupted mutation with the identical operation and ID; never invent a
 replacement ID before checking its receipt. Explicit adoption preserves existing
 document text and introduces bounded generated regions. Repair a lagging projection
-by replaying the committed operation; an edited managed region is a conflict.
+with `action: repair` or by replaying the committed operation; an edited managed
+region is a conflict.
 
 Only John's explicit close of the current presentation marks a slice done.
 Accepting an older presentation does not close a newer refinement. Reading a file

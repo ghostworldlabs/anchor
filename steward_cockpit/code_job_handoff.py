@@ -51,6 +51,86 @@ def snapshot(job):
         return {"error": str(exc)[:300]}
 
 
+_SKIP_WT_DIRS = {".git", ".anchor", ".ecgberht", ".foreman", ".foreman-job", "__pycache__", ".pytest_cache", "node_modules"}
+_WT_ACTIVITY_CACHE = {}
+_AUTO_FINISHING = set()
+
+
+def worktree_activity(job):
+    """Scan the job's worktree for files modified since the job started so live supervision and the Status pane see real
+    file writes on disk even while a long tool call or script is running."""
+    try:
+        wt_raw = str(job.get("worktree") or "")
+        if not wt_raw:
+            return None
+        wt = Path(wt_raw)
+        if not wt.is_dir():
+            return None
+        floor = float(job.get("worker_birth") or job.get("phase_at") or 0) - 2.0
+        if floor <= 0:
+            return None
+        now_bucket = int(time.time() // 5)
+        cache_key = (wt_raw, int(floor), now_bucket)
+        if cache_key in _WT_ACTIVITY_CACHE:
+            return _WT_ACTIVITY_CACHE[cache_key]
+        modified = []
+        newest_mtime = 0.0
+        newest_rel = ""
+        newest_size = 0
+        for root_dir, dirs, files in os.walk(wt):
+            dirs[:] = [d for d in dirs if d not in _SKIP_WT_DIRS]
+            for fname in files:
+                if fname in ("foreman.config.json", "_foreman-status.log", "foreman-checkpoint.json") or fname.endswith((".pyc", ".pyo", ".tmp")):
+                    continue
+                fpath = Path(root_dir) / fname
+                try:
+                    st = fpath.stat()
+                except OSError:
+                    continue
+                if st.st_mtime >= floor:
+                    rel = fpath.relative_to(wt).as_posix()
+                    if cj._runtime(rel) or cj.never_lands(rel):
+                        continue
+                    modified.append(rel)
+                    if st.st_mtime >= newest_mtime:
+                        newest_mtime = st.st_mtime
+                        newest_rel = rel
+                        newest_size = st.st_size
+        if not modified:
+            _WT_ACTIVITY_CACHE[cache_key] = None
+            return None
+        kb = max(0.1, round(newest_size / 1024.0, 1)) if newest_size else 0.0
+        summary = "%d file(s) modified in worktree \u00b7 latest %s (%.1f KB)" % (len(modified), newest_rel, kb)
+        prog_stamp = "wt:%d:%s:%d" % (len(modified), newest_rel, int(newest_mtime))
+        res = {
+            "last_activity": newest_mtime,
+            "progress_at": newest_mtime,
+            "progress_token": prog_stamp,
+            "worktree_summary": summary,
+            "modified_count": len(modified),
+        }
+        if len(_WT_ACTIVITY_CACHE) > 128:
+            _WT_ACTIVITY_CACHE.clear()
+        _WT_ACTIVITY_CACHE[cache_key] = res
+        return res
+    except Exception:
+        return None
+
+
+def _merge_worktree_activity(job, out):
+    wt_act = worktree_activity(job)
+    if not wt_act:
+        return out
+    merged = dict(out)
+    merged["worktree_summary"] = wt_act["worktree_summary"]
+    if not merged.get("last_activity") or wt_act["last_activity"] > float(merged.get("last_activity") or 0):
+        merged["last_activity"] = wt_act["last_activity"]
+    if not merged.get("progress_at") or wt_act["progress_at"] > float(merged.get("progress_at") or 0):
+        merged["progress_at"] = wt_act["progress_at"]
+        merged["progress_token"] = wt_act["progress_token"]
+    return merged
+
+
 def observe(job):
     """Observe an existing worker without constructing/waking an engine. Unknown never means dead."""
     from steward_cockpit import steward_routes as sr
@@ -64,11 +144,11 @@ def observe(job):
             out["last_activity"] = getattr(eng, "last_output", None) or None
             out.update(getattr(eng, "job_observation", None) or {})
             if eng.alive() and (eng.busy or eng.queue):
-                return {**out, "state": "active"}
+                return _merge_worktree_activity(job, {**out, "state": "active"})
             if job.get("worker_completed_at"):
-                return {**out, "state": "completed"}
-        return {**out, "state": process_state(job.get("worker_pid"), job.get("worker_birth"),
-                                             job.get("worker_completed_at"))}
+                return _merge_worktree_activity(job, {**out, "state": "completed"})
+        state = process_state(job.get("worker_pid"), job.get("worker_birth"), job.get("worker_completed_at"))
+        return _merge_worktree_activity(job, {**out, "state": state})
     except Exception as exc:
         out["detail"] = str(exc)[:200]
     return out
@@ -173,7 +253,10 @@ def supervise(job, *, native=None, now=None):
     if native is None and job.get("worker") == "foreman" and job.get("phase") in (None, "producing"):
         from steward_cockpit.steward_campaign import _code_job_native
         native = _code_job_native(job, now)
-    return progress.sample(job, worker, native=native, now=now)
+    res = progress.sample(job, worker, native=native, now=now)
+    if worker.get("worktree_summary"):
+        res["worktree_summary"] = worker["worktree_summary"]
+    return res
 
 
 def settle_stopped_finalizer(cdir, job):
@@ -217,6 +300,65 @@ def refresh_supervision(cdir, *, engine=None):
             continue
         observation = supervise(job, now=now)
         cj._transition(cdir, job["id"], cj.LIVE, expect_attempt=job.get("attempt", 1), supervision=observation)
+        if (job.get("status") == "running" and job.get("phase") in (None, "producing")
+                and not job.get("finalizer_active") and observation.get("liveness") == "dead"
+                and now - float(job.get("phase_at") or 0) >= 15
+                and job["id"] not in _AUTO_FINISHING
+                and Path(str(job.get("worktree") or "")).is_dir()
+                and (job.get("coder_family") in cj.FAMILIES or job.get("authors"))):
+            try:
+                wt_p = Path(job["worktree"])
+                changed = [p for p in (cj.changed_paths(job["worktree"], cj.candidate_base(job)) or [])
+                           if not cj._runtime(p) and not cj.never_lands(p)]
+                if not changed:
+                    dead_empty = cj._transition(
+                        cdir, job["id"], ("running",), expect_attempt=job.get("attempt", 1),
+                        status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        phase="outcome", phase_at=now, kept_worktree="",
+                        error="worker process exited without modifying any files",
+                        land_note="nothing changed; worker process exited",
+                    )
+                    if dead_empty is not None:
+                        cj._report(cdir, dead_empty)
+                    continue
+                outputs_ready = True
+                for decl in (job.get("outputs") or []):
+                    dp = wt_p / decl
+                    md_alt = dp.with_suffix(".md")
+                    src_alt = dp.with_name(dp.stem + "_source.md")
+                    if not ((dp.is_file() and dp.stat().st_size > 0)
+                            or (md_alt.is_file() and md_alt.stat().st_size > 0)
+                            or (src_alt.is_file() and src_alt.stat().st_size > 0)):
+                        outputs_ready = False
+                        break
+                if not outputs_ready:
+                    partial = cj._transition(
+                        cdir, job["id"], ("running",), expect_attempt=job.get("attempt", 1),
+                        status="failed", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        phase="outcome", phase_at=now, kept_worktree=job["worktree"],
+                        files=changed,
+                        error="worker process exited before completing all declared outputs",
+                        land_note="not landed: worker process exited before completing all declared outputs; partial work is kept at %s" % job["worktree"],
+                    )
+                    if partial is not None:
+                        cj._report(cdir, partial)
+                    continue
+                authors = [a for a in (job.get("authors") or [job.get("coder_family")]) if a in cj.FAMILIES]
+                manifest = list(job.get("manifest") or []) or cj.foreman_manifest(job) or list(changed)
+                _AUTO_FINISHING.add(job["id"])
+                def _run_auto_finish(_cdir=cdir, _jid=job["id"], _authors=authors, _manifest=manifest):
+                    try:
+                        cj.finish(_cdir, _jid, {
+                            "text": "Worker process exited with all declared outputs present; auto-finalizing saved worktree.",
+                            "authors": _authors,
+                            "manifest": _manifest,
+                        })
+                    finally:
+                        _AUTO_FINISHING.discard(_jid)
+                threading.Thread(target=_run_auto_finish, name="auto-finish-" + str(job["id"]), daemon=True).start()
+                continue
+            except Exception:
+                _AUTO_FINISHING.discard(job["id"])
         if engine is not None and observation["state"] in {"needs_attention", "dead", "waiting", "needs_inspection", "visibility_lost"}:
             if now - float(job.get("phase_at") or 0) < 30:
                 continue  # give a newly launched phase time to bind its handle; this never terminates work
@@ -266,11 +408,35 @@ def recovery_error(job, worker=None):
         saved = job.get("recovery_snapshot")
         if not isinstance(saved, dict) or saved.get("error") or "files" not in saved:
             return "no trustworthy saved path-hash manifest; preserve for attributed repair"
-        if snapshot(job) != saved:
+        if not snapshot_matches(job, snapshot(job), saved):
             return "saved work changed after completion; original authorship cannot be reused"
     except Exception as exc:
         return "cannot verify saved work: " + str(exc)[:200]
     return ""
+
+
+def snapshot_matches(job, current_snap, saved_snap):
+    """True when current_snap equals saved_snap, or when HEAD moved solely because _commit_manifest committed the
+    job's own candidate commit on top of saved_snap['head'] with identical file hashes (plus Anchor reading copies)."""
+    if not isinstance(current_snap, dict) or not isinstance(saved_snap, dict):
+        return False
+    if current_snap == saved_snap:
+        return True
+    if current_snap.get("error") or saved_snap.get("error"):
+        return False
+    cur_files = current_snap.get("files") or {}
+    sav_files = saved_snap.get("files") or {}
+    copies = set(job.get("anchor_copies") or [])
+    if cur_files != sav_files:
+        if {k: v for k, v in cur_files.items() if k not in copies} != {k: v for k, v in sav_files.items() if k not in copies}:
+            return False
+    if current_snap.get("head") == saved_snap.get("head"):
+        return True
+    wt = job.get("worktree") or ""
+    c1, parent, _ = cj._git(wt, "rev-parse", str(current_snap.get("head") or "") + "^")
+    c2, subj, _ = cj._git(wt, "log", "-1", "--format=%s", str(current_snap.get("head") or ""))
+    return (c1 == 0 and c2 == 0 and parent.strip() == saved_snap.get("head")
+            and subj.strip().startswith("Code job " + str(job.get("id") or "")))
 
 
 def orphaned_finalizer(job):
@@ -304,7 +470,7 @@ def orphaned_finalizer(job):
     return True
 
 
-def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outside_ok=None):
+def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outside_ok=None, reviewer=None):
     """Recheck and land saved bytes asynchronously; never start a producer. ``outside_ok`` names repository files
     the caller knows changed outside the job for its own reasons (a steward's AGENTS.md); each is pinned to its bytes
     now and stops counting as an outside write only while it stays exactly so."""
@@ -314,6 +480,15 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
     job = owned_job(cdir, job_id)
     if job is None:
         return {"ok": False, "error": "no job owned by this commissioning effort"}
+    if (job.get("status") == "running" and not job.get("finalizer_active")
+            and observe(job).get("state") == "dead" and Path(str(job.get("worktree") or "")).is_dir()):
+        rec = cj.stopped_record(job)
+        if not rec.get("manifest"):
+            rec["manifest"] = cj.foreman_manifest(job)
+            rec["recovery_snapshot"] = snapshot(dict(job, manifest=rec["manifest"]))
+        job = cj._transition(cdir, job_id, ("running",), expect_attempt=job.get("attempt", 1),
+                             status="stopped", finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+                             stopped_by="worker_exited", kept_worktree=job["worktree"], **rec) or job
     if job.get("status") == "stopped" and not job.get("recovery_snapshot"):
         job = cj._transition(cdir, job_id, ("stopped",), expect_attempt=job.get("attempt", 1),
                              **cj.stopped_record(job)) or job        # a job stopped before its stop saved this record
@@ -330,6 +505,15 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
     why = cj.scope_error(job, job["worktree"], revised_outputs)
     if why:
         return {"ok": False, "error": why}
+    reviewer = str(reviewer or "").strip().lower()
+    if reviewer:
+        if reviewer not in cj.FAMILIES:
+            return {"ok": False, "error": "unknown reviewer family: %s" % reviewer}
+        authors = [str(a).lower() for a in (job.get("authors") or [job.get("coder_family") or ""]) if a]
+        if reviewer in authors:
+            return {"ok": False, "error": "reviewer family (%s) is an author's family (%s)" % (reviewer, ",".join(authors))}
+        if reviewer in cj.exhausted_families():
+            return {"ok": False, "error": "reviewer family (%s) hit its usage limit recently" % reviewer}
     import proc_probe
     orphan = orphaned_finalizer(job)
     # 2026-10-12 (Book 1 v3): the last attempt's audit was clean and its coder is proven ended (recovery_error), so
@@ -389,7 +573,7 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
             worker_completed_at=current.get("worker_completed_at") or time.time(),   # a stopped coder is proven ended above
             integration_check_ok=None, review=None, delta_review=None, supervision=None, command=None,
             served_tree_changed=None, audit_ok_attempt=None, audit_from=audit_from or current.get("audit_from"),
-            outside_ok=pinned or None)
+            outside_ok=pinned or None, reviewer_family=reviewer or current.get("reviewer_family") or None)
         busy = cj._busy_read()
         busy[job_id] = {"job": job_id, "cdir": str(cdir), "repo": cj._norm(job["repo"])}
         try:
@@ -402,7 +586,7 @@ def recover(cdir, job_id, *, check=None, outputs=None, actor="the steward", outs
     def complete():
         try:
             # Compare again after claim, before any controller command can alter the snapshot.
-            if snapshot(job) != job["recovery_snapshot"]:
+            if not snapshot_matches(job, snapshot(job), job["recovery_snapshot"]):
                 raise ValueError("saved work changed while recovery was claimed")
             cj._finish(cdir, job_id, claimed, {"text": job.get("summary"), "manifest": job.get("manifest") or [],
                                            "authors": job["authors"]})
@@ -500,7 +684,7 @@ def retry_pending(cdir, *, engine):
     pending = [j for j in cj.read_jobs(cdir).values() if (j.get("handoff") or {}).get("state") == "pending"]
     if pending:
         job = min(pending, key=lambda j: (j.get("handoff") or {}).get("last_try", 0))
-        return notify(cdir, job["id"], engine=engine)
+        return notify(cdir, job["id"], engine=engine, wake=True)
     return False
 
 

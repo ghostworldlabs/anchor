@@ -434,6 +434,15 @@
     $$('.chips [data-say]', box.closest('.gconv')).forEach(function (c) { c.addEventListener('click', function () { go(c.getAttribute('data-say')); }); });
   });
 
+  $$('[data-act="mark_done"]').forEach(function (p) {
+    p.addEventListener('click', function (e) {
+      e.stopPropagation();
+      act({ act: 'mark_done', step: p.getAttribute('data-part') });
+    });
+  });
+  var fsCalBtn = $('#fsCalBtn');
+  if (fsCalBtn) fsCalBtn.addEventListener('click', function () { setView(cal && cal.style.display === 'none' ? 'cal' : 'grouped'); });
+
   // the tools
   $$('.tool[data-tool]').forEach(function (b) {
     b.addEventListener('click', function () {

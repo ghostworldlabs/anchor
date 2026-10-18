@@ -24,6 +24,7 @@ TEXT_TYPES = frozenset(('.md', '.txt', '.json', '.mjs', '.js', '.jsx', '.py',
                         '.ts', '.tsx', '.yaml', '.yml', '.toml', '.css', '.html'))
 ICON_TYPES = frozenset(('.png', '.jpg', '.jpeg', '.svg', '.webp'))
 ICON_NAMES = (
+    ('anvil', 'anvil-icon.jpg'),
     ('researchprime', 'research-prime-icon.jpg'), ('gandalf', 'gandalf-icon-v5.jpg'),
     ('crucible', 'crucible-icon.svg'), ('foreman', 'foreman-icon.svg'),
     ('chekhov', 'chekhov-icon.svg'), ('einstein', 'einstein-icon.png'),
@@ -31,7 +32,7 @@ ICON_NAMES = (
     ('legalbeagle', 'legal-beagle-icon.jpg'), ('literaturereview', 'literature-review-icon.jpg'),
     ('ramanujan', 'ramanujan-icon.jpg'), ('tidyidy', 'tidy-idy-icon.jpg'),
     ('zombiehunter', 'zombie-hunter-radar.jpg'), ('superjump', 'superjump-icon.jpg'))
-DISPLAY_NAMES = {'researchprime': 'researchPrime', 'gandalf': 'Gandalf', 'crucible': 'Crucible',
+DISPLAY_NAMES = {'anvil': 'Anvil', 'researchprime': 'researchPrime', 'gandalf': 'Gandalf', 'crucible': 'Crucible',
                  'foreman': 'Foreman', 'chekhov': 'Chekhov', 'einstein': 'Einstein',
                  'financialanalyst': 'Financial-Analyst', 'jumper': 'Jumper', 'legalbeagle': 'Legal-Beagle',
                  'literaturereview': 'Literature-Review', 'ramanujan': 'Ramanujan',
@@ -65,7 +66,7 @@ def discovery_roots():
     foundry = Path(api.FOUNDRY_ROOT)
     trio = Path(os.environ.get('FOUNDRY_TRIO_ROOT') or 'C:/dev/trio')
     steward = Path(os.environ.get('FOUNDRY_STEWARD_ROOT') or
-                   'C:/Users/john/.agents/skills/ecgberht')
+                   (Path.home() / '.agents' / 'skills' / 'ecgberht'))
     return foundry, Path(api.SKILLS_ROOT), trio, steward
 
 

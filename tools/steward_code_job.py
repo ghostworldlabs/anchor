@@ -7,7 +7,7 @@ worktree of --repo; it lands its work when clean and wakes this steward with the
   python C:/dev/Anchor/tools/steward_code_job.py stop [--job <id>]
   python C:/dev/Anchor/tools/steward_code_job.py list
 """
-import argparse, json, os, sys, urllib.request
+import argparse, json, os, re, sys, urllib.request
 from pathlib import Path
 
 ANCHOR = Path(__file__).resolve().parent.parent
@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--work-dir", default=None, help="repository-relative artifact scope; omitted derives from --repo, '.' is root-wide")
     ap.add_argument("--check-argv", default="", help="the check as a JSON argument list (no shell)")
     ap.add_argument("--coder", default="", help="this job's coder family (claude|chatgpt|grok|gemini); default: the Coder seat")
+    ap.add_argument("--reviewer", default="", help="start/recover: reviewer family override (claude|chatgpt|grok|gemini); default: the Reviewer seat")
     ap.add_argument("--skill", default="", help="the skill this job runs (e.g. Chekhov), so the status names it")
     ap.add_argument("--output", action="append", default=[],
                     help="a file this job will PRODUCE (e.g. a render), named up front so it may land; repeatable")
@@ -64,11 +65,35 @@ def main():
         brief = a.brief or (Path(a.brief_file).read_text(encoding="utf-8") if a.brief_file else "")
         if not (a.repo and brief.strip()):
             raise SystemExit("start needs --repo and --brief-file (or --brief)")
+        doc_exts = {".md", ".docx", ".pdf", ".html", ".htm"}
+        stem_re = re.compile(r"(?:_source|-source|_redline|-redline|_track[-_]?changes|_tracked|_clean|_reading)$", re.I)
+        doc_stems = {
+            (Path(o).parent.as_posix().lower(), stem_re.sub("", Path(o).stem).lower())
+            for o in (a.output or [])
+            if Path(o).suffix.lower() in doc_exts and stem_re.sub("", Path(o).stem)
+        }
+        if len(doc_stems) > 3:
+            raise SystemExit(
+                f"start refused: {len(doc_stems)} distinct document stems declared in --output (max 3 per job). "
+                "Split multi-chapter or multi-deliverable bundles into separate focused jobs (1-2 deliverable stems per job)."
+            )
+        bf_abs = str(Path(a.brief_file).resolve()).replace("\\", "/") if a.brief_file else ""
+        if a.brief_file and not a.brief and len(brief) > 7800:
+            head = brief[:3600].rstrip()
+            tail = brief[-3200:].lstrip()
+            brief = (
+                f"FULL BRIEF FILE (also copied to .anchor/full_brief.md in your worktree; read first for complete specifications): {bf_abs}\n\n"
+                f"--- BRIEF OPENING ---\n{head}\n\n"
+                f"[... {len(brief) - len(head) - len(tail)} characters in {bf_abs} / .anchor/full_brief.md ...]\n\n"
+                f"--- BRIEF CLOSING & ACCEPTANCE REQUIREMENTS ---\n{tail}"
+            )
         check = json.loads(a.check_argv) if a.check_argv else a.check       # a list runs with no shell at all
         body.update(repo=str(Path(a.repo).resolve()), brief=brief, check=check, coder=a.coder, actor="the steward", skill=a.skill,
                     outputs=a.output, worker=a.worker, profile=a.profile, work_dir=a.work_dir, size=a.size,
-                    escalates=a.escalates,
+                    escalates=a.escalates, brief_file=bf_abs,
                     plan=Path(a.plan_file).read_text(encoding="utf-8") if a.plan_file else "")
+        if a.reviewer:
+            body["reviewer"] = a.reviewer
     if a.action == "stop":
         body["actor"] = "the steward"
     if a.action in ("inspect", "recover", "collect") and not a.job:
@@ -81,6 +106,8 @@ def main():
             body["outputs"] = a.output
         if a.outside_ok:
             body["outside_ok"] = a.outside_ok
+        if a.reviewer:
+            body["reviewer"] = a.reviewer
     if a.handoff_id:
         body["handoff_id"] = a.handoff_id
     if a.job:

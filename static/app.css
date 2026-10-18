@@ -114,4 +114,16 @@ body.resizing { cursor: col-resize; }
   body:not(.hosted) #head1 { grid-row: 3; grid-column: 1; }
   body:not(.hosted).two .gutter { display: none; }
 }
+@media (max-width: 520px) {
+  #bar { gap: 3px; padding-left: 4px; }
+  #bar .setup-gear { width: 24px; height: 24px; font-size: 14px; }
+  #bar .mark { width: 24px; }
+  #bar .row-control, #rows { width: 24px; }
+  #bar .panes { margin-right: 2px; }
+  #bar .panes button { width: 24px; }
+  #winctl button { width: 28px; }
+  #strip .tile .side { display: none; }
+  .tile { padding: 0 4px 0 7px; gap: 4px; }
+  .tile.cave { padding-right: 7px; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -310,7 +310,7 @@ def safe_auth_url(value, family):
     except ValueError:
         return None
     allowed = {"chatgpt": {"auth.openai.com", "chatgpt.com"},
-               "claude": {"claude.ai", "platform.claude.com", "console.anthropic.com"},
+               "claude": {"claude.ai", "claude.com", "platform.claude.com", "console.anthropic.com"},
                "grok": {"grok.com", "accounts.x.ai", "auth.x.ai"}}[family]
     if url.scheme != "https" or url.hostname not in allowed or url.username or url.password or port not in (None, 443):
         return None
@@ -406,7 +406,7 @@ class NativeProviders:
                 if code == 0 and all(re.search(r"(?m)^\s*" + command + r"\s", help_text) for command in ("status", "login")):
                     code, status_help = run_command([binary, "auth", "status", "--help"], model_policy.policy_environment())
                     login_code, login_help = run_command([binary, "auth", "login", "--help"], model_policy.policy_environment())
-                    if code == 0 and login_code == 0 and "--json" in status_help and "--browser" in login_help:
+                    if code == 0 and login_code == 0 and "--json" in status_help and ("--browser" in login_help or "--device-auth" in login_help):
                         import provider_settings
                         with tempfile.TemporaryDirectory(prefix=".provider-grok-", dir=paths.data_dir()) as directory:
                             probe = provider_settings.new_connection("grok", "Capability probe")
@@ -421,7 +421,8 @@ class NativeProviders:
                                             and Path(report["configDirectory"]).resolve() == Path(directory).resolve())
                             except (ValueError, TypeError, OSError, RuntimeError):
                                 isolated = False
-                            out.update(isolated=isolated, login="browser" if isolated else None,
+                            login_mode = ("browser" if "--browser" in login_help else "device") if isolated else None
+                            out.update(isolated=isolated, login=login_mode,
                                        execution=isolated, status_supported=isolated)
             if not out["isolated"]:
                 out["limit"] = "Requires installed Grok auth status --json, auth login --browser and documented GROK_HOME isolation, with configDirectory and subscription billing attribution. Existing Grok sign-in is retained."
@@ -559,7 +560,7 @@ class NativeProviders:
                 for candidate in re.findall(r"https://[^\s<>]+", line):
                     url = safe_auth_url(candidate.rstrip(".,)"), family)
                     if url:
-                        progress({"state": "awaiting_browser", "url": url,
+                        progress({"state": "awaiting_browser", "url": url, "accepts_code": True,
                                   "message": "Complete native Claude sign-in in the browser on the mother ship. Remote callbacks must return there."})
             code, _ = run_command([executable(family), "auth", "login", "--claudeai"], account_env(connection),
                                   cancel, LOGIN_TIMEOUT, line_progress)
@@ -571,13 +572,23 @@ class NativeProviders:
             if not cap.get("isolated") or not cap.get("login"):
                 raise NativeError("unsupported")
             self.observe(connection, capability=cap)
+            state_box = {"url": None, "user_code": None}
             def line_progress(line):
+                code_match = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b", line)
+                if code_match:
+                    state_box["user_code"] = code_match.group(1)
                 for candidate in re.findall(r"https://[^\s<>]+", line):
                     url = safe_auth_url(candidate.rstrip(".,)"), family)
                     if url:
-                        progress({"state": "awaiting_browser", "url": url,
-                                  "message": "Complete Grok subscription sign-in in the provider browser. Native credentials stay on this mother ship."})
-            code, _ = run_command([executable(family), "auth", "login", "--browser"], account_env(connection),
+                        state_box["url"] = url
+                if state_box["url"]:
+                    payload = {"state": "awaiting_browser", "url": state_box["url"],
+                               "message": "Complete Grok subscription sign-in in the provider browser. Native credentials stay on this mother ship."}
+                    if state_box["user_code"]:
+                        payload["user_code"] = state_box["user_code"]
+                    progress(payload)
+            flag = "--device-auth" if cap.get("login") == "device" else "--browser"
+            code, _ = run_command([executable(family), "auth", "login", flag], account_env(connection),
                                   cancel, LOGIN_TIMEOUT, line_progress)
             if code:
                 raise NativeError()

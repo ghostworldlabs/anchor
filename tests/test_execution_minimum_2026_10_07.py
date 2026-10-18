@@ -1641,7 +1641,8 @@ def test_grok_and_gemini_are_refused_as_coders_until_they_report_writes(monkeypa
                                  "settings_revision": "r"})
     fam, why = code_jobs.choose_coder("grok")
     assert fam is None and "does not report which files it wrote" in why
-    assert code_jobs.choose_coder() == ("chatgpt", None)                     # the ladder skips grok/gemini
+    assert code_jobs.choose_coder("gemini") == ("gemini", None)
+    assert code_jobs.choose_coder() == ("gemini", None)                      # the ladder skips grok, uses gemini
 
 
 def test_served_foundry_html_is_code_not_a_document():

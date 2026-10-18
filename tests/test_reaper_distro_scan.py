@@ -63,11 +63,11 @@ def _product_py_files():
 
 
 def test_psutil_not_in_third_party_allowlist():
-    """The sole declared native-dep exception is winpty — psutil/WMI are NOT
-    sanctioned product imports (the deny-by-default control plane)."""
+    """The declared native/optional-dep exceptions never include psutil/WMI
+    (the deny-by-default control plane)."""
     allow = distro._THIRD_PARTY_IMPORT_ALLOWLIST
-    assert set(allow.keys()) == {"winpty"}, (
-        "Wave 9 must not add a third-party-import exception; psutil is "
+    assert set(allow.keys()) <= {"winpty", "jupyter_server", "jupyter_client", "traitlets"}, (
+        "Wave 9 must not add a process-probe third-party-import exception; psutil is "
         "dev/test-only ground truth, never a product dependency")
     assert "psutil" not in allow
     assert "wmi" not in allow

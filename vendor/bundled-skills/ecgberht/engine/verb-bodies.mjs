@@ -71,6 +71,16 @@ function todayIso() {
  * Parse remaining argv into structured verb options.
  * @param {string[]} args
  */
+import { deriveHorizon } from './horizon.mjs';
+import { composeRepairProposal, openRepairProposals, planRepairApply, sameRepairSet } from './repair.mjs';
+import { foldRefinements } from './refinement-state.mjs';
+
+// W0 (2026-09-28): a wait's subject — a typed reference, never prose. `none` clears it.
+const WAIT_REF_RE = /^(step:[^\s@]+|deliverable:[^\s@]+@[^\s@]+|decision:[^\s@]+|none)$/;
+export function isWaitRef(value) {
+  return typeof value === 'string' && WAIT_REF_RE.test(value.trim());
+}
+
 export function parseVerbArgs(args = []) {
   const tokens = Array.isArray(args) ? [...args] : [];
   const face_patch = {};
@@ -93,6 +103,10 @@ export function parseVerbArgs(args = []) {
     from: null,
     done_when: null,
     waiting_on: null,
+    due: null,
+    ref: null,
+    tier: null,
+    area: null,
     commissioned_as: null,
     skill: null,
     depth_cell: null,
@@ -285,11 +299,21 @@ export function parseVerbArgs(args = []) {
       '--from': 'from',
       '--done-when': 'done_when',
       '--waiting-on': 'waiting_on',
+      '--due': 'due',
+      '--ref': 'ref',
+      '--tier': 'tier',
+      '--area': 'area',
       '--commissioned-as': 'commissioned_as',
       '--who': 'who',
       '--when': 'when',
       '--goal-reread': 'goal_reread',
       '--current-step': 'current_step_id',
+      // the active set (2026-09-29)
+      '--active': 'active',
+      '--active-order': 'active_order',
+      '--seat-in': 'seat_in',
+      '--seat-order': 'seat_order',
+      '--pace': 'pace',
     };
     if (roadmapFlags[t]) {
       const next = tokens[i + 1];
@@ -416,6 +440,60 @@ export function parseVerbArgs(args = []) {
       const next = tokens[i + 1];
       if (next && !next.startsWith('-')) {
         out.strip_tip = { ...(out.strip_tip || {}), capacity: next };
+        i++;
+      }
+      continue;
+    }
+    // W0 (2026-09-28): a wait names its subject — `--wait-ref step:<sid>` · `deliverable:<row>@<version>` ·
+    // `decision:<id>` · `none` (append path only, like the other tip fields)
+    if (t === '--wait-ref') {
+      const next = tokens[i + 1];
+      if (next && !next.startsWith('-')) {
+        out.strip_tip = { ...(out.strip_tip || {}), wait_ref: next.trim() };   // stored trimmed (Grok W0): an exact join, never a padded token
+        i++;
+      }
+      continue;
+    }
+    // W0: `--leave` appends a leave receipt (where he left this project: the step in hand, the last event and
+    // its time, the effort) — his own act, recorded; never a step, never a status
+    if (t === '--leave') {
+      out.leave = true;
+      continue;
+    }
+    if (t === '--leave-at') {
+      const next = tokens[i + 1];
+      if (next && !next.startsWith('-')) {
+        out.leave_at = next;
+        i++;
+      }
+      continue;
+    }
+    // W3 (2026-09-28): `--horizon [--horizon-reason <word>]` derives the line from the plan and writes it, stamped
+    if (t === '--horizon') {
+      out.horizon = true;
+      continue;
+    }
+    if (t === '--horizon-reason') {
+      const next = tokens[i + 1];
+      if (next && !next.startsWith('-')) {
+        out.horizon_reason = next;
+        i++;
+      }
+      continue;
+    }
+
+    // W4 (2026-09-28): repair as a proposal — `--repair-propose --after-step <id> [--after-presentation <id>]`
+    // composes and appends the correction set after an acceptance (nothing changes); `--repair-resolve <proposal>
+    // --disposition accepted|dismissed --who <name> [--why <text>]` is his word on it.
+    if (t === '--repair-propose') {
+      out.repair_propose = true;
+      continue;
+    }
+    if (t === '--after-step' || t === '--after-presentation' || t === '--repair-resolve' || t === '--disposition') {
+      const key = { '--after-step': 'after_step', '--after-presentation': 'after_presentation', '--repair-resolve': 'repair_resolve', '--disposition': 'disposition' }[t];
+      const next = tokens[i + 1];
+      if (next && !next.startsWith('-')) {
+        out[key] = next.trim();
         i++;
       }
       continue;
@@ -686,6 +764,123 @@ export function verbNext(opts = {}) {
  * @param {object} opts
  * @param {string} [opts.verb_name='update']
  */
+/**
+ * W4 of the steward revision (2026-09-28): repair as a proposal (his Q2, "propose the tidying too").
+ *
+ * `--repair-propose --after-step <id> [--after-presentation <id>]` — composes the correction set that follows an
+ * acceptance from the records alone (`composeRepairProposal`: the waits that named the accepted step; the slices
+ * whose pin on it went stale) and appends it as ONE `repair_proposal` event anchored at the roadmap's last seq.
+ * Nothing on any step changes. The SAME set already open for that step (the same presentation and rows) is
+ * answered, not duplicated; a different one — a later acceptance — supersedes the open set (`repair_resolve`
+ * disposition `superseded`, no step written) and the new composition follows, even when it is empty; an empty
+ * set appends no proposal (there is nothing for him to accept). A refinement fold that throws fails the propose:
+ * never a partial set (Grok W4).
+ *
+ * `--repair-resolve <proposal_id> --disposition accepted|dismissed --who <name> [--why <text>]` — his word. On
+ * `accepted` each correction still true of the roadmap (`planRepairApply`) is applied FIRST as a receipted
+ * `step_set` naming the proposal, then the `repair_resolve` is appended with the ids that landed; a failed
+ * `step_set` leaves the proposal open (the landed ones are skipped as moved on a retry). A dismiss is refused once
+ * any correction of that proposal has landed. Second-look rows are noted, never written. No model; no strip write.
+ */
+function repairAct(opts, project_path, lifecycle, verb_name) {
+  const base = { spelling: SPELLING, verb: verb_name, primary: 'update', project_path };
+  const otherFields = Object.keys(opts.face_patch ?? {}).length
+    || Object.keys(opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {}).length
+    || !!opts.current_step_id || !!opts.leave || !!opts.horizon || (opts.repair_propose && opts.repair_resolve);
+  if (otherFields) {
+    return { ok: false, error: 'repair_exclusive', ...base, message: 'A repair act travels alone: no other field on the same update.' };
+  }
+  if (!lifecycle.ok || !Array.isArray(lifecycle.roadmap?.roadmap_events)) {
+    return { ok: false, error: 'no_roadmap', ...base, message: 'A repair needs the roadmap.' };
+  }
+  const events = lifecycle.roadmap.roadmap_events;
+  const projection = Array.isArray(lifecycle.roadmap.roadmap_projection) ? lifecycle.roadmap.roadmap_projection : [];
+  const dry = Boolean(opts.dry_run) || opts.persist === false;
+
+  if (opts.repair_propose) {
+    const step = String(opts.after_step ?? '').trim();
+    if (!step) return { ok: false, error: 'repair_needs_step', ...base, message: '--repair-propose needs --after-step <id>.' };
+    const last = events.length ? events[events.length - 1] : null;
+    const lastSeq = last && typeof last.seq === 'number' ? last.seq : 0;
+    let state = null;
+    try { state = foldRefinements(events); } catch (e) {
+      // a fold that throws is not "no pins": the set would be partial (Grok W4)
+      return { ok: false, error: 'refinement_fold_failed', step_id: step, ...base, message: `The refinement state could not be folded: ${e?.message ?? e}` };
+    }
+    const composed = composeRepairProposal({ projection, accepted_step_id: step,
+      accepted_presentation_id: typeof opts.after_presentation === 'string' && opts.after_presentation.trim() ? opts.after_presentation.trim() : null,
+      refinement_state: state, after_seq: lastSeq });
+    if (!composed.ok) return { ok: false, error: 'unknown_step', step_id: step, ...base, message: composed.reason };
+    const open = openRepairProposals(events);
+    const prior = open.find((e) => e.after && typeof e.after === 'object' && String(e.after.step_id) === step);
+    // the same set already open (a retried route): answered, never a twin
+    if (prior && sameRepairSet(prior, composed.proposal)) {
+      return { ok: true, existing: true, appended: false, proposal_id: String(prior.proposal_id), count: Number(prior.count) || 0, ...base,
+               message: `That set is already proposed (${prior.proposal_id}); his word is still awaited.` };
+    }
+    if (dry) return { ok: true, dry_run: true, appended: false, proposal: composed.proposal, corrections: composed.corrections, supersedes: prior ? String(prior.proposal_id) : null, ...base };
+    let superseded = null;
+    if (prior) {
+      // a later acceptance on the same step: the old set is closed as superseded (nothing written to any step) and
+      // the new composition follows — even an empty one supersedes (Grok W4)
+      const sup = appendRoadmapEventThroughSpine(project_path, { kind: 'repair_resolve', proposal_id: String(prior.proposal_id), disposition: 'superseded',
+        receipt: { who: 'steward', why: `a later acceptance on ${step}` }, applied: [], skipped: [], superseded_by: composed.empty ? null : composed.proposal.proposal_id }, { skip_index: true });
+      if (!sup.ok) return { ...sup, ...base, appended: false };
+      superseded = String(prior.proposal_id);
+    }
+    if (composed.empty) {
+      return { ok: true, empty: true, appended: false, superseded, proposal: composed.proposal, ...base,
+               message: `Nothing to correct after ${step}; no proposal appended${superseded ? ` (${superseded} superseded)` : ''}.` };
+    }
+    const res = appendRoadmapEventThroughSpine(project_path, { ...composed.proposal }, { skip_index: true });
+    if (!res.ok) return { ...res, ...base, appended: false, superseded };
+    return { ok: true, appended: true, superseded, proposal_id: composed.proposal.proposal_id, count: composed.proposal.count, corrections: composed.corrections, ...base,
+             message: `Proposed ${composed.proposal.count} correction${composed.proposal.count === 1 ? '' : 's'} after ${step}; nothing changes until his word.` };
+  }
+
+  const proposal_id = String(opts.repair_resolve ?? '').trim();
+  const disposition = String(opts.disposition ?? '').trim();
+  if (!['accepted', 'dismissed'].includes(disposition)) {
+    return { ok: false, error: 'bad_disposition', proposal_id, ...base, message: '--disposition is accepted or dismissed.' };
+  }
+  const who = String(opts.who ?? '').trim();
+  if (!who) return { ok: false, error: 'repair_needs_who', proposal_id, ...base, message: 'His word carries a name: --who <name>.' };
+  const prop = events.find((e) => e && e.kind === 'repair_proposal' && String(e.proposal_id) === proposal_id);
+  if (!prop) return { ok: false, error: 'unknown_proposal', proposal_id, ...base, message: `No proposal ${proposal_id} in the roadmap.` };
+  if (!openRepairProposals(events).some((e) => String(e.proposal_id) === proposal_id)) {
+    return { ok: false, error: 'proposal_resolved', proposal_id, ...base, message: `Proposal ${proposal_id} already has his word.` };
+  }
+  const landedBefore = events.filter((e) => e && e.kind === 'step_set' && String(e.repair_of ?? '') === proposal_id).map((e) => String(e.step_id));
+  if (disposition === 'dismissed' && landedBefore.length) {
+    return { ok: false, error: 'repair_partly_applied', proposal_id, applied: landedBefore, ...base,
+             message: `${landedBefore.length} correction${landedBefore.length === 1 ? '' : 's'} of ${proposal_id} already landed; accept finishes the set.` };
+  }
+  const plan = disposition === 'accepted' ? planRepairApply({ projection, proposal: prop }) : { apply: [], skipped: [], noted: [] };
+  const afterStep = prop.after && typeof prop.after === 'object' ? String(prop.after.step_id ?? '') : '';
+  const why = typeof opts.reason === 'string' && opts.reason.trim() ? opts.reason.trim()
+    : `${disposition} the correction set after ${afterStep || 'the acceptance'}`;
+  if (dry) return { ok: true, dry_run: true, disposition, proposal_id, apply: plan.apply, skipped: plan.skipped, noted: plan.noted, ...base };
+  // the corrections land FIRST; his word is appended only over what landed (Grok W4: the record tells the truth)
+  const applied = [...landedBefore];
+  for (const c of plan.apply) {
+    const sres = appendRoadmapEventThroughSpine(project_path,
+      { kind: 'step_set', step_id: c.step_id, fields: c.fields, receipt: { who, why: `repair ${proposal_id}: ${c.why}` }, repair_of: proposal_id },
+      { skip_index: true });
+    if (!sres.ok) {
+      return { ...sres, ...base, resolved: false, disposition, proposal_id, applied, skipped: plan.skipped, noted: plan.noted,
+               message: `The correction on ${c.step_id} failed after ${applied.length} landed; the set stays open — accept again finishes it.` };
+    }
+    applied.push(c.step_id);
+  }
+  const rres = appendRoadmapEventThroughSpine(project_path, { kind: 'repair_resolve', proposal_id, disposition, receipt: { who, why },
+    applied, skipped: plan.skipped, noted: plan.noted }, { skip_index: true });
+  if (!rres.ok) return { ...rres, ...base, resolved: false, disposition, proposal_id, applied, skipped: plan.skipped, noted: plan.noted };
+  return { ok: true, resolved: true, disposition, proposal_id, applied, skipped: plan.skipped, noted: plan.noted, ...base,
+           message: disposition === 'accepted'
+             ? `Accepted: ${applied.length} correction${applied.length === 1 ? '' : 's'} applied${plan.skipped.length ? `, ${plan.skipped.length} skipped (moved since)` : ''}${plan.noted.length ? `, ${plan.noted.length} noted for a second look` : ''}.`
+             : 'Dismissed: nothing changed.' };
+}
+
 export function verbUpdate(opts = {}) {
   const verb_name = opts.verb_name ?? 'update';
   const project_path = resolveProjectPath({
@@ -696,8 +891,18 @@ export function verbUpdate(opts = {}) {
   const lifecycle = loadProjectRoadmap(project_path);
   const managed = lifecycle.ok && lifecycle.roadmap?.roadmap_events?.some(e=>e.kind==='refinement_update');
   if(managed && [opts.face_patch,opts.strip_tip,opts.strip_in_place_patch].some(p=>p &&
-      (Object.hasOwn(p,'human_wait') || Object.hasOwn(p,'pending_request')))) {
+      (Object.hasOwn(p,'human_wait') || Object.hasOwn(p,'pending_request') || Object.hasOwn(p,'wait_ref')))) {
     return {ok:false,error:'managed-wait-event-owned',message:'Use refinement-update; a stamp cannot change managed human wait.'};
+  }
+  // W0 (2026-09-28): a wait's subject is a typed reference or 'none' — never free prose
+  const wait_ref_in = opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip.wait_ref : undefined;
+  if (wait_ref_in !== undefined && !isWaitRef(wait_ref_in)) {
+    return { ok: false, error: 'bad_wait_ref', wait_ref: wait_ref_in, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
+             message: '--wait-ref must be step:<id>, deliverable:<row>@<version>, decision:<id>, or none.' };
+  }
+  // W4 (2026-09-28): a repair act is a roadmap act and travels alone
+  if (opts.repair_propose || opts.repair_resolve) {
+    return repairAct(opts, project_path, lifecycle, verb_name);
   }
 
   if (!surfaces.strip && !surfaces.face) {
@@ -712,6 +917,42 @@ export function verbUpdate(opts = {}) {
     };
   }
 
+  // W3 (2026-09-28): --horizon derives the line from the plan — the focus, then what follows it — and writes it as a
+  // stamped instrument (the roadmap's last seq and the focus it derived from). A record whose stamp already covers
+  // the last event with the same focus is unchanged: no write. The focus read is the strip's CURRENT one, so a focus
+  // change he made is honoured, never overridden. Deterministic; no model.
+  let horizon = null;
+  if (opts.horizon) {
+    const proj = lifecycle.ok && Array.isArray(lifecycle.roadmap?.roadmap_projection) ? lifecycle.roadmap.roadmap_projection : [];
+    const evs = lifecycle.ok && Array.isArray(lifecycle.roadmap?.roadmap_events) ? lifecycle.roadmap.roadmap_events : [];
+    const lastEv = evs.length ? evs[evs.length - 1] : null;
+    const focusId = opts.current_step_id ?? surfaces.strip?.current_step_id ?? null;
+    horizon = deriveHorizon({ projection: proj, current_step_id: focusId, n: 3, last_event: lastEv, reason: opts.horizon_reason });
+    if (!horizon.ok) {
+      return { ok: false, error: 'no_horizon', reason: horizon.reason, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
+               message: `No horizon can be derived: ${horizon.reason}.` };
+    }
+    const lastSeq = lastEv && typeof lastEv.seq === 'number' ? lastEv.seq : 0;
+    const stampedSeq = surfaces.strip?.horizon_source_seq;
+    const whyOut = horizon.why ?? (surfaces.strip?.why_next ?? '');
+    const otherFields = Object.keys(opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {}).length
+      || Object.keys(opts.face_patch ?? {}).length || !!opts.current_step_id || !!opts.leave;
+    // unchanged (no write) only when the stamp covers the last event with the same focus AND the line and why on
+    // the strip already equal the derivation AND the call changes nothing else — a later edit of the line by
+    // another update clears the stamp (below), so it can never freeze an old line (Grok W3)
+    if (!opts.force && !otherFields && typeof stampedSeq === 'number' && stampedSeq >= lastSeq
+        && surfaces.strip?.horizon_focus === horizon.focus
+        && surfaces.strip?.next_recommended === horizon.line && String(surfaces.strip?.why_next ?? '') === String(whyOut)) {
+      return { ok: true, unchanged: true, horizon, spelling: SPELLING, verb: verb_name, primary: 'update', project_path };
+    }
+    opts = { ...opts, strip_tip: { ...(opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {}),
+      next_recommended: horizon.line, why_next: whyOut, horizon_source_seq: lastSeq, horizon_focus: horizon.focus, horizon_steps: horizon.steps } };
+  } else if (opts.strip_tip && typeof opts.strip_tip === 'object'
+             && (opts.strip_tip.next_recommended != null || opts.strip_tip.why_next != null || (opts.face_patch && opts.face_patch.why_next != null))) {
+    // a line written by hand (the turn's, his) is not the derived one: the stamp clears so the next --horizon
+    // re-derives rather than reporting "unchanged" over it
+    opts = { ...opts, strip_tip: { ...opts.strip_tip, horizon_source_seq: null, horizon_focus: null } };
+  }
   // the strip's next / why / wait are capped by words (the lead line must fit)
   const face_patch0 = opts.face_patch ?? {};
   const tip0 = opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {};
@@ -776,12 +1017,46 @@ export function verbUpdate(opts = {}) {
   let strip_append = null;
   let receipt_append = null;
 
-  if (strip) {
+  // W0: a bare `--leave` records where he left and moves no clock — no instrument, one receipt
+  const leave_only = !!opts.leave && !Object.keys(face_patch).length && !pin_id
+    && !(opts.strip_tip && typeof opts.strip_tip === 'object' && Object.keys(opts.strip_tip).length);
+  if (strip && opts.leave) {
+    const events = lifecycle.ok && Array.isArray(lifecycle.roadmap?.roadmap_events) ? lifecycle.roadmap.roadmap_events : [];
+    const last = events.length ? events[events.length - 1] : null;
+    // the deliverable version he was on: copied ONLY when the last event already carries one (a refinement
+    // event's presentation), never invented (Grok W0)
+    const op = last && last.kind === 'refinement_update' && last.operation && typeof last.operation === 'object' ? last.operation : null;
+    const presentation = op ? (op.presentation_id ?? op.base_presentation_id ?? null) : null;
+    const receipt = {
+      schema: RECEIPT_SCHEMA_ID,
+      kind: 'leave',
+      as_of: opts.as_of ?? todayIso(),
+      at: typeof opts.leave_at === 'string' && opts.leave_at.trim() ? opts.leave_at.trim() : new Date().toISOString(),
+      current_step_id: strip.current_step_id ?? null,
+      last_event_seq: last?.seq ?? null,
+      last_event_at: last?.at ?? null,
+      last_event_kind: last?.kind ?? null,
+      last_event_step_id: last?.step_id ?? op?.step_id ?? null,
+      presentation_id: presentation,
+      active_effort: strip.active_effort ?? null,
+      wait_ref: strip.wait_ref ?? null,
+      human_wait: strip.human_wait ?? 'none',
+    };
+    const rec = appendStripReceipt(strip, receipt, { apply_to_projection: false });
+    if (!rec.ok) {
+      return { ok: false, error: rec.error, spelling: SPELLING, verb: verb_name, primary: 'update', message: 'Leave receipt append failed' };
+    }
+    strip = rec.strip;
+    receipt_append = receipt;
+  }
+
+  if (strip && !leave_only) {
     const instrument = {
       _kind: 'instrument',
-      kind: verb_name === 'heartbeat' ? 'heartbeat' : 'update',
+      kind: verb_name === 'heartbeat' ? 'heartbeat' : (horizon ? 'horizon' : 'update'),
       as_of: opts.as_of ?? todayIso(),
-      source: 'verb_update',
+      source: horizon ? 'verb_update:horizon' : 'verb_update',
+      ...(horizon ? { derived: true } : {}),
       ...(opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {}),
     };
     // Map face active_effort / human_wait into strip tip when provided

@@ -46,6 +46,9 @@ export const STRIP_CLOCK_FIELDS = Object.freeze([
   'tool_depth_cell',
   'next_recommended',
   'why_next',
+  'wait_ref', // W0 (2026-09-28): what the wait names - a typed reference or 'none'
+  'horizon_source_seq', // W3 (2026-09-28): the roadmap seq the derived line covers
+  'horizon_focus',      // W3: the focus the derived line was read from
   'current_step_id',
   'grasscatch',
   'uncertainty_flags',

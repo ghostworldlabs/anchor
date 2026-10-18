@@ -517,7 +517,7 @@ def activate(repo):
             return out
         code, _, _ = _git(root, "merge-base", "--is-ancestor", "HEAD", BRANCH, timeout=60)
         if code != 0:
-            code, _, err = _git(ip, "-c", "user.name=Anchor lander", "-c", "user.email=lander@anchor.local",
+            code, _, err = _git(ip, "-c", "user.name=Anchor lander", "-c", "user.email=anchor@localhost",
                                 "merge", "--no-edit", "-m", "Bring the running branch's own commits into %s" % BRANCH, out["from"])
             if code != 0:
                 _git(ip, "merge", "--abort")

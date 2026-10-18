@@ -67,26 +67,66 @@ def edge():
     return None
 
 
+def _write_docx(md: Path, docx_out: Path) -> bool:
+    try:
+        import importlib.util
+        tool_py = Path(os.environ.get("ANCHOR_FOUNDRY_TOOLS", "C:/dev/foundry-tools")) / "docx-redline" / "tool.py"
+        if tool_py.is_file():
+            spec = importlib.util.spec_from_file_location("docx_redline_tool", str(tool_py))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.markdown_to_docx(md, docx_out)
+            return docx_out.is_file() and docx_out.stat().st_size > 0
+        from docx import Document
+        doc = Document()
+        for raw in md.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = raw.strip()
+            if not s:
+                continue
+            if s in ("---", "***", "* * *", "___"):
+                p = doc.add_paragraph("* * *")
+                p.alignment = 1
+            elif s.startswith("#"):
+                lvl = min(4, len(s) - len(s.lstrip("#")))
+                doc.add_heading(s[lvl:].strip(), level=lvl)
+            else:
+                doc.add_paragraph(s)
+        docx_out.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(str(docx_out))
+        return docx_out.is_file() and docx_out.stat().st_size > 0
+    except Exception as e:
+        print("no DOCX was made: %s" % e)
+    return False
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("document")
     ap.add_argument("--html", nargs="?", const="", default=None,
                     help="also write the same-version HTML (beside it, or at the path given)")
+    ap.add_argument("--docx", nargs="?", const="", default=None,
+                    help="also write the same-version DOCX (beside it, or at the path given)")
     ap.add_argument("--out", help="the PDF path (default: the document's name with .pdf)")
-    ap.add_argument("--no-pdf", action="store_true", help="only the HTML")
+    ap.add_argument("--no-pdf", action="store_true", help="only the HTML and/or DOCX")
     a = ap.parse_args(argv)
     md = Path(a.document).resolve()
     if not md.is_file():
         print("no such document: %s" % md)
         return 1
     html_out = None if a.html is None else (Path(a.html).resolve() if a.html else md.with_suffix(".html"))
+    docx_out = None if a.docx is None else (Path(a.docx).resolve() if a.docx else md.with_suffix(".docx"))
     if a.no_pdf:
-        if html_out is None:
-            print("--no-pdf needs --html")
+        if html_out is None and docx_out is None:
+            print("--no-pdf needs --html or --docx")
             return 1
-        html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
-                            encoding="utf-8")
-        print(html_out)
+        if html_out is not None:
+            html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
+                                encoding="utf-8")
+            print(html_out)
+        if docx_out is not None:
+            if not _write_docx(md, docx_out):
+                return 1
+            print(docx_out)
         return 0
     pdf = Path(a.out).resolve() if a.out else md.with_suffix(".pdf")
     browser = edge()
@@ -117,6 +157,10 @@ def main(argv=None):
         html_out.write_text(page(md, False).replace(report_viewer.VENDOR_KATEX_DIR.as_uri(), "/vendor/katex"),
                             encoding="utf-8")
         print(html_out)
+    if docx_out is not None:
+        if not _write_docx(md, docx_out):
+            return 1
+        print(docx_out)
     return 0
 
 

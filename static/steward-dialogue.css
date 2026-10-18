@@ -1,7 +1,7 @@
 /* The steward's dialogue — ONE look on the Campaign page and the High Seat (W2c-2, 2026-09-30): the head with the
    steward's state, the list of turns (his, the steward's, the system's), a goal's chip, the live cursor. */
-.exwrap{flex:1 1 auto;min-height:160px;display:flex;flex-direction:column;margin-top:9px;border:1px solid var(--border);border-radius:11px;background:#0d1016;padding:8px 10px 6px}
-.exwrap .scroll{flex:1 1 auto;min-height:0;overflow-y:auto}
+.exwrap{flex:1 1 auto;min-height:160px;display:flex;flex-direction:column;margin-top:9px;border:1px solid var(--border);border-radius:11px;background:#0d1016;padding:8px 10px 6px;overflow-x:hidden}
+.exwrap .scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden}
 .exhead{display:flex;align-items:baseline;gap:8px;padding:0 2px 5px;flex:none;border-bottom:1px solid #1e2330;margin-bottom:2px}
 .exhead h3{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-dim);font-weight:700}
 .exhead .note{font-size:10px;color:var(--text-dim2);margin-left:auto}
@@ -48,7 +48,7 @@
 .nudge.goal{margin:0 0 8px}
 
 /* the words as said: paragraphs and line breaks kept (2026-10-02, his word: the cockpit's blocks, not one run-on row) */
-.exrow .ext{white-space:pre-wrap;overflow-wrap:anywhere}
+.exrow .ext{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .exrow .ext p,.exrow .ext ul,.exrow .ext ol{margin:0 0 6px}
 .exrow .ext a{color:var(--accent-t)}
 .exrow.act .ext{font-style:italic}
@@ -57,7 +57,7 @@
 .exwrap.cview{padding:6px 0 0;overflow:hidden}
 .exwrap.cview .exhead{padding:0 10px 5px}
 .exwrap.cview .exhead .note{color:var(--accent-t);text-decoration:none}
-.exwrap .cview-frame{flex:1 1 auto;width:100%;min-height:240px;border:0;background:#0a0c11;display:block}
+.exwrap .cview-frame{flex:1 1 auto;width:100%;min-height:240px;border:0;background:#0a0c11;display:block;overflow-x:hidden}
 .delivbar{flex:none;margin-top:8px;border:1px solid var(--border);border-radius:11px;background:#0d1016}
 .db-h{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:0;color:var(--text);cursor:pointer;text-align:left}
 .db-t{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}

@@ -57,13 +57,45 @@ def latest():
     return None, ""
 
 
+def _parse_issues(body):
+    try:
+        m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body or "", re.S | re.M)
+        if not m:
+            return []
+        out = []
+        for ln in m.group(1).splitlines():
+            ln = ln.strip()
+            if not ln.startswith("- "):
+                continue
+            mm = re.match(r"- \[([^\]]+)\]\s*(.*)", ln)
+            comp = mm.group(1) if mm else ""
+            detail = (mm.group(2) if mm else ln[2:]).strip()
+            out.append({"component": comp[:120], "detail": detail[:400]})
+            if len(out) >= 8:
+                break
+        return out
+    except Exception:
+        return []
+
+
 def banner():
-    """None, or the red banner's facts: {"status", "date", "report", "text", "why"}."""
+    """None, or the red banner's facts: {"status", "date", "report", "text", "why", "issues", "plain_issues"}."""
     path, body = latest()
     if path is None or status_of(body) != "red":
         return None
+    issues = _parse_issues(body)
+    plain_issues = []
+    try:
+        import doctor_plain as _dp
+        for ex in _dp.explain_all(issues, []):
+            t = (ex.get("title") or "").strip()
+            if t:
+                plain_issues.append(t)
+    except Exception:
+        plain_issues = [f"{it.get('component') or 'check'}: {it.get('detail') or ''}".strip(": ") for it in issues]
     return {"status": "red", "date": path.stem, "report": path.name,
-            "text": "Health check found issues", "why": "%s — Doctor can diagnose it" % path.stem}
+            "text": "Health check found issues", "why": "%s — Doctor can diagnose it" % path.stem,
+            "issues": issues, "plain_issues": plain_issues[:4]}
 
 
 def signature():

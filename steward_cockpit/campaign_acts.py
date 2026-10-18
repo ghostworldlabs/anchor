@@ -13,14 +13,30 @@ referenced part is refused by the engine and the refusal is the receipt.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
 from .campaign_seeds import seed_by_id
 
-ECG = Path(r"C:\dev\Ecgberht\bin\ecgberht.mjs")
-SPINE = "file:///C:/dev/Ecgberht/engine/ledger-spine.mjs"
+
+def _ecgberht_root() -> Path:
+    env = os.environ.get("ECGBERHT_DIR")
+    if env and env.strip():
+        return Path(env.strip()).resolve()
+    sibling = Path(__file__).resolve().parents[2] / "Ecgberht"
+    bundled = Path(__file__).resolve().parents[1] / "vendor" / "bundled-skills" / "ecgberht"
+    if sibling.exists():
+        return sibling
+    if bundled.exists():
+        return bundled
+    return sibling
+
+
+ECG = _ecgberht_root() / "bin" / "ecgberht.mjs"
+SPINE = (_ecgberht_root() / "engine" / "ledger-spine.mjs").as_uri()
+ROADMAP_MJS = (_ecgberht_root() / "engine" / "roadmap.mjs").as_uri()
 WHO = "john"
 
 
@@ -380,7 +396,8 @@ def restore(project, step, navigation, seed=None):
 
 ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore", "retag",
         "pace", "done_when", "place", "seat", "home", "new_goal", "guide", "not_now", "nudge_again", "seat_new",
-        "resume", "resume_done", "if_then", "premortem", "premortem_skip", "premortem_ask"}
+        "resume", "resume_done", "if_then", "premortem", "premortem_skip", "premortem_ask",
+        "mark_done", "reopen_step", "schedule_date"}
 
 
 # ── the seats (2026-09-30, John's three levels): a goal's component on the desk ─────────────────────────────────────
@@ -751,6 +768,202 @@ def seat_new(project, ref, name, seat_to):
     return out
 
 
+def _heal_roadmap_if_needed(tdir):
+    """Heal roadmap_projection if out of sync with roadmap_events so CLI acts never fail on silent rewrite."""
+    try:
+        rm_p = Path(tdir) / "roadmap.json"
+        if rm_p.is_file():
+            raw = json.loads(rm_p.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and not raw.get("roadmap_events") and raw.get("roadmap_projection"):
+                # Seed step_create events for synthetic/legacy roadmaps that only have roadmap_projection
+                evts = []
+                for idx, st in enumerate(raw.get("roadmap_projection") or [], 1):
+                    if not isinstance(st, dict) or not st.get("id"):
+                        continue
+                    st_copy = dict(st)
+                    if st_copy.get("status") == "pending":
+                        st_copy["status"] = "planned"
+                        st["status"] = "planned"
+                    ev = {
+                        "seq": idx,
+                        "at": "2026-10-15",
+                        "kind": "step_create",
+                        "step_id": st_copy["id"],
+                    }
+                    for k, v in st_copy.items():
+                        if k != "id" and v is not None:
+                            ev[k] = v
+                    evts.append(ev)
+                raw["roadmap_events"] = evts
+                rm_p.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        js = (
+            "import fs from 'node:fs'; import path from 'node:path';"
+            "import { healRoadmap } from '%s';"
+            "import { writeRoadmapThroughSpine } from '%s';"
+            "const p = %s; const rmPath = path.join(p, 'roadmap.json');"
+            "if (fs.existsSync(rmPath)) {"
+            "  const raw = JSON.parse(fs.readFileSync(rmPath, 'utf8'));"
+            "  const healed = healRoadmap(raw);"
+            "  if (healed.healed) writeRoadmapThroughSpine(p, healed.roadmap);"
+            "}"
+        ) % (ROADMAP_MJS, SPINE, json.dumps(str(tdir).replace("\\", "/")))
+        subprocess.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True, timeout=30)
+    except Exception:
+        pass
+
+
+def mark_done(project, step="", target_dir="", target_step="", reason=""):
+    """Wave 6b/7: Mark a step done from the Cave of Wonders or Star Chart (either a project/effort step in target_dir or a Campaign part)."""
+    if isinstance(step, dict):
+        d = step
+        target_dir = d.get("target_dir") or target_dir
+        target_step = d.get("target_step") or d.get("step_id") or d.get("step") or target_step
+        reason = d.get("reason") or d.get("note") or reason
+        step = d.get("step") or ""
+    if not str(target_dir or "").strip() and str(step or "").strip():
+        try:
+            from .campaign_parts import parse_ref, _default_lookup
+            wrap = _step(project, str(step).strip())
+            if isinstance(wrap, dict) and wrap.get("ref"):
+                pr = parse_ref(wrap.get("ref"))
+                if pr and pr.get("pid"):
+                    ent = _default_lookup(pr["pid"])
+                    if isinstance(ent, dict) and ent.get("folder_path"):
+                        if pr.get("kind") == "step" and pr.get("sub"):
+                            target_dir = str(ent["folder_path"])
+                            target_step = str(pr["sub"])
+                        elif pr.get("kind") == "effort" and pr.get("sub"):
+                            target_dir = str(Path(ent["folder_path"]) / pr["sub"])
+                        elif pr.get("kind") == "project":
+                            target_dir = str(ent["folder_path"])
+        except Exception:
+            pass
+    tdir = Path(str(target_dir).strip()) if str(target_dir or "").strip() else Path(str(project))
+    if not tdir.is_dir():
+        return _no("target folder not found")
+    _heal_roadmap_if_needed(tdir)
+    proj_steps = _projection(tdir)
+    tsid = str(target_step or step or "").strip()
+    if not tsid or _step(tdir, tsid) is None:
+        # Fallback to current_step_id on strip.json or first open step
+        try:
+            st = json.loads((tdir / "strip.json").read_text(encoding="utf-8"))
+            cur_id = str(st.get("current_step_id") or "").strip()
+            if cur_id and _step(tdir, cur_id) is not None and (_step(tdir, cur_id) or {}).get("status") != "done":
+                tsid = cur_id
+        except Exception:
+            pass
+        if not tsid or _step(tdir, tsid) is None:
+            open_step = next((x for x in proj_steps if x.get("status") in ("active", "waiting", "blocked", "planned") and _own_group(x) is None), None)
+            if open_step:
+                tsid = str(open_step.get("id") or "")
+    target_obj = _step(tdir, tsid)
+    if target_obj is None:
+        return _no("no open step found to mark done")
+    old_status = str(target_obj.get("status") or "active")
+    step_name = str(target_obj.get("name") or tsid)
+    if old_status == "done":
+        return _ok("✓ ‘%s’ is already marked done" % step_name, closed_step=tsid)
+    # If strip.json points current_step_id to tsid, advance current_step_id first so Ecgberht's invariant holds
+    try:
+        sp = tdir / "strip.json"
+        if sp.is_file():
+            st = json.loads(sp.read_text(encoding="utf-8"))
+            if str(st.get("current_step_id") or "") == tsid:
+                next_open = next(
+                    (x for x in proj_steps if x.get("id") != tsid and x.get("status") in ("active", "planned", "waiting", "proposed") and _own_group(x) is None),
+                    None,
+                )
+                if next_open:
+                    nid = str(next_open.get("id"))
+                    r_up = _cli(
+                        tdir, "update",
+                        "--current-step", nid,
+                        "--next-recommended", ("Advance " + str(next_open.get("name") or nid))[:60],
+                        "--strip-why-next", "Previous step marked done by John on Cave of Wonders",
+                    )
+                    if not r_up.get("ok"):
+                        st["current_step_id"] = nid
+                        sp.write_text(json.dumps(st, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    why = " ".join(str(reason or "").split()) or "Marked done by John from Cave of Wonders"
+    r = _cli(tdir, "roadmap-set", "--step", tsid, "--status", "done", "--who", WHO, "--reason", why, "--goal-reread", "reaffirmed")
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    try:
+        from .steward_campaign import compose_status, write_attention
+        att_p = tdir / ".ecgberht" / "attention.json"
+        if att_p.is_file():
+            write_attention(str(tdir), "quiet", "", by="john")
+        compose_status(str(tdir))
+    except Exception:
+        pass
+    return _ok(
+        "✓ Marked ‘%s’ done" % step_name,
+        closed_step=tsid,
+        undo={"act": "reopen_step", "step": step, "target_dir": str(tdir), "target_step": tsid, "old_status": old_status},
+    )
+
+
+def reopen_step(project, step="", target_dir="", target_step="", old_status="active"):
+    """Undo of mark_done: reopen the step to its prior status."""
+    if isinstance(step, dict):
+        d = step
+        target_dir = d.get("target_dir") or target_dir
+        target_step = d.get("target_step") or d.get("step_id") or d.get("step") or target_step
+        old_status = d.get("old_status") or old_status
+        step = d.get("step") or ""
+    tdir = Path(str(target_dir).strip()) if str(target_dir or "").strip() else Path(str(project))
+    tsid = str(target_step or step or "").strip()
+    _heal_roadmap_if_needed(tdir)
+    target_obj = _step(tdir, tsid)
+    if target_obj is None:
+        return _no("no such step to reopen")
+    restore_st = str(old_status or "active")
+    if restore_st not in ("active", "planned", "waiting", "blocked", "proposed"):
+        restore_st = "active"
+    r = _cli(tdir, "roadmap-set", "--step", tsid, "--status", restore_st, "--who", WHO, "--reason", "Reopened by John (undo mark done)", "--goal-reread", "reaffirmed")
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    try:
+        from .steward_campaign import compose_status
+        compose_status(str(tdir))
+    except Exception:
+        pass
+    return _ok("Reopened ‘%s’ (%s)" % (target_obj.get("name") or tsid, restore_st), reopened_step=tsid)
+
+
+def schedule_date(project, step="", due="", target_dir="", target_step=""):
+    """Wave 6b: Set or push a due date on either a project step (target_dir + target_step) or a Campaign step."""
+    if isinstance(step, dict):
+        d = step
+        target_dir = d.get("target_dir") or target_dir
+        target_step = d.get("target_step") or d.get("step_id") or d.get("step") or target_step
+        due = d.get("due") or due
+        step = d.get("step") or ""
+    tdir = Path(str(target_dir).strip()) if str(target_dir or "").strip() else Path(str(project))
+    tsid = str(target_step or step or "").strip()
+    _heal_roadmap_if_needed(tdir)
+    s = _step(tdir, tsid)
+    if s is None:
+        return _no("no such step")
+    due = str(due or "").strip() or "none"
+    old = s.get("due") or "none"
+    r = _cli(tdir, "roadmap-set", "--step", tsid, "--due", due)
+    if not r.get("ok"):
+        return _no("the engine refused: %s (a date is YYYY-MM-DD)" % r.get("error"))
+    try:
+        from .steward_campaign import compose_status
+        compose_status(str(tdir))
+    except Exception:
+        pass
+    return _ok(
+        "%s now %s" % (s.get("name") or tsid, ("due " + due) if due != "none" else "carries no date"),
+        undo={"act": "schedule_date", "step": step, "due": old, "target_dir": str(tdir), "target_step": tsid},
+    )
+
+
 def act(project, body):
     """Dispatch one act from the page; every answer is a receipt sentence, ok or refused."""
     body = body if isinstance(body, dict) else {}
@@ -818,6 +1031,12 @@ def act(project, body):
             return premortem_skip(project, body.get("step"))
         if a == "premortem_ask":
             return premortem_ask(project, body.get("step"), body.get("reason"))
+        if a == "mark_done":
+            return mark_done(project, body.get("step"), body.get("target_dir"), body.get("target_step"), body.get("reason"))
+        if a == "reopen_step":
+            return reopen_step(project, body.get("step"), body.get("target_dir"), body.get("target_step"), body.get("old_status"))
+        if a == "schedule_date":
+            return schedule_date(project, body.get("step"), body.get("due"), body.get("target_dir"), body.get("target_step"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")

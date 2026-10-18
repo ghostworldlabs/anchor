@@ -285,11 +285,43 @@ def status_html(cdir, pid, rel=""):
     at = str(data.get("at") or "")
     stale = (" &middot; live" if eng is not None else
              ((" &middot; the record now; the last run %s" % esc(str(data.get("last_run_at"))[-16:])) if data.get("last_run_at") else " &middot; the record now; no run yet"))
+    raw_wmap = [st for st in (data.get("work_map") or []) if isinstance(st, dict)]
+    wmap = []
+    for entry in raw_wmap:
+        if isinstance(entry.get("steps"), list):
+            wmap.extend(s for s in entry["steps"] if isinstance(s, dict))
+        else:
+            wmap.append(entry)
+    raw_proj = data.get("project")
+    if isinstance(raw_proj, dict):
+        proj = "%d/%d steps done%s" % (
+            int(raw_proj.get("steps_done") or 0),
+            int(raw_proj.get("steps_total") or len(wmap)),
+            (" · " + str(raw_proj["parts"])) if raw_proj.get("parts") else "",
+        )
+    else:
+        proj = str(raw_proj or "")
+    smap_html = ""
+    if wmap or proj:
+        items = []
+        for st in wmap:
+            st_status = str(st.get("status") or "").lower()
+            wait_t = str(st.get("waiting_on_you") or st.get("waiting_on") or "").strip()
+            is_done = st_status in ("done", "completed")
+            is_wait = (not is_done) and (bool(wait_t) or st_status in ("waiting", "blocked"))
+            is_act = (not is_done) and (not is_wait) and st_status in ("active", "in_progress")
+            mark = "&#10003;" if is_done else ("&#9873;" if is_wait else ("&#9679;" if is_act else "&#9675;"))
+            cls = "s-done" if is_done else ("s-waiting" if is_wait else ("s-active" if is_act else "s-planned"))
+            name = esc(_step_label(st))
+            note = (" &mdash; %s" % esc(wait_t[:60])) if (is_wait and wait_t and wait_t != "waiting") else (" (active)" if is_act else "")
+            items.append('<li class="cp-step %s"><span class="cp-mark">%s</span> %s%s</li>' % (cls, mark, name, note))
+        smap_html = ('<div class="cp-smap"><div class="cp-when"><b>Steward Map Status</b>%s</div>'
+                     '<ul class="cp-steps">%s</ul></div>' % ((" &middot; " + esc(proj)) if proj else "", "".join(items)))
     return ('<div class="cp-status"><div class="cp-lead">%s</div><div class="cp-when">last update %s%s</div>'
-            '<table class="cp-facts">%s</table>%s'
+            '<table class="cp-facts">%s</table>%s%s'
             '<div class="cp-foot"><a href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></div>'
             % (esc(lead), esc(at[-16:]) if at else "unknown", stale, rows or '<tr><td>No status recorded yet.</td></tr>',
-               repairs_html(cdir, pid, rel), esc(pid)))
+               smap_html, repairs_html(cdir, pid, rel), esc(pid)))
 
 
 _EFFORT_DIRS = {}

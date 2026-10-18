@@ -300,6 +300,34 @@ def check_reply(text, cdir, hosts=None):
         return text, []
 
 
+def _file_url_to_anchor(url, cdir):
+    """Convert a file:/// URL inside the effort (or project) into its canonical /api/steward/deliverable-file route."""
+    u = str(url or "").strip()
+    if not u.lower().startswith("file:///"):
+        return None
+    try:
+        parts = urlsplit(u)
+        raw_path = unquote(parts.path or "")
+        if re.match(r"^/[A-Za-z]:/", raw_path):
+            raw_path = raw_path[1:]
+        fp = Path(raw_path).resolve()
+        root = Path(cdir).resolve()
+        if fp != root and root in fp.parents and fp.is_file():
+            rel = fp.relative_to(root).as_posix()
+            import deliverables_register as dr
+            pid, erel = dr.project_and_rel(cdir)
+            if pid:
+                q = [("pid", pid), ("dir", erel or ""), ("path", rel)]
+                if rel.lower().endswith((".md", ".markdown", ".txt")):
+                    q.append(("render", "1"))
+                elif rel.lower().endswith((".docx", ".pptx", ".xlsx")):
+                    q.append(("view", "1"))
+                return "/api/steward/deliverable-file?" + urlencode(q, safe="/")
+    except Exception:
+        return None
+    return None
+
+
 def _check_reply(text, cdir, hosts):
     if not text or ("](" not in text and "http" not in text):
         return text, []
@@ -308,6 +336,9 @@ def _check_reply(text, cdir, hosts):
 
     def fix(label, url):
         nonlocal reg
+        file_route = _file_url_to_anchor(url, cdir)
+        if file_route:
+            return file_route
         kind, route = classify(url, hosts)
         if kind != "anchor":
             # final review 10-10: a malformed Anchor URL (a bad port) still never records a credential

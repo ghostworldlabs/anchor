@@ -421,16 +421,24 @@ def test_click_a_pane_then_a_tile_to_show_it_there_with_its_side_marked(page):
     assert sides == ["R", "L", ""]
 
 
-def test_a_panes_x_shuts_that_pane_and_its_tile_stays_and_the_toggle_brings_two_back(page):
+def test_a_panes_x_on_a_deliverable_removes_its_tile_from_the_top_row_and_the_toggle_keeps_tiles(page):
     p1 = _open_p1(page)
     p1.locator("#deliv").click()
     page.wait_for_function("() => document.body.classList.contains('two')")
     _settle(page)
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Deck.pptx"]
     page.locator("#head1 .x").click()
     _settle(page)
     assert not _two(page)
     assert _painted_frames(page) == ["/project/p1"]
+    assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI"]          # deliverable removed from top row
+    p1.locator("#deliv").click()
+    page.wait_for_function("() => document.body.classList.contains('two')")
+    _settle(page)
     assert _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Deck.pptx"]
+    page.locator("#one").click()
+    _settle(page)
+    assert not _two(page) and _tiles(page) == ["Cave of Wonders", "MBA Teaching AI", "Deck.pptx"]
     page.locator("#two").click()
     _settle(page)
     assert _two(page) and _painted_frames(page) == ["/project/p1", "/api/steward/deliverable-file"]

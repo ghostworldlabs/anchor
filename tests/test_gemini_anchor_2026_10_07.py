@@ -120,7 +120,7 @@ def test_the_job_adapter_drives_agy_directly(tmp_path):
 def test_the_drained_restart_counts_steward_code_jobs_and_holds_new_ones(monkeypatch):
     """2026-10-07: the barrier restarted Anchor mid code job (only job_runner records counted)."""
     from steward_cockpit import code_jobs, maintenance, steward_routes
-    monkeypatch.setattr(code_jobs, "_busy_read", lambda: {"c:\dev\anchor": {"job": "J1", "cdir": "x"}})
+    monkeypatch.setattr(code_jobs, "_busy_read", lambda: {r"c:\dev\anchor": {"job": "J1", "cdir": "x"}})
     assert "code:J1" in steward_routes._running_job_ids()
     monkeypatch.setattr(maintenance, "is_active", lambda: True)
     out, code = steward_routes.handle_post("C:/nowhere", "code_job", {"action": "start", "repo": "r", "brief": "b"})

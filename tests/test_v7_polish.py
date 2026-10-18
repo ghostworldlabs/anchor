@@ -335,19 +335,20 @@ def test_gemini_engine_policy_general_plan_build_allowed(env):
     # Gemini ALLOWED everywhere now.
     lanes.check_engine_allowed("general", lanes.BACKEND_GEMINI)
     lanes.check_engine_allowed("research", lanes.BACKEND_GEMINI)
-    for lane in ("plan", "build"):
+    for lane in ("plan", "planning", "build"):
         lanes.check_engine_allowed(lane, lanes.BACKEND_GEMINI)
     # Claude allowed everywhere (sanity).
-    for lane in ("general", "research", "plan", "build"):
+    for lane in ("general", "research", "plan", "planning", "build"):
         lanes.check_engine_allowed(lane, lanes.BACKEND_CLAUDE)
 
 
 def test_general_in_gemini_lanes_set(env):
     """``general`` is a member of the GEMINI_LANES allow-set (and research is too),
-    and now plan/build are TOO."""
+    and now plan/planning/build are TOO."""
     import lanes
     importlib.reload(lanes)
     assert "general" in lanes.GEMINI_LANES
     assert lanes.LANE_RESEARCH in lanes.GEMINI_LANES
     assert lanes.LANE_PLAN in lanes.GEMINI_LANES
+    assert "planning" in lanes.GEMINI_LANES
     assert lanes.LANE_BUILD in lanes.GEMINI_LANES

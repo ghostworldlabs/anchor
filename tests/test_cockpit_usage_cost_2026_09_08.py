@@ -119,10 +119,12 @@ def test_cache_read_tokens_counted_and_invalid_token_values_ignored(cockpit):
 
 def test_price_table_is_dated_sourced_and_holds_the_two_models_john_runs():
     table = engine_mod.api_list_prices()
-    assert table["as_of"] == "2026-09-25" and table["source"].startswith("https://developers.openai.com/")
-    assert table["usd_per_million"] == {
-        "gpt-6-astra": {"input": 10.0, "cached_input": 1.0, "output": 50.0},
-        "gpt-5.6-sol": {"input": 4.0, "cached_input": 0.4, "output": 20.0}}
+    assert table["as_of"] == "2026-10-13" and table["source"].startswith("https://developers.openai.com/")
+    assert table["usd_per_million"]["gpt-6-astra"] == {"input": 10.0, "cached_input": 1.0, "output": 50.0}
+    assert table["usd_per_million"]["gpt-5.6-sol"] == {"input": 4.0, "cached_input": 0.4, "output": 20.0}
+    assert "claude-opus-5-5" in table["usd_per_million"]
+    assert "gemini-4-argon" in table["usd_per_million"]
+    assert "grok-4.20" in table["usd_per_million"]
 
 
 def test_estimate_prices_uncached_input_cached_input_and_output_separately():
@@ -176,3 +178,60 @@ def test_tracked_codex_turn_estimates_from_its_checkpoint_counts(cockpit):
     state = cockpit.state()
     assert state["estimated_turns"] == 1
     assert state["estimated_spend_usd"] == 4.2                 # 0.5M x $4 + 0.5M x $0.40 + 0.1M x $20
+
+
+def test_dismiss_deliverable_hides_until_file_is_modified_on_disk(tmp_path):
+    from steward_cockpit import steward_campaign
+    doc = tmp_path / "PLAN.md"
+    doc.write_text("# Initial Plan\n", encoding="utf-8")
+    items = steward_campaign.read_deliverables(str(tmp_path))["items"]
+    assert any(d["path"] == "PLAN.md" for d in items)
+
+    res = steward_campaign.dismiss_deliverable(str(tmp_path), "PLAN.md")
+    assert res["ok"] and res["dismissed"]["path"] == "PLAN.md"
+    after_dismiss = steward_campaign.read_deliverables(str(tmp_path))["items"]
+    assert not any(d["path"] == "PLAN.md" for d in after_dismiss)
+
+    # Modifying the file on disk automatically un-dismisses it so updated deliverables reappear.
+    doc.write_text("# Updated Plan v2\n", encoding="utf-8")
+    after_edit = steward_campaign.read_deliverables(str(tmp_path))["items"]
+    assert any(d["path"] == "PLAN.md" for d in after_edit)
+
+
+def test_global_usage_summary_decumulates_resumed_session_turns_and_prices_active_models(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    import paths
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(engine_mod, "STATE_FILE", tmp_path / "state.json")
+    steward_routes._GLOBAL_USAGE_CACHE["ts"] = 0.0
+    steward_routes._GLOBAL_USAGE_CACHE["data"] = None
+    ledger = paths.data_dir() / ".anchor" / "usage_ledger"
+    ledger.mkdir(parents=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    (ledger / "proj.json").write_text(json.dumps({"entries": {
+        "t1": {
+            "cli": "chatgpt", "model": "gpt-6.1-sol", "session_id": "sess-1",
+            "recorded_at": now_iso, "tokens": 1_100_000,
+            "input_tokens": 1_000_000, "cached_input_tokens": 0, "output_tokens": 100_000,
+        },
+        "t2": {
+            "cli": "chatgpt", "model": "gpt-6.1-sol", "session_id": "sess-1",
+            "recorded_at": now_iso, "tokens": 2_200_000,
+            "input_tokens": 2_000_000, "cached_input_tokens": 0, "output_tokens": 200_000,
+        },
+        "t3": {
+            "cli": "claude", "model": "claude-fable-5-1", "session_id": "sess-2",
+            "recorded_at": now_iso, "tokens": 1_100_000,
+            "input_tokens": 1_000_000, "cached_input_tokens": 0, "output_tokens": 100_000,
+            "cost_usd": 7.5,
+        },
+    }}), encoding="utf-8")
+    summary, code = steward_routes.global_usage_summary({"refresh": ["1"]})
+    assert code == 200 and summary["ok"] is True
+    w7 = summary["windows"]["7d"]
+    # sess-1 turn 2 was cumulative (2.0M in / 0.2M out total across t1+t2), not 3.0M!
+    assert w7["by_family"]["chatgpt"]["total_tokens"] == 2_200_000
+    assert w7["by_family"]["claude"]["total_tokens"] == 1_100_000
+    assert w7["by_family"]["claude"]["hypothetical_usd"] == 7.5
+

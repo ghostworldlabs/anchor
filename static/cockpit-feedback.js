@@ -13,13 +13,12 @@
       if ((owner.refinement || {}).phase) return false;
       var nav = owner.navigation || {}, label = String(nav.label || '');
       if (nav.current === false || nav.role === 'support') return false;
-      return /^FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ''))
+      return /^(?:START\s+HERE\s*[:\u2014\u2013-]\s*)?FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ''))
         || (!/\b(?:not|no longer)\b/i.test(label) && /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(label));
     });
   }
-  // W4 (his word 2026-10-05: "why is AI Club green and still has a pulsing outline?"): something waiting on him wins over
-  // working - the dot is orange exactly when the edge pulses; red (a problem) still leads
-  function color(light, ready) { return light === 'red' ? 'red' : ready ? 'orange' : light === 'green' ? 'green' : 'gray'; }
+  // John (2026-10-15): working status is always a green light across AI Cockpit, Cave of Wonders, and App Header Strip
+  function color(light, ready) { return light === 'red' ? 'red' : light === 'green' ? 'green' : ready ? 'orange' : 'gray'; }
   function get(url, headers) {
     var controller = new AbortController(), timer = setTimeout(function () { controller.abort(); }, 12000);
     return fetch(url, { cache: 'no-store', signal: controller.signal, headers: headers || {} })

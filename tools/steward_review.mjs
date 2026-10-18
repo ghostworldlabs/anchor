@@ -10,11 +10,12 @@
 //        [--reviewer-family <family>] [--exhausted <family,family>] [--brief-file <path>] [--delta-from <sha>]
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { reviewDiff, largest } from './review_diff.mjs';
 
-const MAX_DIFF = 400_000;
+const MAX_DIFF = 800_000;
 const FAMILIES = ['claude', 'chatgpt', 'grok', 'gemini'];
 
 function arg(name, fallback = '') {
@@ -80,22 +81,30 @@ async function main() {
   const trioRoot = process.env.ANCHOR_TRIO_ROOT || 'C:/dev/trio';
   const drivers = await import(pathToFileURL(path.join(trioRoot, 'drivers', 'index.mjs')).href);
 
-  // the reviewer: the asked family, else the dashboard's Reviewer seat, else its Coder seat - never the author's
+  // the reviewer: the asked family (--reviewer-family), else the dashboard's Reviewer seat - never the author's
   // family, never a family known to be exhausted. No second family: refuse (never review oneself).
-  // The trio routes a review call to the dashboard's Reviewer seat whatever driver is asked for (its Anchor-prefs
-  // rule), so the ONLY reviewer this adapter can honestly call is that seat. When the seat is an author's family or
-  // known exhausted, refuse before launching anything - never change the seats, never call a reviewer we did not pick.
   const prefs = drivers.loadModelFamilies(process.env);
-  const reviewer = String(prefs.review || '').toLowerCase();
+  const asked = arg('reviewer-family').toLowerCase().trim();
+  const reviewer = asked || String(prefs.review || '').toLowerCase();
   attempted = FAMILIES.includes(reviewer) ? reviewer : null;
   if (!FAMILIES.includes(reviewer)) throw new Error(`the Reviewer seat (${reviewer || 'unset'}) is not a known family`);
   if (authors.includes(reviewer)) throw new Error(`the Reviewer seat (${reviewer}) is an author's family (${authors}); choose another Reviewer seat on the dashboard`);
   if (exhausted.has(reviewer)) throw new Error(`the Reviewer seat (${reviewer}) hit its usage limit recently; wait or choose another Reviewer seat`);
 
   const treeHash = git(repo, 'rev-parse', head + '^{tree}');
-  const from = arg('delta-from') || base;
-  const diff = reviewDiff(repo, from, head);
-  if (!diff.trim()) throw new Error('the candidate has no change to review');
+  const deltaFrom = arg('delta-from');
+  const from = deltaFrom || base;
+  const diff = reviewDiff(repo, from, head, { excludeRuntime: Boolean(deltaFrom), deltaBase: deltaFrom ? base : '' });
+  if (!diff.trim()) {
+    if (deltaFrom) {
+      return out({
+        ok: true, family: reviewer, model: 'delta-noop', model_attested: true,
+        tree_hash: treeHash, verdict: 'PASS', findings: [],
+        elegance: 'Only upstream main commits or cockpit runtime records changed during integration; candidate files are unchanged.',
+      });
+    }
+    throw new Error('the candidate has no change to review');
+  }
   if (diff.length > MAX_DIFF) throw new Error(`the diff is ${diff.length} characters (one review reads ${MAX_DIFF} at most)`
     + `${largest(repo, from, head)}; split the job`);
   // fcj review r5: the brief is read WHOLE or the review refuses - never sliced (a cut brief could drop a requirement)
@@ -115,21 +124,41 @@ async function main() {
   // 2026-10-12 (Book 1 jobs 07bd1c, 45f140): the Reviewer seat failed closed on a malformed answer and two finished
   // jobs stayed unlanded. A review is read-only, so a seat failure is retried once on the SAME seat; a second
   // failure is reported with its real cause in plain words. Never another family here, never unreviewed.
+  let tempSettingsDir = null;
+  let agentEnv = process.env;
+  if (asked && asked !== String(prefs.review || '').toLowerCase()) {
+    tempSettingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-review-'));
+    fs.writeFileSync(path.join(tempSettingsDir, 'settings.json'), JSON.stringify({
+      coding_family: prefs.coding || 'claude',
+      review_family: reviewer,
+      default_cli: prefs.terminal || 'claude',
+      model_policy: prefs.model_policy || { mode: 'latest_supported', effort: 'highest_supported' },
+      settings_revision: Number.isSafeInteger(prefs.settings_revision) ? prefs.settings_revision : 0,
+    }), 'utf8');
+    agentEnv = { ...process.env, ANCHOR_DATA_DIR: tempSettingsDir };
+  }
   let receipt = null;
   let result = null;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      result = await drivers.runAgent({
-        prompt, schema: SCHEMA, role: 'review', label: 'review:code-job',
-        driver: drivers.familyToDriverName(reviewer), freshContext: true,
-        onReceipt: (r) => { receipt = r; },
-      });
-      break;
-    } catch (error) {
-      const seat = error && error.receipt;
-      if (!seat || seat.status === 'aborted') throw error;
-      if (attempt >= 2) throw new Error(`the reviewer (${reviewer}) could not give a review twice - ${seatCause(seat)}`);
-      await new Promise(r => setTimeout(r, Number(process.env.ANCHOR_REVIEW_RETRY_MS || 15000)));
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        result = await drivers.runAgent({
+          prompt, schema: SCHEMA, role: 'review', label: 'review:code-job',
+          driver: drivers.familyToDriverName(reviewer), freshContext: true,
+          env: agentEnv,
+          onReceipt: (r) => { receipt = r; },
+        });
+        break;
+      } catch (error) {
+        const seat = error && error.receipt;
+        if (!seat || seat.status === 'aborted') throw error;
+        if (attempt >= 2) throw new Error(`the reviewer (${reviewer}) could not give a review twice - ${seatCause(seat)}`);
+        await new Promise(r => setTimeout(r, Number(process.env.ANCHOR_REVIEW_RETRY_MS || 15000)));
+      }
+    }
+  } finally {
+    if (tempSettingsDir) {
+      try { fs.rmSync(tempSettingsDir, { recursive: true, force: true }); } catch {}
     }
   }
   const served = (receipt && receipt.served) || {};

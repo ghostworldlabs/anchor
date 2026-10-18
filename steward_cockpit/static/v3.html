@@ -44,8 +44,8 @@
   <div class="composer">
     <span class="prompt">john&gt;</span>
     <textarea data-say rows="1"
-      placeholder="talk · /map shows the map · Ctrl+Enter sends"></textarea>
-    <button data-interrupt hidden title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
+      placeholder="talk · /map shows the map · Enter sends · Shift+Enter new line"></textarea>
+    <button data-interrupt hidden style="display:none" title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
     <button class="send" data-send disabled>Send</button>
   </div>
 </div>
@@ -84,7 +84,7 @@ Proto.init({
     document.querySelector("[data-flagline]").textContent =
       map.attention.state === "needs_you" ? "needs you" : "";
     const att = document.querySelector("[data-att]");
-    att.className = "dot " + (map.attention.state || "unknown");
+    if (att && !att.classList.contains("light")) att.className = "dot " + (map.attention.state || "unknown");
   }
 });
 // workbench terminals: seat switch (chatgpt | claude | grok | gemini), handoff-preserving
@@ -118,7 +118,7 @@ if (IS_GENERAL) {
 // /map command, intercepted locally before send
 const ta = document.querySelector("[data-say]");
 ta.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && ta.value.trim() === "/map") {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && ta.value.trim() === "/map") {
     e.preventDefault(); e.stopImmediatePropagation();
     ta.value = "";
     fetch("/api/map").then(r => r.json()).then(m => {

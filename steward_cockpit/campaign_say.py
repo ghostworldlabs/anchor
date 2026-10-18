@@ -18,7 +18,9 @@ import subprocess
 from datetime import date, timedelta
 from pathlib import Path
 
-DIALOGUE = "file:///C:/dev/Ecgberht/engine/dialogue.mjs"
+from .campaign_acts import _ecgberht_root
+
+DIALOGUE = (_ecgberht_root() / "engine" / "dialogue.mjs").as_uri()
 AREAS = ("family", "professional", "writing", "research", "tools", "personal")
 _STOP = {"the", "a", "an", "to", "of", "for", "and", "my", "our"}
 _JS = ("import { compileUtterance, CAMPAIGN_ACT_IDS } from '%s';"

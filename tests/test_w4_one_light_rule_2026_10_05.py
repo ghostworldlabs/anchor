@@ -20,7 +20,8 @@ def _eng(tmp_path, busy=False, question=None):
 
 
 def test_orange_wins_over_working_and_green_needs_observed_work(tmp_path):
-    assert se.Engine.light(_eng(tmp_path, busy=True, question="approve the plan?"), {}) == "orange"
+    assert se.Engine.light(_eng(tmp_path, busy=True, question="approve the plan?"), {}) == "green", "John 2026-10-15: working status is always a green light"
+    assert se.Engine.light(_eng(tmp_path, busy=False, question="approve the plan?"), {}) == "orange"
     assert se.Engine.light(_eng(tmp_path, busy=True), {}) == "green"
     assert se.Engine.light(_eng(tmp_path), {"state": "needs_you"}) == "orange"
     assert se.Engine.light(_eng(tmp_path), {}) == "quiet"

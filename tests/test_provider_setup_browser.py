@@ -199,3 +199,50 @@ def test_setup_gear_retains_settings_draft_and_cave_controls(cave_server,viewpor
             page.screenshot(path=str(screenshots/f'cave-{viewport["width"]}.png'))
         finally:
             context.close();browser.close()
+
+
+def test_wave3_star_chart_onboarding_browser_interactions(cave_server):
+    origin, service, data = cave_server
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1440, "height": 1050})
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            response = context.request.post(origin + "/api/auth/login", data={"token": AUTH})
+            assert response.ok
+            page.goto(origin + "/setup", wait_until="domcontentloaded")
+            page.locator('.setup-steps [data-section="chart"]').click()
+            expect(page.locator("#setup-section-chart")).to_be_visible()
+            expect(page.locator("#root-path-display")).to_have_text(r"C:\dev")
+            expect(page.locator("#folder-list-container .w3-folder-row")).to_have_count(8)
+
+            # Change Workspace Root via Drawer 1
+            page.locator("#btn-toggle-change-root").click()
+            expect(page.locator("#drawer-change-root")).to_be_visible()
+            page.locator("#input-new-root").fill(r"D:\CaveWorkspace")
+            page.locator("#btn-apply-root").click()
+            expect(page.locator("#root-path-display")).to_have_text(r"D:\CaveWorkspace")
+
+            # Toggle a folder to Excluded and verify Undo toast
+            anchor_row = page.locator('#folder-list-container .w3-folder-row[data-folder-id="f-fin"]')
+            anchor_row.locator("button", has_text="○ Excluded").click()
+            expect(page.locator("#exclude-undo-toast")).to_be_visible()
+            page.locator("#btn-undo-exclude").click()
+            expect(page.locator("#exclude-undo-toast")).not_to_be_visible()
+
+            # Switch across Right-Column modes (Projects -> Star Chart -> Setup Coach)
+            page.locator("#tab-mode-starchart").click()
+            expect(page.locator("#view-mode-starchart")).to_be_visible()
+            expect(page.locator("#goals-grid-container .w3-goal-card")).to_have_count(3)
+
+            page.locator("#tab-mode-guide").click()
+            expect(page.locator("#view-mode-guide")).to_be_visible()
+
+            assert not errors, f"Browser errors: {errors}"
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+        finally:
+            context.close()
+            browser.close()
+

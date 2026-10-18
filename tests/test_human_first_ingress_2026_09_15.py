@@ -142,7 +142,7 @@ def test_human_message_ends_a_self_started_turn_and_goes_next(engine, monkeypatc
     e = engine
     monkeypatch.setattr(e, "_kill_tree", lambda proc: None)
     monkeypatch.setattr(e, "_journal_routing", lambda **ev: None)
-    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text, **kw: True)
     woke = []
     monkeypatch.setattr(e, "_wake_locked", lambda fresh, seed: (woke.append((fresh, seed)) or (True, "awake")))
     e._send_locked("(drive - not John) Continue.", origin="control")
@@ -155,7 +155,7 @@ def test_human_message_ends_a_self_started_turn_and_goes_next(engine, monkeypatc
 
 def test_human_message_during_his_own_turn_just_queues(engine, monkeypatch):
     e = engine
-    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text, **kw: True)
     e._send_locked("first question", origin="human")
     result = e.say("second thought")
     assert result == {"ok": True, "queued": True}
@@ -249,7 +249,7 @@ def test_alive_idle_steward_behind_the_barrier_queues_instead_of_a_turn(engine, 
     from steward_cockpit import maintenance as mt
     e = engine
     monkeypatch.setattr(mt, "is_active", lambda: True)
-    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text, **kw: True)
     result = e.say("after the restart please")
     assert result == {"ok": True, "queued": True, "maintenance": True}
     assert e.queue == ["after the restart please"] and e.proc.stdin.written == []
@@ -263,7 +263,7 @@ def test_interrupt_then_wake_path_respects_the_barrier(engine, monkeypatch):
     e = engine
     monkeypatch.setattr(e, "_kill_tree", lambda proc: None)
     monkeypatch.setattr(e, "_journal_routing", lambda **ev: None)
-    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text, **kw: True)
     e._send_locked("(drive - not John) Continue.", origin="control")
     monkeypatch.setattr(mt, "is_active", lambda: True)
     result = e.say("stop that")
@@ -360,3 +360,18 @@ def test_engine_stderr_is_classified_not_forwarded(engine):
     text = [ev["text"] for ev in seen if ev.get("t") == "sys"][-1]
     assert text.startswith("engine stderr: ") and "content withheld" in text and "token=abc" not in text
     assert "auth" in text and "panic" in text
+
+
+def test_in_flight_tracked_between_first_event_and_result(engine):
+    """0042: after _ack_submitted clears submitted, in_flight stays durable until result."""
+    e = engine
+    e._send_locked("launch the next wave", origin="human")
+    assert e._submitted is not None and e._in_flight is None
+    e._handle({"type": "assistant", "message": {"role": "assistant", "content": []}}, e.proc)
+    assert e._submitted is None
+    assert e._in_flight is not None and e._in_flight["text"].endswith("launch the next wave")
+    assert eng._read_state_entry(e.skey())["in_flight"]["text"].endswith("launch the next wave")
+    e._handle({"type": "result", "is_error": False, "result": "done"}, e.proc)
+    assert e._in_flight is None
+    assert eng._read_state_entry(e.skey()).get("in_flight") is None
+

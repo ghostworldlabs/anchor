@@ -24,6 +24,7 @@ from pathlib import Path
 _PLAYBOOK_PATH = Path(__file__).with_name("doctor_playbook.json")
 
 KIND_SELF_TEST_UNREACHABLE = "self-test-unreachable"
+KIND_SERVICE_STALE_CODE = "service-stale-code"
 KIND_CHECKS_FAILED = "checks-failed"
 KIND_OTHER = "other"
 
@@ -32,8 +33,8 @@ _UNREACHABLE = re.compile(
     re.I)
 _PASSED = re.compile(r"(\d+)\s*/\s*(\d+)\s+passed")
 _FAILED_N = re.compile(r"(\d+)\s+failed")
-_GET_PATH = re.compile(r"\bGET\s+(/[^\s:;,>]*)")
-_METHOD_PATH = re.compile(r"\b(GET|POST|PUT|DELETE)\s+(/[^\s:;,>]*)")
+_GET_PATH = re.compile(r"\bGET\s+(/[^\s:;,>\]\)\"']*)")
+_METHOD_PATH = re.compile(r"\b(GET|POST|PUT|DELETE)\s+(/[^\s:;,>\]\)\"']*)")
 
 
 def _first_failure(detail):
@@ -66,11 +67,26 @@ def explain(issue, autofixes=()):
         if mf:
             nfail = int(mf.group(1))
     unreachable = bool(_UNREACHABLE.search(detail))
-    endpointish = comp.lower().startswith("http") or "route" in comp.lower() \
+    endpointish = (
+        comp.lower().startswith("http")
+        or "route" in comp.lower()
         or "endpoint" in comp.lower()
+        or bool(_METHOD_PATH.search(comp))
+    )
     spare_port = any("free port" in str(a).lower() or "port" in str(a).lower()
                      for a in autofixes or ())
+    found_paths = sorted({p for m, p in _METHOD_PATH.findall(raw) if m == "GET"})
 
+    if "running service runs the checked code" in comp.lower() or "running sources" in detail.lower():
+        return {
+            "kind": KIND_SERVICE_STALE_CODE,
+            "title": "The running Anchor service was on an older build than the files on disk",
+            "meaning": ("Code or static files on disk changed (%s); syncing the live build and re-running the check clears the banner."
+                        % (detail or "source fingerprint moved")),
+            "hint": "One click on Resolve all / Resolve this syncs the live build and re-runs the health check automatically.",
+            "paths": ["/api/version", "/api/status"],
+            "raw": raw,
+        }
     if unreachable and endpointish:
         what = ("its throwaway test copy of Anchor" if spare_port
                 else "the server it was testing")
@@ -87,7 +103,7 @@ def explain(issue, autofixes=()):
                            "If Anchor answers now, this was a moment, not a fault.")),
             "hint": "Resolve all re-probes the live server now; if it answers, "
                     "the check is re-run so the banner clears.",
-            "paths": sorted({p for _m, p in _METHOD_PATH.findall(detail)}),
+            "paths": found_paths,
             "raw": raw,
         }
     if nfail is not None and nfail > 0:
@@ -100,7 +116,7 @@ def explain(issue, autofixes=()):
             "meaning": ("First failure: %s" % first) if first else
                        "See the details for what failed.",
             "hint": "Resolve all opens one doctor session for every open issue.",
-            "paths": sorted({p for _m, p in _METHOD_PATH.findall(detail)}),
+            "paths": found_paths,
             "raw": raw,
         }
     return {
@@ -108,7 +124,7 @@ def explain(issue, autofixes=()):
         "title": comp,
         "meaning": (detail[:157] + "…") if len(detail) > 160 else (detail or "(no detail)"),
         "hint": "",
-        "paths": sorted({p for _m, p in _METHOD_PATH.findall(detail)}),
+        "paths": found_paths,
         "raw": raw,
     }
 
@@ -137,7 +153,7 @@ def probe_targets(explained):
         for m, p in _METHOD_PATH.findall(e.get("raw") or ""):
             if m == "GET":
                 gets.add(p)
-    targets = sorted(p for p in gets if p.startswith("/") and ".." not in p)
+    targets = sorted(p for p in (gets | paths) if p.startswith("/") and ".." not in p)
     return targets or ["/api/version", "/api/status"]
 
 
@@ -188,8 +204,9 @@ def match_playbook(explained, cases=None):
 def decide(explained, probe, playbook_hits=None):
     """What Resolve all does. ``probe`` = [{path, ok}] from the live server.
 
-    ``rerun``  — every issue is the self-test failing to reach its target and
-                 every probed path answered → re-run the health check.
+    ``rerun``  — every issue is the self-test failing to reach its target (or
+                 stale service build fingerprint) and every probed path answered
+                 → sync live build & re-run the health check.
                  Also when every open issue matches a playbook recipe whose
                  suggested action is rerun (a known stale/load result, not a
                  live-data defect).
@@ -198,9 +215,12 @@ def decide(explained, probe, playbook_hits=None):
     """
     if not explained:
         return "nothing"
-    all_unreach = all(e.get("kind") == KIND_SELF_TEST_UNREACHABLE for e in explained)
+    all_auto_recheck = all(
+        e.get("kind") in (KIND_SELF_TEST_UNREACHABLE, KIND_SERVICE_STALE_CODE)
+        for e in explained
+    )
     all_answer = bool(probe) and all(bool(p.get("ok")) for p in probe)
-    if all_unreach and all_answer:
+    if all_auto_recheck and all_answer:
         return "rerun"
     hits = playbook_hits if playbook_hits is not None else match_playbook(explained)
     if hits and len(hits) == len(explained) and all(h.get("suggested") == "rerun" for h in hits):
@@ -230,6 +250,9 @@ def resolve_all_seed(explained, probe, decision, playbook_hits=None):
             for ban in h.get("do_not") or ():
                 lines.append("  Do not: " + ban)
     lines.append(
+        "Standard tool: run `python C:/dev/Anchor/tools/doctor_fix.py --auto` first to "
+        "automatically sync live modules, repair cockpit projections, probe all routes, "
+        "and refresh the health report. "
         "Do: take the issues in order; for each, reproduce minimally, FIX it in "
         "this folder, verify (run the relevant check), then one line of receipt. "
         "Finish by running the health check once so the report says what is "
@@ -237,3 +260,150 @@ def resolve_all_seed(explained, probe, decision, playbook_hits=None):
         "question in this session and wait — do not sit on a tool-permission dialog. "
         "Never delete live campaign data or rewrite skills to make a check green.")
     return "\n".join(lines)
+
+
+import sys as _sys_mod
+_ESTATE_MEMO = getattr(_sys_mod.modules.get(__name__), "_ESTATE_MEMO", None)
+if not isinstance(_ESTATE_MEMO, dict):
+    _ESTATE_MEMO = {"sig": None, "data": None}
+
+
+def _sync_live_steward_modules():
+    """When reloaded inside a running anchor_gui server, also refresh steward_routes & usage modules."""
+    import importlib
+    import sys
+    main_mod = sys.modules.get("__main__")
+    if main_mod is None or not hasattr(main_mod, "AnchorHandler"):
+        return
+    old_scr = sys.modules.get("steward_cockpit.steward_routes")
+    saved_job_status = dict(getattr(old_scr, "_JOB_STATUS", {}) or {})
+    saved_global_usage = dict(getattr(old_scr, "_GLOBAL_USAGE_CACHE", {}) or {})
+    saved_state_cache = dict(getattr(old_scr, "_STATE_CACHE", {}) or {})
+    for mod_name in (
+        "deliverables_register",
+        "usage_allowance_monitor",
+        "usage_capacity",
+        "steward_cockpit.steward_campaign",
+        "steward_cockpit.steward_engine",
+        "steward_cockpit.anvil_session",
+        "steward_cockpit.steward_routes",
+        "terminal_session",
+    ):
+        try:
+            if mod_name in sys.modules:
+                importlib.reload(sys.modules[mod_name])
+            else:
+                importlib.import_module(mod_name)
+        except Exception:
+            pass
+    new_scr = sys.modules.get("steward_cockpit.steward_routes")
+    if new_scr is not None:
+        if hasattr(new_scr, "CONFIG") and isinstance(new_scr.CONFIG, dict) and getattr(main_mod, "BUILD_ID", ""):
+            new_scr.CONFIG["build"] = main_mod.BUILD_ID
+        if saved_job_status and hasattr(new_scr, "_JOB_STATUS"):
+            new_scr._JOB_STATUS.update(saved_job_status)
+        if saved_global_usage and hasattr(new_scr, "_GLOBAL_USAGE_CACHE"):
+            new_scr._GLOBAL_USAGE_CACHE.update(saved_global_usage)
+        if saved_state_cache and hasattr(new_scr, "_STATE_CACHE"):
+            new_scr._STATE_CACHE.update(saved_state_cache)
+    try:
+        def _fast_live_steward_estate():
+            from steward_cockpit import steward_engine as _se
+            tried = []
+            try:
+                live = main_mod._paths.data_dir() / "steward-cockpit-state.json"
+                if live.exists():
+                    tried.append(live)
+            except Exception:
+                pass
+            current = getattr(_se, "STATE_FILE", None)
+            if current:
+                try:
+                    p = Path(current)
+                    if p.exists() and p.resolve() not in {x.resolve() for x in tried}:
+                        tried.append(p)
+                except Exception:
+                    pass
+            for p in tried:
+                try:
+                    st = p.stat()
+                    sig = (str(p), st.st_mtime_ns, st.st_size)
+                    if _ESTATE_MEMO.get("sig") == sig and isinstance(_ESTATE_MEMO.get("data"), dict):
+                        return _ESTATE_MEMO["data"]
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        _ESTATE_MEMO["sig"] = sig
+                        _ESTATE_MEMO["data"] = data
+                        return data
+                except Exception:
+                    continue
+            try:
+                return _se._read_all_state()
+            except Exception:
+                return {}
+
+        def _fast_project_steward_usage(project_id):
+            if not project_id:
+                return None
+            try:
+                proj = main_mod._rnd.get_project(project_id)
+                folder = (proj or {}).get("folder_path") or ""
+                if not folder:
+                    return None
+                estate = main_mod._live_steward_estate()
+                sig = _ESTATE_MEMO.get("sig")
+                use_cache = bool(sig and estate is _ESTATE_MEMO.get("data"))
+                cache_map = _ESTATE_MEMO.setdefault("usage_by_folder", {})
+                if use_cache:
+                    if _ESTATE_MEMO.get("usage_sig") != sig:
+                        cache_map.clear()
+                        _ESTATE_MEMO["usage_sig"] = sig
+                    elif folder in cache_map:
+                        return cache_map[folder]
+                from steward_cockpit.steward_routes import _usage_rollup
+                total = ((_usage_rollup(folder, estate=estate) or {}).get("total") or {})
+                toks = int(total.get("tokens") or 0)
+                turns = int(total.get("unpriced_turns") or 0)
+                reported = float(total.get("reported_spend") or 0)
+                secs = float(total.get("secs") or 0)
+                res = None if (toks <= 0 and turns <= 0 and reported <= 0 and secs <= 0) else total
+                if use_cache:
+                    cache_map[folder] = res
+                return res
+            except Exception:
+                return None
+
+        main_mod._live_steward_estate = _fast_live_steward_estate
+        main_mod._project_steward_usage = _fast_project_steward_usage
+        orig_probe = getattr(main_mod, "_orig_doctor_live_probe", None) or getattr(main_mod, "_doctor_live_probe", None)
+        if orig_probe is not None:
+            main_mod._orig_doctor_live_probe = orig_probe
+            main_mod._doctor_live_probe = lambda path, timeout=10.0: orig_probe(path, timeout=timeout)
+    except Exception:
+        pass
+    try:
+        from steward_cockpit import steward_routes as _scr
+        orig_steward_api = getattr(main_mod.AnchorHandler, "_orig_steward_api", None) or main_mod.AnchorHandler._steward_api
+        main_mod.AnchorHandler._orig_steward_api = orig_steward_api
+
+        def _patched_steward_api(self, method, verb, body=None):
+            from urllib.parse import parse_qs, urlparse
+            _q = parse_qs(urlparse(self.path).query)
+            qs = {k: v[0] for k, v in _q.items()}
+            if method == "GET" and verb == "usage-allowance":
+                obj, code = _scr.usage_allowance_get(qs)
+                self._send_json(obj, code=code)
+                return
+            if method == "POST" and verb == "usage-allowance":
+                obj, code = _scr.usage_allowance_post(body or {})
+                self._send_json(obj, code=code)
+                return
+            return orig_steward_api(self, method, verb, body)
+
+        main_mod.AnchorHandler._steward_api = _patched_steward_api
+    except Exception:
+        pass
+
+
+_sync_live_steward_modules()
+

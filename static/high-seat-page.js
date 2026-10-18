@@ -478,6 +478,7 @@
       if (m.kind === 'ready') { ready = true; var q = held; held = []; q.forEach(function (x) { try { frame.contentWindow.postMessage(x, location.origin); } catch (e) {} }); if (warm) post(shown ? 'show' : 'park'); return; }   // a reloaded preloaded view hears where it stands
       if (m.kind === 'state') {
         card._feedbackEpoch = (card._feedbackEpoch || 0) + 1;
+        if (typeof m.ready === 'boolean') paintReady(card, m.ready, m.reason || (m.ready ? 'needs your attention' : ''));
         paintDot(card, m.light);
         if (chip) { chip.textContent = m.word || (m.busy ? 'working…' : (m.alive ? 'listening' : 'parked')); chip.setAttribute('data-state', m.busy ? 'busy' : (m.alive ? 'idle' : 'parked')); }   // the cockpit's own word (ChatGPT 2026-10-02)
         heard = true;
@@ -687,8 +688,8 @@
       var l0 = $('#lane'), l1 = doc.getElementById('lane'), bd = $('.board');
       if (l0 && !l1) l0.remove(); else if (l1 && !l0 && bd) bd.insertAdjacentElement('afterbegin', document.importNode(l1, true)); else if (l0 && l1) morph(l0, l1);
     }
-    // the steward's nudge (W3b) and the seeds
-    ['nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
+    // the steward's nudge (W3b), proactive triage strip, this-week board, comms pulse, collab strip, and the seeds
+    ['shTriage', 'thisWeekBoard', 'cal', 'caveCollabStrip', 'nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
     // the goals: the line and the rows, the rows he opened kept open
     var cb0 = $('#campBody'), cb1 = doc.getElementById('campBody'), cl0 = $('#campLine'), cl1 = doc.getElementById('campLine');
     if (cl0 && cl1) morph(cl0, cl1);
@@ -829,7 +830,7 @@
   }
   function refreshFeedback() {
     var boot = window.ANCHOR_BOOT || {};
-    if (document.hidden || (boot.auth_required && !boot.logged_in)) return;
+    if (document.hidden || (boot.auth_required && !boot.logged_in && !token())) return;
     var feedback = feedbackModule(); if (!feedback) return;
     if (feedbackBusy) { feedbackAgain = true; return; }
     feedbackBusy = true;
@@ -1235,7 +1236,7 @@
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
   }
   if (send) send.addEventListener('click', doSend);
-  if (say) say.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } });
+  if (say) say.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); doSend(); } });
 
   // a redeploy reloads the open page, as the old home did (the verification law: a mechanism, not "refresh"): /api/version
   // every 30 s; a build other than the one this page booted with reloads it once — never while he is typing
@@ -1254,4 +1255,432 @@
       }).catch(function () {});
     }, 30000);
   })();
+
+  // (2026-10-08) Cave health banner reader: polls /api/doctor/status when .main > .masthead is present
+  (function () {
+    if (!$('.main > .masthead')) return;
+    function startHealth() {
+      if (!window.AnchorCaveHealth) return;
+      window.AnchorCaveHealth.start({
+        headers: function () { return window.StewardDialogue ? window.StewardDialogue.authHeaders(headers()) : headers(); },
+        openTool: function (t) {
+          if (t === 'doctor') openWin('/doctor' + tokenQ());
+          else if (t === 'zombie') openWin('/api/rnd/zombie_hunter_report' + tokenQ());
+        }
+      });
+    }
+    if (window.AnchorCaveHealth) startHealth();
+    else {
+      var hs = document.createElement('script');
+      hs.src = '/static/cave-health.js';
+      hs.onload = startHealth;
+      hs.onerror = function () { hs.remove(); };
+      document.head.appendChild(hs);
+    }
+  })();
+
+  // Wave 6b (2026-10-15): 1-click Mark Done, Schedule Push +3d, Horizon tabs, Desk Ad-Hoc Cockpit launch, and Calendar/Email prefills
+  document.addEventListener('click', function (e) {
+    var openBtn = e.target.closest('[data-open-href]');
+    if (openBtn) {
+      e.preventDefault(); e.stopPropagation();
+      window.open(openBtn.getAttribute('data-open-href'), '_blank', 'noopener');
+      return;
+    }
+    var jumpBtn = e.target.closest('[data-jump]');
+    if (jumpBtn) {
+      e.preventDefault();
+      var target = document.querySelector(jumpBtn.getAttribute('data-jump'));
+      if (target) {
+        if (target.id === 'cal') target.classList.add('open');
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    var hzBtn = e.target.closest('.hz-tab[data-hz]');
+    if (hzBtn) {
+      e.preventDefault();
+      var mode = hzBtn.getAttribute('data-hz') || 'both';
+      $$('.hz-tab').forEach(function (b) { b.classList.toggle('on', b === hzBtn); });
+      var tw = document.getElementById('thisWeekBoard'), rl = document.getElementById('ruler');
+      if (tw) tw.hidden = (mode === 'ruler');
+      if (rl) rl.hidden = (mode === 'week');
+      return;
+    }
+    var preBtn = e.target.closest('.cal-prefill[data-say-prefill]');
+    if (preBtn && say) {
+      e.preventDefault(); e.stopPropagation();
+      say.value = preBtn.getAttribute('data-say-prefill') || '';
+      say.dispatchEvent(new Event('input'));
+      say.focus(); say.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    var doneBtn = e.target.closest('[data-mark-done]');
+    if (doneBtn) {
+      e.preventDefault(); e.stopPropagation();
+      act({
+        act: 'mark_done',
+        step: doneBtn.getAttribute('data-step') || '',
+        target_dir: doneBtn.getAttribute('data-target-dir') || '',
+        target_step: doneBtn.getAttribute('data-target-step') || ''
+      });
+      return;
+    }
+    var pushBtn = e.target.closest('[data-schedule-date]');
+    if (pushBtn) {
+      e.preventDefault(); e.stopPropagation();
+      act({
+        act: 'schedule_date',
+        step: pushBtn.getAttribute('data-step') || '',
+        due: pushBtn.getAttribute('data-schedule-date') || '',
+        target_dir: pushBtn.getAttribute('data-target-dir') || '',
+        target_step: pushBtn.getAttribute('data-target-step') || ''
+      });
+      return;
+    }
+    var syncBtn = e.target.closest('[data-comms-sync]');
+    if (syncBtn) {
+      e.preventDefault(); e.stopPropagation();
+      syncBtn.disabled = true; syncBtn.textContent = 'Syncing\u2026';
+      fetch('/api/steward/comms', { method: 'POST', headers: headers(), body: JSON.stringify({ action: 'sync_now' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          syncBtn.disabled = false; syncBtn.textContent = '\u21bb Sync Now';
+          if (d && d.ok) renewInPlace(d.sync_receipt || 'Calendar & Email Pulse synced.');
+          else receipt((d && d.error) || 'Sync did not complete.', true);
+        })
+        .catch(function () {
+          syncBtn.disabled = false; syncBtn.textContent = '\u21bb Sync Now';
+          receipt('Calendar & Email sync did not reach Anchor.', true);
+        });
+      return;
+    }
+    var synthBtn = e.target.closest('[data-triage-synthesize]');
+    if (synthBtn) {
+      e.preventDefault(); e.stopPropagation();
+      synthBtn.disabled = true; synthBtn.textContent = 'Synthesizing\u2026';
+      fetch('/api/steward/comms', { method: 'POST', headers: headers(), body: JSON.stringify({ action: 'synthesize_brief' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          synthBtn.disabled = false; synthBtn.textContent = '\u2726 Synthesize Brief';
+          var box = document.getElementById('triageExecBrief');
+          if (d && d.ok && d.brief) {
+            if (box) {
+              box.hidden = false;
+              box.innerHTML = '<b>\u2726 Chief-of-Staff Executive Brief (' + (d.brief.generated_at || '') + '):</b> ' +
+                (d.brief.summary || '') +
+                (d.brief.priorities && d.brief.priorities.length ? '<div style="margin-top:4px;color:#8b949e">\u2022 ' + d.brief.priorities.join(' &nbsp;\u00b7&nbsp; \u2022 ') + '</div>' : '');
+            }
+            receipt('Executive Brief synthesized across active roadmaps & correspondence.');
+          } else {
+            receipt((d && d.error) || 'Could not synthesize Executive Brief.', true);
+          }
+        })
+        .catch(function () {
+          synthBtn.disabled = false; synthBtn.textContent = '\u2726 Synthesize Brief';
+          receipt('Executive Brief request did not reach Anchor.', true);
+        });
+      return;
+    }
+    var draftBtn = e.target.closest('[data-comms-draft-reply]');
+    if (draftBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var modal = document.getElementById('caveCommsDraftModal');
+      if (modal) {
+        modal.hidden = false;
+        var toIn = document.getElementById('commsDraftTo');
+        var subIn = document.getElementById('commsDraftSubject');
+        var bodyIn = document.getElementById('commsDraftBody');
+        var stSpan = document.getElementById('commsDraftStatus');
+        var sub = draftBtn.getAttribute('data-comms-draft-subject') || '';
+        var to = draftBtn.getAttribute('data-comms-draft-to') || '';
+        var proj = draftBtn.getAttribute('data-comms-draft-project') || '';
+        var step = draftBtn.getAttribute('data-comms-draft-step') || '';
+        modal.setAttribute('data-project-name', proj);
+        modal.setAttribute('data-step-id', step);
+        if (toIn) toIn.value = to;
+        if (subIn) subIn.value = sub && !/^re:/i.test(sub) ? ('Re: ' + sub) : sub;
+        if (bodyIn && !bodyIn.value) {
+          bodyIn.value = 'Hi' + (to ? ' ' + to : '') + ',\n\nFollowing up on ' + (sub || proj || 'our next milestone') + ':\n- \n\nBest,\nJohn';
+        }
+        if (stSpan) stSpan.textContent = '';
+        if (bodyIn) bodyIn.focus();
+      }
+      return;
+    }
+    if (e.target.closest('#btnCommsDraftClose')) {
+      e.preventDefault();
+      var m0 = document.getElementById('caveCommsDraftModal');
+      if (m0) m0.hidden = true;
+      return;
+    }
+    var saveDraftBtn = e.target.closest('#btnCommsDraftSave');
+    if (saveDraftBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var m1 = document.getElementById('caveCommsDraftModal');
+      var toVal = (document.getElementById('commsDraftTo') || {}).value || '';
+      var subVal = (document.getElementById('commsDraftSubject') || {}).value || '';
+      var bodyVal = (document.getElementById('commsDraftBody') || {}).value || '';
+      var stEl = document.getElementById('commsDraftStatus');
+      var mailtoA = document.getElementById('btnCommsDraftMailto');
+      saveDraftBtn.disabled = true;
+      fetch('/api/steward/comms', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          action: 'create_draft',
+          to_addr: toVal,
+          subject: subVal,
+          body: bodyVal,
+          project_name: m1 ? (m1.getAttribute('data-project-name') || '') : '',
+          step_id: m1 ? (m1.getAttribute('data-step-id') || '') : ''
+        })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          saveDraftBtn.disabled = false;
+          if (d && d.ok) {
+            if (stEl) stEl.textContent = '\u2713 Saved ' + (d.eml_file || 'draft.eml');
+            if (mailtoA && d.mailto_url) { mailtoA.href = d.mailto_url; mailtoA.hidden = false; }
+            receipt(d.receipt || 'Reply draft saved to .anchor/drafts/.');
+          } else {
+            if (stEl) stEl.textContent = (d && d.error) || 'Failed to save draft.';
+          }
+        })
+        .catch(function () {
+          saveDraftBtn.disabled = false;
+          if (stEl) stEl.textContent = 'Draft request did not reach Anchor.';
+        });
+      return;
+    }
+    var collabSyncBtn = e.target.closest('[data-collab-sync],[data-collab-sync-peer]');
+    if (collabSyncBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var peerId = collabSyncBtn.getAttribute('data-collab-sync-peer') || '';
+      collabSyncBtn.disabled = true;
+      fetch('/api/steward/collab', { method: 'POST', headers: headers(), body: JSON.stringify({ action: 'sync_now', peer_id: peerId }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          collabSyncBtn.disabled = false;
+          if (d && d.ok) {
+            var note = (d.peer_sync && d.peer_sync.sync_note) ? (' (' + d.peer_sync.sync_note + ')') : '';
+            renewInPlace('Shared Cockpits & Step Leases synced across Motherships' + note + '.');
+          } else receipt((d && d.error) || 'Mothership sync did not complete.', true);
+        })
+        .catch(function () {
+          collabSyncBtn.disabled = false;
+          receipt('Mothership sync did not reach Anchor.', true);
+        });
+      return;
+    }
+    var collabOpenModal = e.target.closest('[data-collab-add-peer],[data-collab-open-import]');
+    if (collabOpenModal) {
+      e.preventDefault(); e.stopPropagation();
+      var cm = document.getElementById('caveCollabModal');
+      if (cm) {
+        cm.hidden = !cm.hidden;
+        if (!cm.hidden) {
+          var focusEl = collabOpenModal.hasAttribute('data-collab-open-import')
+            ? document.getElementById('collabImportJson')
+            : document.getElementById('collabPeerId');
+          if (focusEl) focusEl.focus();
+        }
+      }
+      return;
+    }
+    if (e.target.closest('#btnCollabModalClose')) {
+      e.preventDefault();
+      var cmClose = document.getElementById('caveCollabModal');
+      if (cmClose) cmClose.hidden = true;
+      return;
+    }
+    var collabPeerSaveBtn = e.target.closest('#btnCollabPeerSave');
+    if (collabPeerSaveBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var pidVal = ((document.getElementById('collabPeerId') || {}).value || '').trim() || ('peer-' + Date.now().toString(36));
+      var plblVal = ((document.getElementById('collabPeerLabel') || {}).value || '').trim() || pidVal;
+      var ptrVal = ((document.getElementById('collabPeerTransport') || {}).value || 'tailscale_http').trim();
+      var pepVal = ((document.getElementById('collabPeerEndpoint') || {}).value || '').trim();
+      var stCollab = document.getElementById('collabModalStatus');
+      collabPeerSaveBtn.disabled = true;
+      fetch('/api/steward/collab', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          action: 'register_peer',
+          peer: { id: pidVal, label: plblVal, transport: ptrVal, endpoint: pepVal, role: 'collaborator' }
+        })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          collabPeerSaveBtn.disabled = false;
+          if (d && d.ok) {
+            if (stCollab) stCollab.textContent = '\u2713 Linked ' + plblVal;
+            renewInPlace('Linked Collaborator Mothership (' + plblVal + ').');
+          } else {
+            if (stCollab) stCollab.textContent = (d && d.error) || 'Could not register peer.';
+          }
+        })
+        .catch(function () {
+          collabPeerSaveBtn.disabled = false;
+          if (stCollab) stCollab.textContent = 'Could not reach /api/steward/collab.';
+        });
+      return;
+    }
+    var collabImportBtn = e.target.closest('#btnCollabPacketImport');
+    if (collabImportBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var tdir = ((document.getElementById('collabImportTargetDir') || {}).value || '').trim();
+      var rawPkt = ((document.getElementById('collabImportJson') || {}).value || '').trim();
+      var stImp = document.getElementById('collabModalStatus');
+      var parsedPkt = null;
+      try { parsedPkt = JSON.parse(rawPkt); } catch (err) {
+        if (stImp) stImp.textContent = 'Invalid JSON in packet box.';
+        return;
+      }
+      collabImportBtn.disabled = true;
+      fetch('/api/steward/collab', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'import_packet', cdir: tdir, packet: parsedPkt })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          collabImportBtn.disabled = false;
+          if (d && d.ok) {
+            if (stImp) stImp.textContent = '\u2713 Imported (' + (d.merged_steps || 0) + ' steps merged).';
+            renewInPlace('Imported portable Cockpit Packet (' + (d.merged_steps || 0) + ' steps, ' + (d.merged_leases || 0) + ' leases).');
+          } else {
+            if (stImp) stImp.textContent = (d && d.error) || 'Import failed.';
+          }
+        })
+        .catch(function () {
+          collabImportBtn.disabled = false;
+          if (stImp) stImp.textContent = 'Import request failed.';
+        });
+      return;
+    }
+    var claimBtn = e.target.closest('[data-collab-claim-cdir]');
+    if (claimBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var claimDir = claimBtn.getAttribute('data-collab-claim-cdir') || '';
+      var claimStep = claimBtn.getAttribute('data-collab-claim-step') || '';
+      claimBtn.disabled = true;
+      fetch('/api/steward/collab', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'claim_lease', cdir: claimDir, step_id: claimStep })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          claimBtn.disabled = false;
+          if (d && d.ok) renewInPlace('Claimed step lease on ' + claimStep + '.');
+          else receipt((d && d.error) || 'Could not claim step lease.', true);
+        })
+        .catch(function () { claimBtn.disabled = false; receipt('Lease claim request failed.', true); });
+      return;
+    }
+    var relBtn = e.target.closest('[data-collab-release-cdir]');
+    if (relBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var relDir = relBtn.getAttribute('data-collab-release-cdir') || '';
+      var relStep = relBtn.getAttribute('data-collab-release-step') || '';
+      relBtn.disabled = true;
+      fetch('/api/steward/collab', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'release_lease', cdir: relDir, step_id: relStep })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          relBtn.disabled = false;
+          if (d && d.ok) renewInPlace('Released step lease on ' + relStep + '.');
+          else receipt((d && d.error) || 'Could not release step lease.', true);
+        })
+        .catch(function () { relBtn.disabled = false; receipt('Lease release request failed.', true); });
+      return;
+    }
+    var collabExportBtn = e.target.closest('[data-collab-export]');
+    if (collabExportBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var cdir = collabExportBtn.getAttribute('data-collab-export') || '';
+      var cname = collabExportBtn.getAttribute('data-collab-name') || 'Project';
+      collabExportBtn.disabled = true;
+      fetch('/api/steward/collab', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'export_packet', cdir: cdir })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          collabExportBtn.disabled = false;
+          if (d && d.ok && d.packet) {
+            var pre = document.getElementById('collabPacketPreview');
+            if (pre) {
+              pre.hidden = false;
+              pre.textContent = JSON.stringify(d.packet, null, 2).slice(0, 1800);
+            }
+            receipt('Exported portable Cockpit Packet for ' + cname + ' (digest ' + String(d.packet.packet_digest || '').slice(0, 10) + '\u2026).');
+          } else {
+            receipt((d && d.error) || 'Could not export cockpit packet.', true);
+          }
+        })
+        .catch(function () {
+          collabExportBtn.disabled = false;
+          receipt('Export packet request failed.', true);
+        });
+      return;
+    }
+  });
+
+  // Wave 15: HTML5 Drag-and-Drop rescheduling across the 4-column Today & This Week board (#thisWeekBoard)
+  var twDragPayload = null;
+  document.addEventListener('dragstart', function (e) {
+    var card = e.target.closest && e.target.closest('.tw-card[data-tw-card]');
+    if (!card) return;
+    twDragPayload = {
+      target_dir: card.getAttribute('data-target-dir') || '',
+      target_step: card.getAttribute('data-target-step') || ''
+    };
+    card.classList.add('dragging');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', JSON.stringify(twDragPayload)); } catch (err) {}
+    }
+  });
+  document.addEventListener('dragend', function (e) {
+    var card = e.target.closest && e.target.closest('.tw-card[data-tw-card]');
+    if (card) card.classList.remove('dragging');
+    $$('.tw-col.drop-over').forEach(function (c) { c.classList.remove('drop-over'); });
+  });
+  document.addEventListener('dragover', function (e) {
+    if (!twDragPayload) return;
+    var col = e.target.closest && e.target.closest('.tw-col[data-tw-drop-col]');
+    if (!col) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    col.classList.add('drop-over');
+  });
+  document.addEventListener('dragleave', function (e) {
+    var col = e.target.closest && e.target.closest('.tw-col[data-tw-drop-col]');
+    if (col && (!e.relatedTarget || !col.contains(e.relatedTarget))) col.classList.remove('drop-over');
+  });
+  document.addEventListener('drop', function (e) {
+    var col = e.target.closest && e.target.closest('.tw-col[data-tw-drop-col]');
+    if (!col || !twDragPayload) return;
+    e.preventDefault();
+    col.classList.remove('drop-over');
+    var newDate = col.getAttribute('data-tw-target-date') || '';
+    var payload = twDragPayload;
+    twDragPayload = null;
+    if (newDate && payload.target_dir && payload.target_step) {
+      act({
+        act: 'schedule_date',
+        due: newDate,
+        target_dir: payload.target_dir,
+        target_step: payload.target_step
+      });
+    }
+  });
 })();
+

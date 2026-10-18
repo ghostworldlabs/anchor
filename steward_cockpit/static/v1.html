@@ -1,28 +1,73 @@
 <!doctype html>
 <html><head>
 <meta charset="utf-8">
-<title>Steward — V1</title>
+<title>Aladdin — AI Cockpit</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/anchor.ico" type="image/x-icon">
 <link rel="stylesheet" href="/static/shared.css">
 </head>
 <body>
 <div class="app appx app3">
   <div class="bar">
+    <span class="brand-pill"><img class="anchor-mark" src="/vendor/brand/anchor-tab-48.png" alt="Anchor" width="18" height="18" style="border-radius:4px;vertical-align:middle;flex:none"> ANCHOR · AI COCKPIT</span>
     <span class="dot" data-att></span>
     <span class="title" data-name>…</span>
+    <span class="persona-badge" data-persona-badge title="Active companion persona (selected in Cave of Wonders)">
+      <img data-persona-avatar src="/vendor/brand/aladdin-seal-lamp.jpg" alt="Aladdin" width="20" height="20">
+      <span data-persona-label>Aladdin</span>
+    </span>
     <span class="busy" data-busy></span>
-    <span class="barlead" data-barlead title="the steward's stated next step"></span>
+    <span class="barlead" data-barlead title="the companion's stated next step"></span>
+    <div class="top-deliv-strip" data-top-deliverables hidden></div>
+    <button type="button" class="anvil-tile-btn" data-anvil-toggle title="Launch Anvil for this effort — Anvil takes over and collapses this AI Cockpit into a small clickable tile at the top"><img src="/vendor/brand/anvil-option-2-sword-crystal-v1.jpg" alt="Anvil" width="20" height="20"><span>Anvil</span></button>
+    <button type="button" class="aegis-tile-btn" data-aegis-toggle title="Launch Aegis Security Audit & Auto-Remediation for this effort"><img src="/vendor/brand/aegis-icon.svg" alt="Aegis" width="20" height="20"><span>Aegis</span></button>
     <span class="chip" data-spend></span>
     <button data-drive>▶ Go</button>
     <button data-boneyard title="archive this effort to the boneyard">🪦</button>
     <button data-min title="collapse back to the cockpit">—</button>
   </div>
+  <div class="aegis-overlay" data-aegis-overlay hidden>
+    <div class="aegis-dialog">
+      <div class="aegis-dialog-head">
+        <div style="display:flex;align-items:center;gap:10px">
+          <img src="/vendor/brand/aegis-icon.svg" alt="Aegis" width="26" height="26" style="border-radius:6px">
+          <div>
+            <div style="font-weight:700;font-size:14px;color:#fff">Aegis Defensive Security Audit &amp; Auto-Remediation</div>
+            <div style="font-size:11px;color:var(--dim)" data-aegis-seating>Deterministic AST taint/sink scanner across 6 CWE/OWASP families (`AEG-01` – `AEG-06`)</div>
+          </div>
+        </div>
+        <button type="button" data-aegis-close>✕ Close</button>
+      </div>
+      <div class="aegis-dialog-body">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:11.5px;color:var(--dim);font-weight:600">Target Path:</label>
+          <input type="text" data-aegis-target value="." placeholder="e.g. . or C:\dev\Anchor\steward_cockpit" style="flex:1;min-width:220px;background:#0d1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-family:var(--mono);font-size:12px">
+          <button type="button" data-aegis-scan style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.6);color:#d1fae5;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer">▶ Run Security Scan</button>
+          <button type="button" data-aegis-remediate style="background:rgba(56,189,248,0.18);border:1px solid rgba(56,189,248,0.55);color:#e0f2fe;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer">🛠 Auto-Remediate Fixable Issues</button>
+        </div>
+        <div data-aegis-summary style="padding:10px 12px;border-radius:8px;background:#0d1117;border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--text)">
+          Click <strong>▶ Run Security Scan</strong> to audit your codebase across CWE-78, CWE-94/502, CWE-22, CWE-918, CWE-208/328, and CWE-798.
+        </div>
+        <div data-aegis-findings style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+    </div>
+  </div>
+  <div class="anvil-takeover-live" data-anvil-takeover hidden>
+    <div class="anvil-takeover-live-bar">
+      <button type="button" class="cockpit-return-tile" data-anvil-return title="Click to reopen the AI Cockpit and collapse Anvil back into a small tile in the AI Cockpit top bar">
+        <span>▴ AI Cockpit · <strong data-anvil-cockpit-name>Aladdin</strong> — Click to Return to Cockpit</span>
+      </button>
+      <span class="anvil-takeover-sub"><img src="/vendor/brand/anvil-option-2-sword-crystal-v1.jpg" alt="Anvil" width="18" height="18" style="border-radius:4px;vertical-align:middle;margin-right:6px">Anvil Workbench Active · AI Cockpit parked as top tile</span>
+      <button type="button" data-anvil-return2>↩ Back to AI Cockpit</button>
+    </div>
+    <iframe class="anvil-takeover-live-frame" data-anvil-frame src="about:blank"></iframe>
+  </div>
 
   <div class="goalbar" data-goalbar title="click to expand or close the goal">
     <div class="gline">
-      <span class="glabel" data-goallabel>Goal</span>
+      <span class="glabel" data-goallabel>GOAL</span>
       <span class="gbrief" data-goalbrief>…</span>
-      <span class="gcaret">▸</span>
+      <span class="gcaret">▸ click to expand</span>
     </div>
     <div class="gfull">
       <div class="gkick" data-kickoff></div>
@@ -35,68 +80,76 @@
   <div class="leftcol">
     <div class="plan-grip" data-plangrip role="separator" aria-label="Resize plan" aria-orientation="vertical" tabindex="0"></div>
     <div class="rail">
-      <button type="button" class="wptile" data-wptile title="Open the work-product map">
+      <button type="button" class="wptile" data-wptile hidden style="display:none" title="Open the work-product map">
         <span class="wplab">Work product</span>
         <span class="wpsum" data-wpsum>no map yet</span>
       </button>
       <div class="railhead">
-        <h2>The plan</h2>
-        <button data-railtoggle title="collapse the plan">«</button>
+        <h2 data-plan-head>THE PLAN</h2>
+        <button data-railtoggle title="collapse the plan">« Close</button>
       </div>
-      <div class="progress" data-progress></div>
+      <div class="progress" data-progress hidden></div>
+      <div class="plan-progress-bar" data-progress-bar><i data-progress-fill style="width:0%"></i></div>
       <ul class="steps" data-steps></ul>
       <div class="fresh" data-fresh></div>
       <div class="gaps" data-gaps></div>
+      <div class="tool-scout-box" data-tool-scout hidden></div>
     </div>
   </div>
-  <div class="railtab" data-railtoggle2>the plan</div>
+  <div class="railtab" data-railtoggle2 title="Click to expand the Plan panel">▸ Plan</div>
 
   <div class="main">
     <div class="openq" data-openq title="Show the saved decision context"></div>
+    <div class="steward-next-top" data-steward-next-top></div>
     <div class="scroll"></div>
     <div class="composer">
       <textarea data-say rows="1"
         placeholder="Talk — dictate with Win+H as long as you like. “go” drives; “pause” stops; “later: …” parks an idea."></textarea>
       <div class="row">
-        <span class="hint">Ctrl+Enter or Send · Enter makes a new line · dictate with Win+H · never locked, never lost</span>
-        <button data-interrupt hidden title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
+        <span class="hint">Enter or Send · Shift+Enter makes a new line · dictate with Win+H · never locked, never lost</span>
+        <button data-interrupt hidden style="display:none" title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
         <button class="send" data-send disabled>Send</button>
       </div>
     </div>
   </div>
 
-  <div class="statustab" data-statustoggle>
-    <span class="light orange" data-light2></span>
-    <span>STATUS</span>
+  <div class="statustab" data-statustoggle title="Click to expand the Status panel">
+    <span class="light quiet" id="rightTileLight" data-light2></span>
+    <span>◂ Status</span>
+    <span class="statustab-state" data-statetext2>Idle</span>
   </div>
   <div class="rightcol" data-statuspane>
     <div class="pgrip" data-pgrip title="drag to resize"></div>
     <div class="popen">
       <div class="phead2">
-        <span class="light orange" data-light></span>
-        <span data-statetext>…</span>
-        <button data-statustoggle2 title="collapse">»</button>
+        <span class="status-state-pill">
+          <span class="light quiet" data-light></span>
+          <span data-statetext>…</span>
+        </span>
+        <button data-statustoggle2 title="collapse">Close »</button>
       </div>
       <!-- Pane order + sizing (2026-08-27, John): deliverables on top with a
-           one-line summary, THE STATUS DOMINANT in the middle, files at the
-           bottom. Deliverables and files are collapsible tiles that start
-           CLOSED — click the header to open, click again to close — so the
-           status keeps the room unless he asks for one of them. Only the
-           status section grows (flex:1); the tiles are flex:none and capped
-           even when open, so neither can squeeze the status to nothing.
-           (2026-09-03, John): the status is its OWN bordered window below the
-           deliverables tile — it shrinks when the tile opens, nothing slides
-           under it — and its header carries the time of the last update. -->
+           one-line summary, drop file bar directly under deliverables
+           (2026-10-14, John), THE STATUS DOMINANT in the middle with a
+           click-to-open scrollable log of previous status updates, files at
+           the bottom. -->
       <div class="pdeliv" data-delivmount></div>
       <div class="pstatus" data-pstatus>
         <h2 class="pstatushead">Status <span class="pcount" data-statusstamp></span></h2>
         <div class="platest" data-latest></div>
         <div class="pmsgs" data-msgs></div>
         <div class="pscroll"></div>
+        <details class="prev-status-log" data-prev-status-log>
+          <summary class="psl-head">
+            <span><span class="psl-caret">▸</span> 📋 Previous Status Updates <span class="pcount" data-prev-status-count>(0)</span></span>
+            <span class="psl-hint">click to open · scroll</span>
+          </summary>
+          <div class="psl-scroll" data-prev-status-list></div>
+        </details>
       </div>
       <div class="pfiles psect folded" data-filesect>
         <h2 data-filestoggle>Files produced <span class="pcount" data-filecount></span></h2>
-        <div class="fupload" data-fupload>drop files here to load them into this effort &mdash; or <label style="text-decoration:underline;cursor:pointer">pick one<input type="file" data-fupfile multiple style="display:none"></label> <span data-fupmsg></span></div>
+        <div class="fupload cockpit-dropbar" data-fupload data-cockpit-drop>📥 Drop files here &rarr; <code data-drop-dir>cockpit folder</code> &middot; <label class="cockpit-droppick" style="text-decoration:underline;cursor:pointer">browse<input type="file" data-fupfile data-cockpit-dropfile multiple style="display:none"></label> <span class="cockpit-dropmsg" data-fupmsg data-cockpit-dropmsg></span></div>
         <div class="ftools"><input type="text" data-fsearch placeholder="search files…">
           <button data-fsort="name">name</button><button data-fsort="type">type</button><button data-fsort="date" class="on">date</button></div>
         <div class="flist" data-flist></div>
@@ -137,7 +190,7 @@ try {
 document.querySelectorAll("[data-statustoggle],[data-statustoggle2]").forEach(b =>
   b.onclick = () => {
     app.classList.toggle("statusopen");
-    if (app.dataset.narrow) return;   // a narrow window's open/close is for now, never his remembered choice
+    if (app.dataset.narrow || app.dataset.secondwin) return;   // a narrow or split window's open/close is for now, never his remembered choice
     try {
       localStorage.setItem("steward_status_pane",
         app.classList.contains("statusopen") ? "open" : "shut");
@@ -172,9 +225,44 @@ if (grip) grip.addEventListener("pointerdown", (e) => {
   grip.addEventListener("pointermove", move);
   grip.addEventListener("pointerup", up);
 });
+// 2026-10-14 (John): When an artifact is opened in the second window, both the Plan panel and
+// the Status panel automatically close into their small clickable tiles (▸ Plan / ◂ Status) so
+// the dialogue with Aladdin/Jarvis/Ecgberht can be seen easily. When the second window closes,
+// both panels automatically reopen to their prior state.
+function enterSecondWindowMode() {
+  if (!app.dataset.secondwin) {
+    app.dataset.secondwin = "1";
+    app.dataset.preSecondRail = app.classList.contains("railhide") ? "hide" : "show";
+    app.dataset.preSecondStatus = app.classList.contains("statusopen") ? "open" : "shut";
+  }
+  app.classList.add("railhide");
+  app.classList.remove("statusopen");
+}
+function exitSecondWindowMode() {
+  if (!app.dataset.secondwin) return;
+  const wantHide = app.dataset.preSecondRail === "hide";
+  const wantOpen = app.dataset.preSecondStatus !== "shut";
+  delete app.dataset.secondwin;
+  delete app.dataset.preSecondRail;
+  delete app.dataset.preSecondStatus;
+  if (!app.dataset.narrow) {
+    app.classList.toggle("railhide", wantHide);
+    app.classList.toggle("statusopen", wantOpen);
+  }
+}
+window.addEventListener("anchor-app-split", (ev) => {
+  if (ev && ev.detail && ev.detail.split) enterSecondWindowMode();
+  else exitSecondWindowMode();
+});
+try {
+  if (window.__anchorSplit || (window.top && window.top !== window && window.top.document && window.top.document.body && window.top.document.body.classList.contains("two"))) {
+    enterSecondWindowMode();
+  }
+} catch (e) {}
 const NARROW=1100;
 function fitConversation(){
   if(app.classList.contains('tileview')){app.classList.add('railhide');app.classList.remove('statusopen');return;}
+  if(app.dataset.secondwin) return;
   // 2026-10-07 (John, evidence E6: a narrow cockpit squeezed the dialogue to a sliver): below 1100 px the plan rail
   // AND the status pane close - in memory only, never written to his preferences - and both come back as they were
   // above it. Reopened while narrow, the status pane overlays the dialogue (the 1099px media query).
@@ -196,5 +284,192 @@ function fitConversation(){
   }
 }
 window.addEventListener('resize',fitConversation);fitConversation();
+// 2026-10-14 (John): Launch Anvil from within an AI Cockpit — Anvil takes over and the AI Cockpit
+// collapses into a small clickable tile at the top of Anvil; clicking that tile reopens the AI Cockpit
+// and collapses Anvil back into the small tile inside the AI Cockpit top bar.
+const anvilToggleBtn = document.querySelector("[data-anvil-toggle]");
+const anvilTakeover = document.querySelector("[data-anvil-takeover]");
+const anvilFrame = document.querySelector("[data-anvil-frame]");
+const anvilCockpitName = document.querySelector("[data-anvil-cockpit-name]");
+const _anvilQ = new URLSearchParams(location.search || "");
+const _isEmbeddedAnvilDock = _anvilQ.get("inst") === "anvil" || _anvilQ.get("view") === "tile";
+const anvilStorageKey = "anchor_anvil_open:" + (_anvilQ.get("pid") || "") + ":" + (_anvilQ.get("dir") || "");
+function setAnvilTakeover(open) {
+  if (!anvilTakeover || _isEmbeddedAnvilDock) return;
+  const shouldOpen = typeof open === "boolean" ? open : anvilTakeover.hidden;
+  try { sessionStorage.setItem(anvilStorageKey, shouldOpen ? "1" : "0"); } catch (_) {}
+  if (shouldOpen) {
+    const titleEl = document.querySelector("[data-name]");
+    if (anvilCockpitName && titleEl && titleEl.textContent) {
+      anvilCockpitName.textContent = titleEl.textContent.trim();
+    }
+    if (anvilFrame) {
+      const p = new URLSearchParams(location.search || "");
+      p.set("v", window.STEWARD_BUILD || "14");
+      p.set("from", "cockpit");
+      if (!p.get("pid") && window.STEWARD_PID) p.set("pid", window.STEWARD_PID);
+      if (!p.get("token") && window.STEWARD_TOKEN) p.set("token", window.STEWARD_TOKEN);
+      const targetSrc = "/steward-static/anvil.html?" + p.toString();
+      if (anvilFrame.getAttribute("src") !== targetSrc) {
+        anvilFrame.setAttribute("src", targetSrc);
+      }
+    }
+    anvilTakeover.hidden = false;
+    app.classList.add("anvil-mode");
+  } else {
+    anvilTakeover.hidden = true;
+    app.classList.remove("anvil-mode");
+  }
+}
+if (anvilToggleBtn) anvilToggleBtn.addEventListener("click", () => setAnvilTakeover(true));
+document.querySelectorAll("[data-anvil-return],[data-anvil-return2]").forEach(btn => {
+  btn.addEventListener("click", () => setAnvilTakeover(false));
+});
+window.addEventListener("message", (ev) => {
+  if (ev && ev.origin === window.location.origin && (!anvilFrame || ev.source === anvilFrame.contentWindow) && ev.data) {
+    if (ev.data.type === "anvil-return-cockpit") {
+      setAnvilTakeover(false);
+    } else if (ev.data.type === "anvil-open-aegis") {
+      openAegisModal();
+    }
+  }
+});
+if (!_isEmbeddedAnvilDock) {
+  try {
+    const savedAnvil = sessionStorage.getItem(anvilStorageKey);
+    if (savedAnvil === "1" || (savedAnvil === null && _anvilQ.get("dir") === "Anchor Refactoring")) {
+      setAnvilTakeover(true);
+    }
+  } catch (_) {}
+}
+
+// Wave 17: Aegis Security Audit & Auto-Remediation top-bar tile + interactive modal
+const aegisToggleBtn = document.querySelector("[data-aegis-toggle]");
+const aegisOverlay = document.querySelector("[data-aegis-overlay]");
+const aegisCloseBtn = document.querySelector("[data-aegis-close]");
+const aegisTargetInput = document.querySelector("[data-aegis-target]");
+const aegisScanBtn = document.querySelector("[data-aegis-scan]");
+const aegisRemediateBtn = document.querySelector("[data-aegis-remediate]");
+const aegisSummaryEl = document.querySelector("[data-aegis-summary]");
+const aegisFindingsEl = document.querySelector("[data-aegis-findings]");
+const aegisSeatingEl = document.querySelector("[data-aegis-seating]");
+
+function _aegisUrl() {
+  const p = new URLSearchParams();
+  const d = _anvilQ.get("dir") || "";
+  const pid = _anvilQ.get("pid") || window.STEWARD_PID || "";
+  const tok = _anvilQ.get("token") || window.STEWARD_TOKEN || "";
+  if (d) p.set("dir", d);
+  if (pid) p.set("pid", pid);
+  if (tok) p.set("token", tok);
+  return "/api/steward/aegis?" + p.toString();
+}
+
+function renderAegisState(data) {
+  if (!data || !aegisSummaryEl || !aegisFindingsEl) return;
+  const sess = data.session || {};
+  const seating = sess.model_seating || data.model_seating || {};
+  if (aegisSeatingEl && seating.coding_short) {
+    aegisSeatingEl.textContent = "Coding Seat: " + seating.coding_short + " · Adversarial Review: " + (seating.review_short || "claude-fable-5-1 · max");
+  }
+  if (sess.target_spec && aegisTargetInput && (!aegisTargetInput.value || aegisTargetInput.value === ".")) {
+    aegisTargetInput.value = sess.target_spec;
+  }
+  const scan = sess.scan;
+  if (!scan) {
+    aegisSummaryEl.textContent = "No scan run yet in this cockpit. Enter a target path and click ▶ Run Security Scan.";
+    aegisFindingsEl.replaceChildren();
+    return;
+  }
+  const sev = scan.severity_counts || {};
+  const rem = sess.last_remediation;
+  const remNote = rem && rem.applied ? (" · Auto-Remediated " + (rem.patches_count || 0) + " patch(es)") : "";
+  aegisSummaryEl.textContent =
+    "Verdict: " + (scan.verdict || "PASS") +
+    " · Scanned " + (scan.files_scanned || 0) + " Python file(s) in " + (scan.target || ".") +
+    " · Open Findings: " + (scan.total_findings || 0) +
+    " (" + (scan.auto_fixable_count || 0) + " auto-fixable)" +
+    " [CRITICAL " + (sev.CRITICAL || 0) + " · HIGH " + (sev.HIGH || 0) + " · MEDIUM " + (sev.MEDIUM || 0) + " · LOW " + (sev.LOW || 0) + "]" +
+    remNote + " · Saved to AEGIS-SECURITY-REPORT.md";
+  aegisFindingsEl.replaceChildren();
+  const findings = Array.isArray(scan.findings) ? scan.findings : [];
+  if (!findings.length) {
+    const okDiv = document.createElement("div");
+    okDiv.style.cssText = "padding:10px 12px;border-radius:8px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.4);color:#6ee7b7;font-weight:600";
+    okDiv.textContent = "✓ Zero open vulnerabilities detected across all 6 OWASP/CWE families (AEG-01 through AEG-06).";
+    aegisFindingsEl.appendChild(okDiv);
+    return;
+  }
+  findings.slice(0, 30).forEach(f => {
+    const card = document.createElement("div");
+    card.style.cssText = "padding:9px 12px;border-radius:8px;background:#0d1117;border:1px solid rgba(239,68,68,0.4);display:flex;flex-direction:column;gap:4px";
+    const head = document.createElement("div");
+    head.style.cssText = "font-weight:700;color:#fca5a5;font-family:var(--mono);font-size:11.5px";
+    head.textContent = f.rule_id + " (" + f.cwe + " · " + f.severity + ") — " + f.file + ":" + f.line + " — " + f.message;
+    const cur = document.createElement("div");
+    cur.style.cssText = "font-family:var(--mono);font-size:11px;color:var(--dim)";
+    cur.textContent = "Current:  " + f.snippet;
+    const fix = document.createElement("div");
+    fix.style.cssText = "font-family:var(--mono);font-size:11px;color:#6ee7b7";
+    fix.textContent = "Proposed: " + f.proposed_fix;
+    card.appendChild(head);
+    card.appendChild(cur);
+    card.appendChild(fix);
+    aegisFindingsEl.appendChild(card);
+  });
+}
+
+async function openAegisModal() {
+  if (!aegisOverlay) return;
+  aegisOverlay.hidden = false;
+  try {
+    const r = await fetch(_aegisUrl());
+    const j = await r.json();
+    renderAegisState(j);
+  } catch (_) {}
+}
+
+if (aegisToggleBtn) aegisToggleBtn.addEventListener("click", openAegisModal);
+if (aegisCloseBtn) aegisCloseBtn.addEventListener("click", () => { if (aegisOverlay) aegisOverlay.hidden = true; });
+if (aegisScanBtn) {
+  aegisScanBtn.addEventListener("click", async () => {
+    aegisScanBtn.disabled = true;
+    const orig = aegisScanBtn.textContent;
+    aegisScanBtn.textContent = "Scanning…";
+    try {
+      const body = {
+        action: "scan",
+        target: (aegisTargetInput && aegisTargetInput.value.trim()) || ".",
+        dir: _anvilQ.get("dir") || "",
+        pid: _anvilQ.get("pid") || window.STEWARD_PID || "",
+      };
+      const r = await fetch(_aegisUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      renderAegisState(await r.json());
+    } finally {
+      aegisScanBtn.disabled = false;
+      aegisScanBtn.textContent = orig;
+    }
+  });
+}
+if (aegisRemediateBtn) {
+  aegisRemediateBtn.addEventListener("click", async () => {
+    aegisRemediateBtn.disabled = true;
+    const orig = aegisRemediateBtn.textContent;
+    aegisRemediateBtn.textContent = "Remediating…";
+    try {
+      const body = {
+        action: "remediate",
+        apply: true,
+        dir: _anvilQ.get("dir") || "",
+        pid: _anvilQ.get("pid") || window.STEWARD_PID || "",
+      };
+      const r = await fetch(_aegisUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      renderAegisState(await r.json());
+    } finally {
+      aegisRemediateBtn.disabled = false;
+      aegisRemediateBtn.textContent = orig;
+    }
+  });
+}
 </script>
 </body></html>

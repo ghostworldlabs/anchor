@@ -181,13 +181,15 @@ WRITE_FOR_JOHN = (
     "shown for his approval says in plain words what will be built, what is left out, and how you will know it works - "
     "the builder's plan stays in its file, behind a link. Keep the finish light: a PDF or HTML reading copy is ONE "
     "command that takes seconds (reading-copy in FOUNDRY TOOLS; a code job makes a declared one itself from the "
-    "Markdown of the same name) - never commission or write a renderer. A job brief names the deliverable and its "
+    "Markdown of the same name), and a Word (.docx) reading copy or redline is ONE command via `python "
+    "C:/dev/foundry-tools/ft.py docx-redline --from-md <doc.md> --out <doc.docx>` or `--redline <old.docx> <new.docx> "
+    "--out <redline.docx>` - never commission or write a renderer or custom python-docx script in .ecgberht/. A job brief names the deliverable and its "
     "one check: never require receipt, hash, manifest, provenance or delivery-check files that only repeat what "
     "Anchor already records (it fingerprints every delivered file); keep evidence the work itself or John's rules "
     "need. The check tests the work (tests, a build, a render), never a receipt. A declared PDF or HTML reading copy "
     "is Anchor's to make from the Markdown: do not ask the worker to make it, open it in a browser, or check its "
     "pages or phone layout unless John asked for that check. Split a change of more than about 300 KB of text into several jobs (one review reads "
-    "400,000 characters at most). "
+    "400,000 characters at most), and keep each commissioned document/chapter job bounded to 1-2 deliverable stems so it finishes and lands in minutes. "
 )
 # 2026-10-12: Book 1's steward slept in 45-second steps for 22 minutes watching its own job while John's message waited
 HAND_OFF = (
@@ -296,6 +298,7 @@ def _is_machine_text(text):
 
 STEP_CAP = int(os.environ.get("STEWARD_SMALL_STEP_CAP", "15"))
 RECEIPT_AFTER_S = float(os.environ.get("STEWARD_RECEIPT_AFTER_S", "20"))   # two-lane step 1: words he sees within the minute
+FAST_RECEIPT_AFTER_S = float(os.environ.get("STEWARD_FAST_RECEIPT_AFTER_S", "6"))  # fast live feedback when tools run first
 _EFFORT_ON = re.compile(r"\b(make (?:this|it) an effort|effort mode(?: on)?|full process|treat (?:this|it) as an effort)\b", re.I)
 _EFFORT_OFF = re.compile(r"\b(small mode|effort mode off|end the effort|back to small)\b", re.I)
 
@@ -305,6 +308,11 @@ CONTRACT = (
     "coding effort wait for John's approval before starting it. Do not invent a validator or a verify script. " + ANCHOR_RULE + SIZE_OR_HOLD +
     "A background job that runs a SKILL (Chekhov, a review, research) uses the same launcher with --skill <its "
     "name> (John, 2026-10-08), so his status names the skill and its models - never 'code job'. "
+    "ANVIL SESSION (John, 2026-10-14): when John asks you to use Anvil to analyze/improve software (in this cockpit "
+    "or a GitHub repo) or to map a paper (arXiv/URL or local file) to software, run `python -m "
+    "steward_cockpit.anvil_session --cockpit . --action start_code --software <path_or_github_url>` (or `--action "
+    "start_paper --software <path_or_github_url> --paper <arxiv_or_url_or_path>`) so this cockpit's Anvil workbench "
+    "(`.anvil/session.json` and `ANVIL-REPORT.md`) populates immediately. "
     "Clarifying (John, 2026-10-07): a clear instruction gets no question - do it. Ask one question, with "
     "your recommended answer, only when the answer would change what you deliver, only in reply to John's own "
     "request, and before any job or skill starts; never ask in an automatic turn, never re-ask what the record "
@@ -365,6 +373,15 @@ CONTRACT = (
     "asks - the target is zero; (12) commit as you go IS enforced: every cadence "
     "tick that finds the working tree dirty gets a commit with a sensible "
     "message before you continue; "
+    "(12b) IMMEDIATE RESPONSIVENESS & COCKPIT SYNC (John, 2026-10-15): on every "
+    "human turn, ALWAYS write one direct opening sentence addressing John's question "
+    "or confirming what you are checking BEFORE invoking any tool, and keep status/file "
+    "inspections bounded (<= 4 fast reads) so he never waits in silence. Whenever work "
+    "lands or changes version, update strip.json (active_effort, current_step_id, "
+    "human_wait, next_recommended), roadmap.json (the active step's name, done_when, "
+    "waiting_on, and navigation.featured_paths), and DELIVERABLES.md (new rows at the "
+    "TOP of the table with 'START HERE - FOR REVIEW' and superseded versions relabeled "
+    "'Supporting - ...') in the same turn; "
     ""
 )
 
@@ -495,15 +512,23 @@ def estimate_list_price_usd(model, usage):
     """USD for one turn at the table's list price; None when the model is not in the
     table or the turn carries no token counts. Cached input is a subset of input."""
     table = api_list_prices().get("usd_per_million")
-    row = (table or {}).get(str(model or "").strip().lower()) if isinstance(table, dict) else None
+    key = str(model or "").strip().lower()
+    row = None
+    if isinstance(table, dict) and key:
+        row = table.get(key)
+        if row is None:
+            stripped = re.sub(r"-(minimal|low|medium|high|xhigh|max)$", "", key)
+            stripped = re.sub(r"-\d{8}$", "", stripped)
+            row = table.get(stripped)
     usage = usage if isinstance(usage, dict) else {}
-    def count(key):
-        value = usage.get(key)
+    def count(k):
+        value = usage.get(k)
         return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
-    if not isinstance(row, dict) or not any(key in usage for key in ("input_tokens", "output_tokens")):
+    if not isinstance(row, dict) or not any(k in usage for k in ("input_tokens", "output_tokens")):
         return None
     try:
-        cached = min(count("cached_input_tokens"), count("input_tokens"))
+        raw_cached = count("cached_input_tokens") or count("cache_read_input_tokens")
+        cached = min(raw_cached, count("input_tokens"))
         return round(((count("input_tokens") - cached) * float(row["input"]) + cached * float(row["cached_input"])
                       + count("output_tokens") * float(row["output"])) / 1e6, 6)
     except (KeyError, TypeError, ValueError):
@@ -623,6 +648,56 @@ def _usage_snapshot(usage):
             "estimated_spend": round(estimated, 4), "estimated_turns": count("estimated_turns"),
             "secs": secs, "turns": turns, **_usage_visibility(_usage_original),
             **({"spend": None, "cost_complete": False} if (_usage_visibility(_usage_original)["unpriced_inflight"] or _usage_visibility(_usage_original)["usage_attribution_error"]) else {})}
+
+
+def _backfill_usage_estimate(u, raw, model_policy=None):
+    """Backfill API list-price estimates for saved unpriced turns when exact checkpoint
+    counts or a priced model_policy exist on the record (e.g., turns recorded before the
+    model was added to api_list_prices.json)."""
+    if not isinstance(u, dict) or u.get("unpriced_turns", 0) <= u.get("estimated_turns", 0):
+        return u
+    mp = model_policy if isinstance(model_policy, dict) else {}
+    m_served = mp.get("model_served")
+    m_req = mp.get("model")
+    if not m_served and not m_req:
+        return u
+    raw_d = raw if isinstance(raw, dict) else {}
+    checkpoints = raw_d.get("usage_checkpoints")
+    ck_spend = 0.0
+    ck_turns = 0
+    ck_tokens = 0
+    if isinstance(checkpoints, dict):
+        for ck in checkpoints.values():
+            if not isinstance(ck, dict) or ck.get("finalized") is not True:
+                continue
+            counts = ck.get("counts")
+            if not isinstance(counts, dict):
+                continue
+            est = estimate_list_price_usd(m_served, counts) if m_served else None
+            if est is None and m_req:
+                est = estimate_list_price_usd(m_req, counts)
+            if est is not None:
+                ck_spend += est
+                ck_turns += 1
+                ck_tokens += int(counts.get("input_tokens") or 0) + int(counts.get("output_tokens") or 0)
+    if ck_turns > u.get("estimated_turns", 0):
+        u["estimated_turns"] = min(u["unpriced_turns"], ck_turns)
+        u["estimated_spend"] = round(max(float(u.get("estimated_spend") or 0.0), ck_spend), 4)
+    if u.get("unpriced_turns", 0) > u.get("estimated_turns", 0) and u.get("tokens", 0) > ck_tokens and u.get("reported_spend", 0.0) <= 0.0:
+        rem_tokens = max(0, int(u["tokens"]) - ck_tokens)
+        in_tok = int(rem_tokens * 0.90)
+        synth_counts = {
+            "input_tokens": in_tok,
+            "cached_input_tokens": int(rem_tokens * 0.50),
+            "output_tokens": max(0, rem_tokens - in_tok),
+        }
+        rem_est = estimate_list_price_usd(m_served, synth_counts) if m_served else None
+        if rem_est is None and m_req:
+            rem_est = estimate_list_price_usd(m_req, synth_counts)
+        if rem_est is not None:
+            u["estimated_spend"] = round(float(u.get("estimated_spend") or 0.0) + rem_est, 4)
+            u["estimated_turns"] = u["unpriced_turns"]
+    return u
 
 
 def result_error_text(ev):
@@ -774,6 +849,7 @@ FENCE_ALLOWED_TOOLS = (
     "Edit(./**)",   # Edit rules cover every file tool (NotebookEdit(...) made Claude warn on each launch)
     "Bash(python C:/dev/Anchor/tools/steward_code_job.py *)",
     "Bash(python C:/dev/Anchor/tools/steward_skill.py *)",
+    "Bash(python C:/dev/foundry-tools/ft.py *)",
     "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
 )
 FENCE_NOTE = (
@@ -968,6 +1044,7 @@ class Engine:
         self._resume_prefix = None
         self._turn_origin = "human"
         self._submitted = stored_entry.get("submitted") if isinstance(stored_entry.get("submitted"), dict) else None
+        self._in_flight = stored_entry.get("in_flight") if isinstance(stored_entry.get("in_flight"), dict) else None
         self._interrupted = stored_entry.get("interrupted") if isinstance(stored_entry.get("interrupted"), dict) else None
         self._bridge_system_prompt = None
         self._project_ids = None    # (project_id, folder_path) once resolved (Wave 2 S1)
@@ -1003,7 +1080,7 @@ class Engine:
         # (re)creation and the turn-end write then REPLACED the durable usage with
         # the smaller in-memory total. Seed them from the record so the totals
         # carry the entire history of the effort.
-        _u = _usage_snapshot(stored_entry.get("usage"))
+        _u = _backfill_usage_estimate(_usage_snapshot(stored_entry.get("usage")), stored_entry.get("usage"), stored_entry.get("model_policy"))
         self.spend = _u["reported_spend"]
         self.unpriced_turns = _u["unpriced_turns"]
         self.estimated_spend, self.estimated_turns = _u["estimated_spend"], _u["estimated_turns"]
@@ -1143,26 +1220,24 @@ class Engine:
                                self.woke_at) > max(2 * TICK_SECONDS, 1200))
         if self.broken or stuck or att.get("producer_recovery_required"):
             return "red"
-        # W4 of the two-lane plan (2026-10-05, his rule): ORANGE when something waits on him - even while work runs (a
-        # plan ready for his review sat behind a green light on the Knowledge Map); GREEN only when work is observed
-        # running - a turn, a held message, a running code job (the steward's own "working" note alone no longer
-        # paints green: read_map already ages a stale note out); gray otherwise.
+        # John (2026-10-15): whenever a cockpit/effort is working, its light MUST be green across AI Cockpit,
+        # Cave of Wonders, and everywhere else; red (broken/stuck) leads, then green (working), then orange (waiting).
+        if self.alive() and (self.busy or self.queue):
+            return "green"
+        try:
+            from steward_cockpit.steward_campaign import running_code_jobs, running_skill_jobs
+            if running_code_jobs(self.dir) or running_skill_jobs(self.dir):
+                return "green"
+        except Exception:
+            pass
+        if att.get("state") == "working":
+            return "green"      # a fresh note (read_map keeps it only while its heartbeat is fresh)
         if att.get("managed_refinement"):
             waits = bool(self._question_contexts(att))
         else:
             waits = bool(self.open_question) or att.get("state") in ("needs_you", "blocked")
         if waits:
             return "orange"
-        if self.alive() and (self.busy or self.queue):
-            return "green"
-        try:
-            from steward_cockpit.steward_campaign import running_code_jobs
-            if running_code_jobs(self.dir):
-                return "green"
-        except Exception:
-            pass
-        if att.get("state") == "working":
-            return "green"      # a fresh note (read_map keeps it only while its heartbeat is fresh)
         return "quiet"
 
     def _question_contexts(self, attention):
@@ -1228,6 +1303,11 @@ class Engine:
             # last message was durably accepted (a stale "paused for restart" note older than it is not shown)
             "activity": self._turn_activity() if self.busy else "",
             "turn_origin": getattr(self, "_turn_origin", "") if self.busy else "",
+            "turn_tools": int(getattr(self, "_turn_tools", 0) or 0) if self.busy else 0,
+            "turn_tool_names": list(getattr(self, "_turn_tool_names", []) or [])[-5:] if self.busy else [],
+            "turn_wrote_files": bool(getattr(self, "_turn_wrote_files", False)) if self.busy else False,
+            "turn_output_refs": list(getattr(self, "_turn_output_refs", []) or [])[-5:] if self.busy else [],
+            "turn_touched_served": bool(getattr(self, "_turn_touched_served", False)) if self.busy else False,
             "human_accepted_at": float(_read_state_entry(self.skey()).get("human_accepted_at") or 0),
             # commissioned/background work in flight (the attention flag,
             # disk-true) — WITHOUT this the header pill said "waiting on
@@ -1824,6 +1904,7 @@ class Engine:
                 # in the same breath.
                 prefix = RESUME_QUIET if self.one_conversation else RESUME_BRIEF
                 interrupted = entry.get("interrupted") if isinstance(entry.get("interrupted"), dict) else self._interrupted
+                in_flight = entry.get("in_flight") if isinstance(entry.get("in_flight"), dict) else getattr(self, "_in_flight", None)
                 if interrupted:
                     when = time.strftime("%H:%M", time.localtime(interrupted.get("at") or time.time()))
                     prefix += (f" INTERRUPTED TURN: your previous turn was ended at {when} "
@@ -1831,8 +1912,26 @@ class Engine:
                                "Verify before repeating any action; do not assume it completed.")
                     self._interrupted = None
                     _update_state(self.skey(), {"interrupted": None})
+                if in_flight:
+                    when = time.strftime("%H:%M", time.localtime(in_flight.get("started_at") or time.time()))
+                    in_flight_text = (in_flight.get("text") or "")[:300]
+                    prefix += (f" INTERRUPTED IN-FLIGHT TURN: your previous turn at {when} "
+                               f"(request: {in_flight_text!r}) was interrupted mid-turn before completion; "
+                               "its partial writes may be on disk. Verify disk and .ecgberht/code-jobs.json "
+                               "before repeating any action; do not assume it completed.")
+                    self._in_flight = None
+                    _update_state(self.skey(), {"in_flight": None})
                 self._resume_prefix = prefix
                 self._reconcile_submitted_locked(entry)
+                if ((in_flight or (interrupted and interrupted.get("reason") != "stopped by John"))
+                        and self.effort_on() and not self.queue):
+                    initial_prompt = (
+                        prefix + "\n\n(server restart recovery - not John) Your previous turn was interrupted "
+                        "mid-turn by a server restart while this effort was active. Inspect disk and "
+                        ".ecgberht/code-jobs.json to verify what already completed, do not repeat finished "
+                        "actions, and continue the effort from where it left off."
+                    )
+                    self._resume_prefix = None
         elif seed:
             initial_prompt = seed
         elif history_reference:
@@ -2367,7 +2466,8 @@ class Engine:
                     return {"ok": False, "error": "could not durably queue your text"}
                 self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
                 return {"ok": True, "queued": True, "maintenance": True}
-            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general and self.effort_on()) else ""),
+            # self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""))
+            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""),
                                    origin="human" if human else "control", words=his_words)
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
@@ -2389,12 +2489,70 @@ class Engine:
             pass
 
     def _plan_drift_suffix(self):
-        """The PLAN DRIFT line for this campaign dir, or ''. Never raises."""
+        """The PLAN DRIFT line (plus active Anvil workbench context if present) for this campaign dir, or ''. Never raises."""
+        out = ""
         try:
             from steward_cockpit import steward_campaign as campaign
-            return campaign.plan_drift_suffix(self.dir)
+            out = campaign.plan_drift_suffix(self.dir) or ""
         except Exception:
-            return ""
+            out = ""
+        try:
+            if self.dir and (Path(self.dir) / ".anvil" / "session.json").is_file():
+                from steward_cockpit import anvil_session as _as_ctx
+                out += _as_ctx.apply_conversational_anvil_side_effects(self.dir, "")
+        except Exception:
+            pass
+        return out
+
+    def _current_roadmap_events_len(self):
+        """Length of roadmap_events in roadmap.json (plus mtime fallback) to detect plan mutations."""
+        try:
+            rm_path = Path(self.dir) / "roadmap.json"
+            if not rm_path.is_file():
+                return (0, 0.0)
+            rm = json.loads(rm_path.read_text(encoding="utf-8", errors="replace"))
+            ev_len = len(rm.get("roadmap_events") or rm.get("roadmap_projection") or []) if isinstance(rm, dict) else 0
+            return (ev_len, round(rm_path.stat().st_mtime, 2))
+        except Exception:
+            return (0, 0.0)
+
+    def _check_conversational_plan_mutation(self):
+        """Wave 6a: When a human turn changes or discusses changing the plan without mutating roadmap.json,
+        record .ecgberht/conversational-plan-drift.json so plan_drift() and next-turn PLAN DRIFT catch it."""
+        if self.general or not self.dir:
+            return
+        try:
+            marker = Path(self.dir) / ".ecgberht" / "conversational-plan-drift.json"
+            before = getattr(self, "_turn_start_roadmap_seq", (0, 0.0))
+            after = self._current_roadmap_events_len()
+            if after != before:
+                if marker.is_file():
+                    marker.unlink()
+                return
+            user_txt = str(getattr(self, "_turn_words", "") or getattr(self, "_last_submitted", "") or "").lower()
+            reply_txt = str(getattr(self, "turn_text", "") or "").lower()
+            plan_intent_tokens = (
+                "update the plan", "change the plan", "add to the plan", "add step", "new step",
+                "mark done", "already done", "finished lecture", "emailed stanford", "sent the documents",
+                "push back", "hold off on", "reprioritize", "priority is", "move to next week",
+                "roadmap", "deliverable", "on deck", "close step",
+            )
+            reply_ack_tokens = (
+                "updated the plan", "added to the plan", "marked as done", "i'll update the roadmap",
+                "will update the plan", "noted on the plan", "adjusted the schedule", "updated the roadmap",
+            )
+            if any(tok in user_txt for tok in plan_intent_tokens) or any(tok in reply_txt for tok in reply_ack_tokens):
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({
+                    "drift": True,
+                    "at": time.time(),
+                    "reason": (
+                        "John discussed a plan/priority/completion change in chat, "
+                        "but roadmap.json was not updated in that turn — run ecgberht roadmap-add / roadmap-set / update now"
+                    ),
+                }, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _refresh_model_locked(self, selection):
         """Replace an idle bridge while retaining its native session and queued work."""
@@ -2567,10 +2725,12 @@ class Engine:
                 # by every write into a running turn, which silently cancelled the timer (his message waited 26 min)
                 self._turn_began = time.time()
                 self._turn_tools = 0
+                self._turn_tool_names = []
                 self._turn_touched_served = False
                 self._progress_said = False
                 self._turn_wrote_files = False
                 self._turn_output_refs = []
+                self._turn_start_roadmap_seq = self._current_roadmap_events_len()
                 self._refinement_dispatch_context = refinement_context
                 self._refinement_producer_id = refinement_producer_id
             self.busy = True
@@ -2583,12 +2743,13 @@ class Engine:
                     self._finish_served_audit()                    # a previous turn's open audit is never overwritten
                     self._served_snap = _served_code_snapshot()   # final review: a steward's own writes are audited
             self.turn_text = ""
+            self._segment_text = ""
             self._turn_origin = "control" if is_control else "human"
             arrivals = getattr(self, "_human_arrivals", None) or []
             self._timing = {"arrived": (arrivals.pop(0) if (arrivals and not is_control) else None),
                             "started": self.turn_started, "first_word": None, "tools": 0}
             if not is_control and not self.general:
-                _t = threading.Timer(RECEIPT_AFTER_S, self._early_receipt, args=(self.turn_started,))
+                _t = threading.Timer(min(RECEIPT_AFTER_S, FAST_RECEIPT_AFTER_S), self._early_receipt, args=(self.turn_started,))
                 _t.daemon = True
                 _t.start()
             if not is_control:
@@ -2606,6 +2767,10 @@ class Engine:
                         if arrivals:
                             arrivals.pop(0)
                 _update_state(self.skey(), {"submitted": self._submitted})
+            elif _is_machine_text(human_text) and not self.general:
+                self._in_flight = {"text": human_text[:4000], "started_at": time.time(),
+                                   "family": self.cli, "session_id": self.session_id, "origin": "control"}
+                _update_state(self.skey(), {"in_flight": self._in_flight})
             return True
         except Exception as e:
             self.broken = True
@@ -2640,7 +2805,8 @@ class Engine:
                 take.append(take[-1] + 1)
         items = [self.queue[i] for i in take]
         queued = "\n\n".join(items)
-        suffix = "" if (self.general or machine or not self.effort_on()) else self._plan_drift_suffix()
+        # suffix = "" if self.general else self._plan_drift_suffix()
+        suffix = "" if (self.general or machine) else self._plan_drift_suffix()
         bank = self.__dict__.setdefault("_queued_words", {})
         words = "\n\n".join(w for w in (bank.pop(x, "") for x in items) if w)   # unknown after a restart: not guessed
         self._batch_parts = items if len(items) > 1 else None
@@ -2694,7 +2860,8 @@ class Engine:
             inp = block.get("input") or {}
             name = block.get("name") or ""
             from steward_cockpit import code_jobs as _cjt
-            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
+            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch",
+                        "write_to_file", "replace_file_content", "multi_replace_file_content"):
                 paths = [p for p in ([inp.get("file_path")] + list(inp.get("paths") or [])) if isinstance(p, str) and p.strip()]
                 if not paths or inp.get("paths_incomplete") or any(
                         _cjt.inside(p if os.path.isabs(p) else os.path.join(self.dir, p), served) for p in paths):
@@ -2761,7 +2928,8 @@ class Engine:
         origin = getattr(self, "_turn_origin", "human")
         self._interrupted = {"at": time.time(), "reason": reason, "origin": origin,
                              "text": (self._last_submitted or "")[:300]}
-        _update_state(self.skey(), {"interrupted": self._interrupted})
+        self._in_flight = None
+        _update_state(self.skey(), {"interrupted": self._interrupted, "in_flight": None})
         self._emit({"t": "sys", "text": f"turn interrupted ({reason}); partial work on disk is kept and the outcome is uncertain until the next turn reconciles it"})
         try:
             self._journal_routing(action="interrupted", family=self.cli, origin=origin,
@@ -2832,7 +3000,8 @@ class Engine:
             # execution minimum item 3: a code job's coder writes ONLY inside its own worktree - never the repository
             # it was cut from (for Anchor, the served tree) or anywhere else
             from steward_cockpit import code_jobs as _cj0
-            outside = [p for p in absolute0 if name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch")
+            outside = [p for p in absolute0 if name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch",
+                                                         "write_to_file", "replace_file_content", "multi_replace_file_content")
                        and not _cj0.inside(p, self.dir)]
             repo0 = str(self.code_job.get("repo") or "")
             if not outside and name0 in _SHELL_TOOLS and repo0:
@@ -2845,7 +3014,8 @@ class Engine:
             reason = "a code job writes only in its own worktree"
             note = ("(interface - not John) Your last turn was ended: it wrote outside your worktree (%s). Work only in "
                     "%s; the job places your files after review." % (outside[0], self.dir))
-        elif not self.general and name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
+        elif not self.general and name0 in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch",
+                                            "write_to_file", "replace_file_content", "multi_replace_file_content"):
             # a steward never edits the served Anchor tree's code - that is a code job (worktree + review gate)
             served = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             from steward_cockpit import code_jobs as _cj1
@@ -2876,8 +3046,10 @@ class Engine:
         if owned:
             name = block.get("name") or ""
             absolute = [p if os.path.isabs(p) else os.path.join(self.dir, p) for p in paths]
-            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch"):
-                hit = [p for p in absolute if any(_cj.inside(p, r) for r in owned)]
+            if name in ("Write", "Edit", "NotebookEdit", "file_change", "apply_patch",
+                        "write_to_file", "replace_file_content", "multi_replace_file_content"):
+                hit = [p for p in absolute if not _cj._RECORDS.search(p.replace(chr(92), "/"))
+                       and any(_cj.inside(p, r) for r in owned)]
             elif name in _SHELL_TOOLS:
                 # a shell or exec call: a write when it runs inside a busy repository, or names one with a writing verb
                 cmd = json.dumps(inp, ensure_ascii=False)[:6000]
@@ -3137,6 +3309,13 @@ class Engine:
             saved = _update_state(self.skey(), {"usage": self._usage_payload(persistence_confirmed=True)}) is True
         except Exception:
             saved = False
+        if saved:
+            try:
+                from steward_cockpit import steward_routes as _sr
+                with _sr._ROLLUP_LOCK:
+                    _sr._ROLLUP_CACHE.clear()
+            except Exception:
+                pass
         self._usage_persistence_error = None if saved else "usage-persistence-failed"
         return saved, not saved and not was_failed
 
@@ -3280,11 +3459,15 @@ class Engine:
                 self.secs += duration
                 if cost is None:
                     self.unpriced_turns += 1
-                    if infer_subscription_cli(self.cli, self._usage_source) == "chatgpt":
+                    if (infer_subscription_cli(self.cli, self._usage_source) in ("chatgpt", "gemini", "grok")
+                            or self.cli in ("chatgpt", "gemini", "grok", "claude")):
                         counts = (self._usage_checkpoints[_usage_uuid(ev["usage_invocation_id"])].get("counts")
                                   if tracked else ev.get("usage"))
                         selection = self.model_selection if isinstance(self.model_selection, dict) else {}
-                        estimate = estimate_list_price_usd(selection.get("model_served") or selection.get("model"), counts)
+                        estimate = (estimate_list_price_usd(selection.get("model_served"), counts)
+                                    if selection.get("model_served") else None)
+                        if estimate is None:
+                            estimate = estimate_list_price_usd(selection.get("model"), counts)
                         if estimate is not None:
                             self.estimated_spend += estimate
                             self.estimated_turns += 1
@@ -3429,18 +3612,31 @@ class Engine:
         with self._lock:
             if proc is not self.proc or self._submitted is None:
                 return False
+            sub = self._submitted
             if ev.get("type") == "result" and ev.get("is_error") and ev.get("replay_safe") is True:
                 # never submitted natively: give it back to the queue as-is
-                parts = [p for p in (self._submitted.get("parts") or []) if isinstance(p, str) and p] \
-                    or [self._submitted.get("text") or ""]
+                parts = [p for p in (sub.get("parts") or []) if isinstance(p, str) and p] \
+                    or [sub.get("text") or ""]
                 missing = [p for p in parts if p and p not in self.queue]     # a batch goes back whole, in order
                 for p in reversed(missing):
                     self.queue.insert(0, p)
                 if missing:
                     self._persist_queue()
                     self._emit({"t": "sys", "text": "the turn failed before your message reached the model; it is queued again"})
+                self._in_flight = None
+            elif ev.get("type") == "result":
+                self._in_flight = None
+            else:
+                self._in_flight = {
+                    "text": sub.get("text") or "",
+                    "parts": list(sub.get("parts") or []),
+                    "started_at": sub.get("at") or time.time(),
+                    "family": self.cli,
+                    "session_id": self.session_id,
+                    "origin": "human",
+                }
             self._submitted = None
-            _update_state(self.skey(), {"submitted": None})
+            _update_state(self.skey(), {"submitted": None, "in_flight": self._in_flight})
             return True
 
     def _handle(self, ev, proc):
@@ -3475,6 +3671,15 @@ class Engine:
                                       "model_policy": self.model_selection})
         elif t == "usage_checkpoint":
             self._record_usage_checkpoint(ev)
+        elif t == "rate_limit_event":
+            info = ev.get("rate_limit_info")
+            if isinstance(info, dict):
+                try:
+                    import usage_allowance_monitor as _uam
+                    conn_id = (self.model_selection or {}).get("connection_id") or f"{self.cli}-default"
+                    _uam.record_rate_limit_event(str(conn_id), str(self.cli or "claude"), info)
+                except Exception:
+                    pass
         elif t == "stream_event":
             inner = ev.get("event", {})
             if inner.get("type") == "content_block_delta":
@@ -3484,8 +3689,10 @@ class Engine:
                     _tm = getattr(self, "_timing", None)
                     if _tm is not None and _tm.get("first_word") is None:
                         _tm["first_word"] = self.last_output
-                    self.turn_text += delta.get("text", "")
-                    self._emit({"t": "delta", "text": delta.get("text", ""),
+                    chunk = delta.get("text", "")
+                    self.turn_text += chunk
+                    self._segment_text = getattr(self, "_segment_text", "") + chunk
+                    self._emit({"t": "delta", "text": chunk,
                                 "tick": self.in_tick})
         elif t == "assistant":
             # tool activity is liveness too - keep the "stuck" light honest
@@ -3493,26 +3700,39 @@ class Engine:
             self.last_output = time.time()
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
+                    seg = getattr(self, "_segment_text", "")
+                    if seg:
+                        if self.turn_text and not self.turn_text.endswith("\n"):
+                            self.turn_text += "\n\n"
+                        self._segment_text = ""
                     self._turn_had_tools = True
                     self._turn_tools = getattr(self, "_turn_tools", 0) + 1
+                    tnames = getattr(self, "_turn_tool_names", None)
+                    if not isinstance(tnames, list):
+                        tnames = []
+                    bname = str(block.get("name") or "?")
+                    tnames.append(bname)
+                    self._turn_tool_names = tnames[-20:]
                     if self._guard_turn(block):
                         return
                     inp = block.get("input") or {}
                     fp = inp.get("file_path")
-                    # a Claude edit names one file_path; a Codex file_change names its paths
+                    # a Claude/Gemini edit names one file_path; a Codex file_change names its paths
                     touched = [p for p in (inp.get("paths") or []) if isinstance(p, str) and p.strip()] \
                         if isinstance(inp.get("paths"), list) else []
                     if isinstance(fp, str) and fp.strip():
                         touched.insert(0, fp)
-                    # a code job's manifest holds only COMPLETED writes (ChatGPT review, item 3): a Claude edit counts
+                    # a code job's manifest holds only COMPLETED writes (ChatGPT review, item 3): a Claude/Gemini edit counts
                     # when its tool_result comes back without an error; a Codex file_change when it says completed
                     if self.code_job is not None and touched:
-                        if block.get("name") in ("Write", "Edit", "NotebookEdit"):
+                        if block.get("name") in ("Write", "Edit", "NotebookEdit",
+                                                 "write_to_file", "replace_file_content", "multi_replace_file_content"):
                             self.__dict__.setdefault("_pending_writes", {})[str(block.get("id") or "")] = list(touched)
                         elif block.get("name") == "file_change" and str(inp.get("status") or "").lower() == "completed":
                             ok = self.__dict__.setdefault("written_ok", [])
                             ok.extend(p for p in touched if p not in ok)
-                    if block.get("name") in ("Write", "Edit", "NotebookEdit", "file_change"):
+                    if block.get("name") in ("Write", "Edit", "NotebookEdit", "file_change",
+                                             "write_to_file", "replace_file_content", "multi_replace_file_content"):
                         self._turn_wrote_files = True
                         refs = getattr(self, "_turn_output_refs", [])
                         for path in touched:
@@ -3523,6 +3743,23 @@ class Engine:
                         if new:
                             self.files.extend(new)
                             _update_state(self.skey(), {"files": self.files[-40:]})
+                        # Wave 6a: if the steward updated roadmap.json, strip.json, or DELIVERABLES.md mid-turn,
+                        # refresh the cockpit status bar immediately (debounced to 2s)
+                        if not self.general and any(
+                            os.path.basename(str(p)).lower() in ("roadmap.json", "strip.json", "deliverables.md", "plan.md")
+                            for p in touched
+                        ):
+                            now_ts = time.time()
+                            if now_ts - getattr(self, "_last_midturn_status_ts", 0.0) >= 2.0:
+                                self._last_midturn_status_ts = now_ts
+                                threading.Thread(target=self._status_update, kwargs={"emit": True}, daemon=True).start()
+                    elif bname in ("Bash", "run_command") and not self.general:
+                        cmd_str = str(inp.get("command") or inp.get("CommandLine") or "").lower()
+                        if "ecgberht" in cmd_str and any(k in cmd_str for k in ("roadmap-", "update", "deliverable")):
+                            now_ts = time.time()
+                            if now_ts - getattr(self, "_last_midturn_status_ts", 0.0) >= 2.0:
+                                self._last_midturn_status_ts = now_ts
+                                threading.Timer(1.2, lambda: self._status_update(emit=True)).start()
                     if getattr(self, "_timing", None) is not None:
                         self._timing["tools"] = self._timing.get("tools", 0) + 1
                     self._emit({"t": "tool",
@@ -3543,6 +3780,8 @@ class Engine:
                 return
             if proc is not self.proc:
                 return   # re-check: a newer process must own this result
+            self._in_flight = None
+            _update_state(self.skey(), {"in_flight": None})
             # (2026-09-04, John) a model session limit is TOLD, never swallowed:
             # an error result is said in the pane with its text, a limit raises
             # the flag so the High Seat says "need you" with the reason.
@@ -3605,6 +3844,8 @@ class Engine:
                     link_report = []
 
             was_tick = self.in_tick
+            if not was_tick and getattr(self, "_turn_origin", "") == "human":
+                self._check_conversational_plan_mutation()
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
             self._ledger_turn(ev, accounting, completed_turn_id)
             producer_id = getattr(self, "_refinement_producer_id", None)
@@ -3976,6 +4217,10 @@ class Engine:
         with self._status_lock:
             try:
                 from steward_cockpit import steward_campaign as campaign
+                try:
+                    campaign.sync_steward_projections(self.dir)
+                except Exception:
+                    pass
                 status = campaign.compose_status(self.dir, self.state())
             except Exception as exc:
                 self._emit({"t": "sys", "tick": True,

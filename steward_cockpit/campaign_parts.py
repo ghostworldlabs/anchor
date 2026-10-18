@@ -82,8 +82,9 @@ def _summary(folder, cache):
 
 def _strip_wait(folder, cache):
     def read():
+        from .steward_campaign import _real_wait
         d = json.loads((Path(folder) / "strip.json").read_text(encoding="utf-8"))
-        return str(d.get("human_wait") or "").strip()
+        return str(_real_wait(d.get("human_wait")) or "").strip()
     return _cached(cache, ("wait", str(folder)), read) or ""
 
 
@@ -128,8 +129,9 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         # the same fact the home's rows use: the strip's human wait, else the last status's "waiting on you"
         wait = _strip_wait(folder, cache)
         if not wait:
+            from .steward_campaign import _real_wait
             plan = _summary(folder, cache).get("plan")
-            wait = " ".join(str((plan or {}).get("waiting_on_you") or "").split()) if isinstance(plan, dict) else ""
+            wait = " ".join(str(_real_wait((plan or {}).get("waiting_on_you")) or "").split()) if isinstance(plan, dict) else ""
             wait = (wait[:88].rstrip() + "…") if len(wait) > 90 else wait
         out["state"] = ("waiting on you: " + wait) if wait else ""
         out["date"] = _nearest_due(steps)

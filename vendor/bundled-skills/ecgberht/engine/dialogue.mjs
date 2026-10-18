@@ -109,7 +109,7 @@ export const ACT_TABLE = Object.freeze([
     invariants: null,
     patterns: Object.freeze([
       /\brecall (?:the )?park(?:ed)?\b/i,
-      /\bunpark\b/i,
+      /^unpark(?:\s+(?:it|that|this|the parked|the park|the grasscatch))?\s*[.!]?$/i,
       /\brecall (?:the )?grasscatch\b/i,
       /\bbring back (?:the )?parked\b/i,
     ]),
@@ -181,10 +181,110 @@ export const ACT_TABLE = Object.freeze([
       /^got it\b/i,
     ]),
   }),
+  // ── The Campaign verbs (High Seat W5, 2026-09-26). Command-shaped from the first word; applied by the Campaign's own
+  // writer in Anchor (steward_cockpit/campaign_acts) on the Campaign record only — the engine names the act and its
+  // arguments, writes nothing. Appended after the eleven (the plan's word); each pattern excludes park_that's
+  // and recall_park's own words, and recall_park's bare "unpark" is narrowed to the forms without a part.
+  Object.freeze({
+    act: 'campaign_move_tier',
+    label: 'Move an initiative to a tier',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^move (.+?) to tier ([123])\b/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_add_part',
+    label: 'Add a part to an initiative',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^add (?:a )?(?:part|task) to (.+?):\s*(.+)$/i, /^add to (.+?):\s*(.+)$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_promote_seed',
+    label: 'Make a seed an initiative',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^make (.+?) (?:an initiative|a goal)\b/i, /^promote (?:the seed )?(.+?)(?: to (?:an initiative|a goal))?$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_park',
+    label: 'Park a part until a trigger',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^park (?!(?:that|this|it)\b)(?!(?:that|this|the) (?:idea|thought)\b)(.+?) until (.+)$/i, /^park (?!(?:that|this|it)\b)(?!(?:that|this|the) (?:idea|thought)\b)(.+)$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_unpark',
+    label: 'Unpark a part',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^unpark (?!(?:the )?(?:parked|park|grasscatch|it|that|this)\b)(.+)$/i]),
+  }),
+  // ── The active set (2026-09-29, John: "the active group"): activate · bench · pace — his acts, applied by
+  // the Campaign's writer; the engine names them. A bare "<name> by <date>" is NOT in this table (Grok W1: a grammar
+  // that over-matches then backs out is two mechanisms): the Campaign's applier, which knows the names, reads it.
+  Object.freeze({
+    act: 'campaign_activate',
+    label: 'Make an initiative active (out of its goal, on the desk)',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^(?:make|set) (.+?) active\s*[.!]?$/i, /^activate (.+?)\s*[.!]?$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_deck',
+    label: 'Put an initiative on deck',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^put (.+?) on deck\s*[.!]?$/i, /^deck (.+?)\s*[.!]?$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_home',
+    label: 'Send an initiative back to its goal',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^send (.+?) (?:back|home)(?: to (?:its|the) goal)?\s*[.!]?$/i, /^put (.+?) back(?: in (?:its|the) goal)?\s*[.!]?$/i, /^bench (.+?)\s*[.!]?$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_pace',
+    label: 'Set the pace of an initiative',
+    verb: null,
+    effect: 'campaign_act',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, applied_by: 'anchor_campaign_acts' }),
+    patterns: Object.freeze([/^(?:set )?(?:the )?pace (?:of |for )(.+?) (?:to |at |by |is )(.+?)\s*[.!]?$/i, /^pace (.+?) (?:to |at |by )(.+?)\s*[.!]?$/i]),
+  }),
+  Object.freeze({
+    act: 'campaign_needs',
+    label: 'What needs me',
+    verb: null,
+    effect: 'campaign_read',
+    receipt_kind: null,
+    invariants: Object.freeze({ campaign_only: true, read_only: true }),
+    patterns: Object.freeze([/^what needs me(?: this week| today)?\s*\??$/i]),
+  }),
 ]);
 
 /** Closed act ids in table order. */
 export const DIALOGUE_ACT_IDS = Object.freeze(ACT_TABLE.map((a) => a.act));
+
+/** The Campaign verbs (High Seat W5): command-shaped from the first word, applied by Anchor's Campaign writer. */
+export const CAMPAIGN_ACT_IDS = Object.freeze(ACT_TABLE.filter((a) => a.effect === 'campaign_act' || a.effect === 'campaign_read').map((a) => a.act));
 
 /**
  * Free-form destruction never compiles to a verb — always refuse-with-proposal.
@@ -254,6 +354,53 @@ export function refuseWithProposal(text, opts = {}) {
 /** Per-act argument extractors (closed — only what the act table needs). */
 function extractActArgs(act, text) {
   const args = {};
+  if (act === 'campaign_move_tier') {
+    const m = text.match(/^move (.+?) to tier ([123])\b/i);
+    if (m) { args.initiative = m[1].trim(); args.tier = Number(m[2]); }
+  }
+  if (act === 'campaign_add_part') {
+    const m = text.match(/^add (?:a )?(?:part|task) to (.+?):\s*(.+)$/i) || text.match(/^add to (.+?):\s*(.+)$/i);
+    if (m) {
+      args.initiative = m[1].trim();
+      let rest = m[2].trim();
+      const due = rest.match(/^(.+?)\s+(?:due|by)\s+(.+)$/i);
+      if (due) { rest = due[1].trim(); args.due = due[2].trim(); }
+      args.text = rest;
+    }
+  }
+  if (act === 'campaign_promote_seed') {
+    let m = text.match(/^make (.+?) (?:an initiative|a goal)(?: in tier ([123]))?(?: under (\w+))?\s*\.?$/i);
+    if (!m) m = text.match(/^promote (?:the seed )?(.+?)(?: to (?:an initiative|a goal))?(?: in tier ([123]))?(?: under (\w+))?\s*\.?$/i);
+    if (m) { args.seed = m[1].trim(); if (m[2]) args.tier = Number(m[2]); if (m[3]) args.area = m[3].toLowerCase(); }
+  }
+  if (act === 'campaign_park') {
+    const m = text.match(/^park (.+?) until (.+)$/i);
+    if (m) { args.part = m[1].trim(); args.trigger = m[2].trim().replace(/[.!]+$/, ''); }
+    else { const n = text.match(/^park (.+)$/i); if (n) args.part = n[1].trim().replace(/[.!]+$/, ''); }
+  }
+  if (act === 'campaign_unpark') {
+    const m = text.match(/^unpark (.+)$/i);
+    if (m) args.part = m[1].trim().replace(/[.!]+$/, '');
+  }
+  if (act === 'campaign_activate') {
+    const m = text.match(/^(?:make|set) (.+?) active\s*[.!]?$/i) || text.match(/^activate (.+?)\s*[.!]?$/i);
+    if (m) args.initiative = m[1].trim();
+  }
+  if (act === 'campaign_deck') {
+    const m = text.match(/^put (.+?) on deck\s*[.!]?$/i) || text.match(/^deck (.+?)\s*[.!]?$/i);
+    if (m) args.initiative = m[1].trim();
+  }
+  if (act === 'campaign_home') {
+    const m = text.match(/^send (.+?) (?:back|home)(?: to (?:its|the) goal)?\s*[.!]?$/i) || text.match(/^put (.+?) back(?: in (?:its|the) goal)?\s*[.!]?$/i) || text.match(/^bench (.+?)\s*[.!]?$/i);
+    if (m) args.initiative = m[1].trim();
+  }
+  if (act === 'campaign_pace') {
+    const m = text.match(/^(?:set )?(?:the )?pace (?:of |for )(.+?) (?:to |at |by |is )(.+?)\s*[.!]?$/i) || text.match(/^pace (.+?) (?:to |at |by )(.+?)\s*[.!]?$/i);
+    if (m) { args.initiative = m[1].trim(); args.pace = m[2].trim(); }
+  }
+  if (act === 'campaign_needs') {
+    args.span = /today/i.test(text) ? 'today' : 'week';
+  }
   if (act === 'switch_seat') {
     const m = text.match(/\b(chatgpt|codex|claude|gemini|grok)\b/i);
     if (m) args.seat = m[1].toLowerCase() === 'codex' ? 'chatgpt' : m[1].toLowerCase();

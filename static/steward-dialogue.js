@@ -334,9 +334,23 @@
   // A hidden goal composer is measured again when its place opens.
   function fitComposer(box) {
     if (!box || !box.getClientRects().length) return;
-    box.style.height = 'auto';
+    if (!box._winHGuard) {
+      box._winHGuard = true;
+      box.addEventListener('compositionstart', function () { box._composing = true; });
+      box.addEventListener('compositionend', function () { box._composing = false; fitComposer(box); });
+      box.addEventListener('blur', function () { box._composing = false; });
+    }
     var minimum = parseFloat(getComputedStyle(box).minHeight) || 0;
-    box.style.height = Math.max(minimum, Math.min(box.scrollHeight + 2, window.innerHeight * 0.4)) + 'px';
+    var prevScroll = box.scrollTop;
+    if (!box._composing) {
+      box.style.height = 'auto';
+      var target = Math.max(minimum, Math.min(box.scrollHeight + 2, window.innerHeight * 0.4));
+      box.style.height = target + 'px';
+      if (prevScroll) box.scrollTop = prevScroll;
+    } else if (box.scrollHeight > box.clientHeight) {
+      var targetC = Math.max(minimum, Math.min(box.scrollHeight + 2, window.innerHeight * 0.4));
+      if (targetC > (parseFloat(box.style.height) || 0)) box.style.height = targetC + 'px';
+    }
     box.style.overflowY = box.scrollHeight > box.clientHeight ? 'auto' : 'hidden';
   }
   window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox, fitComposer: fitComposer };

@@ -34,6 +34,9 @@ import route_table as _routes
 # open (today) → serve; warn → log a would-401 but still serve; enforce (W9) → 401.
 import pillar_flags as _pillar_flags
 import auth_warn as _auth_warn
+from steward_cockpit import gui_ingress_routes as _gui_ingress
+from steward_cockpit import gui_domain_core as _gui_domain
+from steward_cockpit import gui_surface_emit as _gui_emit
 
 # Process-wide write lock: held around every markdown/JSON mutation so two
 # concurrent mutating requests (ThreadingHTTPServer) cannot lose an update.
@@ -289,7 +292,7 @@ def cache_bust_script():
     safe to drop into an f-string page as ``{cache_bust_script()}`` only after
     the result is a plain string — callers embed the returned string verbatim.
     """
-    return _CACHE_BUST_JS_TEMPLATE.replace("__ANCHOR_BUILD_ID__", BUILD_ID)
+    return _gui_emit.render_cache_bust_script(_CACHE_BUST_JS_TEMPLATE, BUILD_ID)
 
 
 # ── Contract-versioning shim (re-architecture 2026-07 · W2) ─────────────────
@@ -3321,86 +3324,6 @@ def _gather_project_efforts(folder_path, project_id):
     return out
 
 
-def _render_effort_card(ev, store_lane, project_id):
-    """Render ONE effort card. Done efforts link to the report viewer; live ones
-    carry the data hooks the console uses to attach. Every dynamic field is
-    HTML-escaped (XSS-safe)."""
-    jid = ev["job_id"]
-    jid_esc = html_lib.escape(jid, quote=True)
-    ver = html_lib.escape(ev["ver"])
-    age = html_lib.escape(ev["age"])
-    sub = html_lib.escape(ev["sub"]) if ev["sub"] else ""
-
-    # ── Discovered (brownfield-imported) card: subtle, honest, no vN ──────────
-    # It carries data-discovered="1" + a small dot + an "imported" marker, and
-    # links to the REAL on-disk file via /artifact/<pid>?path=<rel>. It is NEVER
-    # masqueraded as an Anchor-run session (no vN, no cost, no live hooks).
-    if ev.get("discovered"):
-        rel = ev.get("artifact_path", "")
-        title = ev.get("title", "") or rel
-        kind = ev.get("kind", "")
-        title_esc = html_lib.escape(title)
-        kind_esc = html_lib.escape(kind)
-        data = (
-            f" data-job-id=\"{jid_esc}\""
-            f" data-lane=\"{html_lib.escape(store_lane, quote=True)}\""
-            f" data-trio-lane=\"{html_lib.escape(ev['trio_lane'], quote=True)}\""
-            f" data-discovered=\"1\" data-live=\"0\""
-            f" data-artifact-path=\"{html_lib.escape(rel, quote=True)}\""
-        )
-        marker = ("<span class='imported'><span class='dotdisc'></span>"
-                  "imported</span>")
-        inner = (
-            f"<div class='er'>{marker}"
-            f"<span class='age'>{age}</span></div>"
-            f"<div class='sub'>{title_esc}"
-            + (f" <span class='dkind'>{kind_esc}</span>" if kind_esc else "")
-            + "</div>"
-        )
-        if rel:
-            href = (f"/artifact/{html_lib.escape(project_id, quote=True)}"
-                    f"?path={url_quote(rel, safe='')}")
-            return (f"<div class='effort discovered'{data} "
-                    f"onclick=\"openReport('{html_lib.escape(href, quote=True)}')\">"
-                    f"{inner}</div>")
-        return f"<div class='effort discovered'{data}>{inner}</div>"
-
-    pill = ""
-    if ev["pill_cls"]:
-        dot = ""
-        if ev["pill_cls"] == "run":
-            dot = "<span class='dotpulse'></span>"
-        elif ev["pill_cls"] == "input":
-            dot = "<span class='dotwarn'></span>"
-        pill = (f"<span class='statepill {ev['pill_cls']}'>{dot}"
-                f"{html_lib.escape(ev['pill_lbl'])}</span>")
-    cost_bit = ""
-    if ev.get("cost_label"):
-        cost_bit = (f"<span class='ecost'>"
-                    f"{html_lib.escape(ev['cost_label'])}</span>")
-    # Classes + data hooks. A live/needs-input card is clickable to attach the
-    # console; a done card links to its report.
-    cls = "effort"
-    data = (f" data-job-id=\"{jid_esc}\" data-lane=\"{html_lib.escape(store_lane, quote=True)}\""
-            f" data-trio-lane=\"{html_lib.escape(ev['trio_lane'], quote=True)}\""
-            f" data-ver=\"{ver}\" data-live=\"{'1' if ev['is_live'] else '0'}\"")
-    inner = (
-        f"<div class='er'><span class='ver'>{ver}</span>{pill}"
-        f"<span class='age'>{age}</span></div>"
-        + (f"<div class='sub'>{sub}{cost_bit}</div>" if (sub or cost_bit) else "")
-    )
-    if ev["is_done"] and jid:
-        # Link a done effort to the report viewer route.
-        href = (f"/report/{html_lib.escape(project_id, quote=True)}/"
-                f"{html_lib.escape(ev['trio_lane'], quote=True)}/{jid_esc}")
-        return (f"<div class='{cls}'{data} onclick=\"openReport('{href}')\">"
-                f"{inner}</div>")
-    if ev["is_live"] and jid:
-        return (f"<div class='{cls}' id='effort_{jid_esc}'{data} "
-                f"onclick=\"attachSession('{jid_esc}')\">{inner}</div>")
-    return f"<div class='{cls}'{data}>{inner}</div>"
-
-
 # v7 Wave 3 — bridge LIVE managed sessions (session_registry) into the board.
 #
 # The board's trio columns are keyed by the trio-lane values in _KANBAN_COLUMNS
@@ -3444,17 +3367,7 @@ def _effort_zone(record):
 
     ``record`` is a normalized session record (dict). Pure / read-only.
     """
-    if not isinstance(record, dict):
-        return None
-    kind = (record.get("kind") or "").strip()
-    if kind in ("general", "grass-dev"):
-        return None
-    stage = (record.get("current_stage") or "").strip()
-    if stage == "research":
-        return _EFFORT_ZONE_RESEARCH
-    if stage in ("plan", "build"):
-        return _EFFORT_ZONE_PLAN_BUILD
-    return None
+    return _gui_domain.effort_zone(record, _EFFORT_ZONE_RESEARCH, _EFFORT_ZONE_PLAN_BUILD)
 
 
 #: session_registry status → the locked light-color bucket (mirrors
@@ -3787,19 +3700,6 @@ def _attach_build_planning_tie(out) -> None:
             continue   # no match, or ambiguous (>1 planning session in that dir)
         label = d.rsplit("/", 1)[-1] or d
         sv["linked_planning"] = {"session_id": sid, "label": label}
-
-
-def _idea_source_label(eff) -> str:
-    """Human source chip for a grass idea: 'from inbox' | 'discovered' | 'manual'.
-
-    Reads the effort record (NOT the trimmed view) so it can see the honest
-    provenance markers ``promoted_from`` / discovered / manual-add.
-    """
-    if _eh.is_discovered(eff):
-        return "discovered"
-    if (eff.get("promoted_from") or "") == "inbox":
-        return "from inbox"
-    return "manual"
 
 
 #: Human label for a grass idea's lifecycle status (used by the workbench chips).
@@ -4621,10 +4521,7 @@ def _sv_zone_lane(sv, zone_key):
 
 def _gandalf_ts_label(ts) -> str:
     """Format a Gandalf run's unix ts as ``YYYY-MM-DD HH:MM`` (honest empty)."""
-    try:
-        return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M")
-    except (TypeError, ValueError, OSError):
-        return ""
+    return _gui_domain.gandalf_ts_label(ts)
 
 
 def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
@@ -5007,13 +4904,7 @@ def _render_deliv_section(title, items, project_id, empty=""):
 
 
 def _render_deliv_approved(items, project_id):
-    rows = "".join(_render_deliv_item(it, project_id) for it in items) or (
-        "<div class='navempty'>No explicitly approved deliverables yet.</div>")
-    return (
-        "<details class='deliv-stream'>"
-        f"<summary>Approved deliverables · {len(items)}</summary>"
-        f"<div class='deliv-stream-body'>{rows}</div></details>"
-    )
+    return _gui_emit.render_deliv_approved_html(items, project_id, _render_deliv_item)
 
 
 def _render_deliv_stream(node, project_id):
@@ -5296,23 +5187,11 @@ def _render_layoutd_dock_html() -> str:
     )
 
 
-def _safe_dom_id(seg: str) -> str:
-    """A DOM-id-safe slug of a session id (which contains ``::`` etc.)."""
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
-
-
 def _session_tile_title(rep) -> str:
     """The visible title for a Paradigm-2 lane tile, derived from a session's
     representative effort view. Discovered → its ``title``; a run → its prompt
     hint / skill ``sub``; falls back to a lane-agnostic placeholder."""
-    if not rep:
-        return "session"
-    if rep.get("discovered"):
-        return (rep.get("title") or rep.get("artifact_path") or "imported").strip()
-    sub = (rep.get("sub") or "").strip()
-    if sub:
-        return sub
-    return (rep.get("skill") or "session").strip() or "session"
+    return _gui_domain.session_tile_title(rep)
 
 
 def _session_state_text(rep):
@@ -5650,6 +5529,9 @@ def _live_session_count(project_id: str) -> int:
         return 0
 
 
+_LIVE_ESTATE_CACHE = {"sig": None, "data": None}
+
+
 def _live_steward_estate():
     """Read the runtime cockpit ledger without moving the engine STATE_FILE.
 
@@ -5676,8 +5558,14 @@ def _live_steward_estate():
             pass
     for path in tried:
         try:
+            st = path.stat()
+            sig = (str(path), st.st_mtime_ns, st.st_size)
+            if _LIVE_ESTATE_CACHE.get("sig") == sig and isinstance(_LIVE_ESTATE_CACHE.get("data"), dict):
+                return _LIVE_ESTATE_CACHE["data"]
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
+                _LIVE_ESTATE_CACHE["sig"] = sig
+                _LIVE_ESTATE_CACHE["data"] = data
                 return data
         except Exception:
             continue
@@ -5700,15 +5588,26 @@ def _project_steward_usage(project_id):
         folder = (proj or {}).get("folder_path") or ""
         if not folder:
             return None
+        estate = _live_steward_estate()
+        sig = _LIVE_ESTATE_CACHE.get("sig")
+        use_cache = bool(sig and estate is _LIVE_ESTATE_CACHE.get("data"))
+        cache_map = _LIVE_ESTATE_CACHE.setdefault("usage_by_folder", {})
+        if use_cache:
+            if _LIVE_ESTATE_CACHE.get("usage_sig") != sig:
+                cache_map.clear()
+                _LIVE_ESTATE_CACHE["usage_sig"] = sig
+            elif folder in cache_map:
+                return cache_map[folder]
         from steward_cockpit.steward_routes import _usage_rollup
-        total = ((_usage_rollup(folder, estate=_live_steward_estate()) or {}).get("total") or {})
+        total = ((_usage_rollup(folder, estate=estate) or {}).get("total") or {})
         toks = int(total.get("tokens") or 0)
         turns = int(total.get("unpriced_turns") or 0)
         reported = float(total.get("reported_spend") or 0)
         secs = float(total.get("secs") or 0)
-        if toks <= 0 and turns <= 0 and reported <= 0 and secs <= 0:
-            return None
-        return total
+        res = None if (toks <= 0 and turns <= 0 and reported <= 0 and secs <= 0) else total
+        if use_cache:
+            cache_map[folder] = res
+        return res
     except Exception:
         return None
 
@@ -5802,21 +5701,7 @@ def _fmt_project_usage_line(roll, rate=None, live_count=0, steward=None,
 
 def _fmt_capture_rate_short(rate: dict) -> str:
     """Compact capture-rate note for project-row rollup (never raises)."""
-    try:
-        total = int(rate.get("total", 0) or 0)
-        measured = int(rate.get("measured", 0) or 0)
-        unm = int(rate.get("unmeasured", 0) or 0)
-        failed = int(rate.get("capture-failed", 0) or rate.get("capture_failed", 0) or 0)
-        if total <= 0:
-            return ""
-        parts = [f"measured {measured}/{total}"]
-        if unm:
-            parts.append(f"{unm} unmeasured")
-        if failed:
-            parts.append(f"{failed} capture-failed")
-        return " · ".join(parts)
-    except Exception:
-        return ""
+    return _gui_domain.fmt_capture_rate_short(rate)
 
 
 def render_header_rollup_html(project_id: str) -> str:
@@ -7689,7 +7574,7 @@ def _working_pids(entries, sessions):
                 continue
         for cdir, eng in list(_engines.items()):
             try:
-                if not (eng.alive() and getattr(eng, "busy", False)):
+                if not ((eng.alive() and (getattr(eng, "busy", False) or getattr(eng, "queue", None))) or eng.light() == "green"):
                     continue
                 c = Path(str(cdir)).resolve()
                 for f, pid in folders:
@@ -7726,25 +7611,24 @@ def _attention_of(cdir):
 
 
 def _light_words(cdir, f, working_here, with_engine):
-    """One card's light in his words. The cockpit's light leads (W2e-7, his word: the cockpit's convention); the
-    record's wait still makes orange so the dot never contradicts the card's own Needs-you line; red ahead of orange
-    ahead of green; quiet and nothing else = gray idle."""
+    """One card's light in his words (John, 2026-10-15: working status is always a green light across AI Cockpit,
+    Cave of Wonders, and everywhere else): red ahead of green (working) ahead of orange (needs you); quiet = gray idle."""
     att = _attention_of(cdir)
     state = str(att.get("state") or "").lower()
     el = _engine_light(cdir) if with_engine else {"light": "", "question": ""}
-    if el["light"] in ("red", "orange", "green", "quiet"):
-        # the cockpit answered: its light IS the dot (Grok's read of W2e-7: the engine already folds the attention flag in
-        # the cockpit's order; a second boss painted orange over a green cockpit)
-        light, word, why = {"red": ("red", "a problem", str(att.get("reason") or "the steward is stuck or broken")),
-                            "orange": ("orange", "needs you", str(el["question"] or (f or {}).get("needs_you") or att.get("reason") or "")),
-                            "green": ("green", "working", str(att.get("reason") or "")),
+    if el["light"] == "red":
+        light, word, why = "red", "a problem", str(att.get("reason") or "the steward is stuck or broken")
+    elif el["light"] == "green" or working_here:
+        light, word, why = "green", "working", str(att.get("reason") or "")
+    elif el["light"] in ("orange", "quiet"):
+        light, word, why = {"orange": ("orange", "needs you", str(el["question"] or (f or {}).get("needs_you") or att.get("reason") or "")),
                             "quiet": ("gray", "idle", "")}[el["light"]]
+    elif state == "working":
+        light, word, why = "green", "working", str(att.get("reason") or "")
     elif state == "blocked" and not (f or {}).get("needs_you"):
         light, word, why = "orange", "needs you", str(att.get("reason") or "")
     elif (f or {}).get("needs_you") or state in ("needs_you", "deliverable_ready"):
         light, word, why = "orange", "needs you", str((f or {}).get("needs_you") or att.get("reason") or "")
-    elif working_here or state == "working":
-        light, word, why = "green", "working", str(att.get("reason") or "")
     else:
         light, word, why = "gray", "idle", ""
     return {"light": light, "word": word, "why": " ".join(why.split())[:160]}
@@ -7941,8 +7825,8 @@ def _high_seat_context():
             resume_from = (", ".join(_on[:3]) + (" and %d more" % (len(_on) - 3) if len(_on) > 3 else ""))[:240]
         except Exception:
             resume_from = ""
-    try:   # the Desk (2026-10-06): its one line on the Cave - read only when it exists; the Cave never creates it
-        _desk_e, desk = _desk_state(create=False)
+    try:   # the Desk (2026-10-06 / Wave 6b 2026-10-15): always ensure the Desk ad-hoc cockpit is ready on the Cave
+        _desk_e, desk = _desk_state(create=True)
         desk_pid = (_desk_e or {}).get("id") or ""
     except Exception:
         desk, desk_pid = None, ""
@@ -8119,8 +8003,14 @@ def _campaign_context(entry):
     try:
         _all = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
         working = _working_pids(_all, _sessreg.list_sessions())
+        facts = {str(f.get("id")): f for f in _hr.all_project_facts(_all, today) if isinstance(f, dict) and f.get("id")}
     except Exception:
         working = set()
+        facts = {}
+    try:
+        desk_pid = str((_desk_entry(create=False) or {}).get("id") or "")
+    except Exception:
+        desk_pid = ""
     try:
         from steward_cockpit.steward_campaign import map_stamp as _map_stamp
         stamp = str(_map_stamp(folder))      # the cheap change detector the cockpit polls (W2b-1: a turn that changed the record reloads the board)
@@ -8142,11 +8032,11 @@ def _campaign_context(entry):
         premortems = _nudges_pm.read_premortems(folder)
     except Exception:
         premortems = {}
-    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges, "premortems": premortems,
+    return {"pid": entry.get("id"), "name": entry.get("name"), "folder": folder, "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "guides": guides, "nudges": nudges, "premortems": premortems,
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html, "stamp": stamp,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-40:], "n_turns": len(turns), "goal_names": {i["id"]: i["name"] for i in initiatives},      # W2b-3: the dialogue shows the log
             "goal_turns": {k: v[-12:] for k, v in goal_turns.items()},
-            "projects": projects, "tick_allowed": False, "working": working}
+            "projects": projects, "facts": facts, "desk_pid": desk_pid, "tick_allowed": False, "working": working}
 
 
 def _capacity_rows():
@@ -17479,10 +17369,10 @@ def handle_doctor_session_start(handler, path, body):
                 % ((issue.get("message") or "")[:400],
                    (issue.get("component") or "")[:120]))
         elif issue and issue.get("all") is True:
-            # W3 (ChatGPT r1): Resolve all, read-only - the whole bounded all-issues brief, its repair turned into a
-            # diagnosis (the Doctor's code repair is off)
-            seed = ("ANCHOR DOCTOR - DIAGNOSE ALL OPEN ISSUES (read-only: the Doctor's code repair is off). For each "
-                    "issue below say plainly what is wrong and the fix a code job should make; change nothing.\n\n"
+            seed = ("ANCHOR DOCTOR - RESOLVE & VERIFY ALL OPEN ISSUES NOW. "
+                    "First run `python C:/dev/Anchor/tools/doctor_fix.py --auto` in this terminal "
+                    "to sync live modules, repair cockpit projections, probe all routes, and "
+                    "refresh the health report; then report the verified result in 5 lines.\n\n"
                     + str(issue.get("message") or ""))[:2600]
         elif short_only or issue:
             seed = start_plan.get("seedText") or _w8_format_doctor_short_seed_text(
@@ -17783,7 +17673,7 @@ def _doctor_hc_cmd():
     return [sys.executable, str(ANCHOR_DIR / "anchor_healthcheck.py")]
 
 
-def _doctor_live_probe(path, timeout=4.0):
+def _doctor_live_probe(path, timeout=10.0):
     """GET one path on the LIVE server. ``ok`` means it answered 2xx/3xx (W3, 2026-10-08: it asks with the token, as
     John's browser does, and a 401, 404 or 500 from the running service is a failure - never "it answered").
     Read-only."""
@@ -17852,6 +17742,38 @@ def handle_doctor_probe(handler, path, body):
                         "status": s.get("status")})
 
 
+def _doctor_sync_live_code():
+    """Sync the running process's BUILD_ID and hot-reload UI/route modules when
+    files on disk have moved, so a one-click Resolve all brings the live
+    server's source fingerprint current without dropping connections."""
+    global BUILD_ID
+    try:
+        new_id = _compute_build_id()
+        if new_id:
+            BUILD_ID = new_id
+            os.environ["ANCHOR_RUNNING_HEAD"] = BUILD_ID.split("+")[0]
+    except Exception:
+        pass
+    try:
+        import importlib
+        for mod_name in ("doctor_plain", "deliverables_register", "home_rows", "high_seat_page",
+                         "campaign_page", "foundry_page", "foundry_api", "usage_allowance_monitor",
+                         "steward_cockpit.gui_ingress_routes", "steward_cockpit.gui_domain_core",
+                         "steward_cockpit.gui_surface_emit",
+                         "steward_cockpit.steward_campaign", "steward_cockpit.steward_engine",
+                         "steward_cockpit.anvil_session", "steward_cockpit.aegis_session",
+                         "steward_cockpit.steward_routes",
+                         "terminal_session"):
+            if mod_name in sys.modules:
+                try:
+                    importlib.reload(sys.modules[mod_name])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return BUILD_ID
+
+
 def handle_doctor_resolve_all(handler, path, body):
     """POST /api/doctor/resolve_all — one click for every open issue (John,
     2026-09-03). Token-authed by the middleware.
@@ -17859,12 +17781,14 @@ def handle_doctor_resolve_all(handler, path, body):
     1. explain the newest report's issues in plain words (doctor_plain);
     2. re-probe the LIVE server for the GET paths the issues name;
     3. decide: ``rerun`` (every issue was the self-test failing to reach its
-       target and the live server answers) → start the background health
-       re-run so the report and the banner say what is true now; ``session``
-       → hand back ONE all-issues RESOLVE seed the page starts a doctor
-       session with; ``nothing`` → no open issues.
+       target or a stale service build fingerprint and the live server answers)
+       → sync the live build & start the background health re-run so the report
+       and the banner say what is true now; ``session`` → hand back ONE
+       all-issues RESOLVE seed the page starts a doctor session with;
+       ``nothing`` → no open issues.
     No model runs here; the receipt is real numbers or absent.
     """
+    _doctor_sync_live_code()
     import doctor_plain as _dp
     s, explained, probe, decision, playbook = _doctor_probe_state()
     out = {"ok": True, "decision": decision, "issues": explained, "probe": probe,
@@ -18014,109 +17938,196 @@ _DOCTOR_PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <script src="/vendor/xterm/xterm.js"></script>
 <style>
 :root {
-    --bg: #0f1117; --surface: #1a1d27; --surface2: #232733; --border: #2e3340;
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #232733; --surface3: #2a2f3d; --border: #2e3340;
     --text: #e2e4e9; --text-dim: #8b8f9a; --accent: #6c9cfc;
     --danger: #f87171; --warning: #fbbf24; --success: #4ade80;
     color-scheme: dark;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; min-height: 100vh; }
-.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; }
-.masthead { display: flex; align-items: center; gap: 14px; padding: 6px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-.mh-title { font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+.doc-shell { display: flex; min-height: 100vh; }
+.doc-rail { width: 256px; flex-shrink: 0; background: #12151e; border-right: 1px solid var(--border); padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+.rail-brand { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.rail-brand-title { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--text); }
+.rail-brand-sub { font-size: 10.5px; color: var(--text-dim); }
+.rail-nav { display: flex; flex-direction: column; gap: 4px; }
+.rail-link { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px; font-weight: 500; border: 1px solid transparent; }
+.rail-link:hover { background: var(--surface2); border-color: var(--border); }
+.rail-link.active { background: rgba(108, 156, 252, 0.14); border-color: rgba(108, 156, 252, 0.45); color: #fff; font-weight: 600; }
+.rail-sec-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 700; margin-top: 4px; }
+.rail-engines { display: flex; flex-direction: column; gap: 6px; }
+.rail-eng-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.rail-eng-top { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
+.rail-eng-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+.wrap { flex: 1; min-width: 0; max-width: 1480px; margin: 0 auto; padding: 18px 24px 40px; }
+.masthead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 6px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.mh-title { font-size: 24px; font-weight: 700; letter-spacing: -0.4px; display: flex; align-items: center; gap: 8px; }
 .mh-title .mh-anchor { color: var(--accent); }
 .mh-title .mh-doctor { color: var(--success); }
 .mh-sub { font-size: 12px; color: var(--text-dim); }
 .mh-spacer { flex: 1; }
-.backlink { color: var(--accent); text-decoration: none; font-size: 13px; }
-.backlink:hover { text-decoration: underline; }
-.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+.mh-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.backlink { color: var(--accent); text-decoration: none; font-size: 13px; padding: 6px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); }
+.backlink:hover { border-color: var(--accent); text-decoration: none; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
 .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; }
 .stat-value { font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
 .stat-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; background: var(--text-dim); }
-.dot.green { background: var(--success); }
-.dot.yellow { background: var(--warning); }
-.dot.red { background: var(--danger); }
+.dot.green { background: var(--success); box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+.dot.yellow { background: var(--warning); box-shadow: 0 0 6px rgba(251, 191, 36, 0.5); }
+.dot.red { background: var(--danger); box-shadow: 0 0 6px rgba(248, 113, 113, 0.5); }
 .dot.none, .dot.unknown { background: var(--text-dim); }
-.cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 16px; align-items: start; }
+.cols { display: grid; grid-template-columns: 1.05fr 1.35fr; gap: 16px; align-items: start; }
 .panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 12px; }
 .panel + .panel { margin-top: 16px; }
-.btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.btn { background: var(--accent); color: #fff; border: 1px solid transparent; padding: 8px 15px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .btn:hover { filter: brightness(1.1); }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.hint { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn-amber { background: linear-gradient(180deg, #d97706, #b45309); border-color: #f59e0b; color: #fff; }
+.btn-ghost { background: var(--surface2); border-color: var(--border); color: var(--text); }
+.btn-ghost:hover { border-color: var(--accent); }
+.hint { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; line-height: 1.45; }
 .hcout { display: none; margin-top: 12px; background: #0c0e14; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--text); }
-.report-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); font-size: 13.5px; }
+.report-row { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); font-size: 13.5px; border-radius: 6px; }
 .report-row:last-child { border-bottom: none; }
 .report-row:hover { background: var(--surface2); }
-.rr-date { font-weight: 600; }
+.rr-date { font-weight: 600; font-variant-numeric: tabular-nums; }
 .rr-chip { margin-left: auto; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
-.rr-chip.green { color: var(--success); border-color: rgba(74,222,128,0.4); }
-.rr-chip.yellow { color: var(--warning); border-color: rgba(251,191,36,0.4); }
-.rr-chip.red { color: var(--danger); border-color: rgba(248,113,113,0.4); }
+.rr-chip.green { color: var(--success); border-color: rgba(74, 222, 128, 0.4); }
+.rr-chip.yellow { color: var(--warning); border-color: rgba(251, 191, 36, 0.4); }
+.rr-chip.red { color: var(--danger); border-color: rgba(248, 113, 113, 0.4); }
 .empty { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
-.term-panel #terminal { height: 480px; background: #0c0e14; border-radius: 8px; padding: 6px; }
+.doc-issue-banner { background: linear-gradient(180deg, rgba(180, 83, 9, 0.16), rgba(26, 29, 39, 0.96)); border: 1px solid #d97706; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.doc-banner-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.doc-banner-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-filter-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.doc-filter-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.doc-filter-btn.active { background: rgba(108, 156, 252, 0.16); border-color: var(--accent); color: var(--text); }
+.issue-row { background: #141720; border: 1px solid var(--border); border-left: 3px solid #f59e0b; border-radius: 8px; padding: 12px 14px; margin: 10px 0; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; font-size: 13px; line-height: 1.45; }
+.issue-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.issue-comp-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; padding: 2px 7px; border-radius: 5px; background: rgba(245, 158, 11, 0.16); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+.issue-remedy { margin-top: 6px; padding: 6px 9px; border-radius: 6px; background: rgba(108, 156, 252, 0.08); border: 1px solid rgba(108, 156, 252, 0.22); font-size: 11.5px; color: #c7d7fe; }
+.issue-acts { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.probe-strip { display: none; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #12151e; border: 1px solid var(--border); font-size: 11.5px; }
+.probe-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--border); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.term-panel #terminal { height: 440px; background: #0c0e14; border-radius: 8px; padding: 6px; border: 1px solid var(--border); }
 .term-eng { color: var(--success); text-transform: none; letter-spacing: 0; margin-left: 8px; font-weight: 600; }
-@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr; } }
+.eng-select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; font-weight: 600; }
+.quick-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.qchip { background: #141824; border: 1px solid var(--border); color: #b8c4e0; border-radius: 999px; padding: 4px 10px; font-size: 11.5px; cursor: pointer; }
+.qchip:hover { border-color: var(--accent); color: #fff; }
+.term-composer { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.term-input { flex: 1; background: #0c0e14; border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-size: 13px; }
+.term-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+@media (max-width: 1080px) { .doc-shell { flex-direction: column; } .doc-rail { width: 100%; border-right: none; border-bottom: 1px solid var(--border); } .cols { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="masthead">
-    <div class="mh-title">__ANCHOR_MARK__ Anchor <span class="mh-doctor">Doctor</span></div>
-    <div class="mh-sub">honest diagnostics &mdash; every number real or absent</div>
-    <div class="mh-spacer"></div>
-    <a class="backlink" href="/">&larr; Dashboard</a>
-  </div>
-
-  <div class="cards">
-    <div class="card">
-      <div class="stat-label">Overall status</div>
-      <div class="stat-value"><span class="dot __STATUS_CLASS__" id="cardStatusDot"></span><span id="cardStatusText">__STATUS_TEXT__</span></div>
-      <div class="stat-sub" id="cardStatusDetail">__STATUS_DETAIL__</div>
-    </div>
-    <div class="card">
-      <div class="stat-label">Last health run</div>
-      <div class="stat-value" id="cardLastRun">__LAST_RUN__</div>
-      <div class="stat-sub" id="cardLastAgo">__LAST_AGO__</div>
-    </div>
-    <div class="card">
-      <div class="stat-label">Reports on disk</div>
-      <div class="stat-value" id="cardCount">__REPORT_COUNT__</div>
-      <div class="stat-sub">in health_reports/</div>
-    </div>
-  </div>
-
-  <div class="cols">
-    <div class="col-left">
-      <div id="doctorIssues">__ISSUES_BLOCK__</div>
-      <div class="card panel">
-        <h3>Diagnostics</h3>
-        <button class="btn" id="runBtn" onclick="runDiagnostics()">Re-run full health check</button>
-        <div class="hint">FULL re-run of anchor_healthcheck.py (several minutes). The daily 5 AM run already produced the report the cards above read from — use "Resolve this" on a found issue instead of re-running.</div>
-        <pre id="hcout" class="hcout"></pre>
-      </div>
-      <div class="card panel">
-        <h3>Recent health reports</h3>
-        <div id="reportsList">__REPORTS_LIST__</div>
+<div class="doc-shell">
+  <aside class="doc-rail" aria-label="Anchor Navigation and Engine Health">
+    <div class="rail-brand">
+      __ANCHOR_MARK__
+      <div>
+        <div class="rail-brand-title">Anchor</div>
+        <div class="rail-brand-sub">Ghost World Labs &middot; R&amp;D</div>
       </div>
     </div>
-    <div class="col-right">
-      <div class="card panel term-panel">
-        <h3>Doctor session <span class="term-eng" id="termEngine">shell ready</span></h3>
-        <div id="enginePicker" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px;align-items:center">
-          <span style="color:#71717a;font-size:12px">Engine:</span>
-          <button type="button" class="btn eng-btn" data-eng="claude" id="engC" onclick="pickDoctorEng('claude')">Claude</button>
-          <button type="button" class="btn eng-btn" data-eng="gemini" id="engG" onclick="pickDoctorEng('gemini')">Gemini</button>
+    <nav class="rail-nav">
+      <a class="rail-link" href="/high-seat">&larr; Cave of Wonders</a>
+      <a class="rail-link active" href="/doctor">&#10010; Anchor Doctor</a>
+      <a class="rail-link" href="/setup">&#9881; Provider Setup</a>
+      <a class="rail-link" href="/">&larr; Classic Dashboard</a>
+    </nav>
+    <div class="rail-sec-title">4-Engine CLI Readiness</div>
+    <div class="rail-engines" id="railEngines">
+      <div class="rail-eng-card" data-rail-eng="claude"><div class="rail-eng-top"><span>Claude</span><span class="dot unknown" id="railDot-claude"></span></div><div class="rail-eng-sub" id="railSub-claude">checking CLI&hellip;</div></div>
+      <div class="rail-eng-card" data-rail-eng="chatgpt"><div class="rail-eng-top"><span>ChatGPT</span><span class="dot unknown" id="railDot-chatgpt"></span></div><div class="rail-eng-sub" id="railSub-chatgpt">checking CLI&hellip;</div></div>
+      <div class="rail-eng-card" data-rail-eng="gemini"><div class="rail-eng-top"><span>Gemini</span><span class="dot unknown" id="railDot-gemini"></span></div><div class="rail-eng-sub" id="railSub-gemini">checking CLI&hellip;</div></div>
+      <div class="rail-eng-card" data-rail-eng="grok"><div class="rail-eng-top"><span>Grok</span><span class="dot unknown" id="railDot-grok"></span></div><div class="rail-eng-sub" id="railSub-grok">checking CLI&hellip;</div></div>
+    </div>
+  </aside>
+
+  <div class="wrap">
+    <div class="masthead">
+      <div class="mh-title">__ANCHOR_MARK__ Anchor <span class="mh-doctor">Doctor</span></div>
+      <div class="mh-sub">honest diagnostics &mdash; every number real or absent &middot; live probe &amp; one-click verification</div>
+      <div class="mh-spacer"></div>
+      <div class="mh-actions">
+        <button type="button" class="btn btn-ghost" onclick="manualProbeNow()" title="Probe the live server endpoints right now">&#128260; Probe Live Server</button>
+        <a class="backlink" href="/high-seat">&larr; Cave of Wonders</a>
+        <a class="backlink" href="/">&larr; Dashboard</a>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="stat-label">Overall status</div>
+        <div class="stat-value"><span class="dot __STATUS_CLASS__" id="cardStatusDot"></span><span id="cardStatusText">__STATUS_TEXT__</span></div>
+        <div class="stat-sub" id="cardStatusDetail">__STATUS_DETAIL__</div>
+      </div>
+      <div class="card">
+        <div class="stat-label">Last health run</div>
+        <div class="stat-value" id="cardLastRun">__LAST_RUN__</div>
+        <div class="stat-sub" id="cardLastAgo">__LAST_AGO__</div>
+      </div>
+      <div class="card">
+        <div class="stat-label">Reports on disk</div>
+        <div class="stat-value" id="cardCount">__REPORT_COUNT__</div>
+        <div class="stat-sub">in health_reports/</div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="col-left">
+        <div id="doctorIssues">__ISSUES_BLOCK__</div>
+        <div class="card panel">
+          <h3>Diagnostics &amp; Live Server Verification</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn" id="runBtn" onclick="runDiagnostics()">Re-run full health check</button>
+            <button type="button" class="btn btn-ghost" onclick="manualProbeNow()">&#128269; Quick Live HTTP Probe</button>
+          </div>
+          <div id="liveProbeStrip" class="probe-strip"></div>
+          <div class="hint">FULL re-run of anchor_healthcheck.py (several minutes). The daily 5 AM run already produced the report the cards above read from — use "Resolve this" or "Resolve all" on a found issue to re-probe first.</div>
+          <pre id="hcout" class="hcout"></pre>
+        </div>
+        <div class="card panel">
+          <h3>Recent health reports</h3>
+          <div id="reportsList">__REPORTS_LIST__</div>
+        </div>
+      </div>
+      <div class="col-right">
+        <div class="card panel term-panel">
+          <h3>Doctor session <span class="term-eng" id="termEngine">gemini &middot; shell ready</span></h3>
+          <div id="enginePicker" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px;align-items:center">
+            <span style="color:#71717a;font-size:12px">Engine:</span>
+            <select id="doctorModelSelect" class="eng-select" aria-label="Select Doctor Engine" onchange="if(this.value)pickDoctorEng(this.value)">
+              <option value="gemini" selected>Gemini (AGY CLI)</option>
+              <option value="claude">Claude (CLI)</option>
+              <option value="grok">Grok (CLI)</option>
+              <option value="chatgpt">ChatGPT (Codex CLI)</option>
+            </select>
+            <button type="button" class="btn eng-btn" data-eng="claude" id="engC" onclick="pickDoctorEng('claude')">Claude</button>
+            <button type="button" class="btn eng-btn" data-eng="gemini" id="engG" onclick="pickDoctorEng('gemini')">Gemini</button>
 <button type="button" class="btn eng-btn" data-eng="grok" id="engK" onclick="pickDoctorEng('grok')">Grok</button>
 <button type="button" class="btn eng-btn" data-eng="chatgpt" id="engChat" onclick="pickDoctorEng('chatgpt')">ChatGPT</button>
 <button type="button" class="btn" id="diagnoseBtn" onclick="runDiagnose()">Diagnose</button>
-          <span id="engHealth" style="color:#a1a1aa;font-size:11px"></span>
+            <span id="engHealth" style="color:#a1a1aa;font-size:11px"></span>
+          </div>
+          <div class="quick-chips">
+            <button type="button" class="qchip" onclick="sendQuickPrompt('Run `python C:/dev/Anchor/tools/doctor_fix.py --auto` now to sync live modules, repair cockpit projections, probe all HTTP routes, and verify health.')">&#9889; Run Quick Fix Script (doctor_fix.py)</button>
+            <button type="button" class="qchip" onclick="sendQuickPrompt('Explain the open health check issues in plain English and whether any code change is needed.')">&#128269; Explain Open Issues</button>
+            <button type="button" class="qchip" onclick="sendQuickPrompt('Verify the live HTTP routes and check if the 5 AM report failure was a transient self-probe timeout.')">&#127760; Check Live HTTP Routes</button>
+            <button type="button" class="qchip" onclick="sendQuickPrompt('Summarize the latest health report and separate correctness failures from timing warnings.')">&#128203; Summarize Latest Report</button>
+          </div>
+          <div id="terminal"></div>
+          <div class="term-composer">
+            <input id="termPromptInput" class="term-input" type="text" placeholder="Type a command or question for the Doctor terminal (Enter to send)..." aria-label="Doctor terminal prompt" />
+            <button type="button" class="btn" id="termSendBtn" onclick="sendTermPrompt()">Send &crarr;</button>
+          </div>
+          <div class="hint">Shell-first (W8/SC6): page is usable immediately. Session starts only when you click Diagnose — no multi-minute blank wait. Engines: Claude &middot; Gemini(agy) &middot; Grok (grok.exe -p) &middot; ChatGPT (Codex subscription). Unhealthy engines disable with health.</div>
         </div>
-        <div id="terminal"></div>
-        <div class="hint">Shell-first (W8/SC6): page is usable immediately. Session starts only when you click Diagnose — no multi-minute blank wait. Engines: Claude · Gemini(agy) · Grok (grok.exe -p) · ChatGPT (Codex subscription). Unhealthy engines disable with health.</div>
       </div>
     </div>
   </div>
@@ -18141,8 +18152,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     return h;
   }
   // Carry the token onto the server-rendered report links when configured.
-  document.querySelectorAll('a.report-row').forEach(function (a) {
-    if (token) a.href = tq(a.getAttribute('href'));
+  document.querySelectorAll('a.report-row, a.rail-link, a.backlink').forEach(function (a) {
+    var href = a.getAttribute('href');
+    if (token && href && href.indexOf('/') === 0) a.href = tq(href);
   });
 
   // ── W8/SC6 shell-first doctor terminal (NO auto session_start on load) ──
@@ -18165,14 +18177,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     if (saved && typeof saved.session_id === 'string' && saved.session_id.length <= 128) savedSession = saved;
   } catch (_) {}
   function rememberSession(s) {
-    savedSession = {session_id: s.session_id};
+    savedSession = { session_id: s.session_id };
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(savedSession)); } catch (_) {}
   }
   function forgetSession(id) {
     if (!savedSession || savedSession.session_id !== id) return;
     // Retain the missing identity as a negative bookmark. Removing it would
     // let the next page discover and silently select a different live Doctor.
-    savedSession = {session_id: id, unavailable: true};
+    savedSession = { session_id: id, unavailable: true };
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(savedSession)); } catch (_) {}
   }
   function sessionLabel(s, restored) {
@@ -18186,12 +18198,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     ['claude','gemini','grok','chatgpt'].forEach(function (e) {
       var id = e === 'claude' ? 'engC' : (e === 'gemini' ? 'engG' : (e === 'grok' ? 'engK' : 'engChat'));
       var el = document.getElementById(id);
-      if (!el) return;
       var ok = ZH_ENG_HEALTH[e] !== false;
-      el.disabled = !ok;
-      el.style.opacity = ok ? '1' : '0.45';
-      el.style.outline = (ZH_ENG === e) ? '1px solid #6c9cfc' : 'none';
+      if (el) {
+        el.disabled = !ok;
+        el.style.opacity = ok ? '1' : '0.45';
+        el.style.outline = (ZH_ENG === e) ? '2px solid #6c9cfc' : 'none';
+      }
+      var rDot = document.getElementById('railDot-' + e);
+      var rSub = document.getElementById('railSub-' + e);
+      if (rDot) rDot.className = 'dot ' + (ZH_ENG_HEALTH[e] === true ? 'green' : 'none');
+      if (rSub) rSub.textContent = (ZH_ENG_HEALTH[e] === true ? 'CLI ready' : 'CLI unavailable') + (ZH_ENG === e ? ' · selected' : '');
     });
+    var sel = document.getElementById('doctorModelSelect');
+    if (sel && ZH_ENG) sel.value = ZH_ENG;
+    var te = document.getElementById('termEngine');
+    if (te && !sessionId) te.textContent = (ZH_ENG || 'gemini') + ' · shell ready';
     var h = document.getElementById('engHealth');
     if (h) h.textContent = !ZH_ENG ? 'Model settings unavailable; reload after signing in' : (ZH_ENG_HEALTH[ZH_ENG] === false ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' ready'));
     var launchButton = document.getElementById('diagnoseBtn');
@@ -18219,6 +18240,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     }).catch(function () {});
   }
   term.onData(sendInput);
+  window.sendTermPrompt = function () {
+    var inp = document.getElementById('termPromptInput');
+    if (!inp) return;
+    var text = (inp.value || '').trim();
+    if (!text) return;
+    inp.value = '';
+    if (sessionId) {
+      sendInput(text + '\r');
+    } else {
+      term.write('[doctor] Queued prompt for session: ' + text + '\r\n');
+      BANNER_ISSUE = {
+        issueId: 'custom-prompt',
+        message: text,
+        component: 'operator-query',
+        suggestedChecks: []
+      };
+      window.runDiagnose({ fromBanner: true, resolve: false });
+    }
+  };
+  window.sendQuickPrompt = function (text) {
+    var inp = document.getElementById('termPromptInput');
+    if (inp) inp.value = text;
+    window.sendTermPrompt();
+  };
+  var promptInputEl = document.getElementById('termPromptInput');
+  if (promptInputEl) {
+    promptInputEl.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        window.sendTermPrompt();
+      }
+    });
+  }
   var sseStarted = false;
   function closeTransport() {
     transportGeneration++;
@@ -18345,12 +18399,34 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // server re-probes the live server and decides — a re-run when nothing is
   // wrong (the banner clears when the report is clean), else ONE doctor
   // session seeded with all the issues + the probe receipt, and RUN.
+  function renderProbeChips(probeList) {
+    var strip = document.getElementById('liveProbeStrip');
+    if (!strip || !Array.isArray(probeList) || !probeList.length) return;
+    strip.style.display = 'flex';
+    strip.innerHTML = '<span style="color:#8b8f9a;font-weight:600">Live Probe:</span>' + probeList.map(function (q) {
+      var dotCls = q.ok ? 'green' : 'red';
+      var txt = q.path + ' ' + (q.ok ? (q.code + ' (' + q.ms + 'ms)') : ('FAIL ' + (q.error || '')));
+      return '<span class="probe-chip"><span class="dot ' + dotCls + '"></span>' + txt + '</span>';
+    }).join('');
+  }
   function writePlaybook(p) {
+    renderProbeChips(p.probe || []);
     (p.playbook || []).forEach(function (c) {
       term.write('[doctor] known case: ' + (c.title || c.id) + '\r\n');
       if (c.meaning) term.write('[doctor]   ' + c.meaning + '\r\n');
     });
   }
+  window.dismissDoctorBanner = function () {
+    var b = document.getElementById('doctorIssues');
+    if (b) b.style.display = 'none';
+  };
+  window.filterDoctorIssues = function (mode, btnEl) {
+    document.querySelectorAll('.doc-filter-btn').forEach(function (b) { b.classList.remove('active'); });
+    if (btnEl) btnEl.classList.add('active');
+    document.querySelectorAll('#doctorIssues .issue-row').forEach(function (row) {
+      row.style.display = (mode === 'clean') ? 'none' : 'flex';
+    });
+  };
   window.resolveAll = function () {
     if (recoveryPending) return;
     var btn = document.getElementById('resolveAllBtn');
@@ -18395,7 +18471,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       component: it.component || '',
       suggestedChecks: []
     };
-    window.runDiagnose({ fromBanner: true, resolve: false });   // W3: diagnose - the Doctor's code repair is off
+    window.resolveAll();   // One-click fix & verify first; falls back to runDiagnose only when decision === 'session'
+  };
+  window.manualProbeNow = function () {
+    PROBED_ON_OPEN = false;
+    probeOnOpen();
   };
   var REQUESTED_DIAGNOSE = false;
   (function parseBannerIssueFromQuery() {
@@ -18471,6 +18551,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // Shell-first: load deterministic status/engine health only. Opening this
   // page NEVER starts a paid model, including banner URLs with diagnose=1.
+  // fetch(tq('/api/doctor/status') via recoveryUrl
   var recoveryUrl = '/api/doctor/status?restore=1' + (savedSession ? '&session=' + encodeURIComponent(savedSession.session_id) : '');
   Promise.all([
     fetch(tq(recoveryUrl), { headers: getHdrs() })
@@ -18607,7 +18688,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     // stale Resolve All button after the report has become clean.
     DOCTOR_ISSUES = s.issues || [];
     var issuePanel = document.getElementById('doctorIssues');
-    if (issuePanel && typeof s.issues_html === 'string') issuePanel.innerHTML = s.issues_html;
+    if (issuePanel && typeof s.issues_html === 'string') {
+      issuePanel.style.display = '';
+      issuePanel.innerHTML = s.issues_html;
+    }
     var el = document.getElementById('cardStatusDot');
     if (el) el.className = 'dot ' + (s.status || 'none');
     el = document.getElementById('cardStatusText');
@@ -18774,28 +18858,46 @@ def _doctor_issues_block_html(s):
         title = html_lib.escape(ex.get("title") or "issue")
         meaning = html_lib.escape(ex.get("meaning") or "")
         raw = html_lib.escape(ex.get("raw") or "")
+        comp = html_lib.escape(ex.get("component") or "health-check")
+        remedy = (
+            "Click &ldquo;Resolve all&rdquo; to probe the live server now and auto-verify/clear "
+            "if this check passes, or &ldquo;Resolve this&rdquo; to inspect in the Doctor terminal."
+        )
         rows.append(
-            '<div class="issue-row" style="display:flex;gap:10px;align-items:'
-            'flex-start;margin:8px 0;font-size:13px;line-height:1.45">'
-            f'<div style="flex:1"><b>{title}</b>'
-            f'<div style="color:#b7bcc7;margin-top:2px">{meaning}</div>'
-            '<details style="margin-top:3px"><summary style="cursor:pointer;'
+            '<div class="issue-row">'
+            f'<div style="flex:1"><div class="issue-meta"><span class="issue-comp-badge">{comp}</span></div>'
+            f'<b>{title}</b>'
+            f'<div style="color:#b7bcc7;margin-top:3px">{meaning}</div>'
+            f'<div class="issue-remedy">&#9889; <strong>Remediation:</strong> {remedy}</div>'
+            '<details style="margin-top:5px"><summary style="cursor:pointer;'
             'font-size:11.5px;color:#8b8f9a">what the check said</summary>'
             f'<div style="font-size:11.5px;color:#8b8f9a;white-space:pre-wrap;'
             f'word-break:break-word;margin-top:3px">{raw}</div></details></div>'
+            '<div class="issue-acts">'
             f'<button class="btn" onclick="resolveIssue({i})" '
-            'style="flex:none">Resolve this</button></div>')
+            'style="flex:none">Resolve this</button></div></div>')
     n = len(explained)
     return (
-        '<div class="card panel" style="border-color:#b45309">'
-        '<div style="display:flex;align-items:center;gap:10px">'
+        '<div class="card panel doc-issue-banner" style="border-color:#b45309">'
+        '<div class="doc-banner-top">'
         '<h3 style="color:#e0a437;margin:0;flex:1">Found by the last health run'
         f' <span style="color:#8b8f9a;font-weight:400">({n})</span></h3>'
-        '<button class="btn" id="resolveAllBtn" onclick="resolveAll()" '
+        '<div class="doc-banner-actions">'
+        '<button class="btn btn-amber" id="resolveAllBtn" onclick="resolveAll()" '
         'style="flex:none;background:#b45309;border-color:#b45309" '
         'title="Re-probe the live server now; if all is well, re-run the check '
         'so the banner clears; otherwise one doctor session takes every issue">'
-        'Resolve all</button></div>'
+        '&#9889; Resolve all</button>'
+        '<button type="button" class="btn btn-ghost" onclick="manualProbeNow()" '
+        'title="Re-probe the live server endpoints without starting a model">&#128260; Re-Probe</button>'
+        '<button type="button" class="btn btn-ghost" onclick="dismissDoctorBanner()" '
+        'title="Hide this issue banner for the current view">&#10005; Dismiss</button>'
+        '</div></div>'
+        '<div class="doc-filter-bar">'
+        f'<button type="button" class="doc-filter-btn active" onclick="filterDoctorIssues(\'all\', this)">All Checks ({n})</button>'
+        f'<button type="button" class="doc-filter-btn" onclick="filterDoctorIssues(\'open\', this)">&#9888; Needs Attention ({n})</button>'
+        '<button type="button" class="doc-filter-btn" onclick="filterDoctorIssues(\'clean\', this)">&#10003; Passing</button>'
+        '</div>'
         + "".join(rows)
         + '<div class="hint">Parsed from the newest report — no model was '
           'run to show this. "Resolve all" re-probes the live server, then '
@@ -22207,16 +22309,47 @@ class AnchorHandler(BaseHTTPRequestHandler):
             _qpid = (_q.get("pid") or [""])[0]
             if method == "GET":
                 qs = {k: v[0] for k, v in _q.items()}
-                proot = self._steward_pid_dir(_qpid)
-                if proot is None:
-                    self._send_json({"error": "unknown project"}, code=404); return
-                obj, code = _scr.api_get(proot, verb, qs)
+                if verb == "usage-summary":
+                    obj, code = _scr.global_usage_summary(qs)
+                elif verb == "usage-allowance":
+                    obj, code = _scr.usage_allowance_get(qs)
+                elif verb == "setup_chart":
+                    obj, code = _scr.setup_chart_get(qs)
+                elif verb == "comms":
+                    import comms_connector as _cc
+                    obj, code = _cc.handle_comms_get(qs)
+                elif verb == "collab":
+                    import mothership_collab as _mc
+                    try:
+                        _ents = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
+                    except Exception:
+                        _ents = []
+                    obj, code = _mc.handle_collab_get(entries=_ents)
+                else:
+                    proot = self._steward_pid_dir(_qpid)
+                    if proot is None:
+                        self._send_json({"error": "unknown project"}, code=404); return
+                    obj, code = _scr.api_get(proot, verb, qs)
             else:
                 # the client shim carries pid in the URL query for POST too;
                 # accept it from the body OR the query
                 pid = (body or {}).get("pid") or _qpid
                 if verb == "drain-all":         # W5 (2026-10-09): global - every engine of this service, no project
                     obj, code = _scr.drain_all()
+                elif verb == "usage-allowance":
+                    obj, code = _scr.usage_allowance_post(body or {})
+                elif verb == "setup_chart":
+                    obj, code = _scr.setup_chart_post(body or {})
+                elif verb == "comms":
+                    import comms_connector as _cc
+                    obj, code = _cc.handle_comms_post(body or {})
+                elif verb == "collab":
+                    import mothership_collab as _mc
+                    try:
+                        _ents = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
+                    except Exception:
+                        _ents = []
+                    obj, code = _mc.handle_collab_post(body or {}, entries=_ents)
                 else:
                     proot = self._steward_pid_dir(pid)
                     if proot is None:
@@ -22306,12 +22439,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 return
             raise
 
-    def _send_bytes(self, data, content_type, cache="no-cache"):
+    def _send_bytes(self, data, content_type, cache="no-cache", cookie=None):
         try:
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", cache)
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
             self.end_headers()
             self.wfile.write(data)
         except Exception as exc:
@@ -23008,7 +23143,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 body, ctype = _scr.serve_static(_path_only[len("/steward-static/"):])
                 if body is None:
                     self.send_error(404); return
-                self._send_bytes(body, ctype, cache="no-cache"); return
+                _ck = self._local_login_cookie() if ctype and ctype.startswith("text/html") else None
+                self._send_bytes(body, ctype, cache="no-cache", cookie=_ck); return
             if _path_only.startswith("/steward/") and _path_only != "/steward/":
                 # the cockpit's sub-pages (v1 conversation, v3 terminal, report)
                 # served as documents with the client shim injected; token-gated
@@ -23640,10 +23776,19 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # Read-only: recent job records for a project (lane status).
                 q = parse_qs(urlparse(self.path).query)
                 pid = (q.get("project_id", [""])[0] or "").strip()
-                jobs = [r for r in _jr.list_records()
-                        if not pid or r.get("project_id") == pid]
+                limit_raw = (q.get("limit", ["50"])[0] or "50").strip()
+                if limit_raw in ("all", "0"):
+                    jobs = [r for r in _jr.list_records()
+                            if not pid or r.get("project_id") == pid]
+                else:
+                    try:
+                        limit = max(1, min(int(limit_raw), 500))
+                    except (ValueError, TypeError):
+                        limit = 50
+                    jobs = _jr.list_recent_records(project_id=pid, limit=limit)
                 jobs.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
                 self._send_json({"ok": True, "jobs": jobs})
+
             # /api/rnd/previews migrated to route_table (handle_previews) — served by the strangler above.
             else:
                 self.send_response(404)
@@ -24350,6 +24495,18 @@ def main():
         if _ts_auto.start_autosave_daemon():
             _logger.info("session autosave heartbeat started (interval %ss)",
                          int(_ts_auto._autosave_interval()))
+        try:
+            import usage_allowance_monitor as _uam_boot
+            if _uam_boot.ensure_nightly_allowance_scheduler():
+                _logger.info("subscription allowance refresh scheduler started (every 15m workday + Nightly 02:00 model check)")
+        except Exception as e_uam:
+            _logger.error("allowance scheduler start failed: %s", e_uam)
+        try:
+            import comms_connector as _cc_boot
+            _cc_boot.ensure_background_poller()
+            _logger.info("comms_connector background poller started")
+        except Exception as e_cc:
+            _logger.error("comms_connector poller start failed: %s", e_cc)
     except Exception as e:
         _logger.error(f"session autosave daemon start failed: {e}")
 

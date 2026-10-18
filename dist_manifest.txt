@@ -49,6 +49,7 @@ provider_native.py
 provider_secrets.py
 provider_setup.py
 usage_capacity.py
+high_seat_core.py
 high_seat_page.py
 codex_catalog.py
 model_policy.py
@@ -302,27 +303,54 @@ chamber/rebrief-channel-audit.json
 # runtime state lives OUTSIDE the repo (data_dir steward-cockpit-state.json,
 # per-project .anchor/ + .ecgberht/) — no repo data files.
 steward_cockpit/__init__.py
-steward_cockpit/steward_engine.py
+steward_cockpit/aegis_session.py
+steward_cockpit/anvil_session.py
+steward_cockpit/boundaries.py
+steward_cockpit/campaign_acts.py
+steward_cockpit/campaign_parts.py
+steward_cockpit/campaign_say.py
+steward_cockpit/campaign_seeds.py
+steward_cockpit/code_job_handoff.py
+steward_cockpit/code_job_progress.py
+steward_cockpit/code_jobs.py
+steward_cockpit/codex_event_stream.py
 steward_cockpit/codex_turn_bridge.py
 steward_cockpit/codex_usage.py
-steward_cockpit/refinement_client.py
-steward_cockpit/producer_handoff.py
 steward_cockpit/conversation_history.py
-steward_cockpit/legacy_claude_history.py
-steward_cockpit/grok_turn_bridge.py
-steward_cockpit/steward_routes.py
-steward_cockpit/steward_campaign.py
-steward_cockpit/navigation_compat.py
+steward_cockpit/engine_cli.py
 steward_cockpit/fake_claude.py
-# Gate 5 kickoff-synthesis canary (W7 reader + W8 cockpit GET route): the
-# pass-through reader over Ecgberht's projection.json and the read-model
-# kickoff_show endpoint substance. Stdlib-only, read-only by construction.
+steward_cockpit/forecasts.py
+steward_cockpit/foundry_tools.py
+steward_cockpit/gemini_turn_bridge.py
+steward_cockpit/grok_turn_bridge.py
+steward_cockpit/gui_domain_core.py
+steward_cockpit/gui_ingress_routes.py
+steward_cockpit/gui_surface_emit.py
+steward_cockpit/high_seat_card.py
+steward_cockpit/horizon.py
+steward_cockpit/job_ledger.py
 steward_cockpit/kickoff_reader.py
 steward_cockpit/kickoff_show_route.py
+steward_cockpit/legacy_claude_history.py
+steward_cockpit/link_check.py
+steward_cockpit/maintenance.py
+steward_cockpit/navigation_compat.py
+steward_cockpit/nudges.py
+steward_cockpit/presence.py
+steward_cockpit/producer_handoff.py
+steward_cockpit/question_context.py
+steward_cockpit/refinement_client.py
+steward_cockpit/repair.py
+steward_cockpit/skill_jobs.py
+steward_cockpit/steward_campaign.py
+steward_cockpit/steward_core.py
+steward_cockpit/steward_engine.py
+steward_cockpit/steward_routes.py
 steward_cockpit/static/cockpit.html
 steward_cockpit/static/v1.html
 steward_cockpit/static/v3.html
 steward_cockpit/static/report.html
+steward_cockpit/static/anvil.html
 steward_cockpit/static/shared.js
 steward_cockpit/static/notebook-actions.js
 steward_cockpit/static/shared.css
@@ -330,6 +358,17 @@ steward_cockpit/static/md.js
 steward_cockpit/static/plate.js
 steward_cockpit/static/tidy-idy-run.js
 steward_cockpit/static/skill-icons.js
+foundry_page.py
+health_state.py
+home_rows.py
+desk.py
+desk_page.py
+campaign_page.py
+usage_allowance_monitor.py
+git_safety.py
+anchor_next.py
+usage_index.py
+comms_connector.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the
@@ -437,6 +476,7 @@ vendor/brand/jarvis-seal-salver.jpg
 # NOTE: the anvil candidate is RESERVED for the future 'anvil'
 # code-validation skill's icon — do not reuse it for the workbench.
 vendor/brand/workbench-icon.jpg
+vendor/brand/anvil-option-2-sword-crystal-v1.jpg
 # Tidy-Idy workbench launcher icon. The cockpit references this directly, so
 # it must ride with the launcher script in the deny-by-default distribution.
 vendor/brand/tidy-idy-icon.jpg
@@ -485,6 +525,7 @@ starter/**
 # (the frontend off-switch flag); stdlib-only.
 static/**
 pillar_flags.py
+mothership_collab.py
 
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml
@@ -507,6 +548,21 @@ tests/test_*.py
 !tests/test_share_feedback_w6.py
 !tests/test_share_onboard_w5.py
 !tests/test_log_redaction_2026_07_26.py
+!tests/test_activation_literal_rollback_2026_10_10.py
+!tests/test_active_set_w2e_2026_09_30.py
+!tests/test_campaign_parts_2026_09_26.py
+!tests/test_campaign_say_2026_09_26.py
+!tests/test_foundry_page_walkthrough.py
+!tests/test_human_first_ingress_2026_09_15.py
+!tests/test_provider_account_refinement.py
+!tests/test_provider_review_followup.py
+!tests/test_provider_setup.py
+!tests/test_provider_setup_hardening.py
+!tests/test_provider_setup_live.py
+!tests/test_service_bootstrap_2026_10_10.py
+!tests/test_setup_first_launch_browser.py
+!tests/test_star_chart_2026_10_03.py
+!tests/test_steward_deliverables_register.py
 tests/fixtures/fake_stream.jsonl
 tests/fixtures/gate_stream.jsonl
 tests/fixtures/model-policy-v1.json

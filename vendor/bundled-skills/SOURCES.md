@@ -6,4 +6,6 @@ extraction. The archived commit sha below is the honest provenance.
 
 | Skill | Source | Archived commit |
 |-------|--------|-----------------|
-| ecgberht | <path> | `0bddf424a30ea4415ce8bc19c2e6cebe7e38f2ae` |
+| anvil | <path> Foundry | `b302f6a36bee682004f827c7e05e7a52752dd4fe` |
+| aegis | <path> Foundry | `b302f6a36bee682004f827c7e05e7a52752dd4fe` |
+| foundry-triage | <path> Foundry | `b302f6a36bee682004f827c7e05e7a52752dd4fe` |

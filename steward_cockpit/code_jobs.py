@@ -166,11 +166,16 @@ def busy_repos():
     repository even when several jobs run there (stale entries dropped; a Foreman lost to a restart reconciled)."""
     out = {}
     _prune_finished()
+    from steward_cockpit import code_job_handoff as _ch
     for key, info in _busy_read().items():
         repo = info.get("repo") or key           # keyed by job since 2026-10-09; older entries by repository
         j = read_jobs(info.get("cdir", "")).get(info.get("job", ""), {})
         if j.get("worker") == "foreman":
             j = reconcile_foreman(info.get("cdir", ""), j)
+        if j.get("status") == "finishing" and not j.get("stop_requested") and _ch.orphaned_finalizer(j):
+            continue
+        if j.get("status") == "running" and _ch.observe(j).get("state") == "dead":
+            continue
         if j.get("status") in LIVE:
             out[repo] = info
     return out
@@ -811,9 +816,9 @@ def mark_exhausted(family):
     _replace(str(tmp), str(_exhausted_path()))
 
 
-# consensus C3: a coder family must report its completed file writes (the manifest) - Claude and Codex do; the Grok
-# and Gemini bridges do not yet, so their jobs could never land. Refused, honestly, until their bridges report writes.
-CODE_JOB_FAMILIES = ("claude", "chatgpt")
+# consensus C3: a coder family must report its completed file writes (the manifest) - Claude, Codex, and Gemini do;
+# the Grok bridge does not yet, so its jobs could never land. Refused, honestly, until its bridge reports writes.
+CODE_JOB_FAMILIES = ("claude", "chatgpt", "gemini")
 NO_MANIFEST = "%s cannot run a code job yet: its bridge does not report which files it wrote, so its work could never land"
 
 
@@ -862,7 +867,7 @@ def small_tier(family, discover=None):
     model, effort = str(want.get("model") or ""), str(want.get("effort") or "")
     if effort not in model_policy.EFFORT_ORDER:
         return None, "effort %r is not a known level" % effort
-    if family not in ("claude", "chatgpt"):
+    if family not in ("claude", "chatgpt", "gemini"):
         return None, "no small tier for %s" % family
     if family == "claude" and model not in CLAUDE_TIER_MODELS:
         return None, "Claude model %r is not one of %s" % (model, ", ".join(CLAUDE_TIER_MODELS))
@@ -870,7 +875,7 @@ def small_tier(family, discover=None):
         rows, _ = (discover or model_policy.discover)(family)
     except Exception as e:
         return None, "the %s models could not be listed (%s)" % (family, str(e)[:80])
-    # Claude's catalog is one moving alias ("best") with the efforts the CLI accepts; ChatGPT lists each model
+    # Claude's catalog is one moving alias ("best") with the efforts the CLI accepts; ChatGPT and Gemini list each model
     row = rows[0] if family == "claude" and rows else next((r for r in rows if r.get("model") == model), None)
     if row is None:
         return None, "%s offers no model %r" % (family, model)
@@ -907,7 +912,7 @@ def choose_coder(requested=""):
         fam = str(fam or "").lower()
         if fam in CODE_JOB_FAMILIES and fam not in tired:
             return fam, None
-    return None, "no configured code-job family (Claude or ChatGPT) is available now"
+    return None, "no configured code-job family (Claude, ChatGPT, or Gemini) is available now"
 
 
 # ── Checks: an argument list or a temp script; never cut, never re-quoted ──────────────────────────────────────────
@@ -1031,6 +1036,32 @@ def run_command(job, tree, argv, *, output_limit=128 * 1024):
     return subprocess.CompletedProcess(argv, 130 if cancelled else 1 if fatal_launch else run.proc.returncode, text, "")
 
 
+def _escape_cmd_percent(text):
+    """Escape literal '%' as '%%' for Windows .cmd batch scripts while preserving %ENV_VAR% expansions."""
+    env_keys = {k.upper() for k in os.environ} | {
+        "CD", "DATE", "TIME", "RANDOM", "ERRORLEVEL", "CMDEXTVERSION", "CMDCMDLINE"
+    }
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "%":
+            out.append(text[i])
+            i += 1
+            continue
+        if i + 1 < n and text[i + 1] == "%":
+            out.append("%%")
+            i += 2
+            continue
+        m = re.match(r"^%([A-Za-z_][A-Za-z0-9_()]*)%", text[i:])
+        if m and m.group(1).upper() in env_keys:
+            out.append(m.group(0))
+            i += len(m.group(0))
+            continue
+        out.append("%%")
+        i += 1
+    return "".join(out)
+
+
 def run_check(job, tree):
     """Run the job's check in ``tree`` (the job's own worktree). (ok, output tail). A string runs from a temp script
     so its quotes and length reach the shell unchanged; a list runs with no shell at all."""
@@ -1046,8 +1077,9 @@ def run_check(job, tree):
             d.mkdir(parents=True, exist_ok=True)
             if os.name == "nt":
                 script = d / ("%s-%s.cmd" % (job["id"], uuid.uuid4().hex[:6]))
+                cmd_body = _escape_cmd_percent(check.replace("\r\n", "\n")).replace("\n", "\r\n")
                 with script.open("w", encoding="utf-8", newline="") as fh:   # already CRLF: text mode made CR CR LF
-                    fh.write("@echo off\r\n" + check.replace("\r\n", "\n").replace("\n", "\r\n") + "\r\n")
+                    fh.write("@echo off\r\n" + cmd_body + "\r\n")
                 argv = ["cmd.exe", "/d", "/c", "call", str(script)]
             else:
                 script = d / ("%s-%s.sh" % (job["id"], uuid.uuid4().hex[:6]))
@@ -1335,6 +1367,8 @@ def run_review(job, tree, head, delta_from=""):
                   "--exhausted", ",".join(sorted(exhausted_families()))]
     if delta_from:
         argv += ["--delta-from", delta_from]
+    if job.get("reviewer_family"):
+        argv += ["--reviewer-family", str(job["reviewer_family"])]
     try:
         r = run_command(job, tree, argv)
     except Exception as e:
@@ -1421,7 +1455,7 @@ def declared_outputs(outputs):
 
 
 def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder="", actor="", skill="", outputs=None,
-          worker="coder", plan="", profile="slim", work_dir=None, size="standard", escalates=""):
+          worker="coder", plan="", profile="slim", work_dir=None, size="standard", escalates="", reviewer=""):
     """Start a code job for the steward at ``cdir``: a worktree of ``repo`` and a coder engine given ``brief``.
     ``engine_factory(worktree) -> engine`` is the seam (steward_routes passes get_engine). ``coder`` is this job's
     family choice (else the Coder seat); ``check`` is an argument list or the full command text. ``worker="foreman"``
@@ -1465,6 +1499,14 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
             return {"ok": False, "error": why}
     else:
         return {"ok": False, "error": "a code job's worker is a coder or foreman, not %s" % worker}
+    reviewer = str(reviewer or "").strip().lower()
+    if reviewer:
+        if reviewer not in FAMILIES:
+            return {"ok": False, "error": "no job started: unknown reviewer family %s" % reviewer}
+        if reviewer == family:
+            return {"ok": False, "error": "no job started: reviewer family (%s) must differ from coder family (%s)" % (reviewer, family)}
+        if reviewer in exhausted_families():
+            return {"ok": False, "error": "no job started: reviewer family (%s) hit its usage limit recently" % reviewer}
     size = str(size or "standard").strip().lower()
     if size not in SIZES:
         return {"ok": False, "error": "no job started: a job's size is small or standard, not %s" % size}
@@ -1487,6 +1529,10 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
     outputs, why = declared_outputs(outputs)
     if why:
         return {"ok": False, "error": why}
+    doc_stems = {k for p in (outputs or []) if (k := _doc_stem_key(p)) is not None}
+    if len(doc_stems) > 3:
+        return {"ok": False, "error": "no job started: %d distinct document stems declared in outputs (max 3 per job) - "
+                "split multi-chapter or multi-deliverable bundles into separate focused jobs" % len(doc_stems)}
     root = _repo_root(repo or "")
     if root is None:
         return {"ok": False, "error": "not a git repository: %s" % repo}
@@ -1559,6 +1605,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                    "check": check, "status": "running", "started": time.strftime("%Y-%m-%d %H:%M:%S"), "land_to": land_to, "outputs": outputs,
                    "steward_dir": str(cdir), "steward": steward, "worker": worker, "coder_family": family,
                    "started_by": str(actor or "the steward"), "size": size, "tier": tier_note}
+            if reviewer:
+                job["reviewer_family"] = reviewer
             if escalates:
                 job["escalates"] = escalates
             # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
@@ -1610,6 +1658,11 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         terms = Path(wt) / ".anchor" / "steward-terms.json"
         terms.parent.mkdir(parents=True, exist_ok=True)
         terms.write_text(json.dumps({"1": {"label": "code job " + job_id, "created": job["started"], "archived": False}}), encoding="utf-8")
+        if str(brief or "").startswith("FULL BRIEF FILE"):
+            first_ln = str(brief).splitlines()[0]
+            bf_cand = first_ln.split(":", 1)[1].strip() if ":" in first_ln else ""
+            if bf_cand and Path(bf_cand).is_file():
+                shutil.copy2(bf_cand, Path(wt) / ".anchor" / "full_brief.md")
         _exclude_local(wt)
     except Exception as e:
         return abandon("no job started: the job's worktree could not be prepared (%s)" % e)
@@ -1686,12 +1739,90 @@ def _exclude_local(wt):
         pass
 
 
+_COCKPIT_LEDGER_RE = re.compile(r"(?:^|/)(?:ECGBERHT|DELIVERABLES|STATUS[^/]*)\.md$|(?:^|/)roadmap\.json$", re.I)
+_COMPANION_DOC_EXT = (".md", ".markdown", ".docx", ".pdf", ".html", ".htm")
+_STEM_SUFFIX_RE = re.compile(r"(?:_source|-source|_redline|-redline|_track[-_]?changes|_tracked|_clean|-clean|_reading)$", re.I)
+
+
+def _doc_stem_key(path):
+    p = Path(str(path).replace(chr(92), "/").lstrip("/"))
+    if p.suffix.lower() not in _COMPANION_DOC_EXT:
+        return None
+    stem = _STEM_SUFFIX_RE.sub("", p.stem).lower()
+    return (p.parent.as_posix().lower(), stem) if stem else None
+
+
+def _companion_outputs(job, wt, allowed, candidates, *, base=None):
+    """Admit newly created same-directory, same-stem document companions (.md, _source.md, .docx, .pdf, .html) of any
+    declared output or tool-written document so Markdown-first + CLI packaging never blocks landing on a companion file,
+    while refusing undeclared edits to existing tracked files."""
+    allowed_keys = {k for p in (allowed or ()) if (k := _doc_stem_key(p)) is not None}
+    if not allowed_keys:
+        return []
+    out = []
+    for c in candidates or ():
+        if c in allowed or never_lands(c) or _runtime(c):
+            continue
+        if _doc_stem_key(c) in allowed_keys and not scope_error(job, wt, [c]):
+            if base and _blob(wt, base, c) is not None:
+                continue
+            out.append(c)
+    if out:
+        job["admitted_companions"] = sorted(set(job.get("admitted_companions") or []) | set(out))
+    return out
+
+
+def _hold_cockpit_records(wt, job, manifest):
+    """When a worker produces real deliverable files and also edits cockpit ledger files (DELIVERABLES.md, ECGBERHT.md,
+    STATUS*.md, roadmap.json) inside the worktree, stash those ledger copies under .anchor/held-records/ and restore
+    them in the worktree so they never block landing. Explicitly declared outputs are exempt."""
+    try:
+        base = candidate_base(job)
+        changed = changed_paths(wt, base) or []
+        declared_set = set(job.get("outputs") or [])
+        ledgers = [p for p in changed if p not in declared_set and _COCKPIT_LEDGER_RE.search(p.replace(chr(92), "/"))]
+        others = [p for p in changed if p not in set(ledgers) and not _runtime(p) and not never_lands(p)]
+        if not ledgers or (not others and not declared_set):
+            return []
+        brief_l = str(job.get("brief") or "").lower()
+        held = []
+        hold_root = Path(wt) / ".anchor" / "held-records"
+        for rel in ledgers:
+            if Path(rel).name.lower() in brief_l:
+                continue
+            src = Path(wt) / rel
+            if src.is_file():
+                dst = hold_root / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            code, _, _ = _git(wt, "cat-file", "-e", "%s:%s" % (base, rel))
+            if code == 0:
+                _git(wt, "--literal-pathspecs", "checkout", "-q", base, "--", rel)
+                _git(wt, "--literal-pathspecs", "reset", "-q", "--", rel)
+            else:
+                _git(wt, "--literal-pathspecs", "rm", "-q", "-f", "--ignore-unmatch", "--", rel)
+                try:
+                    if src.is_file() or src.is_symlink():
+                        src.unlink()
+                except OSError:
+                    pass
+            held.append(rel)
+        if held:
+            manifest[:] = [p for p in manifest if p not in set(held)]
+            job["held_cockpit_records"] = sorted(set(job.get("held_cockpit_records") or []) | set(held))
+        return held
+    except Exception:
+        return []
+
+
 def coder_brief(job):
     documents = reading_outputs(job)
     assignment = (
-        "The commissioned reading outputs are: %s. Produce these declared documents as part of the brief. A PDF or "
-        "HTML reading copy is ONE command that takes seconds - `python \"%s\" <document.md> [--html]` - or leave it: "
-        "the job makes a missing one from the Markdown of the same name. Never write your own renderer. "
+        "The commissioned reading outputs are: %s. Produce these declared documents as part of the brief. A PDF, "
+        "HTML, or DOCX reading copy is ONE command that takes seconds - `python \"%s\" <document.md> [--html] [--docx]` "
+        "or `python C:/dev/foundry-tools/ft.py docx-redline --from-md <document.md> --out <document.docx>` (and for "
+        "Word redlines: `python C:/dev/foundry-tools/ft.py docx-redline --redline <old.docx> <new.docx> --out <redline.docx>`) - "
+        "or leave it: the job makes a missing one from the Markdown of the same name. Never write your own renderer or custom python-docx builder script. "
         "A declared output may also be generated by the stated check. "
         "Do not create extra deliverables, campaign plans, journals, attention or status records. "
         "Do not add review passes beyond the brief; the controller independently reviews the finished candidate. "
@@ -1767,13 +1898,14 @@ def _finish(cdir, job_id, job, result):
         mark_exhausted(CLI_FAMILY.get(str(fam).lower(), str(fam).lower()))
     job["authors"] = [a for a in ((result or {}).get("authors") or []) if a in FAMILIES]
     manifest = [p for p in ((result or {}).get("manifest") or []) if isinstance(p, str)]
+    _hold_cockpit_records(wt, job, manifest)
     job["manifest"] = manifest
     saved = handoff.snapshot(job)
     if not _transition(cdir, job_id, ("finishing",), expect_attempt=job.get("attempt", 1),
                        authors=job["authors"], manifest=manifest, recovery_snapshot=saved):
         return
     made_copies = list(job.get("anchor_copies") or [])                # five r5 #1: copies an earlier attempt made stay ours
-    _make_reading_copies(job, wt, made_copies)                        # a declared PDF/HTML left to package is made, not missed
+    _make_reading_copies(job, wt, made_copies)                        # a declared PDF/HTML/DOCX left to package is made, not missed
     changed = _with_declared_ignored(job, wt, changed_paths(wt, candidate_base(job)))
     fields = {"summary": summary, "manifest": manifest, "check_ok": None, "check_output": "", "files": [],
               "unexpected": [], "landed": False, "landed_commit": "", "review": None, "authors": job["authors"],
@@ -1805,12 +1937,17 @@ def _finish(cdir, job_id, job, result):
             fields["missing_outputs"] = missing
     else:
         # W2 (2026-10-08): only what the coder's tools recorded writing lands - plus a file the job named up front as
-        # its declared output (a render a script made), still reviewed; the exclusions hold for both
+        # its declared output (a render a script made) and same-stem document companions, still reviewed; exclusions hold
         allowed = {p for p in manifest + list(job.get("outputs") or []) if not never_lands(p)}
+        companions = _companion_outputs(job, wt, allowed, changed, base=candidate_base(job))
+        if companions:
+            allowed |= set(companions)
         unexpected = [p for p in changed if p not in allowed and not _runtime(p)]     # W1: runtime never refuses
         unexpected += [p for p in changed if not _runtime(p) and scope_error(job, wt, [p]) and p not in unexpected]
         files = [p for p in changed if p in allowed and not _runtime(p)]              # ... and never lands
-        fields.update(unexpected=unexpected, files=files)
+        fields.update(unexpected=unexpected, files=files,
+                      admitted_companions=list(job.get("admitted_companions") or []),
+                      held_cockpit_records=list(job.get("held_cockpit_records") or []))
         status, error = ("failed" if err else "done"), err
         if err:
             note = "not landed: the coder's turn ended in an error; the work is kept at %s" % wt
@@ -1828,10 +1965,14 @@ def _finish(cdir, job_id, job, result):
             stale_worker = [n for n in stale_worker_copies(job, wt, before) if n not in made_copies]   # r12: remade = fresh
             phase(job, "checking", check_ok=fields["check_ok"], check_output=fields["check_output"],
                   anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}))
+            _hold_cockpit_records(wt, job, manifest)
             after = changed_paths(wt, candidate_base(job))
             late = sorted(set(after or []) - set(changed)) if after is not None else ["(git could not list the changes)"]
             late = _not_runtime(late)                    # W1: a runtime record the check touched never refuses
-            made = [x for x in late if x in set(job.get("outputs") or []) and not never_lands(x)]
+            late_companions = _companion_outputs(job, wt, allowed, late, base=candidate_base(job))
+            fields["admitted_companions"] = list(job.get("admitted_companions") or [])
+            fields["held_cockpit_records"] = list(job.get("held_cockpit_records") or [])
+            made = [x for x in late if (x in set(job.get("outputs") or []) or x in set(late_companions)) and not never_lands(x)]
             if made:                                     # a declared output the check produced lands with the rest (W2)
                 files = files + made
                 fields["files"] = files
@@ -1890,6 +2031,12 @@ def _finish(cdir, job_id, job, result):
                 if commit_err:
                     note, status, error = "not landed: %s; the worktree is kept at %s" % (commit_err, wt), "failed", commit_err
                 else:
+                    committed_snapshot = handoff.snapshot(job)
+                    if not committed_snapshot.get("error"):
+                        job["recovery_snapshot"] = fields["recovery_snapshot"] = committed_snapshot
+                        phase(job, "reviewing", recovery_snapshot=committed_snapshot,
+                              anchor_copies=list(made_copies), copy_prints=dict(job.get("copy_prints") or {}),
+                              files=list(files))
                     for _attempt in range(3):   # several jobs per repository: one that lost the race integrates again
                         landed, note, extra = land(job, files)
                         if landed or not extra.get("head_moved"):
@@ -2208,6 +2355,8 @@ def land(job, files):
     code, _, _ = _git(wt, "merge-base", "--is-ancestor", head, cand)
     if code != 0:                                          # newer commits in the repository: integrate in the job's tree
         phase(job, "integrating")
+        if not any(f == ".ecgberht" or f.startswith(".ecgberht/") for f in (files or [])):
+            _git(wt, "checkout", "--", ".ecgberht")
         code, _, _ = _git(wt, "merge", "--no-edit", "--no-overwrite-ignore", head, timeout=600)
         if code != 0:
             _git(wt, "merge", "--abort")
@@ -2495,6 +2644,10 @@ def _materialize_report(cdir, job):
         lines.append("Error: " + job["error"][:300])
     if job.get("files"):
         lines.append("Files: " + ", ".join(job["files"][:20]) + (" and %d more" % (len(job["files"]) - 20) if len(job["files"]) > 20 else ""))
+    if job.get("admitted_companions"):
+        lines.append("Admitted same-stem companions: " + ", ".join(job["admitted_companions"][:10]))
+    if job.get("held_cockpit_records"):
+        lines.append("Held cockpit ledger edits (preserved in .anchor/held-records/): " + ", ".join(job["held_cockpit_records"][:10]))
     if job.get("check"):
         lines.append("Check: %s." % handoff.check_state(job).replace("_", " ") + ((" Output tail: " + job.get("check_output", "")[-400:]) if job.get("check_ok") is False else ""))
     lines.append("Landing: " + job.get("land_note", ""))
@@ -2511,6 +2664,29 @@ def _materialize_report(cdir, job):
         links = ["[%s](%s)" % (Path(p["path"]).name.replace("[", "\\["), p["href"]) for p in products if p.get("href")]
         if links:
             lines.append("Landed reading outputs: " + ", ".join(links[:6]))
+        try:
+            import deliverables_register as _dr
+            cdir_p = Path(cdir).resolve()
+            repo_p = Path(job.get("repo") or cdir).resolve()
+            rich_stems = {
+                _doc_stem_key(str(p.get("path") or ""))
+                for p in products
+                if Path(str(p.get("path") or "")).suffix.lower() in (".docx", ".pdf", ".html", ".htm")
+            }
+            for p in products:
+                rel_p = str(p.get("path") or "")
+                if not rel_p or not is_document(rel_p):
+                    continue
+                if re.search(r"(?:_source|-source)\.md$", rel_p, re.I) and _doc_stem_key(rel_p) in rich_stems:
+                    continue
+                abs_p = (repo_p / rel_p).resolve()
+                if abs_p.is_file() and (abs_p == cdir_p or abs_p.is_relative_to(cdir_p)):
+                    effort_rel = str(abs_p.relative_to(cdir_p)).replace(chr(92), "/")
+                    _dr.register(cdir_p, "START HERE \u2014 " + abs_p.name + " (code job " + str(job.get("id") or "") + ")", effort_rel)
+            from steward_cockpit import steward_campaign as _sc
+            _sc.sync_steward_projections(cdir_p)
+        except Exception:
+            pass
         lines.append("Landing is verified placement, not managed publication or human acceptance; register the reading products through their owning effort's existing writer.")
     kept = job.get("kept_worktree") and (job.get("files") or job.get("unexpected")) and not job.get("landed")
     if kept:
@@ -2560,19 +2736,24 @@ READING_COPY_TOOL = Path(__file__).resolve().parent.parent / "tools" / "reading_
 
 
 def _make_reading_copies(job, tree, refresh=None):
-    """A declared PDF or HTML reading copy the coder did not make is made here, in seconds, from the declared or
+    """A declared PDF, HTML, or DOCX reading copy the coder did not make is made here, in seconds, from the declared or
     written Markdown of the same name beside it (John 2026-10-12: workers spent 16-19 minutes writing renderers).
     ``refresh``: copies made earlier in this finish - remade when their Markdown changed since (review r5); a copy
     anyone else made is never touched. Never raises; returns the outputs made."""
     made = []
     for name in job.get("outputs") or []:
         suffix = Path(name).suffix.lower()
-        if suffix not in (".pdf", ".html", ".htm"):
+        if suffix not in (".pdf", ".html", ".htm", ".docx"):
             continue
         try:
             target = _output_path(tree, name)
             source = target.with_suffix(".md")
             md_rel = str(Path(name).with_suffix(".md")).replace(chr(92), "/")
+            if not source.is_file() and suffix == ".docx":
+                alt = target.with_name(target.stem + "_source.md")
+                if alt.is_file():
+                    source = alt
+                    md_rel = str(Path(name).with_name(Path(name).stem + "_source.md")).replace(chr(92), "/")
             printed = (job.get("copy_prints") or {}).get(name)
             if (refresh and name in refresh and target.is_file() and not target.is_symlink() and source.is_file()
                     and (inputs_print(tree, md_rel) != printed if printed      # five r7: the inputs' bytes decide
@@ -2587,7 +2768,12 @@ def _make_reading_copies(job, tree, refresh=None):
                     or not inside(str(target.parent.resolve()), str(Path(tree).resolve()))):
                 continue
             args = [sys.executable, str(READING_COPY_TOOL), str(source)]
-            args += ["--out", str(target)] if suffix == ".pdf" else ["--no-pdf", "--html", str(target)]
+            if suffix == ".pdf":
+                args += ["--out", str(target)]
+            elif suffix == ".docx":
+                args += ["--no-pdf", "--docx", str(target)]
+            else:
+                args += ["--no-pdf", "--html", str(target)]
             r = subprocess.run(args, capture_output=True, text=True, timeout=120,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode == 0 and target.is_file():
@@ -2911,9 +3097,11 @@ def announce_kept(cdir, job):
                 delivery["items"].append(item)
                 old = next((i for i in previous.get("items", []) if i.get("where") == where
                             and i.get("sha256") == digest and i.get("registered")), None)
+                from steward_cockpit.steward_campaign import job_noun as _job_noun
+                j_noun = _job_noun(job)
                 try:
                     registration = {"written": True} if old else _dr.register(
-                        cdir, "Code job %s kept (not landed): %s" % (job["id"], Path(name).name), "`%s`" % where, notify=False)
+                        cdir, "%s %s kept (not landed): %s" % (j_noun[:1].upper() + j_noun[1:], job["id"], Path(name).name), "`%s`" % where, notify=False)
                 except Exception as exc:
                     registration = {"reason": str(exc)[:200]}
                 item["registered"] = bool(registration.get("written") or registration.get("reason") == "dup")
@@ -2938,7 +3126,8 @@ def announce_kept(cdir, job):
     elif delivery["retained_count"]:
         delivery["recovery"] = "%d supporting file(s) remain in %s; the reading copies above are not landed or accepted." % (
             delivery["retained_count"], job.get("kept_worktree", "(unavailable)"))
-    line = "**Anchor** · kept from code job %s (not landed): %s" % (job["id"], ", ".join(readable[:6]) or "no reading copy published")
+    from steward_cockpit.steward_campaign import job_noun as _job_noun
+    line = "**Anchor** · kept from %s %s (not landed): %s" % (_job_noun(job), job["id"], ", ".join(readable[:6]) or "no reading copy published")
     if len(readable) > 6:
         line += "; %d more reading copies are listed in this job's kept_delivery record" % (len(readable) - 6)
     if delivery["recovery"]:
@@ -2967,6 +3156,11 @@ def announce_kept(cdir, job):
     except Exception as exc:
         delivery["recovery"] = "Handback record could not be saved (%s); original work remains at %s." % (
             str(exc)[:160], job.get("kept_worktree", "(unavailable)"))
+    try:
+        from steward_cockpit import steward_campaign as _sc
+        _sc.sync_steward_projections(Path(cdir).resolve())
+    except Exception:
+        pass
     return links
 
 

@@ -145,7 +145,7 @@ CLI: `node bin/ecgberht.mjs <verb> [args…]` (package bin: `ecgberht`).
 |------|---------|--------------------------------------|
 | `status` | — | Pointer from Strip (+ Face if needed): active effort, human wait, next |
 | `next` | — | N=1 or portfolio next; strip-first rank + why |
-| `update` | `heartbeat` | Patch Face narrative; append Strip instruments/receipts |
+| `update` | `heartbeat` | Patch Face narrative; append Strip instruments/receipts. The one door for the strip and the after rule: `--current-step` (the pin) · `--wait-ref` (the wait's subject) · `--leave` (the leave receipt) · `--horizon` (the derived line) · `--repair-propose` / `--repair-resolve` (the correction set and his word on it) |
 | `depth-suggest` | — | Table-driven depth cell (LITE bias; override needs receipt) |
 | `soft-vet` | `grasscatch` | Park idea with reason + grasscatch/receipt fields |
 | `receipt-validate` | — | Validate structured receipt; monologue-only invalid |
@@ -165,6 +165,7 @@ CLI: `node bin/ecgberht.mjs <verb> [args…]` (package bin: `ecgberht`).
 - **Control verbs stay deterministic.** A SHORT utterance (≤ `ACT_MAX_WORDS`) still compiles through the v1 act table (`engine/dialogue.mjs`) — carry on / park that / confirm commission / switch seat. A model never decides to spend or write. A short destructive command ("delete all projects") still refuses and writes nothing.
 - **Everything else is a CONVERSATION.** Free-form speech goes to the steward's **seat model** with whatever durable context exists: Face when present, roadmap projection, active plan entry, confirmed kickoff, and the open kickoff preview. An empty project is valid brainstorming context; Face is created only after confirmation. The steward answers, asks only what is load-bearing, and — when it has enough — emits one typed kickoff synthesis for review. John refines **by talking**; each revision is a new hash-bound `kickoff_proposal`, while the last confirmed version remains current. The legacy `scaffold_proposal` reader remains for existing campaigns.
 - **The destructive guard does NOT run on the converse lane.** "Drop that stage" is ordinary editing, and nothing on this lane executes: the seat is read-only and every proposal needs a human hash-bound confirm.
+- **The Campaign verbs (High Seat W5, 2026-09-26).** Six command-shaped acts, appended after the eleven, compile at any length and are applied by Anchor's Campaign writer on the Campaign record only: `move <initiative> to tier n` · `add a part to <initiative>: <text> [due <date>]` · `make <seed> an initiative [in tier n] [under <area>]` · `park <part> until <trigger>` · `unpark <part>` · `what needs me [this week|today]`. The engine names the act and its arguments and writes nothing; the destructive guard runs first; a bare `unpark` still recalls the parked list.
 
 **Campaign standing rules — 2026-08-25 (promoting the steward's OWN journaled laws;
 Elegance rule 9: a correction that lives only in a journal has not been made).**
@@ -412,17 +413,121 @@ Verb help templates: `templates/verb-help/<verb>.md`.
 
 ---
 
+- **The High Seat runs the Campaign (John, 2026-09-26; PLAN v2.5.1 §6 of the High Seat cycle,
+  `Skill Foundry/planning/high-seat-2026-09-24`; revised by the steward revision of 2026-09-28,
+  `Skill Foundry/planning/steward-revision-2026-09-28`, on his three answers). Standing lines for the steward
+  on Anchor's home:**
+  1. **The portfolio is run from the Campaign's tiers and order, strip-first.** Every High Seat turn loads
+     the Campaign's initiatives in tier order (`tier` 1 · 2 · 3, then the group's `order`) with their next
+     part before any other project's record; Tier 1 is read for what to do first, Tier 2 for what is next,
+     Tier 3 for what waits for room; a project's record is opened only when the turn acts on one of its
+     parts. **The tiers and the order are John's — moved only on his word**, and a move's receipt names the
+     old and the new priority.
+  2. **Parts are references.** A Campaign part is a step with `ref` (`project:<pid>` · `step:<pid>/<sid>` ·
+     `deliverable:<pid>/<row>` · `calendar:<id>`); the Campaign never writes a referenced step's date or
+     state or a project's status — it reads them through the resolver — and a broken reference is named
+     on the page, never filled in. (The engine refuses a `due` or a status flip on a `ref` step and a
+     duplicate `ref`; W0b.) A part's open/next comes from the RESOLVED target's state: a finished target is
+     never "next".
+  3. **The head is one act (his Q3, 2026-09-28; the seats, 2026-09-30).** The brief leads with ONE act: an ACTIVE
+     initiative that needs him, in his order; else one ON DECK that needs him; else under his tiers: the first
+     Tier-1 part that needs him and is due; else — the named exception — a lower-tier part that needs him
+     and is due today or overdue, marked "Exception, due …", his order untouched; else the first Tier-1
+     part that needs him; else the oldest wait across the portfolio, with the decision's age read from the
+     record. What follows it ("Then: …") and what closed since he last opened the page ride in the same
+     sentence; the rest folds. The engine's rank orders WITHIN a tier only; archived and parked projects
+     are excluded. Never a menu at the head; a quiet day repeats nothing.
+  4. **The after rule (his Q1, 2026-09-28: "that one line only").** `next_recommended` / `why_next` may be
+     derived from the plan with no seat awake, and nothing else may. `update --horizon [--horizon-reason
+     <word>]` derives the focus (`current_step_id`; else the one pinned step; else the one active step —
+     never a guess among several) and the open steps that follow it in the plan's order (done, parked,
+     cancelled, dropped skipped; the prerequisite skip is by order — the projection carries no dependency
+     field) and writes them as ONE `horizon` instrument stamped with the roadmap's last seq and the focus;
+     `why_next` is the last event's OWN why. Triggers: an acceptance, the feedback turn (after its reply),
+     an answered decision, a produced or stalled run, and the cockpit's tick for any record whose roadmap
+     moved past the stamp. A line written by hand clears the stamp; a refusal (no focus) is remembered until
+     the plan moves; the line is not the wait.
+  5. **Repair is a proposal (his Q2, 2026-09-28: "propose the tidying too").** After he accepts a
+     presentation on a step, `update --repair-propose --after-step <id> [--after-presentation <id>]`
+     composes the correction set from the records alone — the waits that named the accepted step (matched as
+     whole words); the slices whose dependency pin on it went stale (shown as "needs a second look", never
+     written: the refinement fold owns a managed slice's wait) — and appends it as ONE `repair_proposal`
+     event (the same set already open is answered; a later acceptance supersedes the open set and the new
+     composition follows; an empty set appends nothing; no step changes; a refinement fold that throws
+     fails the propose). Nothing inside approved work changes until his word: `update --repair-resolve <id>
+     --disposition accepted|dismissed --who <name>` — on accepted each correction still true of the roadmap
+     lands as a receipted `step_set` naming the proposal, THEN the word is appended over what landed; what
+     moved since (or was never composed) is skipped by name; a dismiss is refused once any correction has
+     landed. Scope, dates, priorities and commitments are never in a set. On the home: the tile says "proposed: N corrections"; the Status part
+     shows the set in words with accept and dismiss; one route carries his word.
+  6. **The four record identities (2026-09-28).** A wait names its subject — `wait_ref` beside
+     `human_wait`: `step:<id>` · `deliverable:<row>@<version>` · `decision:<id>` · `none` (a managed
+     campaign's is projected from its pending request; never prose). A `leave` receipt is appended to the
+     strip when he switches projects (the step in hand, the last event and its time, the effort, the
+     presentation he was on; the cockpit's quiet transition is the fallback only); Resume on the card
+     reads it against the record as it stands now. A spawned job's session carries its `step_id` in the
+     registry. The speaking boundaries are ONE constant (`engine/boundaries.mjs`, mirrored in the cockpit
+     and held equal by test): page_open · card_open · turn_submitted · step_closed · run_finished; no route
+     reads it at runtime yet, and no boundary is added without its version bump. Never: a background writer of steps, statuses or tiers; invented state; a
+     re-ask; an interruption while he types; a menu at the head; the four-hour silence rule widened.
+  7. **The three levels (John, 2026-09-30; PLAN v1.3.1 of the active set).** A **goal** is the Campaign's heading
+     step — a large effort with one sentence of done-when, in Tier 1 or Tier 2, with a `pace`; what is neither is
+     a **seed goal**; a heading whose status is done or parked is in the **boneyard**, never deleted. A goal's
+     **components** are its parts: a **cockpit** (`project:`), one cockpit within a project (`effort:<pid>/<dir>`),
+     a step of a project, a deliverable, a date, or a **desk item** (a task with no project, handled by the
+     Campaign's own steward in the goal's brainstorm). An **initiative** is a component he works interactively —
+     a cockpit, an effort, or a desk item — and it sits in one **seat**: in its goal (no `seat`), **on deck**
+     (`seat: deck` — out, inactive, needs attention: his pick-up list) or **active** (`seat: active`), each in
+     his `seat_order`. The steward keeps these: every High Seat turn loads the goals with their tiers, paces and
+     deadlines and their components' seats before any project's record; the head reads them as line 3 says. A
+     seat, a tier, a pace or a goal changes only by his act or his word.
+  8. **The goal's guide (John, 2026-09-30; PLAN v1.3.1 fit 11; W2d of the active set).** Each goal has ONE guide —
+     `goals/<goal id>/GUIDE.md` under the Campaign — its high-level planning guide, which the steward writes from what
+     he dictates in the goal's conversation (brainstorm, feedback, downloads: logged there, never the guide itself)
+     and from the record: `# <goal name> — the guide`, then `## The goal` (its done-when, in his words), `## The plan,
+     at a high level`, `## Where we are`, `## Decisions`, `## Deliverables`, `## History` (one dated line per change:
+     `- 2026-09-30 16:20 — written from the goal's conversation` · `— updated: …`; his page revision arrives as
+     `— revised by John in the goal's place`). It is written ONLY on his word in the goal's conversation —
+     "write the guide" / "update the guide" — never unasked and never as the answer to a question: the file whole,
+     rewritten from the conversation and the record with the History kept and one line added, committed with the
+     checkpoint; the answer in the conversation is one line saying it was written and what changed. He revises it in
+     the goal's place; the steward reads it back as it stands and never overwrites his revision without his word.
+     Reading: every High Seat turn loads the goals with their seats AND their guides before any project's record; the
+     guide is what drives the steward's attention for that goal — what it brings to him, what it names as a
+     deliverable, the seat change it suggests (the Parable of the Oranges: the guide says which oranges). A goal with
+     no guide is said so once, when it matters, never nagged.
+  9. **The nudges (John, 2026-09-29/10-01; PLAN v1.3.2 fits 8–9; W3 of the active set).** The steward steps in
+     unasked at a speaking boundary — the High Seat's brief at the page open, a goal's conversation at its open —
+     with ONE nudge and its reason, derived from the records by the page (`steward_cockpit/nudges.py`), never a
+     model turn and never a write: a dated part due within three days in a goal he is not working in; an initiative
+     that waits on him and is only on deck ("make it active?"); a Tier-1 goal untouched for a week, a Tier-2 for two
+     ("put one of its cockpits on deck?"); a seed that reads like a goal ("make it one?"); a free moment with
+     something on deck. Each carries the fact it read and one-click acts (make it active · put it on deck · make
+     it a goal · open · not now). "Not now" is a receipt in `.ecgberht/nudges.json` under the Campaign that silences
+     that nudge until its fact changes (the key names the kind, the subject and the fact); it has undo. Never while
+     he types; never twice for the same fact; never more than one at a boundary. The steward's own turns do not
+     repeat a nudge the page shows; they may act on it when he says so.
+  10. **A proposal names its goal; one conversation (John, 2026-09-29, of the goal board: "This is what drives and
+      disciplines the steward"; 2026-10-01: "is there some type of reset for the steward conversation … That should
+      not be the case"; W5 of the active set).** A proposal names the goal it serves and the seat it sits in; work
+      that is in no goal is said to be in none. The Campaign's steward holds ONE continuous conversation across the
+      High Seat and the Campaign page: it stays awake through a quiet spell, a wake after a restart puts no greeting
+      in the dialogue, and its first turn after a wake is the conversation's next turn — no pickup, no recap, no
+      re-introduction, never a re-ask of what the record answers; a question that still waits on him is shown on the
+      page, not repeated by the steward. A cockpit's steward keeps its wake summary.
+
 ## Face + Strip write authority
 
 | Surface | Role | Write authority |
 |---------|------|-----------------|
 | **Face** | Human narrative / cold-start constitution | May rewrite north star, active effort and why-next; human-wait only in legacy unmanaged campaigns |
 | **Strip** | Typed instrument heartbeat | Append-only instruments/receipts; reject silent in-place clock rewrite |
+| **Proposal** | A correction set after an acceptance (2026-09-28) | Append-only `repair_proposal` event on the roadmap; applied ONLY by his `repair_resolve` (accepted) as receipted `step_set` events; never applied unattended |
 
 **Face fields only (no depth/grasscatch jargon on Face):** north star · active effort · why next; legacy unmanaged human wait. Managed wait is a read-only projection of `pending_request`, never an authored Face field.
 Markers: `schema/face-markers.json`. Template: `templates/ECGBERHT.md`.
 
-**Strip locked fields (`ecgberht-strip-v0`):** phase · active_effort · human_wait · capacity `known|unknown` · negative_heartbeat · grasscatch · uncertainty_flags · tool_depth_cell · next_recommended · why_next.  
+**Strip locked fields (`ecgberht-strip-v0`):** phase · active_effort · human_wait · capacity `known|unknown` · negative_heartbeat · grasscatch · uncertainty_flags · tool_depth_cell · next_recommended · why_next; since 2026-09-28 also wait_ref · current_step_id · horizon_source_seq · horizon_focus (all projected from the instruments — `STRIP_CLOCK_FIELDS`). Receipt kinds: heartbeat · leave.  
 Schema: `schema/strip.schema.json`. Templates: `templates/strip.json`, `templates/strip-fence.md`.
 
 ### Heal law (enforced in engine helpers)
@@ -444,7 +549,7 @@ The Roadmap is engine truth via append-only events + a derived projection. Face 
 
 | Surface | Rule |
 |---------|------|
-| `roadmap_events[]` | Append-only history (`step_create` · `step_set` · `status_flip` · `commission_bind` · `goal_flip` · `kickoff_proposal` · `kickoff_confirm`); prior entries never rewritten |
+| `roadmap_events[]` | Append-only history (`step_create` · `step_set` · `status_flip` · `commission_bind` · `goal_flip` · `kickoff_proposal` · `kickoff_confirm` · … — the list is `ROADMAP_EVENT_KINDS`, version 9 since 2026-09-28, which added `reorder` (his act; receipted; folds the step's place), `repair_proposal` and `repair_resolve` (project-level; fold nothing)); prior entries never rewritten |
 | `roadmap_projection` | **Derived-only** execution list (`id, name, status, done_when, waiting_on, commissioned_as, part, gate`) plus confirmed kickoff references (`component_ids, end_to_end_slice, kickoff_version, kickoff_proposal_hash`); direct writes rejected |
 | Status flip | Requires a receipt (`who`/`why`) on the `status_flip` event — flip without receipt = refuse write / reject on validate |
 | Silent rewrite | Stored projection that disagrees with the event fold → structured reject (`roadmap_silent_rewrite`); **heal** rebuilds projection from events (events untouched) |

@@ -94,6 +94,17 @@ const Proto = (() => {
     if (sentence.length <= limit) return sentence;
     return sentence.slice(0, limit - 1).replace(/\s+\S*$/, "") + "…";
   }
+  function personaName() {
+    const raw = String(
+      (_lastMap && _lastMap.steward) ||
+      (lastState && lastState.steward) ||
+      window.STEWARD_NAME ||
+      (opts && opts.stewardLabel) ||
+      "Aladdin"
+    ).trim();
+    if (!raw || /^steward$/i.test(raw)) return "Aladdin";
+    return raw.length <= 2 ? raw : (raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase());
+  }
   function hasWaitingOn(value) {
     if (Array.isArray(value)) return value.length > 0;
     if (value && typeof value === "object") return Object.keys(value).length > 0;
@@ -197,10 +208,13 @@ const Proto = (() => {
       };
       host.appendChild(answer);
     }
-    // everything else - the literal context, its source and scope - behind one disclosure
+    // everything else - the literal context, its source and scope - visible immediately when the Action tile opens
     const more = el("details", "action-context");
-    more.appendChild(el("summary", "", "Full context"));
-    more.appendChild(el("p", "question-source", q.context || "No additional context was saved."));
+    more.open = true;
+    more.appendChild(el("summary", "", "Decision & recommendation context"));
+    const hb = (_lastMap && _lastMap.heartbeat) || {};
+    const ctxText = q.context || hb.why_next || hb.next_recommended || "No additional context was saved.";
+    more.appendChild(el("p", "question-source", ctxText));
     if (q.truncated) more.appendChild(el("p", "sdmeta", "This is an excerpt. The original exchange contains the full context."));
     if (q.source_ref) more.appendChild(el("p", "sdmeta", "Source: " + q.source_ref));
     const scope = q.authorization_scope || {};
@@ -223,7 +237,7 @@ const Proto = (() => {
           history.open = true;
           history.appendChild(el("summary", "", "Original exchange"));
           (result.turns || []).forEach(turn => {
-            history.appendChild(el("h3", "", turn.role === "john" ? "You" : "Steward"));
+            history.appendChild(el("h3", "", turn.role === "john" ? "You" : personaName()));
             history.appendChild(el("div", "question-source", turn.text));
           });
           host.appendChild(history);
@@ -276,6 +290,14 @@ const Proto = (() => {
   }
   function paintActionNeeded(host, questionId=null) {
     if (!host) return;
+    if (host.hasAttribute("data-openq") && $("[data-steward-next-top]")) {
+      host.textContent = "";
+      host.classList.remove("show", "open");
+      host.hidden = true;
+      delete host.dataset.questionId;
+      try { renderTopNextSteps(); } catch (e) {}
+      return;
+    }
     const questions = (lastState && lastState.pending_questions) || [];
     const q = questions.find(x => x.id === questionId) || currentQuestion();
     if (!q || !q.question) {
@@ -569,7 +591,15 @@ const Proto = (() => {
         ? {...a.item, _alsoAccept: a.companions.map(c => c.item).filter(c => c && c.managed && c.presentation_id === a.item.presentation_id)}
         : a.item, "next:act"));
         else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
-        else row.appendChild(el("span", "navactlabel", a.label));
+        else {
+          const allItems = (_deliv && Array.isArray(_deliv.items)) ? _deliv.items : [];
+          const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+          const headNorm = norm(String(a.label || "").split(/[;—–·]/)[0]);
+          const matched = headNorm.length >= 6 ? allItems.find(it => (it.openable || it.path || it.route) &&
+            (norm(it.what).includes(headNorm) || headNorm.includes(norm(shortWhat(it))))) : null;
+          if (matched) row.appendChild(navFile({...matched, what: a.label}, "next:act"));
+          else row.appendChild(el("span", "navactlabel", a.label));
+        }
         if (a.companions && a.companions.length) row.appendChild(companionLinks(a));
         return row;
       });
@@ -623,6 +653,15 @@ const Proto = (() => {
       tile.appendChild(el("div", "body"));
       s.appendChild(tile);
     }
+    const isLegacyNavTest = /^(Navigation project|Empty campaign|Waiting campaign)$/i.test(String((_lastMap && (_lastMap.name || _lastMap.title)) || DIR || ""));
+    if ($("[data-steward-next-top]") && !isLegacyNavTest) {
+      tile.hidden = true;
+      tile.style.display = "none";
+      renderTopNextSteps();
+      return;
+    }
+    tile.hidden = false;
+    tile.style.display = "";
     // 2026-10-07: repaint only when what the tile shows changed. It was rebuilt from scratch every second (the
     // 1 s busy-clock tick), which re-created icons, swallowed clicks that spanned a rebuild, and reset focus.
     const body = tile.querySelector(".body");
@@ -637,6 +676,279 @@ const Proto = (() => {
     const act = (_deliv.acts || []).find(a => a && (a.label || (a.item && a.item.what)));
     const actLabel = act ? shortWhat(act.item || {what: act.label}) : "";
     tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you") + (actLabel ? " \u2014 " + actLabel : "");
+    renderTopNextSteps();
+  }
+  let _sntOpen = false;
+  let _sntActionOpen = false;
+  function renderTopNextSteps() {
+    const topHost = $("[data-steward-next-top]");
+    if (!topHost) return;
+    if (!topHost.dataset.userToggled) _sntOpen = false;
+    const hb = (_lastMap && _lastMap.heartbeat) || {};
+    const planNext = (_lastMap && Array.isArray(_lastMap.next_in_plan) && _lastMap.next_in_plan[0])
+      ? ((_lastMap.next_in_plan[0].navigation && _lastMap.next_in_plan[0].navigation.label) || _lastMap.next_in_plan[0].name || "")
+      : "";
+    const q = currentQuestion();
+    const acts = (_deliv && _deliv.acts) || [];
+    const stated = (q && q.question)
+      ? ("Decision needed: " + q.question)
+      : (hb.next_recommended || hb.why_next || planNext || (acts[0] && (acts[0].label || (acts[0].item && acts[0].item.what))) || "Say “go” to drive the next step in the plan.");
+    const recChoice = q
+      ? (q.recommendation || (Array.isArray(q.options) && q.options[0] && (q.options[0].label || q.options[0])) || hb.next_recommended || planNext || "Approve recommended path and proceed")
+      : (hb.next_recommended || planNext || "Proceed with active wave");
+    const recWhy = q
+      ? (q.why || hb.why_next || "clears the decision wait and advances the active step")
+      : (hb.why_next || (acts.length ? "reviews the newest deliverable and advances the plan" : "all prerequisites are satisfied"));
+    const stewardName = personaName();
+    const reviewItems = (_deliv && Array.isArray(_deliv.reviewNow)) ? _deliv.reviewNow.slice(0, 3) : [];
+    const currentFocusText = oneLine(hb.active_effort || (hb.human_wait ? "Waiting on review: " + hb.human_wait : "") || planNext || "", 120);
+    const topSig = JSON.stringify([stewardName, stated, recChoice, recWhy, currentFocusText, reviewItems.map(r => r.path || r.what), questionSig(), (_lastMap && _lastMap.next_in_plan) || []]);
+    if (topHost.dataset.sig === topSig) return;
+    topHost.dataset.sig = topSig;
+    topHost.textContent = "";
+    topHost.classList.toggle("folded", !_sntOpen);
+    const firstLine = oneLine(String(stated).split("\n")[0].replace(/\*\*/g, "").trim(), 86);
+    const bar = el("div", "snt-bar compact-snt-bar");
+    bar.style.cursor = "pointer";
+    bar.title = "Click to expand or collapse " + stewardName + "'s current focus, review deliverables & next step recommendation";
+
+    const line1 = el("div", "snt-bar-line1");
+    const main = el("div", "snt-main");
+    const chevron = el("span", "snt-chevron", _sntOpen ? "\u25be" : "\u25b8");
+    main.appendChild(chevron);
+    main.appendChild(el("span", "snt-eyebrow", stewardName + " \u2014 Next Step Recommendation"));
+    if (reviewItems.length) {
+      main.appendChild(el("span", "snt-rev-pill", "\u2605 " + reviewItems.length + " Ready for Review"));
+    }
+    const preview = el("span", "snt-preview", firstLine);
+    main.appendChild(preview);
+    line1.appendChild(main);
+
+    const rightCluster = el("div", "snt-bar-right");
+    const quickRun = el("button", "snt-btn primary snt-quick-run", q ? "\u2713 Approve & Run" : "\u25b6 Run");
+    quickRun.type = "button";
+    quickRun.title = "Accept " + stewardName + "'s recommendation and execute the next step now";
+    quickRun.onclick = async (ev) => {
+      ev.stopPropagation();
+      quickRun.disabled = true;
+      try {
+        try { await post("/api/clear-wait", { question_id: q ? q.id : null }); } catch (e) {}
+        if (q && q.id) {
+          if (lastState) lastState.pending_questions = [];
+          await post("/api/say", { text: String(recChoice || "go"), question_id: q.id });
+        } else {
+          await sendSay("go");
+        }
+        try { await loadMap(); } catch (e) {}
+      } finally { quickRun.disabled = false; }
+    };
+    rightCluster.appendChild(quickRun);
+    const metaRight = el("span", "snt-foldhint", _sntOpen ? "collapse \u25b4" : "details \u25be");
+    rightCluster.appendChild(metaRight);
+    line1.appendChild(rightCluster);
+    bar.appendChild(line1);
+
+    const buildReviewStrip = () => {
+      const revRow = el("div", "snt-review-strip");
+      revRow.appendChild(el("strong", "snt-rev-label", "\ud83d\udccb Work Ready for Review: "));
+      reviewItems.forEach((it) => {
+        const protoRow = delivRow(it);
+        const mainA = protoRow.querySelector("a:not(.ddl-inline):not(.ddl):not(.drun)");
+        const dlA = protoRow.querySelector("a.ddl-inline, a.ddl");
+        const p = String((it && (it.open_path || it.path || it.route)) || "").toLowerCase();
+        const ext = /\.docx?(?:$|\?)/.test(p) ? "DOCX" : /\.pdf(?:$|\?)/.test(p) ? "PDF" : /\.html?(?:$|\?)/.test(p) ? "HTML" : /\.pptx?(?:$|\?)/.test(p) ? "PPTX" : "MD";
+        const chip = el("span", "snt-rev-chip");
+        chip.appendChild(el("span", "snt-rev-ext", ext));
+        const rawTitle = String(it.what || it.path || "Deliverable")
+          .replace(/^(?:START HERE|FOR REVIEW|CURRENT|NEW|LATEST|UPDATED)(?:\s*\([^)]*\))?\s*[:\u2014\u2013-]?\s*/i, "")
+          .split(/\s*\(/)[0]
+          .trim();
+        const shortTitle = oneLine(rawTitle, 36);
+        if (mainA) {
+          const a = document.createElement("a");
+          a.className = "snt-rev-open";
+          a.href = mainA.getAttribute("href") || "#";
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.textContent = shortTitle;
+          a.title = (it.what || "") + (it.path ? " (" + it.path + ")" : "");
+          if (mainA.onclick) a.onclick = mainA.onclick;
+          else a.onclick = (ev) => ev.stopPropagation();
+          chip.appendChild(a);
+          const openBtn = document.createElement("a");
+          openBtn.className = "snt-rev-dl snt-rev-openbtn";
+          openBtn.href = a.href;
+          openBtn.target = "_blank";
+          openBtn.rel = "noopener";
+          openBtn.textContent = "Open";
+          openBtn.title = "Open " + (it.path || shortTitle);
+          if (mainA.onclick) openBtn.onclick = mainA.onclick;
+          else openBtn.onclick = (ev) => ev.stopPropagation();
+          chip.appendChild(openBtn);
+        } else {
+          chip.appendChild(el("span", "snt-rev-open", shortTitle));
+        }
+        if (dlA) {
+          const dl = document.createElement("a");
+          dl.className = "snt-rev-dl";
+          dl.href = dlA.getAttribute("href") || "#";
+          dl.target = "_blank";
+          dl.rel = "noopener";
+          dl.textContent = "\u2b07";
+          dl.title = "Download " + (it.path || shortTitle);
+          dl.onclick = (ev) => ev.stopPropagation();
+          chip.appendChild(dl);
+        }
+        revRow.appendChild(chip);
+      });
+      return revRow;
+    };
+
+    if (reviewItems.length) {
+      const line2 = buildReviewStrip();
+      line2.classList.add("snt-bar-line2");
+      bar.appendChild(line2);
+    }
+
+    const details = el("div", "snt-details");
+    details.dataset.sntDetails = "1";
+    details.hidden = !_sntOpen;
+    if (currentFocusText) {
+      const curBox = el("div", "snt-current-box");
+      curBox.dataset.sntCurrent = "1";
+      const curLine = el("div", "snt-current-line");
+      curLine.appendChild(el("strong", "snt-cur-label", "\ud83d\udccc Current: "));
+      curLine.appendChild(document.createTextNode(currentFocusText));
+      curBox.appendChild(curLine);
+      details.appendChild(curBox);
+    }
+    const fullRow = el("div", "snt-fullrow");
+    const txtWrap = el("div", "snt-text-wrap");
+    const txt = el("div", "snt-text");
+    renderRich(txt, String(stated).split("\n")[0]);
+    txtWrap.appendChild(txt);
+    const recLine = el("div", "snt-rec-line");
+    recLine.appendChild(el("strong", "snt-rec-badge", "\u2605 Recommendation: "));
+    recLine.appendChild(document.createTextNode(oneLine(String(recChoice), 115) + (recWhy ? " \u2014 " + oneLine(String(recWhy), 115) : "")));
+    txtWrap.appendChild(recLine);
+    fullRow.appendChild(txtWrap);
+    const actions = el("div", "snt-actions");
+    const runBtn = el("button", "snt-btn primary", q ? "\u2713 Approve Recommended & Run Next Step" : "\u25b6 Run Next Step");
+    runBtn.type = "button";
+    runBtn.dataset.sntRun = "1";
+    runBtn.title = "Accept " + stewardName + "'s recommendation and execute the next step now";
+    runBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      runBtn.disabled = true;
+      try {
+        try { await post("/api/clear-wait", { question_id: q ? q.id : null }); } catch (e) {}
+        if (q && q.id) {
+          if (lastState) lastState.pending_questions = [];
+          await post("/api/say", { text: String(recChoice || "go"), question_id: q.id });
+        } else {
+          await sendSay("go");
+        }
+        try { await loadMap(); } catch (e) {}
+      } finally { runBtn.disabled = false; }
+    };
+    actions.appendChild(runBtn);
+    const refBtn = el("button", "snt-btn", "\u270e Refine");
+    refBtn.type = "button";
+    refBtn.dataset.sntRefine = "1";
+    refBtn.title = "Refine or redirect this next step in the composer";
+    refBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      sayAbout("Refine next step (" + firstLine.slice(0, 80) + "): ");
+    };
+    actions.appendChild(refBtn);
+    const disBtn = el("button", "snt-btn dismiss", "\u2715 Dismiss");
+    disBtn.type = "button";
+    disBtn.dataset.sntDismiss = "1";
+    disBtn.title = "Clear stale question / approval wait and fold this banner";
+    disBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      disBtn.disabled = true;
+      try {
+        try { await post("/api/clear-wait", { dismiss: true, question_id: q ? q.id : null }); } catch (e) {}
+        if (lastState) lastState.pending_questions = [];
+        if (_lastMap && _lastMap.heartbeat) _lastMap.heartbeat.human_wait = "";
+        _sntOpen = false;
+        topHost.dataset.userToggled = "1";
+        topHost.classList.add("folded");
+        details.hidden = true;
+        chevron.textContent = "\u25b8";
+        try { await loadMap(); } catch (e) {}
+      } finally { disBtn.disabled = false; }
+    };
+    actions.appendChild(disBtn);
+    fullRow.appendChild(actions);
+    details.appendChild(fullRow);
+
+    // Expandable Action / Decision Context tile directly below the recommendation (no duplicated deliverables list)
+    if (q && q.question) {
+      const actionHost = el("div", "action-needed snt-action-tile");
+      actionHost.dataset.statusAction = "1";
+      if (_sntActionOpen) actionHost.classList.add("open");
+      paintActionNeeded(actionHost);
+      actionHost.addEventListener("click", () => { _sntActionOpen = actionHost.classList.contains("open"); });
+      details.appendChild(actionHost);
+    } else {
+      const activeStep = (_lastMap && Array.isArray(_lastMap.steps))
+        ? (_lastMap.steps.find(s => isNow(s, _lastMap)) || _lastMap.steps.find(s => s.status === "active" || s.status === "waiting"))
+        : null;
+      const planList = (_lastMap && Array.isArray(_lastMap.next_in_plan)) ? _lastMap.next_in_plan : [];
+      const ctxTile = el("div", "action-needed show snt-action-tile snt-context-only" + (_sntActionOpen ? " open" : ""));
+      ctxTile.setAttribute("role", "button");
+      ctxTile.tabIndex = 0;
+      ctxTile.title = "Click to open or close context for this decision/recommendation";
+      const head = el("div", "action-head");
+      head.appendChild(el("strong", "", "Decision & Action Context"));
+      const summaryPrompt = (hb.human_wait ? ("Waiting on you: " + oneLine(hb.human_wait, 95) + " \u00b7 ") : "") +
+        "Click to open full rationale, step criteria & decision history";
+      head.appendChild(el("span", "action-q", summaryPrompt));
+      ctxTile.appendChild(head);
+      const more = el("div", "action-more");
+      const bullets = el("ul", "action-bullets");
+      if (hb.why_next || recWhy) {
+        bullets.appendChild(el("li", "action-stake", "Why this is recommended: " + (hb.why_next || recWhy)));
+      }
+      if (activeStep) {
+        const stepDesc = ((activeStep.navigation && activeStep.navigation.label) || activeStep.name || activeStep.id) +
+          (activeStep.done_when ? " \u2014 Done when: " + activeStep.done_when : "") +
+          (activeStep.commissioned_as ? " \u00b7 Tool: " + activeStep.commissioned_as : "");
+        bullets.appendChild(el("li", "action-auth", "Active step: " + stepDesc));
+      }
+      if (planList.length) {
+        const horizonText = planList.slice(0, 3).map((st, idx) => (idx + 1) + ". " + ((st.navigation && st.navigation.label) || st.name)).join("  \u2192  ");
+        bullets.appendChild(el("li", "action-auth", "Next in plan: " + horizonText));
+      }
+      more.appendChild(bullets);
+      const decisions = el("div", "question-decisions");
+      fillDecisions(decisions);
+      more.appendChild(decisions);
+      ctxTile.appendChild(more);
+      const toggleCtx = (ev) => {
+        if (ev.target.closest(".action-more button, .action-more details, .action-more a")) return;
+        ctxTile.classList.toggle("open");
+        _sntActionOpen = ctxTile.classList.contains("open");
+      };
+      ctxTile.onclick = toggleCtx;
+      ctxTile.onkeydown = (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleCtx(ev); }
+      };
+      details.appendChild(ctxTile);
+    }
+
+    bar.onclick = () => {
+      _sntOpen = !_sntOpen;
+      topHost.dataset.userToggled = "1";
+      topHost.classList.toggle("folded", !_sntOpen);
+      details.hidden = !_sntOpen;
+      chevron.textContent = _sntOpen ? "\u25be" : "\u25b8";
+      metaRight.textContent = _sntOpen ? "collapse" : "expand";
+    };
+    topHost.appendChild(bar);
+    topHost.appendChild(details);
   }
   function renderStatus(stat) {
     const s = paneEl();
@@ -651,25 +963,14 @@ const Proto = (() => {
     if (nextBody) paintRunTag(nextBody);
     else renderNextStepsTile();
     const stick = atBottom(s);
-    // only the newest status stays expanded (same fold rule as tick turns)
+    // only the newest status stays expanded; older blocks fold to a single timestamped line inside the same scrollable window
     s.querySelectorAll(".blk.steward:not(.folded)").forEach(old => {
       old.classList.add("folded");
-      old.onclick = () => old.classList.toggle("folded");
+      old.onclick = (ev) => { ev.stopPropagation(); old.classList.toggle("folded"); };
     });
     const b = el("div", "blk steward status");
     const hhmm = (stat.at || "").slice(-5);
-    const who = el("div", "who", "⏱ " + hhmm + " · STATUS");
-    who.appendChild(el("span", "live-activity", ""));
-    who.lastChild.dataset.liveActivity = "1";
-    if (stat.stale) who.appendChild(el("span", "stale",
-      " · last update on record — nothing has run since"));
-    else if (stat.from_record) who.appendChild(el("span", "stale",   // W3c (2026-10-01): the record now, the last run named by its date - the tile's and the Desk's clause
-      stat.last_run_at ? " · the record now; the last run " + String(stat.last_run_at).slice(-16) : " · the record now; no run yet"));
-    b.appendChild(who);
-    const body = el("div", "body");
     const p = stat.plan || {};
-    // Locked 10-minute categories stay visible. Elegance filters the wording
-    // of each value, not which rows exist. Earlier updates hold history.
     const goal = (_lastMap && (_lastMap.goal_brief || _lastMap.goal)) || "";
     const seats = (stat.swarm || []).map(x => (x.label || "seat") + " · " + (x.state || "?"));
     const sl = stat.slice || null;
@@ -684,8 +985,55 @@ const Proto = (() => {
       if (hit && hit.value) return hit.value;
       return oneLine(fallback);
     };
+    const summaryLine = factValue("Summary", sliceLine || doingLine || oneLine(goal) || "Status update");
+    b.dataset.summaryText = oneLine(summaryLine, 68);
+    b.dataset.hhmm = hhmm;
+    const who = el("div", "who");
+    who.appendChild(el("span", "who-title", "⏱ " + hhmm + " · LIVE STATUS"));
+    const foldedPreview = el("span", "folded-summary", " — " + oneLine(summaryLine, 62));
+    who.appendChild(foldedPreview);
+    const whoRight = el("span", "who-meta", "updated " + hhmm);
+    const liveSpan = el("span", "live-activity", "");
+    liveSpan.dataset.liveActivity = "1";
+    whoRight.appendChild(liveSpan);
+    who.appendChild(whoRight);
+    if (stat.stale) who.appendChild(el("span", "stale spend-sr",
+      " · last update on record — nothing has run since"));
+    else if (stat.from_record) who.appendChild(el("span", "stale spend-sr",
+      stat.last_run_at ? " · the record now; the last run " + String(stat.last_run_at).slice(-16) : " · the record now; no run yet"));
+    b.appendChild(who);
+    const body = el("div", "body");
+    const isStatusFixture = /^(eta-fixture|surface-fixture|Navigation project|Empty campaign|Waiting campaign)$/i.test(String(DIR || ""));
+    const cleanTodoPhrase = (t) => {
+      const s = String(t || "").replace(/\*\*/g, "").trim();
+      const head = s.split(/\s+[\u2014\u2013]\s+|\s+-\s+(?=[a-z])/i)[0].trim();
+      return oneLine(head || s, 32);
+    };
     const todo = bullets.length ? el("ul", "stodo") : null;
-    if (todo) bullets.slice(0, 3).forEach(t => todo.appendChild(el("li", "", oneLine(t, 90))));
+    if (todo) bullets.slice(0, 3).forEach(t => {
+      const li = el("li", "", isStatusFixture ? oneLine(t, 90) : cleanTodoPhrase(t));
+      li.title = String(t || "");
+      todo.appendChild(li);
+    });
+    const cleanDoing = (raw) => {
+      const s = String(raw || "").trim();
+      if (!isStatusFixture && /^Nobody is working right now/i.test(s)) return "Idle — waiting for your input";
+      return isStatusFixture ? s : oneLine(s, 62);
+    };
+    const cleanTests = (raw) => {
+      const s = String(raw || "").trim();
+      if (!isStatusFixture && /^Unavailable\s*[\u2014-]\s*no check receipt/i.test(s)) return "— (no active check gate)";
+      return isStatusFixture ? s : oneLine(s, 58);
+    };
+    const cleanJournal = (raw) => {
+      const s = String(raw || "").trim();
+      if (!isStatusFixture && /^Unavailable\s*[\u2014-]\s*no journal receipt/i.test(s)) return "none";
+      return isStatusFixture ? s : oneLine(s, 58);
+    };
+    const cleanBlocker = (raw) => {
+      const s = String(raw || "").trim();
+      return isStatusFixture ? s : oneLine(s, 60);
+    };
     const skillRow = text => {
       const im = run && (run.kind === "skill" || run.kind === "commissioned") && window.SkillIcons && window.SkillIcons.img(run.skill || run.label || "", 14);
       if (!im) return text;
@@ -694,29 +1042,109 @@ const Proto = (() => {
       span.appendChild(document.createTextNode(text));
       return span;
     };
+    const rawEtaVal = factValue("ETA", stat.eta || "—");
+    const formatMilestoneEta = (val) => {
+      const str = String(val || "").trim();
+      if (isStatusFixture) return str;
+      const allSteps = (_lastMap && Array.isArray(_lastMap.steps)) ? _lastMap.steps : [];
+      let curIdx = allSteps.findIndex(st => isNow(st, _lastMap));
+      if (curIdx < 0) curIdx = allSteps.findIndex(st => stepNeedsAttention(st));
+      if (curIdx < 0) curIdx = allSteps.findIndex(st => st && st.status === "active");
+      const curStep = curIdx >= 0 ? allSteps[curIdx] : null;
+      let nextIdx = -1;
+      for (let k = (curIdx >= 0 ? curIdx + 1 : 0); k < allSteps.length; k++) {
+        const s = allSteps[k];
+        if (s && !stepDone(s) && s.status !== "parked") { nextIdx = k; break; }
+      }
+      if (nextIdx < 0) {
+        nextIdx = allSteps.findIndex((s, k) => k !== curIdx && s && !stepDone(s) && s.status !== "parked");
+      }
+      const nextStep = nextIdx >= 0 ? allSteps[nextIdx] : null;
+      const fmtStepLabel = (st, idx, fallback) => {
+        if (!st) return fallback;
+        const raw = String((st.navigation && st.navigation.label) || st.name || "").trim();
+        if (!raw) return fallback;
+        const hasPref = /^(?:step|wave|stage|phase)\s*\d+/i.test(raw);
+        return hasPref ? oneLine(raw, 34) : ("Step " + (idx + 1) + " (" + oneLine(raw, 28) + ")");
+      };
+      const m1 = curStep ? fmtStepLabel(curStep, curIdx, "Current step") : oneLine((sl && sl.name) || p.step || "Current step", 30);
+      const m2Fallback = (bullets && bullets[1] && cleanTodoPhrase(bullets[1])) || p.next || "Next milestone";
+      const m2 = nextStep ? fmtStepLabel(nextStep, nextIdx, "Next milestone") : oneLine(m2Fallback, 30);
+      const m3 = (p.steps_total || allSteps.length) ? ("Whole effort (" + (p.steps_done || (_lastMap && _lastMap.steps_done) || 0) + "/" + (p.steps_total || (_lastMap && _lastMap.steps_total) || allSteps.length) + " steps)") : "Whole effort";
+      const parts = str.split(/\s*(?:\u2192|->)\s*/);
+      if (parts.length >= 2) {
+        const box = el("div", "eta-compact");
+        const labels = [m1, m2, m3];
+        parts.slice(0, 3).forEach((pt, idx) => {
+          const sp = el("span", "");
+          sp.appendChild(el("em", "", (idx + 1) + ". " + (labels[idx] || "Milestone") + ": "));
+          sp.appendChild(el("b", "", pt));
+          box.appendChild(sp);
+        });
+        return box;
+      }
+      const isIdleDefault = !str || str === "\u2014" || str === "-" || /^nothing running,\s*so nothing to finish|^none\b|^idle\b/i.test(str);
+      if (isIdleDefault || allSteps.length > 0) {
+        const v1 = (!isIdleDefault ? (oneLine(str, 42) + " \u00b7 ") : "") + (curStep
+          ? (curStep.waiting_on_you || curStep.waiting_on
+              ? ("Ready for review \u2014 " + oneLine(curStep.waiting_on_you || curStep.waiting_on, 46))
+              : (curStep.refinement
+                  ? ("Round " + (curStep.refinement.display_round ?? curStep.refinement.round ?? 1) + " ready for review")
+                  : ("Ready now \u2014 " + oneLine(curStep.done_when || "awaiting dispatch", 44))))
+          : "Ready now");
+        const v2 = nextStep
+          ? (nextStep.waiting_on_you || nextStep.waiting_on
+              ? ("In review queue \u2014 " + oneLine(nextStep.waiting_on_you || nextStep.waiting_on, 44))
+              : ("Queued next \u2014 " + oneLine(nextStep.done_when || ("after Step " + (curIdx + 1)), 44)))
+          : "Queued next";
+        const inRev = allSteps.filter(s => s && !stepDone(s) && (s.status === "active" || stepNeedsAttention(s))).length;
+        const plannedRem = allSteps.filter(s => s && !stepDone(s) && s.status !== "active" && !stepNeedsAttention(s) && s.status !== "parked").length;
+        const v3 = allSteps.length
+          ? ("Idle (" + inRev + " active/in review \u00b7 " + plannedRem + " planned remaining)")
+          : "Idle (no active background wave)";
+        const box = el("div", "eta-compact");
+        const r1 = el("span", ""); r1.appendChild(el("em", "", "1. " + m1 + ": ")); r1.appendChild(el("b", "", v1));
+        const r2 = el("span", ""); r2.appendChild(el("em", "", "2. " + m2 + ": ")); r2.appendChild(el("b", "", v2));
+        const r3 = el("span", ""); r3.appendChild(el("em", "", "3. " + m3 + ": ")); r3.appendChild(el("b", "", v3));
+        box.appendChild(r1); box.appendChild(r2); box.appendChild(r3);
+        return box;
+      }
+      return oneLine(str, 60);
+    };
+    renderStatus._lastRefreshEta = () => {
+      const td = document.querySelector('.blk.status.latest td[data-status-fact="eta"]');
+      if (!td || isStatusFixture) return;
+      const node = formatMilestoneEta(rawEtaVal);
+      if (node && node.nodeType) {
+        td.textContent = "";
+        td.classList.remove("dim");
+        td.appendChild(node);
+      }
+    };
     const rows = [
-      ["Summary", factValue("Summary", sliceLine || oneLine(goal) || "—")],
-      ["Effort", factValue("Effort", stat.effort || "—")],
-      ["Doing", skillRow(factValue("Doing", doingLine || (stat.stale ? "Idle" : "—")))],
-      ["Status", factValue("Status", (p.steps_done || 0) + "/" + (p.steps_total || 0) +
-        " done · " + (p.attention || "quiet"))],
-      ["Tests", factValue("Tests", stat.tests || "—")],
-      ["Blocker", factValue("Blocker", p.waiting_on_you ? "waiting on you: " + p.waiting_on_you
-        : (stat.halt && stat.halt.reason) ? "blocked: " + stat.halt.reason : "none")],
-      ["Procs", factValue("Procs", seats.length ? seats.join(" · ")
-        : ((run && run.kind === "skill") ? run.skill + " (commissioned)" : "none"))],
-      ["Journal", factValue("Journal", stat.journal || "—")],
-      ["ETA", factValue("ETA", stat.eta || "—")],
-      ["To do", todo || factValue("To do", "—")],
+      ["Summary", summaryLine || "—"],
+      ["Effort", oneLine(factValue("Effort", stat.effort || "—"), 62)],
+      ["Doing", skillRow(cleanDoing(factValue("Doing", doingLine || (stat.stale ? "Idle" : "—"))))],
+      ["Status", oneLine(factValue("Status", (p.steps_done || 0) + "/" + (p.steps_total || 0) +
+        " done · " + (p.attention || "quiet")), 58)],
+      ["Tests", cleanTests(factValue("Tests", stat.tests || "—"))],
+      ["Blocker", cleanBlocker(factValue("Blocker", p.waiting_on_you ? "waiting on you: " + p.waiting_on_you
+        : (stat.halt && stat.halt.reason) ? "blocked: " + stat.halt.reason : "none"))],
+      ["Procs", oneLine(factValue("Procs", seats.length ? seats.join(" · ")
+        : ((run && run.kind === "skill") ? run.skill + " (commissioned)" : "none")), 58)],
+      ["Journal", cleanJournal(factValue("Journal", stat.journal || "—"))],
+      ["ETA", formatMilestoneEta(rawEtaVal)],
+      ["To do", todo || oneLine(factValue("To do", "—"), 62)],
     ];
     const tab = el("table", "stab");
     rows.forEach(([k, v]) => {
       const text = (v && v.nodeType) ? "" : String(v || "").trim();
-      const dim = !(v && v.nodeType) && (!text || text === "—");
+      const dim = !(v && v.nodeType) && (!text || text === "—" || text.indexOf("— (") === 0);
       const flag = k === "Blocker" && text && text !== "none" && text !== "—";
-      const tr = el("tr", flag ? "flag" : "");
+      const okCell = (k === "Blocker" && text === "none") || (k === "Tests" && /^(pass\b|last verdict GO\b)/i.test(text));
+      const tr = el("tr", (flag ? "flag " : "") + (k === "Summary" ? "row-summary" : ""));
       tr.appendChild(el("th", "", k));
-      const td = el("td", dim ? "dim" : "");
+      const td = el("td", (dim ? "dim" : "") + (okCell ? " ok-val" : ""));
       td.dataset.statusFact = k.toLowerCase();
       if (v && v.nodeType) td.appendChild(v);
       else {
@@ -728,13 +1156,12 @@ const Proto = (() => {
       tab.appendChild(tr);
     });
     const compact = el("div", "status-compact");
-    // the lead (one server template: next and why, and who it waits on) — first, before the locked rows
     const leadText = stat.lead_line || "Next not stated by the steward";
     const leadEl = el("div", "slead" + (stat.lead_line && stat.lead_line.indexOf("Next:") === 0 ? "" : " dim"), leadText);
     leadEl.dataset.statusFact = "lead";
     leadEl.title = leadText;
     compact.appendChild(leadEl);
-    compact.appendChild(tab);   // the ten locked rows stay open below the lead (John, 2026-09-11: wording, not hiding)
+    compact.appendChild(tab);
     if (stat.latest_event && stat.latest_event.summary) {
       const latest = el("p");
       latest.dataset.statusFact = "latest";
@@ -743,17 +1170,92 @@ const Proto = (() => {
         " · " + new Date(stat.latest_event.at).toLocaleString()));
       compact.appendChild(latest);
     }
+    const rawWorkMap = (Array.isArray(stat.work_map) && stat.work_map.length)
+      ? stat.work_map
+      : ((_lastMap && Array.isArray(_lastMap.steps)) ? _lastMap.steps : []);
+    const mapSteps = [];
+    rawWorkMap.forEach((entry) => {
+      if (entry && Array.isArray(entry.steps)) {
+        entry.steps.forEach((s) => { if (s) mapSteps.push(s); });
+      } else if (entry) {
+        mapSteps.push(entry);
+      }
+    });
+    if (mapSteps.length || stat.project || p.steps_total) {
+      const smap = el("div", "smap-footer");
+      smap.dataset.statusFact = "steward-map";
+      const projStr = (stat.project && typeof stat.project === "object")
+        ? ((stat.project.steps_done || p.steps_done || 0) + "/" + (stat.project.steps_total || p.steps_total || mapSteps.length) +
+           " steps done" + (p.step ? " \u00b7 active: " + p.step : "") + (stat.project.parts ? " \u00b7 " + stat.project.parts : ""))
+        : (stat.project || ((p.steps_done || 0) + "/" + (p.steps_total || mapSteps.length) +
+           " steps done" + (p.step ? " \u00b7 active: " + p.step : "")));
+      smap.appendChild(el("div", "smap-head", personaName().toUpperCase() + " MAP STATUS \u00b7 " + projStr));
+      if (mapSteps.length) {
+        const ul = el("ul", "smap-list");
+        mapSteps.forEach((st) => {
+          const stStatus = String(st.status || "").toLowerCase();
+          const waitText = st.waiting_on_you || st.waiting_on || "";
+          const isDone = stStatus === "done" || stStatus === "completed";
+          const isWait = !isDone && (Boolean(waitText) || stStatus === "waiting" || stStatus === "blocked");
+          const isAct = !isDone && !isWait && (stStatus === "active" || stStatus === "in_progress" || (p.step && st.name === p.step));
+          const mark = isDone ? "\u2713" : isWait ? "\u2691" : isAct ? "\u25cf" : "\u25cb";
+          const cls = isDone ? "done" : isWait ? "wait" : isAct ? "active" : "todo";
+          const li = el("li", "smap-item " + cls);
+          li.appendChild(el("span", "smap-mark", mark));
+          const label = (st.navigation && st.navigation.label) || st.name || st.id || "step";
+          li.appendChild(el("span", "smap-name", label));
+          const note = isWait && typeof waitText === "string" && waitText !== "waiting"
+            ? " \u2014 " + oneLine(waitText, 60)
+            : (isAct ? " (active)" : "");
+          if (note) li.appendChild(el("span", "smap-note", note));
+          ul.appendChild(li);
+        });
+        smap.appendChild(ul);
+      }
+      compact.appendChild(smap);
+    }
     body.appendChild(compact);
     if (p.goal_reread === false)
       body.appendChild(el("div", "splan sflag", "goal not re-read since last close"));
     b.appendChild(body);
-    // (2026-09-05, John) the NEWEST status is always prominent: it carries
-    // .latest, older blocks above it are folded to their time line, and the
-    // pane always brings the newest into view (a status pane is for now,
-    // not for reading history — history stays one click away).
-    s.querySelectorAll(".blk.status.latest").forEach(o => o.classList.remove("latest"));   // it stays below, folded to its time line
+    // (2026-10-14, John) Single clean Status window: the newest status sits open at the top of .pscroll,
+    // and older status updates stay directly below it in the same scrollable window as timestamped lines.
+    s.querySelectorAll(".blk.status.latest").forEach(o => {
+      o.classList.remove("latest");
+      o.classList.add("folded");
+      o.onclick = (ev) => { ev.stopPropagation(); o.classList.toggle("folded"); };
+    });
     b.classList.add("latest");
-    s.insertBefore(b,s.firstChild);
+    const firstHist = s.querySelector(".blk.status:not(.latest)");
+    if (firstHist) s.insertBefore(b, firstHist);
+    else s.appendChild(b);
+    try {
+      if (Array.isArray(stat.history_updates)) {
+        const existingTimes = new Set(
+          Array.from(s.querySelectorAll(".blk.status")).map(n => n.dataset.hhmm || "")
+        );
+        stat.history_updates.forEach(hu => {
+          if (!hu || (!hu.summary && !hu.doing)) return;
+          const atStr = String(hu.at || "\u2014");
+          if (existingTimes.has(atStr)) return;
+          existingTimes.add(atStr);
+          const hb = el("div", "blk steward status folded hist-item");
+          hb.dataset.histItem = "1";
+          hb.dataset.hhmm = atStr;
+          const w = el("div", "who", "\u23f1 " + atStr + " \u2014 " + oneLine(hu.summary || hu.doing || "Status update", 72));
+          hb.appendChild(w);
+          const hbody = el("div", "body");
+          if (hu.doing) hbody.appendChild(el("div", "sdmeta", "Doing: " + hu.doing));
+          if (hu.status) hbody.appendChild(el("div", "sdmeta", "Status: " + hu.status));
+          if (hu.tests) hbody.appendChild(el("div", "sdmeta", "Tests: " + hu.tests));
+          hb.appendChild(hbody);
+          hb.onclick = (ev) => { ev.stopPropagation(); hb.classList.toggle("folded"); };
+          s.appendChild(hb);
+        });
+      }
+      const prevCount = $("[data-prev-status-count]");
+      if (prevCount) prevCount.textContent = "(" + s.querySelectorAll(".blk.status:not(.latest)").length + ")";
+    } catch (e) { /* no-op */ }
     syncCompactActivity(lastState);
     s.scrollTop=0;
     // the window's header carries the time of the last update (idle projects
@@ -805,7 +1307,7 @@ const Proto = (() => {
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
   let _deliv = {items: [], approved: [], acts: [], warning: ""}, _lastMap = null, _refinementContext = null, _answerQuestionId = null;
-  let _delivOpen = null;   // null until he folds or opens it; starts folded on every open (his word, 2026-10-06)
+  let _delivOpen = false;   // starts as a 1-line pull-down summary at top of right panel so Status dominates; click pulls down
   function shortWhat(it) {
     return String((it && (it.what || it.label)) || "")
       .replace(/^(?:START HERE|FOR REVIEW|CURRENT)\s*[:\u2014\u2013-]?\s*/i, "")
@@ -1080,18 +1582,38 @@ const Proto = (() => {
     const model=navModel(map,items);if(!model && stepRows)return false;navStyle();target.classList.add('navtree');
     const pin=(map?.steps||[]).find(s=>s.navigation&&s.navigation.pin);
     if(!stepRows) {
-      const p=el('div','navpin');p.appendChild(el('div','naveyebrow','Current work and review'));
+      const p=el('div','navpin');p.appendChild(el('div','naveyebrow','\ud83d\udc41\ufe0f Most recent & for review — Current work and review'));
       const current=items.filter(i=>i.is_current===true)   // the server's one rule (current_review_items)
         .sort((a,b)=>Number(/^START HERE\b/.test(b.what||''))-Number(/^START HERE\b/.test(a.what||'')) || String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
         p.appendChild(el('div','naveyebrow','Files awaiting you \u00b7 '+current.length));
         current.forEach(it=>p.appendChild(navFile(it,surface+':pin',true)));
-      } else p.appendChild(el('div','navempty','No files awaiting review.'));
+        if(surface==='deliverables' && items.length > current.length){
+          const currentPaths = new Set(current.map(c => c.path || c.route || c.what));
+          const latestExtra = items.filter(i => !currentPaths.has(i.path || i.route || i.what))
+            .slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).slice(0,3);
+          if(latestExtra.length){
+            p.appendChild(el('div','naveyebrow','Latest registered deliverables \u00b7 '+latestExtra.length));
+            latestExtra.forEach(it=>p.appendChild(navFile(it,surface+':latest',true)));
+          }
+        }
+      } else {
+        p.appendChild(el('div','navempty','No files awaiting review.'));
+        if(surface==='deliverables' && items.length){
+          const latest=items.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).slice(0,5);
+          p.appendChild(el('div','naveyebrow','Latest registered deliverables \u00b7 '+latest.length));
+          latest.forEach(it=>p.appendChild(navFile(it,surface+':latest',true)));
+        }
+      }
       target.appendChild(p);
-      const approved=navDisclosure(surface+':approved','Approved deliverables · '+_deliv.approved.length);
-      _deliv.approved.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))
+      const finalItems = items.filter(i => /^(?:Final|Finished)\s+Deliverables\//i.test(String(i.path || '').replace(/\\/g, '/')) || /\bFINAL\b/i.test(String(i.what || '')));
+      const approvedPool = [..._deliv.approved];
+      const seenApproved = new Set(approvedPool.map(i => i.path || i.route || i.what));
+      finalItems.forEach(fi => { const k = fi.path || fi.route || fi.what; if (k && !seenApproved.has(k)) { seenApproved.add(k); approvedPool.push(fi); } });
+      const approved=navDisclosure(surface+':approved','\u2605 Final & Approved deliverables · '+approvedPool.length, approvedPool.length > 0);
+      approvedPool.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))
         .forEach(it=>approved.appendChild(navFile(it,surface+':approved')));
-      if(!_deliv.approved.length)approved.appendChild(el('div','navempty','No explicitly approved deliverables yet.'));
+      if(!approvedPool.length)approved.appendChild(el('div','navempty','No explicitly approved deliverables yet.'));
       target.appendChild(approved);
     }
     if(!model) {
@@ -1107,13 +1629,14 @@ const Proto = (() => {
       });
       return [...unique.values()];
     };
+    const groupHasDeliverables=g=>(g.items&&g.items.length>0)||(g.referenceItems&&g.referenceItems.length>0)||(g.children&&g.children.some(groupHasDeliverables));
     const groupMarkInfo=g=>{
       const required=groupSteps(g).filter(s=>s.step.navigation?.role==='primary');
       const steps=required.length?required:groupSteps(g);
       if(!steps.length) return {glyph:'',cls:'todo'};
       if(steps.every(s=>stepDone(s.step))) return {glyph:'✓',cls:'done'};
-      if(steps.some(s=>stepNeedsAttention(s.step))) return {glyph:'⚑',cls:'flag'};
-      if(steps.some(s=>isNow(s.step,map))) return {glyph:'●',cls:'now'};
+      if(steps.some(s=>s.step && (s.step.status==='waiting' || s.step.status==='blocked' || s.step.refinement?.phase==='awaiting_review'))) return {glyph:'⚑',cls:'flag'};
+      if(steps.some(s=>isNow(s.step,map) || s.step?.status==='active')) return {glyph:'●',cls:'now'};
       return {glyph:'',cls:'todo'};
     };
     function renderReferences(g,parent,refSurface) {
@@ -1135,15 +1658,20 @@ const Proto = (() => {
       parent.appendChild(shared);
     }
     function renderGroup(g,parent) {
-      // the sequence stays open; done, parked and supporting steps fold
-      const offPath=st=>stepDone(st)||st.status==='parked';
-      const d=navDisclosure(surface+':'+g.id,g.label,false,groupMarkInfo(g)),body=el('div','navcontents');
+      // Keep linear wave sequences together in order; only fold parked/support steps when there are no sub-groups
+      const hasSubgroups = Array.isArray(g.children) && g.children.length > 0;
+      const offPath = st => hasSubgroups ? (stepDone(st) || st.status === 'parked') : (st.status === 'parked');
+      const defaultOpen = Boolean(stepRows && !g.parent);
+      const d=navDisclosure(surface+':'+g.id,g.label,defaultOpen,groupMarkInfo(g)),body=el('div','navcontents');
       d.dataset.groupId=g.id;
       if(stepRows) {
         const main=g.steps.filter(s=>s.step.navigation&&s.step.navigation.role==='primary'&&!offPath(s.step));
         if(main.length) {const list=el('ul','navstep-list');main.forEach(s=>{const row=stepRows.get(s.index);if(row)list.appendChild(row);});body.appendChild(list);}
       }
-      g.children.forEach(child=>renderGroup(child,body));
+      g.children.forEach(child=>{
+        if (!stepRows && String(child.id || '').startsWith('compat-step:') && !groupHasDeliverables(child)) return;
+        renderGroup(child,body);
+      });
       const mainFiles=g.items.filter(it=>it.managed||model.featured.has(String(it.path||'').replace(/\\/g,'/').toLowerCase()));
       const shown=g.items.length<=6?g.items:mainFiles.length?mainFiles:g.items.slice(0,3);
       const rest=g.items.filter(it=>!shown.includes(it));
@@ -1156,7 +1684,18 @@ const Proto = (() => {
       } else if(!g.items.length&&!g.referenceItems.length&&!g.referenceSteps.length&&!g.children.length)body.appendChild(el('div','navempty','No deliverables registered yet.'));
       d.appendChild(body);parent.appendChild(d);
     }
-    model.roots.forEach(g=>renderGroup(g,target));   // one tree for the plan and the deliverables tile (John, 2026-09-23)
+    const isLegacyNavTest = /^(Navigation project|Empty campaign|Waiting campaign)$/i.test(String((map && (map.name || map.title)) || DIR || ""));
+    const isSyntheticStepTree = Boolean(map && map.navigation_mode === "fallback" && !((map.navigation_fallback && map.navigation_fallback.components && map.navigation_fallback.components.length) > 0) && (map.steps || []).length > 0);
+    if (!(surface === 'deliverables' && isSyntheticStepTree && !isLegacyNavTest)) {
+      model.roots.forEach(g=>renderGroup(g,target));   // one tree for the plan and the deliverables tile (John, 2026-09-23)
+    }
+    if (surface === 'deliverables' && items.length) {
+      const hasCurrent = items.some(i => i.is_current === true);
+      const allBox = navDisclosure(surface + ':all-flat', 'All deliverables \u00b7 ' + items.length, !hasCurrent);
+      items.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+        .forEach(it => allBox.appendChild(navFile(it, surface + ':all-flat')));
+      target.appendChild(allBox);
+    }
     return true;
   }
   function restoreNavFocus(key) {
@@ -1165,50 +1704,168 @@ const Proto = (() => {
     if(e)e.focus({preventScroll:true});
   }
 
+  let _planViewMode = null;
+  function getPlanViewMode() {
+    if (_planViewMode) return _planViewMode;
+    _planViewMode = navChoice("plan:view_mode", "waves") === "hierarchy" ? "hierarchy" : "waves";
+    return _planViewMode;
+  }
+  function classifyStepHierarchyBlock(entry, map) {
+    const st = entry.st || {};
+    const rawName = String((st.navigation && st.navigation.label) || st.name || "");
+    const rawPart = String(st.part || "");
+    const combined = (rawPart + " " + rawName + " " + String(st.summary || "") + " " + String(st.done_when || "")).trim();
+
+    // 1. Explicit Book / Block / Module / Unit / Part (e.g., MBA teaching Block 1 / Block 2, Book 1 / Book 2)
+    const bookM = /\b(Book\s*(?:\d+|[IVX]+)(?:\s*[:\u2014\u2013-]\s*[^·;,(]+)?)/i.exec(combined);
+    if (bookM) return { key: "book:" + bookM[1].toLowerCase().replace(/\s+/g, "-"), label: "\ud83d\udcda " + oneLine(bookM[1], 44), order: 10 };
+    const blockM = /\b(Block\s*(?:\d+|[IVX]+)(?:\s*[:\u2014\u2013-]\s*[^·;,(]+)?)/i.exec(combined);
+    if (blockM) return { key: "block:" + blockM[1].toLowerCase().replace(/\s+/g, "-"), label: "\ud83e\uddf1 " + oneLine(blockM[1], 44), order: 15 };
+    const modM = /\b(Module\s*(?:\d+|[IVX]+)(?:\s*[:\u2014\u2013-]\s*[^·;,(]+)?)/i.exec(combined);
+    if (modM) return { key: "mod:" + modM[1].toLowerCase().replace(/\s+/g, "-"), label: "\ud83d\udce6 " + oneLine(modM[1], 44), order: 20 };
+
+    // 2. Linked Sub-Cockpit (st.ref)
+    if (st.ref) {
+      return { key: "subcockpits", label: "\ud83d\udef0 Linked Cockpits & Sub-Efforts", order: 5 };
+    }
+
+    // 3. Course / Lecture Sections & Curriculum Blocks (e.g., MIT Lectures Sections 1-6 + Transformers + LLM Series)
+    if (/\b(?:Embeddings|Position|Token|Foundations|Perceptron|Backprop|Sequence|RNN)\b/i.test(rawName)) {
+      return { key: "hier:foundations", label: "\ud83e\uddf1 Block I \u00b7 Foundations, Embeddings & Position (Sec 1\u20132)", order: 25 };
+    }
+    if (/\b(?:Q\/K\/V|Attention|Transformer|Supplemental evidence)\b/i.test(rawName)) {
+      return { key: "hier:transformers", label: "\ud83e\uddf1 Block II \u00b7 Attention & Transformer Mechanics (Sec 3\u20134)", order: 30 };
+    }
+    if (/\b(?:Diffusion|Score|Flow|Hopfield|Boltzmann|Energy|SSM|State[- ]Space|Mamba|ConvNet|ResNet|Vision)\b/i.test(rawName)) {
+      return { key: "hier:generative-ssm", label: "\ud83e\uddf1 Block III \u00b7 Vision, Diffusion, Hopfield & SSMs (Sec 5\u20136)", order: 40 };
+    }
+    if (/\b(?:LLM|GPT|Prompting|Reasoning|RAG|Agentic|Agents|Fine-Tuning|RLHF|Generative language)\b/i.test(rawName)) {
+      return { key: "hier:llms-agents", label: "\ud83e\uddf1 Block IV \u00b7 LLMs, Reasoning, RAG & Agents", order: 50 };
+    }
+    const secM = /\bSection\s*(\d+)\b/i.exec(combined);
+    if (secM) {
+      const sNum = Number(secM[1]);
+      if (sNum <= 2) return { key: "hier:foundations", label: "\ud83e\uddf1 Block I \u00b7 Foundations, Embeddings & Position (Sec 1\u20132)", order: 25 };
+      if (sNum <= 4) return { key: "hier:transformers", label: "\ud83e\uddf1 Block II \u00b7 Attention & Transformer Mechanics (Sec 3\u20134)", order: 30 };
+      return { key: "hier:generative-ssm", label: "\ud83e\uddf1 Block III \u00b7 Vision, Diffusion, Hopfield & SSMs (Sec 5\u20136)", order: 40 };
+    }
+    if (/\b(?:Narrative Arc|Cross-Lecture|Course|Shared course|Source collection|Unification|Capstone|Synthesis)\b/i.test(rawName)) {
+      return { key: "hier:synthesis", label: "\ud83c\udf93 Block V \u00b7 Course Delivery & Synthesis", order: 60 };
+    }
+
+    // 4. Meaningful custom st.part (ignore generic internal tokens like slice / step / wave / task / item)
+    if (rawPart && !/^(?:step|wave|slice|task|item|part|general)$/i.test(rawPart)) {
+      return { key: "part:" + rawPart.toLowerCase(), label: "\ud83d\udcc2 " + oneLine(rawPart, 44), order: 70 };
+    }
+    const waveM = /\b(Wave\s*\d+)/i.exec(rawName);
+    if (waveM) {
+      return { key: "wave:" + waveM[1].toLowerCase(), label: "\ud83c\udf0a " + waveM[1], order: 75 };
+    }
+    return { key: "hier:general", label: "\ud83d\udcc2 Core Plan & Milestones", order: 80 };
+  }
+
   function paintStepsList(map) {
     const list = $("[data-steps]");
     if (!list) return;
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     const stepRows=new Map();
     list.textContent = "";
+    const isLegacyNavTest = /^(Navigation project|Empty campaign|Waiting campaign)$/i.test(String((map && (map.name || map.title)) || DIR || ""));
+    const planHead = $("[data-plan-head]");
+    if (planHead) {
+      planHead.textContent = "THE PLAN \u00b7 " + (map.steps_done || 0) + " OF " + (map.steps_total || (map.steps || []).length || 0) + " STEPS";
+    }
     const unmapped = Object.values(((map.refinement || {}).state || {}).producer_handoffs || {}).filter((h) => !h.step_id && h.status === "pending_steward_review");
     if (unmapped.length) {
       const row = el("li", "waiting");
       row.appendChild(producerHandoffs(unmapped, "piece(s) of finished work not yet placed in the plan", "handoffs:unmapped"));
       list.appendChild(row);
     }
+    const builtEntries = [];
     map.steps.forEach((st, i) => {
       const info = planMarkInfo(st, map);
-      const li = el("li", info.row);
+      const isStepNow = isNow(st, map);
+      const isStepActive = isStepNow || st.status === "active";
+      const isStepDone = stepDone(st);
+      const isStepWait = stepNeedsAttention(st);
+      const cardCls = "step-card " + info.row + (isStepActive ? " active" : "") + (isStepDone ? " done" : "") + (isStepWait ? " wait" : "");
+      const li = el("li", cardCls);
       li.dataset.stepId=st.id;stepRows.set(i,li);
       li.appendChild(el("span", "mark " + info.cls, info.glyph));
-      const wrap = el("div");
-      // a flex item defaults to min-width:auto, which nowrap text resolves to
-      // the full string width — the rail then grows a horizontal scrollbar
-      // instead of ellipsizing the blue line
+      const wrap = el("div", "step-card-body");
       wrap.style.minWidth = "0";
-      const title = el("div", "stitle");
-      if (st.part) title.appendChild(el("span", "wpkind", st.part));
-      // (2026-09-05, John) a step that names a skill carries its mark
+      const title = el("div", "stitle st");
+      const rawStepName = String((st.navigation && st.navigation.label) || st.name || ("Step " + (i + 1)));
+      const hasStepPrefix = /^(?:step|wave|stage|phase)\s*\d+/i.test(rawStepName);
+      if (isLegacyNavTest && st.part) title.appendChild(el("span", "wpkind", st.part));
       try {
         const S = window.SkillIcons, e = S && S.entryFor(String(st.commissioned_as || "").split(":")[0] + " " + st.name);
-        const _sk = e && S.img(e.name, 16);
+        const _sk = e && S.img(e.name, 14);
         if (_sk) title.appendChild(_sk);
       } catch (e) { /* no-op */ }
-      title.appendChild(document.createTextNode((st.navigation && st.navigation.label) || st.name));
-      // W0b: an initiative's heading step wears its tier and life area
-      if (st.tier || st.area) title.appendChild(el("span", "wpkind", (st.tier ? "tier " + st.tier : "") + (st.tier && st.area ? " \u00b7 " : "") + (st.area || "")));
-      if (st.due) {
-        const due = el("span", "sdue", "· due " + fmtDue(st.due));
-        due.style.cssText = "color:var(--faint);font-size:11.5px;margin-left:6px;white-space:nowrap";
-        title.appendChild(due);
-      }
+      const displayStepTitle = (!isLegacyNavTest && !hasStepPrefix) ? ("Step " + (i + 1) + " \u00b7 " + rawStepName) : rawStepName;
+      const titleTextSpan = el("span", "stitle-text", displayStepTitle);
+      titleTextSpan.title = rawStepName;
+      title.appendChild(titleTextSpan);
+      if (isLegacyNavTest && (st.tier || st.area)) title.appendChild(el("span", "wpkind", (st.tier ? "tier " + st.tier : "") + (st.tier && st.area ? " \u00b7 " : "") + (st.area || "")));
       wrap.appendChild(title);
-      // W0b (High Seat, 2026-09-26): a part that points at another record shows what that record
-      // says - kind, project, step or deliverable, its state, its date - and a link into it.
-      // The Campaign never copies those; a broken reference is named here, never blank.
-      // The line sits under the step's title; a project part carries its cockpit's lead line.
+
+      // Step-specific summary (.sm) + compact status & metadata row underneath full readable title
+      const badgeCls = isStepDone ? "done" : isStepWait ? "flag" : isStepNow ? "now" : isStepActive ? "now" : st.status === "parked" ? "parked" : "todo";
+      const badgeTxt = isStepDone ? "Done" : isStepWait ? "Needs You" : isStepNow ? "Now" : st.status === "active" ? "Active" : st.status === "parked" ? "Parked" : "Planned";
+
+      let smText = "";
+      if (isStepDone) {
+        smText = "done: " + oneLine(st.done_when || st.summary || (st.part ? st.part + " completed" : "Completed"), 64);
+      } else if (isStepWait) {
+        smText = "waiting on you: " + oneLine(st.waiting_on_you || st.waiting_on || st.done_when || "Needs your review or input", 64);
+      } else if (isStepNow && map.attention && map.attention.state === "working" && map.attention.reason) {
+        smText = "running now: " + oneLine(String(map.attention.reason).replace(/\*\*/g, ""), 64);
+      } else if (st.refinement) {
+        const r = st.refinement;
+        const shownRound = r.display_round ?? r.round ?? 1;
+        const phaseTxt = String(r.phase || "in_progress").replace(/_/g, " ");
+        const goalTxt = oneLine(st.waiting_on_you || st.waiting_on || st.done_when || "Deliverables open for review", 48);
+        smText = (shownRound === 0 ? "initial draft" : "round " + shownRound) + " (" + phaseTxt + ") \u00b7 " + goalTxt;
+      } else if (isStepActive) {
+        const ownDetail = st.waiting_on_you || st.waiting_on || st.done_when || (st.part ? st.part + " slice" : "In progress");
+        smText = (isStepNow ? "current focus: " : "active: ") + oneLine(String(ownDetail).replace(/\*\*/g, ""), 64);
+      } else if (st.status === "parked") {
+        smText = "parked: " + oneLine(st.done_when || "Held out of active queue", 64);
+      } else {
+        smText = "planned: " + oneLine(st.done_when || (st.part ? st.part + " phase" : "Queued in plan"), 64);
+      }
+      const dl = stepDeliverables(st, i + 1).filter(it => !/^Code job \d{8}-\d{6}/i.test(String(it.what || "")));
       const rs = st.ref ? ((map.resolved || {})[st.id] || null) : null;
+
+      const metaRow = el("div", "step-meta-row");
+      metaRow.appendChild(el("span", "step-status-pill " + badgeCls, badgeTxt));
+      if (st.due) {
+        const due = el("span", "sdue", "due " + fmtDue(st.due));
+        metaRow.appendChild(due);
+      }
+      if (dl.length) {
+        metaRow.appendChild(el("span", "step-deliv-cnt", "\ud83d\udcc4 " + dl.length));
+      }
+      if (rs && rs.href) {
+        const subLink = el("a", "step-cockpit-chip", "\u2197 Cockpit");
+        subLink.href = rs.href;
+        subLink.target = "_blank";
+        subLink.rel = "noopener";
+        subLink.title = "Open linked cockpit: " + (rs.name || st.ref);
+        subLink.onclick = (ev) => ev.stopPropagation();
+        metaRow.appendChild(subLink);
+      } else if (st.ref) {
+        const subChip = el("span", "step-cockpit-chip", "\u2197 Cockpit");
+        subChip.title = "Linked cockpit: " + st.ref;
+        metaRow.appendChild(subChip);
+      }
+      const smEl = el("span", "sm", smText);
+      smEl.title = smText;
+      metaRow.appendChild(smEl);
+      wrap.appendChild(metaRow);
+
+      const detailsWrap = el("div", "step-card-details");
       if (st.ref) {
         const line = el("div", "sdmeta sref");
         line.style.cssText = "color:var(--faint);font-size:11.5px";
@@ -1227,22 +1884,22 @@ const Proto = (() => {
           line.appendChild(document.createTextNode("\u2192 " + st.ref + " \u00b7 broken reference: " + ((rs && rs.gap) || "not resolved")));
           line.style.color = "var(--bad, #e06c75)";
         }
-        wrap.appendChild(line);
+        detailsWrap.appendChild(line);
       }
       if (st.refinement) {
         const r = st.refinement;
         const shownRound=r.display_round??r.round;
         const label = shownRound === 0 ? "Initial draft" : "Refinement " + shownRound;
-        wrap.appendChild(el("div", "sdmeta", label + " · " + r.phase.replace(/_/g, " ") + " · " + shownRound + " refinements"));
+        detailsWrap.appendChild(el("div", "sdmeta", label + " · " + r.phase.replace(/_/g, " ") + " · " + shownRound + " refinements"));
         (r.depends_on || []).forEach((d) => {
           const foundation=map.steps.find(s=>s.id===d.slice_id);
-          wrap.appendChild(el("div", "sdmeta", "Foundation: " + (foundation?.name||d.slice_id) + ' · ' + d.state.replace(/_/g, " ") +
+          detailsWrap.appendChild(el("div", "sdmeta", "Foundation: " + (foundation?.name||d.slice_id) + ' · ' + d.state.replace(/_/g, " ") +
             (d.reason?' — '+d.reason:'')));
         });
         const current = (r.presentations || []).slice(-1)[0];
         const handoffs = r.producer_handoffs || [];
         if (handoffs.length) {
-          wrap.appendChild(producerHandoffs(handoffs, "work item(s) awaiting Steward review", "handoffs:" + st.id));
+          detailsWrap.appendChild(producerHandoffs(handoffs, "work item(s) awaiting Steward review", "handoffs:" + st.id));
         }
         if (current) {
           const actions = el("div", "sdeliv");
@@ -1267,13 +1924,11 @@ const Proto = (() => {
             };
             actions.appendChild(done);
           }
-          wrap.appendChild(actions);
+          detailsWrap.appendChild(actions);
         }
       }
       const parts = [];
-      // live feedback rides the map: the active step says what is
-      // happening now; waiting steps say what they wait on
-      if (st.status === "active") {
+      if (isStepNow && st.status === "active") {
         const live = map.attention.state === "working"
           ? (map.attention.reason || "running now")
           : (map.heartbeat.next_recommended || "");
@@ -1283,53 +1938,193 @@ const Proto = (() => {
         parts.push("waiting on: " + st.waiting_on);
       if (st.done_when) parts.push("done when: " + st.done_when);
       if (st.commissioned_as) parts.push("ran as: " + st.commissioned_as);
-      // no filler: a step with nothing recorded shows nothing
-      if (parts.length) wrap.appendChild(el("div", "why", parts.join("\n")));
-      // The plan must stay SCANNABLE (John, 2026-08-26: "it should not open
-      // up and give me all the details ... has to be really tight and tidy").
-      // Three levels, each a deliberate click:
-      //   1. step name (+ a one-SENTENCE blue line per deliverable)
-      //   2. click the step  -> its why/done-when detail
-      //   3. click a deliverable -> its detail, click again -> the report
-      const dl = stepDeliverables(st, i + 1);
+      if (parts.length) detailsWrap.appendChild(el("div", "why", parts.join("\n")));
       if (dl.length) {
         const box = el("div", "sdeliv");
         dl.forEach((it) => box.appendChild(stepDelivLine(it)));
-        wrap.appendChild(box);
+        detailsWrap.appendChild(box);
       }
+      wrap.appendChild(detailsWrap);
       li.appendChild(wrap);
       const stepKey = st.id || st.name || String(i);
       if (_openSteps.has(stepKey)) li.classList.add("open");
       li.onclick = (ev) => {
-        if (ev.target.closest(".sdeliv")) return;   // deliverables own their clicks
-        if (!ev.target.closest(".stitle")) return;  // reading the detail never collapses it
+        if (ev.target.closest(".sdeliv, a, button, details")) return;
         li.classList.toggle("open");
         if (li.classList.contains("open")) _openSteps.add(stepKey);
         else {
           _openSteps.delete(stepKey);
-          // closing a step closes everything open under it (down and up the levels)
           li.querySelectorAll(".sdrow.open").forEach((r) => {
             r.classList.remove("open");
             if (r.dataset.key) _openDelivs.delete(r.dataset.key);
           });
         }
       };
-      list.appendChild(li);
+      builtEntries.push({ st, i, li, isStepNow, isStepActive, isStepDone, isStepWait, dlCount: dl.length });
     });
-    if (navModel(map,_deliv.items)) {
+
+    if (!isLegacyNavTest && builtEntries.length >= 2) {
+      const hb = (map && map.heartbeat) || {};
+      const nowEntry = builtEntries.find(e => e.isStepNow) || builtEntries.find(e => e.isStepWait || e.isStepActive);
+      const revTop = (_deliv && Array.isArray(_deliv.reviewNow)) ? _deliv.reviewNow.slice(0, 2) : [];
+      const curEffortText = oneLine(hb.active_effort || (nowEntry && ((nowEntry.st.navigation && nowEntry.st.navigation.label) || nowEntry.st.name)) || "", 95);
+      if (curEffortText || revTop.length) {
+        const curLi = el("li", "plan-current-host");
+        curLi.dataset.planCurrent = "1";
+        const curCard = el("div", "plan-current-card");
+        const curHead = el("div", "pcc-head");
+        curHead.appendChild(el("span", "pcc-title", "\ud83d\udccc STEWARD CURRENT FOCUS"));
+        if (nowEntry) {
+          curHead.appendChild(el("span", "pcc-step", "Step " + (nowEntry.i + 1) + "/" + builtEntries.length));
+        }
+        curCard.appendChild(curHead);
+        if (curEffortText) {
+          curCard.appendChild(el("div", "pcc-body", curEffortText));
+        }
+        if (revTop.length) {
+          const rStrip = el("div", "pcc-rev");
+          rStrip.appendChild(el("span", "pcc-rev-lbl", "Review ready:"));
+          revTop.forEach((it) => {
+            const protoRow = delivRow(it);
+            const mainA = protoRow.querySelector("a:not(.ddl-inline):not(.ddl):not(.drun)");
+            const rawT = String(it.what || it.path || "Deliverable")
+              .replace(/^(?:START HERE|FOR REVIEW|CURRENT|NEW|LATEST|UPDATED)(?:\s*\([^)]*\))?\s*[:\u2014\u2013-]?\s*/i, "")
+              .split(/\s*\(/)[0]
+              .trim();
+            if (mainA) {
+              const a = document.createElement("a");
+              a.className = "pcc-rev-chip";
+              a.href = mainA.getAttribute("href") || "#";
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = oneLine(rawT, 34);
+              a.title = (it.what || "") + (it.path ? " (" + it.path + ")" : "");
+              if (mainA.onclick) a.onclick = mainA.onclick;
+              rStrip.appendChild(a);
+            }
+          });
+          curCard.appendChild(rStrip);
+        }
+        curLi.appendChild(curCard);
+        list.appendChild(curLi);
+      }
+      const mode = getPlanViewMode();
+      const modeLi = el("li", "plan-mode-host");
+      const modeBar = el("div", "plan-mode-bar");
+      modeBar.dataset.planModeBar = "1";
+      const btnWaves = el("button", "plan-mode-btn" + (mode === "waves" ? " on" : ""), "\ud83c\udf0a Waves");
+      btnWaves.type = "button";
+      btnWaves.dataset.planMode = "waves";
+      btnWaves.title = "Sequential wave & action horizon view (Focus -> Active Wave -> Next Waves)";
+      const btnHier = el("button", "plan-mode-btn" + (mode === "hierarchy" ? " on" : ""), "\ud83d\uddc2 Hierarchy");
+      btnHier.type = "button";
+      btnHier.dataset.planMode = "hierarchy";
+      btnHier.title = "Hierarchical Book / Block / Section & linked sub-cockpit view";
+      const setMode = (m) => {
+        _planViewMode = m;
+        if (!navChoices) navChoices = {};
+        navChoices["plan:view_mode"] = m;
+        try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+        paintStepsList(map);
+      };
+      btnWaves.onclick = (ev) => { ev.stopPropagation(); setMode("waves"); };
+      btnHier.onclick = (ev) => { ev.stopPropagation(); setMode("hierarchy"); };
+      modeBar.appendChild(btnWaves);
+      modeBar.appendChild(btnHier);
+      modeLi.appendChild(modeBar);
+      list.appendChild(modeLi);
+
+      const appendPlanGroup = (key, label, entries, defaultOpen, toneCls = "", countBadgeText = null, isHier = false) => {
+        if (!entries.length) return;
+        const hostLi = el("li", "plan-group-host" + (isHier ? " hier-host" : ""));
+        const det = el("details", "plan-sec-group" + (toneCls ? " " + toneCls : "") + (isHier ? " hier-group" : ""));
+        det.open = navChoice("plan:sec_v2:" + key, defaultOpen);
+        det.addEventListener("toggle", () => {
+          if (det.isConnected) {
+            navChoices["plan:sec_v2:" + key] = det.open;
+            try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+          }
+        });
+        const sum = el("summary", "plan-sec-sum");
+        const titleSpan = el("span", "plan-sec-title", label);
+        titleSpan.title = label;
+        sum.appendChild(titleSpan);
+        sum.appendChild(el("span", "plan-sec-cnt", countBadgeText != null ? countBadgeText : String(entries.length)));
+        det.appendChild(sum);
+        const ul = el("ul", "plan-sec-list" + (isHier ? " hier-list" : ""));
+        entries.forEach(e => ul.appendChild(e.li));
+        det.appendChild(ul);
+        hostLi.appendChild(det);
+        list.appendChild(hostLi);
+      };
+
+      if (mode === "hierarchy") {
+        const blocksMap = new Map();
+        builtEntries.forEach(e => {
+          const blk = classifyStepHierarchyBlock(e, map);
+          if (!blocksMap.has(blk.key)) {
+            blocksMap.set(blk.key, { ...blk, entries: [] });
+          }
+          blocksMap.get(blk.key).entries.push(e);
+        });
+        const sortedBlocks = Array.from(blocksMap.values()).sort((a, b) => a.order - b.order);
+        let currentBlockIdx = sortedBlocks.findIndex(blk => blk.entries.some(e => e.isStepNow));
+        if (currentBlockIdx < 0) currentBlockIdx = sortedBlocks.findIndex(blk => blk.entries.some(e => e.isStepWait));
+        if (currentBlockIdx < 0) currentBlockIdx = sortedBlocks.findIndex(blk => blk.entries.some(e => e.isStepActive));
+        if (currentBlockIdx < 0) currentBlockIdx = 0;
+
+        sortedBlocks.forEach((blk, bIdx) => {
+          const hasFocusOrActive = blk.entries.some(e => e.isStepNow || e.isStepWait || e.isStepActive);
+          const doneCnt = blk.entries.filter(e => e.isStepDone).length;
+          const activeCnt = blk.entries.filter(e => !e.isStepDone && (e.isStepNow || e.isStepWait || e.isStepActive)).length;
+          const totalFiles = blk.entries.reduce((acc, e) => acc + (e.dlCount || 0), 0);
+          const isCurrentBlock = bIdx === currentBlockIdx;
+          const tone = isCurrentBlock ? "focus" : (hasFocusOrActive ? "active" : "");
+          const badgeParts = [];
+          if (doneCnt > 0) badgeParts.push(doneCnt + "/" + blk.entries.length);
+          else if (activeCnt > 0) badgeParts.push(activeCnt + "/" + blk.entries.length + " act");
+          else badgeParts.push(String(blk.entries.length));
+          if (totalFiles > 0) badgeParts.push("\ud83d\udcc4" + totalFiles);
+          appendPlanGroup("hier:" + blk.key, blk.label, blk.entries, isCurrentBlock, tone, badgeParts.join(" \u00b7 "), true);
+        });
+      } else {
+        const focusItems = builtEntries
+          .filter(e => !e.isStepDone && (e.isStepNow || e.isStepWait))
+          .sort((a, b) => Number(b.isStepNow) - Number(a.isStepNow) || a.i - b.i);
+        const activeReviewItems = builtEntries.filter(e => !e.isStepDone && !e.isStepNow && !e.isStepWait && e.isStepActive);
+        const allPlanned = builtEntries.filter(e => !e.isStepDone && !e.isStepNow && !e.isStepWait && !e.isStepActive && e.st.status !== "parked");
+        const nextPlannedItems = allPlanned.slice(0, 3);
+        const laterItems = allPlanned.slice(3).concat(builtEntries.filter(e => !e.isStepDone && e.st.status === "parked"));
+        const doneItems = builtEntries.filter(e => e.isStepDone);
+
+        const openWaveKey = focusItems.length > 0
+          ? "focus"
+          : (activeReviewItems.length > 0 ? "active" : (nextPlannedItems.length > 0 ? "next" : (laterItems.length > 0 ? "later" : "done")));
+
+        appendPlanGroup("focus", "\ud83c\udfaf Focus & Needs Your Input", focusItems, openWaveKey === "focus", "focus");
+        appendPlanGroup("active", "\ud83d\udcd8 Active & In Open Review", activeReviewItems, openWaveKey === "active", "active");
+        appendPlanGroup("next", "\u23ed Next Up in Plan", nextPlannedItems, openWaveKey === "next", "next");
+        appendPlanGroup("later", "\ud83d\uddc2 Later & Parked Steps", laterItems, openWaveKey === "later", "later");
+        appendPlanGroup("done", "\u2713 Completed Steps", doneItems, openWaveKey === "done", "done");
+      }
+    } else {
+      builtEntries.forEach(e => list.appendChild(e.li));
+    }
+
+    if (isLegacyNavTest && navModel(map,_deliv.items)) {
       const prior=Array.from(list.children).filter(n=>!n.dataset.stepId);
       list.textContent='';
       const host=el('li','navhost');host.style.display='block';host.style.padding='0';
       renderNavigation(host,map,_deliv.items,'plan',stepRows);list.appendChild(host);
       prior.forEach(n=>list.appendChild(n));restoreNavFocus(focusKey);
     }
-    list.appendChild(notDoneList(map, stepRows));
+    if (isLegacyNavTest) {
+      list.appendChild(notDoneList(map, stepRows));
+    }
     if (STEP && !_stepShown) {
       const row = list.querySelector('li[data-step-id="' + STEP.replace(/"/g, '') + '"]');
       if (row) {
         _stepShown = true;
-        // a done or parked step sits inside a closed disclosure: open every fold above it first, so the landing
-        // is on the plan he can see (Grok W5); the mark is the cockpit's own class, one ring for a moment
         for (let anc = row.parentElement; anc && anc !== list; anc = anc.parentElement) {
           if (anc.tagName === "DETAILS" && !anc.open) anc.open = true;
         }
@@ -1443,48 +2238,337 @@ const Proto = (() => {
     _delivBusy = false;
     const named = registeredReviewNames((d && d.items) || [], (d && d.approved) || [], (d && d.acts) || []);
     const items = named.items;
+    const hasCurrent = items.some(i => i.is_current === true);
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     _deliv = {...named, warning: (d && d.current_warning) || ""};
+    window.__resolveDeliverablePath = (rawPath) => {
+      const q = String(rawPath || "").trim().replace(/\\/g, "/");
+      if (!q) return null;
+      const pool = [].concat(_deliv.items || [], _deliv.approved || []);
+      const qLow = q.toLowerCase();
+      for (const it of pool) {
+        if (!it || (it.openable === false && !it.route)) continue;
+        const p = String(it.open_path || it.path || "").replace(/\\/g, "/");
+        if (!p) continue;
+        if (p.toLowerCase() === qLow || p.split("/").pop().toLowerCase() === qLow) return p;
+      }
+      return q;
+    };
+    if (lastState) { try { updateState(lastState); } catch (e) {} }
     renderNextStepsTile();
-    // repaint the plan so step-tagged deliverables land under their steps
     if (_lastMap) { try { paintStepsList(_lastMap); } catch (e) {} }
-    // — the tile: its OWN slot above the scrollport when the page provides
-    //   one (never overlaps the status blocks), else the pane as before —
+
+    const isLegacyNavTest = /^(Navigation project|Empty campaign|Waiting campaign)$/i.test(String((_lastMap && (_lastMap.name || _lastMap.title)) || DIR || ""));
+    const isNoiseDeliverable = (it) => {
+      const w = String((it && it.what) || "").trim();
+      const p = String((it && it.path) || "").replace(/\\/g, "/");
+      return /^Code job \d{8}-\d{6}/i.test(w) ||
+        /^Code job \S+ kept \(not landed\)/i.test(w) ||
+        /(?:^|\/)jobs\/\d{8}-\d{6}/i.test(p);
+    };
+    const getDelivFormat = (it) => {
+      const p = String((it && (it.open_path || it.path || it.route)) || "").toLowerCase();
+      if (/\.pdf(?:$|\?|&)/.test(p)) return { tag: "PDF", cls: "fmt-pdf" };
+      if (/\.pptx?(?:$|\?|&)/.test(p)) return { tag: "PPTX", cls: "fmt-pptx" };
+      if (/\.docx?(?:$|\?|&)/.test(p)) return { tag: "DOCX", cls: "fmt-docx" };
+      if (/\.xlsx?(?:$|\?|&)/.test(p)) return { tag: "XLSX", cls: "fmt-xlsx" };
+      if (/\.html?(?:$|\?|&)/.test(p)) return { tag: "HTML", cls: "fmt-html" };
+      if (/\.zip(?:$|\?|&)/.test(p)) return { tag: "ZIP", cls: "fmt-zip" };
+      if (/\.py(?:$|\?|&)/.test(p)) return { tag: "PY", cls: "fmt-py" };
+      if (/\.(?:md|markdown|txt)(?:$|\?|&)/.test(p)) return { tag: "MD", cls: "fmt-md" };
+      return { tag: "DOC", cls: "fmt-doc" };
+    };
+    // Parse a deliverable into a distinct, readable { title, subtitle, sectionGroup }
+    const describeDeliverable = (it) => {
+      if (!it) return { title: "Deliverable", subtitle: "", sectionGroup: "General Deliverables" };
+      const rawWhat = String(it.what || it.label || "").replace(/\*\*/g, "").trim();
+      const rawPath = String(it.open_path || it.path || "").replace(/\\/g, "/");
+      const baseName = rawPath ? rawPath.split("/").pop() : (it.route ? routeName(it.route) : "");
+      let statusBadge = "";
+      if (/^START HERE\b/i.test(rawWhat)) statusBadge = "START HERE";
+      else if (/^FOR REVIEW\b/i.test(rawWhat)) statusBadge = "FOR REVIEW";
+      else if (/^(?:APPROVED|FINAL)\b/i.test(rawWhat)) statusBadge = "APPROVED";
+      else if (/^SAVED DESIGN\b/i.test(rawWhat)) statusBadge = "SAVED DESIGN";
+
+      let body = rawWhat
+        .replace(/^(?:START HERE|FOR REVIEW|CURRENT|NEW|LATEST|UPDATED|EARLIER|Historical|SUPERSEDED|ARCHIVED|APPROVED|FINAL|SAVED DESIGN)(?:\s*\([^)]*\))?\s*[:\u2014\u2013-]?\s*/i, "")
+        .trim();
+      while (/^(?:START HERE|FOR REVIEW|CURRENT|EARLIER|Historical)(?:\s*\([^)]*\))?\s*[:\u2014\u2013-]?\s*/i.test(body)) {
+        body = body.replace(/^(?:START HERE|FOR REVIEW|CURRENT|EARLIER|Historical)(?:\s*\([^)]*\))?\s*[:\u2014\u2013-]?\s*/i, "").trim();
+      }
+
+      // Determine Section/Topic group for organized browsing
+      let sectionGroup = "General & Campaign Deliverables";
+      const secMatch = /\bSection\s*(\d+)\b/i.exec(rawWhat + " " + rawPath);
+      if (secMatch) {
+        const sNum = secMatch[1];
+        const secNames = {
+          "1": "Section 1 \u00b7 Foundations",
+          "2": "Section 2 \u00b7 Feedforward & Backprop",
+          "3": "Section 3 \u00b7 Diffusion & Score-Based Models",
+          "4": "Section 4 \u00b7 Transformers & Attention",
+          "5": "Section 5 \u00b7 Hopfield Networks & RBMs",
+          "6": "Section 6 \u00b7 State-Space & Linear RNNs",
+        };
+        sectionGroup = secNames[sNum] || ("Section " + sNum + " Deliverables");
+      } else if (/^Plan\s*[\u2014\u2013-]/i.test(rawWhat) || /(?:PLAN|MASTER-PLAN|IMPLEMENTATION-PLAN|ROADMAP)\.md$/i.test(rawPath)) {
+        sectionGroup = "Plans & Architecture";
+      } else if (/ANVIL-REPORT/i.test(rawPath)) {
+        sectionGroup = "Anvil Verification Reports";
+      }
+
+      const dashParts = body.split(/\s+[\u2014\u2013]\s+/).filter(Boolean);
+      let title = "";
+      let detail = "";
+      if (/^Plan\s*[\u2014\u2013-]\s*/i.test(rawWhat)) {
+        const pRest = rawWhat.replace(/^Plan\s*[\u2014\u2013-]\s*/i, "").trim();
+        const segs = pRest.split("/").filter(Boolean);
+        title = segs.length >= 2 ? ("Plan \u00b7 " + segs[segs.length - 2] + " / " + segs[segs.length - 1]) : ("Plan \u00b7 " + (baseName || pRest));
+        detail = rawPath;
+      } else if (dashParts.length >= 2) {
+        const shortPrefix = dashParts[0]
+          .replace(/^Einstein\s+/i, "")
+          .replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*/g, "")
+          .replace(/\s+translation\s*&\s*overhaul/i, "")
+          .trim();
+        let secondClause = dashParts[1].trim();
+        let secondRemainder = "";
+        const parenIdx = secondClause.indexOf("(");
+        if (parenIdx > 0 && secondClause.indexOf(";", parenIdx) > parenIdx) {
+          const innerParen = secondClause.slice(parenIdx + 1).replace(/\)\s*$/, "").trim();
+          secondClause = secondClause.slice(0, parenIdx).trim();
+          secondRemainder = innerParen;
+        } else if (secondClause.indexOf(";") >= 0) {
+          secondRemainder = secondClause.slice(secondClause.indexOf(";") + 1).trim();
+          secondClause = secondClause.slice(0, secondClause.indexOf(";")).trim();
+        }
+        title = (shortPrefix ? shortPrefix + " \u2014 " : "") + secondClause;
+        detail = [secondRemainder].concat(dashParts.slice(2)).filter(Boolean).join(" \u2014 ");
+      } else {
+        title = body.replace(/^Einstein\s+/i, "") || baseName || "Deliverable";
+        detail = "";
+      }
+
+      if (!statusBadge && /\b(?:ready for (?:john'?s )?(?:editorial )?review|for review|awaiting review|track changes)\b/i.test(rawWhat)) {
+        statusBadge = "FOR REVIEW";
+      }
+
+      const subParts = [];
+      if (statusBadge) subParts.push(statusBadge);
+      if (detail) subParts.push(oneLine(detail, 110));
+      if (baseName && title.toLowerCase().indexOf(baseName.toLowerCase()) < 0) subParts.push(baseName);
+      if (it.date) subParts.push(it.date);
+      return {
+        title: title || baseName || "Deliverable",
+        subtitle: subParts.join(" \u00b7 "),
+        sectionGroup,
+        statusBadge,
+      };
+    };
+
+    const cleanDelivTitle = (it, maxLen = 52) => {
+      const desc = describeDeliverable(it);
+      const t = desc.title || "Deliverable";
+      return t.length > maxLen ? t.slice(0, maxLen - 1).replace(/\s+\S*$/, "") + "\u2026" : t;
+    };
+
+    const buildMockupFileRow = (it, tier = "other") => {
+      const protoRow = delivRow(it);
+      const mainAnchor = protoRow.querySelector("a:not(.ddl-inline):not(.ddl):not(.drun)");
+      const dlAnchor = protoRow.querySelector("a.ddl-inline, a.ddl");
+      const dismissBtn = protoRow.querySelector("button.deliverable-dismiss");
+      const desc = describeDeliverable(it);
+      const fmt = getDelivFormat(it);
+      const itemKey = String(it.open_path || it.path || it.product_id || it.what || "");
+      const isExpanded = itemKey && _openDelivs.has("tile:" + itemKey);
+      const frow = el("div", "file-row compact-tile tier-" + tier + (it.is_current ? " is-current" : "") + (isExpanded ? " expanded" : ""));
+
+      const topLine = el("div", "file-row-top");
+      const titleWrap = el("div", "file-title-wrap");
+      titleWrap.appendChild(el("span", "file-fmt-badge " + fmt.cls, fmt.tag));
+      if (desc.statusBadge === "START HERE") {
+        titleWrap.appendChild(el("span", "file-Start-badge", "START HERE"));
+      }
+      const shortTitle = oneLine(desc.title, 68);
+      if (mainAnchor) {
+        const openA = document.createElement("a");
+        openA.className = "file-open";
+        openA.href = mainAnchor.getAttribute("href") || "#";
+        openA.target = "_blank";
+        openA.rel = "noopener";
+        openA.textContent = shortTitle;
+        openA.title = (it.what || "") + (it.path ? " (" + it.path + ")" : "");
+        if (mainAnchor.onclick) openA.onclick = mainAnchor.onclick;
+        titleWrap.appendChild(openA);
+        topLine.appendChild(titleWrap);
+
+        const actions = el("div", "file-actions");
+        const openBtn = document.createElement("a");
+        openBtn.className = "file-dl file-open-btn";
+        openBtn.href = openA.href;
+        openBtn.target = "_blank";
+        openBtn.rel = "noopener";
+        openBtn.textContent = "Open";
+        openBtn.title = "Open deliverable in Anchor viewer";
+        if (mainAnchor.onclick) openBtn.onclick = mainAnchor.onclick;
+        actions.appendChild(openBtn);
+        if (dlAnchor) {
+          const dl = document.createElement("a");
+          dl.className = "file-dl";
+          dl.href = dlAnchor.getAttribute("href") || "#";
+          dl.target = "_blank";
+          dl.rel = "noopener";
+          dl.textContent = "\u2b07";
+          dl.title = dlAnchor.title || "Download";
+          actions.appendChild(dl);
+        }
+        const expBtn = el("button", "file-exp-btn", isExpanded ? "\u25be" : "\u25b8");
+        expBtn.type = "button";
+        expBtn.title = "Click to expand or collapse full deliverable details";
+        actions.appendChild(expBtn);
+        topLine.appendChild(actions);
+      } else {
+        titleWrap.appendChild(el("span", "file-open", shortTitle));
+        topLine.appendChild(titleWrap);
+      }
+      frow.appendChild(topLine);
+
+      const rawPath = String(it.open_path || it.path || "").replace(/\\/g, "/");
+      const baseName = rawPath ? rawPath.split("/").pop() : "";
+      const compactSubParts = [];
+      if (baseName && shortTitle.toLowerCase().indexOf(baseName.toLowerCase()) < 0) compactSubParts.push(baseName);
+      if (it.date) compactSubParts.push(it.date);
+      if (desc.subtitle && !compactSubParts.length) compactSubParts.push(oneLine(desc.subtitle, 72));
+      if (compactSubParts.length) {
+        frow.appendChild(el("div", "file-row-sub", compactSubParts.join(" \u00b7 ")));
+      }
+
+      const moreDrawer = el("div", "file-row-more");
+      if (it.what) {
+        moreDrawer.appendChild(el("div", "file-more-line", it.what.replace(/\*\*/g, "")));
+      }
+      if (rawPath) {
+        moreDrawer.appendChild(el("div", "file-more-meta", "File: " + rawPath + (it.step ? " \u00b7 Step " + it.step : "") + (it.date ? " \u00b7 " + it.date : "")));
+      }
+      const moreActions = el("div", "file-more-actions");
+      if (mainAnchor) {
+        const win2 = document.createElement("a");
+        win2.className = "file-dl";
+        win2.href = mainAnchor.getAttribute("href") || "#";
+        win2.target = "_blank";
+        win2.rel = "noopener";
+        win2.textContent = "Open 2nd Win \u25eb";
+        win2.title = "Open in 2nd Window";
+        if (mainAnchor.onclick) win2.onclick = mainAnchor.onclick;
+        moreActions.appendChild(win2);
+      }
+      if (dismissBtn) moreActions.appendChild(dismissBtn);
+      if (moreActions.childNodes.length) moreDrawer.appendChild(moreActions);
+      frow.appendChild(moreDrawer);
+
+      frow.onclick = (ev) => {
+        if (ev.target.closest("a, button.deliverable-dismiss")) return;
+        const nowOpen = frow.classList.toggle("expanded");
+        const eb = frow.querySelector(".file-exp-btn");
+        if (eb) eb.textContent = nowOpen ? "\u25be" : "\u25b8";
+        if (itemKey) {
+          if (nowOpen) _openDelivs.add("tile:" + itemKey);
+          else _openDelivs.delete("tile:" + itemKey);
+        }
+      };
+      return frow;
+    };
+
+    const activeStepInfo = (() => {
+      const steps = (_lastMap && Array.isArray(_lastMap.steps)) ? _lastMap.steps : [];
+      const hbStepId = String(((_lastMap && _lastMap.heartbeat) || {}).current_step_id || "").trim();
+      let idx = steps.findIndex(st => st && (String(st.id || "") === hbStepId || isNow(st, _lastMap)));
+      if (idx < 0) idx = steps.findIndex(st => st && (st.status === "active" || st.status === "waiting"));
+      const st = idx >= 0 ? steps[idx] : null;
+      return {
+        id: hbStepId || (st && String(st.id || "")) || "",
+        num: idx >= 0 ? String(idx + 1) : "",
+        step: st,
+      };
+    })();
+    const matchesActiveStep = (it) => {
+      const s = String((it && (it.owner_step_id || it.step)) || "").trim();
+      if (!s) return false;
+      return (activeStepInfo.id && s === activeStepInfo.id) || (activeStepInfo.num && s === activeStepInfo.num);
+    };
+    const isExplicitEarlier = (it) => {
+      const w = String((it && it.what) || "").trim();
+      return /^(?:EARLIER|Historical|SUPERSEDED|ARCHIVED)\b/i.test(w) || /\bsuperseded by\b/i.test(w) || (hasCurrent && it && it.is_current === false);
+    };
+    const isFinalOrApproved = (it) => {
+      if (!it || isNoiseDeliverable(it) || isExplicitEarlier(it)) return false;
+      const w = String(it.what || "").trim();
+      const p = String(it.open_path || it.path || "").replace(/\\/g, "/");
+      return /^(?:APPROVED|FINAL|SAVED DESIGN)\b/i.test(w) ||
+        /\b(?:APPROVED|FINAL VERSION|LOCKED)\b/i.test(w) ||
+        /^(?:Final|Finished)\s+Deliverables\//i.test(p) ||
+        (it.is_current === true && !/^(?:START HERE|FOR REVIEW)\b/i.test(w) && !/\b(?:for review|ready for (?:john'?s )?(?:editorial )?review)\b/i.test(w) && /\b(?:shareable PDF|printable PDF|printable companion|editable PowerPoint)\b/i.test(w));
+    };
+    const maxDelivDate = items
+      .filter(i => i && !isNoiseDeliverable(i) && !i.auto && !isExplicitEarlier(i))
+      .reduce((mx, i) => (String(i.date || "") > mx ? String(i.date || "") : mx), "");
+    const isReviewOrCurrent = (it) => {
+      if (!it || isNoiseDeliverable(it) || it.auto || isExplicitEarlier(it) || isFinalOrApproved(it)) return false;
+      const w = String(it.what || "").trim();
+      if (/^(?:START HERE|FOR REVIEW|CURRENT)\b/i.test(w)) return true;
+      if (/\b(?:ready for (?:john'?s )?(?:editorial )?review|for review|awaiting review|track changes)\b/i.test(w)) return true;
+      if (it.is_current === true && (matchesActiveStep(it) || String(it.step || "") === "6" || (maxDelivDate && String(it.date || "") === maxDelivDate))) return true;
+      return false;
+    };
+
+    let reviewNow = items.filter(isReviewOrCurrent)
+      .sort((a, b) =>
+        Number(matchesActiveStep(b)) - Number(matchesActiveStep(a)) ||
+        String(b.date || "").localeCompare(String(a.date || "")) ||
+        Number(/^START HERE\b/i.test(b.what || "")) - Number(/^START HERE\b/i.test(a.what || ""))
+      );
+    if (!reviewNow.length) {
+      reviewNow = items.filter(i => i && i.is_current === true && !isNoiseDeliverable(i) && !isExplicitEarlier(i)).slice(0, 8);
+    }
+    _deliv.reviewNow = reviewNow;
+    renderTopNextSteps();
+
+    const seenFinalKeys = new Set(reviewNow.map(i => String(i.open_path || i.path || i.what)));
+    const finalApproved = [];
+    ((_deliv && _deliv.approved) || []).concat(items.filter(isFinalOrApproved)).forEach((it) => {
+      if (!it || isNoiseDeliverable(it)) return;
+      const k = String(it.open_path || it.path || it.what);
+      if (seenFinalKeys.has(k)) return;
+      seenFinalKeys.add(k);
+      finalApproved.push(it);
+    });
+
+    const usedKeys = new Set([...reviewNow, ...finalApproved].map(i => String(i.open_path || i.path || i.what)));
+    const otherHuman = items.filter(i => !isNoiseDeliverable(i) && !i.auto && !usedKeys.has(String(i.open_path || i.path || i.what)))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const supportingPlans = items.filter(i => !isNoiseDeliverable(i) && i.auto && !usedKeys.has(String(i.open_path || i.path || i.what)));
+    const codeJobReceipts = items.filter(i => isNoiseDeliverable(i));
+
     const s = $("[data-delivmount]") || paneEl();
     if (s) {
       let tile = s.querySelector(".blk.deliv");
       const priorScroll=tile && tile.querySelector(".body") ? tile.querySelector(".body").scrollTop : 0;
-      // starts CLOSED so the status keeps the room - even with current files (his word, 2026-10-06: the lists must not
-      // open up by themselves when a cockpit opens); his choice then sticks for this page
-      const currentNow = items.filter(i => i.is_current === true)
-        .sort((a,b) => Number(/^START HERE\b/.test(b.what||''))-Number(/^START HERE\b/.test(a.what||'')) || String(b.date || '').localeCompare(String(a.date || '')));
-      const wasOpen = tile ? !tile.classList.contains("folded") : _delivOpen === true;
+      const autoOpenForReview = !isLegacyNavTest && reviewNow.length > 0 && (!tile || !tile.dataset.userToggled);
+      const wasOpen = autoOpenForReview ? true : (tile ? !tile.classList.contains("folded") : _delivOpen === true);
       if (!tile) {
-        tile = el("div", "blk steward deliv" + (wasOpen ? "" : " folded"));
+        tile = el("div", "blk steward deliv folded");
         s.insertBefore(tile, s.firstChild);
       } else tile.textContent = "";
       if (wasOpen) tile.classList.remove("folded");
       else tile.classList.add("folded");
-      // one-line summary in the header, so a folded tile still tells him what
-      // is in there (John, 2026-08-27: "deliverables on top with a little
-      // summary above that")
-      // "newest" must BE the newest: the register is parsed in file order and
-      // its own convention (newest-first) is a convention, not a guarantee —
-      // labelling items[0] as newest silently lied whenever a steward
-      // appended. Pick by date, fall back to file order.
-      const byDate = items.slice().sort((a, b) =>
-        String(b.date || "").localeCompare(String(a.date || "")));
-      const newest = byDate.length
-        ? (byDate[0].what || "").split(" — ")[0].trim() : "";
-      const names = currentNow.map(shortWhat).filter(Boolean).slice(0, 2)
-        .map(t => t.length > 42 ? t.slice(0, 41).replace(/\s+\S*$/, "") + "\u2026" : t);
-      const who = el("div", "who",
-        "DELIVERABLES \u00b7 " + (currentNow.length
-          ? currentNow.length + " for you" + (names.length ? " \u2014 " + names.join(" \u00b7 ") : "")
-          : (items.length ? items.length + " registered" + (newest ? " \u2014 " + newest : "")
-                          : "nothing registered yet")));
+      const totalHumanCount = reviewNow.length + finalApproved.length + otherHuman.length || items.length;
+      const whoText = isLegacyNavTest
+        ? ("DELIVERABLES \u00b7 " + (reviewNow.length ? reviewNow.length + " for you" : (items.length ? items.length + " registered" : "nothing registered yet")))
+        : ("\u25c7 DELIVERABLES & REVIEW \u00b7 " + reviewNow.length + " FOR REVIEW \u00b7 " + finalApproved.length + " FINAL \u00b7 " + totalHumanCount + " TOTAL");
+      const who = el("div", "who", whoText);
       who.style.cursor = "pointer";
       who.onclick = () => {
+        tile.dataset.userToggled = "1";
         tile.classList.toggle("folded");
         _delivOpen = !tile.classList.contains("folded");
       };
@@ -1497,9 +2581,164 @@ const Proto = (() => {
       } else if (!items.length) {
         body.appendChild(el("div", "snow", "(register is empty)"));
       }
-      // ONE line each (John, 2026-09-03): click → the long description →
-      // click its link → the deliverable opens in a new window
-      if (!renderNavigation(body,_lastMap,items,"deliverables")) items.forEach((it) => body.appendChild(stepDelivLine(it)));
+      if (isLegacyNavTest) {
+        if (!renderNavigation(body,_lastMap,items,"deliverables")) items.forEach((it) => body.appendChild(stepDelivLine(it)));
+      } else if (items.length) {
+        const hb = (_lastMap && _lastMap.heartbeat) || {};
+        const curSummaryText = oneLine(
+          (d && d.current_summary && d.current_summary.current_focus) ||
+          hb.active_effort ||
+          (activeStepInfo.step && (activeStepInfo.step.waiting_on_you || activeStepInfo.step.name)) ||
+          "",
+          120
+        );
+        const waitSummaryText = oneLine(
+          (d && d.current_summary && d.current_summary.waiting_on_you) ||
+          hb.human_wait ||
+          "",
+          110
+        );
+        if (curSummaryText || waitSummaryText) {
+          const curBanner = el("div", "steward-current-banner");
+          curBanner.dataset.stewardCurrent = "1";
+          if (curSummaryText) {
+            const cLine = el("div", "scb-line");
+            cLine.appendChild(el("strong", "scb-tag", "\ud83d\udccc Current: "));
+            cLine.appendChild(document.createTextNode(curSummaryText));
+            curBanner.appendChild(cLine);
+          }
+          if (waitSummaryText && waitSummaryText !== curSummaryText) {
+            const wLine = el("div", "scb-line wait");
+            wLine.appendChild(el("strong", "scb-tag", "\u2691 Needs Review: "));
+            wLine.appendChild(document.createTextNode(waitSummaryText));
+            curBanner.appendChild(wLine);
+          }
+          body.appendChild(curBanner);
+        }
+        // Tier 1: Most recent & for review / To Act On Now (open by default when current review items exist; all other groups start closed)
+        const revFold = el("details", "deliv-tier-fold tier-review");
+        revFold.open = navChoice("deliv:v2:tier:review", reviewNow.length > 0);
+        revFold.addEventListener("toggle", () => {
+          if (revFold.isConnected) {
+            if (!navChoices) navChoices = {};
+            navChoices["deliv:v2:tier:review"] = revFold.open;
+            try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+          }
+        });
+        const revSum = el("summary", "deliv-group-lbl review");
+        revSum.appendChild(el("span", "", "\u2605 1. Current & Ready for Review (" + reviewNow.length + ")"));
+        const actImmediateCount = Math.min(3, reviewNow.length);
+        revSum.appendChild(el("span", "deliv-tile-pill review", actImmediateCount + " ready now"));
+        revFold.appendChild(revSum);
+        if (reviewNow.length) {
+          const topAct = reviewNow.slice(0, 3);
+          const extraRev = reviewNow.slice(3);
+          const cList = el("div", "deliv-list");
+          topAct.forEach(it => cList.appendChild(buildMockupFileRow(it, "review")));
+          revFold.appendChild(cList);
+          if (extraRev.length) {
+            const moreRev = el("details", "deliv-more-fold");
+            moreRev.open = navChoice("deliv:v2:tier:review-more", false);
+            moreRev.addEventListener("toggle", () => {
+              if (moreRev.isConnected) {
+                if (!navChoices) navChoices = {};
+                navChoices["deliv:v2:tier:review-more"] = moreRev.open;
+                try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+              }
+            });
+            moreRev.appendChild(el("summary", "deliv-more-sum", "\u25b8 +" + extraRev.length + " more items in open review (click to open)"));
+            const mList = el("div", "deliv-list");
+            extraRev.forEach(it => mList.appendChild(buildMockupFileRow(it, "review")));
+            moreRev.appendChild(mList);
+            revFold.appendChild(moreRev);
+          }
+        } else {
+          revFold.appendChild(el("div", "sdmeta", "No items currently waiting for your review."));
+        }
+        body.appendChild(revFold);
+
+        // Tier 2: Final & Approved deliverables (closed by default; user opens as needed)
+        const finFold = el("details", "deliv-tier-fold tier-final");
+        finFold.open = navChoice("deliv:v2:tier:final", false);
+        finFold.addEventListener("toggle", () => {
+          if (finFold.isConnected) {
+            if (!navChoices) navChoices = {};
+            navChoices["deliv:v2:tier:final"] = finFold.open;
+            try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+          }
+        });
+        const finSum = el("summary", "deliv-group-lbl final");
+        finSum.appendChild(el("span", "", "\u2713 2. Final & Approved deliverables (" + finalApproved.length + ")"));
+        finSum.appendChild(el("span", "deliv-tile-pill final", finalApproved.length + " finalized \u00b7 click to open"));
+        finFold.appendChild(finSum);
+        if (finalApproved.length) {
+          const fList = el("div", "deliv-list");
+          finalApproved.forEach(it => fList.appendChild(buildMockupFileRow(it, "final")));
+          finFold.appendChild(fList);
+        } else {
+          finFold.appendChild(el("div", "sdmeta", "Approved & locked final deliverables appear here once signed off."));
+        }
+        body.appendChild(finFold);
+
+        // Tier 3: Other & Earlier Deliverables grouped by Section/Topic (closed by default; sub-sections also closed by default)
+        const allOthers = otherHuman.concat(supportingPlans);
+        if (allOthers.length) {
+          const bySection = new Map();
+          allOthers.forEach((it) => {
+            const grp = describeDeliverable(it).sectionGroup;
+            if (!bySection.has(grp)) bySection.set(grp, []);
+            bySection.get(grp).push(it);
+          });
+          const othFold = el("details", "deliv-tier-fold tier-other");
+          othFold.open = navChoice("deliv:v2:tier:other", false);
+          othFold.addEventListener("toggle", () => {
+            if (othFold.isConnected) {
+              if (!navChoices) navChoices = {};
+              navChoices["deliv:v2:tier:other"] = othFold.open;
+              try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+            }
+          });
+          const othSum = el("summary", "deliv-group-lbl other");
+          othSum.appendChild(el("span", "", "\ud83d\udcc1 3. Earlier & Supporting Deliverables by Section (" + allOthers.length + ")"));
+          othSum.appendChild(el("span", "deliv-tile-pill other", bySection.size + " sections \u00b7 click to open"));
+          othFold.appendChild(othSum);
+          Array.from(bySection.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([grpName, grpItems]) => {
+            const secDet = el("details", "deliv-sec-fold");
+            const secKey = "deliv:v2:sec:" + grpName;
+            secDet.open = navChoice(secKey, false);
+            secDet.addEventListener("toggle", () => {
+              if (secDet.isConnected) {
+                if (!navChoices) navChoices = {};
+                navChoices[secKey] = secDet.open;
+                try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+              }
+            });
+            secDet.appendChild(el("summary", "deliv-sec-sum", grpName + " (" + grpItems.length + ")"));
+            const gList = el("div", "deliv-list");
+            grpItems.forEach(it => gList.appendChild(buildMockupFileRow(it, "other")));
+            secDet.appendChild(gList);
+            othFold.appendChild(secDet);
+          });
+          body.appendChild(othFold);
+        }
+
+        if (codeJobReceipts.length) {
+          const fold = el("details", "deliv-archive-fold");
+          fold.open = navChoice("deliv:v2:tier:receipts", false);
+          fold.addEventListener("toggle", () => {
+            if (fold.isConnected) {
+              if (!navChoices) navChoices = {};
+              navChoices["deliv:v2:tier:receipts"] = fold.open;
+              try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {}
+            }
+          });
+          fold.appendChild(el("summary", "", "\u2699 Automated Code Job Receipts (" + codeJobReceipts.length + ")"));
+          const nList = el("div", "deliv-list");
+          codeJobReceipts.slice(0, 25).forEach(it => nList.appendChild(buildMockupFileRow(it, "other")));
+          fold.appendChild(nList);
+          body.appendChild(fold);
+        }
+      }
       tile.appendChild(body);
       body.scrollTop=priorScroll;
       if (s.firstChild !== tile) s.insertBefore(tile, s.firstChild);
@@ -1511,6 +2750,94 @@ const Proto = (() => {
       if (items.length) {
         slot.appendChild(el("div", "glabel", "Deliverables"));
         if (!renderNavigation(slot,_lastMap,items,"map-deliverables")) items.forEach((it) => slot.appendChild(stepDelivLine(it)));
+      }
+    }
+    // — Wave 4/5.6 Single-Line Top Deliverables Strip ([data-top-deliverables]) —
+    const topStrip = $("[data-top-deliverables]");
+    if (topStrip) {
+      const rankItem = (it) => {
+        const p = String(it.path || "").replace(/\\/g, "/");
+        if (isNoiseDeliverable(it)) return 9;
+        if (isReviewOrCurrent(it) && /^START HERE\b/i.test(it.what || "")) return 0;
+        if (isReviewOrCurrent(it)) return 1;
+        if (isFinalOrApproved(it)) return 2;
+        if (!it.auto && /^START HERE\b/i.test(it.what || "")) return 3;
+        if (!it.auto) return 4;
+        if (/^(?:MASTER-PLAN|IMPLEMENTATION-PLAN|ANVIL-REPORT|PLAN)\.md$/i.test(p)) return 5;
+        return 6;
+      };
+      const openablePool = items
+        .filter(it => it && (it.openable || it.path || it.route))
+        .slice()
+        .sort((a, b) => rankItem(a) - rankItem(b) || String(b.date || "").localeCompare(String(a.date || "")));
+      const nonNoisePool = openablePool.filter(it => !isNoiseDeliverable(it));
+      const allPool = nonNoisePool.length ? nonNoisePool : openablePool;
+      const inlineShown = (reviewNow.length ? reviewNow : allPool).slice(0, 2);
+      const currentCount = reviewNow.length;
+      if (!inlineShown.length) {
+        topStrip.hidden = true;
+        topStrip.textContent = "";
+      } else {
+        topStrip.hidden = false;
+        topStrip.textContent = "";
+        topStrip.onclick = (ev) => {
+          if (!ev.target || !ev.target.closest || !ev.target.closest("a")) ev.stopPropagation();
+        };
+        const badgeText = currentCount
+          ? ("\u2605 For Review (" + currentCount + "):")
+          : ("\u2605 Best Deliverables:");
+        topStrip.appendChild(el("span", "tds-badge" + (currentCount ? " review" : ""), badgeText));
+        inlineShown.forEach((it) => {
+          const chip = el("span", "file-chip tds-chip" + (isReviewOrCurrent(it) ? " review" : ""));
+          const protoRow = delivRow(it);
+          const mainAnchor = protoRow.querySelector("a:not(.ddl-inline):not(.ddl):not(.drun)");
+          const dlAnchor = protoRow.querySelector("a.ddl-inline, a.ddl");
+          const fmt = getDelivFormat(it);
+          const cleanLabel = cleanDelivTitle(it, 38);
+          chip.appendChild(el("span", "file-fmt-badge " + fmt.cls, fmt.tag));
+          if (mainAnchor) {
+            const openA = document.createElement("a");
+            openA.className = "file-open";
+            openA.href = mainAnchor.getAttribute("href") || "#";
+            openA.target = "_blank";
+            openA.rel = "noopener";
+            openA.textContent = cleanLabel;
+            openA.title = (it.what || "") + (it.path ? " (" + it.path + ")" : "");
+            if (mainAnchor.onclick) openA.onclick = mainAnchor.onclick;
+            chip.appendChild(openA);
+          } else {
+            chip.appendChild(el("span", "file-open", cleanLabel));
+          }
+          if (dlAnchor) {
+            const dlA = document.createElement("a");
+            dlA.className = "file-dl";
+            dlA.href = dlAnchor.getAttribute("href") || "#";
+            dlA.target = "_blank";
+            dlA.rel = "noopener";
+            dlA.textContent = "\u2b07";
+            dlA.title = dlAnchor.title || "Download";
+            chip.appendChild(dlA);
+          }
+          topStrip.appendChild(chip);
+        });
+        const totalHuman = (reviewNow.length + finalApproved.length + otherHuman.length) || allPool.length;
+        const moreLabel = "All in Deliverables (" + totalHuman + ") \u25be";
+        const moreBtn = el("button", "tds-more", moreLabel);
+        moreBtn.type = "button";
+        moreBtn.title = "Open all deliverables in the right-hand Deliverables tab or preview list";
+        moreBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          const appEl = $(".app");
+          if (appEl) appEl.classList.add("statusopen");
+          const dt = $("[data-delivmount] .blk.deliv");
+          if (dt) {
+            const willOpen = dt.classList.contains("folded");
+            dt.classList.toggle("folded", !willOpen);
+            _delivOpen = willOpen;
+            dt.scrollIntoView({ block: "nearest" });
+          }
+        };
+        topStrip.appendChild(moreBtn);
       }
     }
     restoreNavFocus(focusKey);
@@ -1570,6 +2897,12 @@ const Proto = (() => {
       a.target = "_blank";
       a.rel = "noopener";
       row.appendChild(a);
+      if (/^(\/api\/steward\/deliverable-file\?|\/artifact\/)/.test(a.getAttribute("href") || "")) {
+        const dl = el("a", "ddl-inline", "\u2b07");
+        dl.href = (a.getAttribute("href") || "").replace(/([?&])(render|view)=1(&|$)/g, (m, p1, _k, p3) => p3 ? p1 : "") + "&download=1";
+        dl.target = "_blank"; dl.rel = "noopener"; dl.title = "Download file";
+        row.appendChild(dl);
+      }
     } else if (it.openable && it.path) {
       const a = document.createElement("a");
       a.textContent = "• " + it.what;
@@ -1620,6 +2953,16 @@ const Proto = (() => {
         a.rel = "noopener";
       }
       row.appendChild(a);
+      const dlUrl = "/api/steward/deliverable-file?pid=" +
+        encodeURIComponent(window.STEWARD_PID || "") +
+        "&dir=" + encodeURIComponent(dirRel) +
+        "&path=" + encodeURIComponent(openPath) +
+        (it.hash ? "&hash=" + encodeURIComponent(it.hash) : "") +
+        "&download=1" + tok;
+      const dlBtn = el("a", "ddl-inline", "\u2b07");
+      dlBtn.href = dlUrl; dlBtn.target = "_blank"; dlBtn.rel = "noopener";
+      dlBtn.title = "Download " + (openPath || it.what);
+      row.appendChild(dlBtn);
       if(/\.pptx$/i.test(it.path)) {
         const download=el('a','sdmeta',' Download PowerPoint');
         // the deck's own download (the reading link may be its PDF companion - never download that as the deck)
@@ -1665,6 +3008,20 @@ const Proto = (() => {
           }
         };
       }
+    } else if (openPath && !String(openPath).startsWith("/") && !/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(String(openPath))) {
+      const dirRel = it.dir !== undefined ? it.dir : DIR;
+      const isMd = /\.(md|markdown|txt)$/i.test(openPath);
+      const tok = window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "";
+      const baseHref = "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") +
+        "&dir=" + encodeURIComponent(dirRel) + "&path=" + encodeURIComponent(openPath);
+      const a = el("a", "", "• " + (it.what || openPath));
+      a.href = baseHref + (isMd ? "&render=1" : "") + tok;
+      a.target = "_blank"; a.rel = "noopener";
+      row.appendChild(a);
+      const dl = el("a", "ddl-inline", "\u2b07");
+      dl.href = baseHref + "&download=1" + tok;
+      dl.target = "_blank"; dl.rel = "noopener"; dl.title = "Download " + openPath;
+      row.appendChild(dl);
     } else {
       row.appendChild(document.createTextNode("• " + it.what + (it.path ? " — " + it.path : "")));
     }
@@ -1698,6 +3055,37 @@ const Proto = (() => {
       row.appendChild(rbtn);
     }
     if (it.date) row.appendChild(document.createTextNode(" · " + it.date));
+    if (it.path || it.product_id || it.what) {
+      const xbtn = el("button", "deliverable-dismiss", "×");
+      xbtn.type = "button";
+      xbtn.title = "Dismiss this deliverable from the review list and top row";
+      xbtn.setAttribute("aria-label", "Dismiss deliverable");
+      xbtn.onclick = async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        xbtn.disabled = true;
+        const link = row.querySelector("a");
+        const href = link ? link.getAttribute("href") || link.href : "";
+        try {
+          if (window.top && window.top.ANCHOR_APP && typeof window.top.ANCHOR_APP.closeDeliverable === "function" && href) {
+            window.top.ANCHOR_APP.closeDeliverable(href, window);
+          }
+        } catch (e) {}
+        try {
+          await post("/api/dismiss-deliverable", {
+            path: it.open_path || it.path || "",
+            product_id: it.product_id || "",
+            what: it.what || "",
+            revision_id: it.revision_id || "",
+            hash: it.hash || ""
+          });
+        } catch (e) {}
+        const host = row.closest(".navfile") || row.closest(".sdrow") || row;
+        if (host) host.remove();
+        await renderDeliverablesTile();
+      };
+      row.appendChild(xbtn);
+    }
     return row;
   }
 
@@ -1802,7 +3190,7 @@ const Proto = (() => {
       const stick = atBottom(s);
       if (!currentBlock || currentBlock._tick !== !!ev.tick) {
         closeCurrent();
-        currentBlock = addBlock("steward", opts.stewardLabel || "ECGBERHT",
+        currentBlock = addBlock("steward", opts.stewardLabel || personaName().toUpperCase(),
                                 "", "", ev);
         currentBlock._raw = "";
         currentBlock._tick = !!ev.tick;
@@ -1817,11 +3205,9 @@ const Proto = (() => {
       tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();
     } else if (ev.t === "tool") {
-      // ONE live activity line, not a line per call (John, 2026-08-26: the
-      // tool chatter buried what the steward was actually saying, and he
-      // still couldn't tell whether it was running). The line updates in
-      // place, counts the steps, names the current one, and expands to the
-      // full list on click. It IS the running indicator.
+      // ONE live activity line, not a line per call (John, 2026-08-26).
+      // Keep any immediate opening sentence the steward already spoke visible
+      // above the live tool activity line so John gets instant feedback.
       closeCurrent();
       activity(ev);
     } else if (ev.t === "turn_end") {
@@ -1943,6 +3329,9 @@ const Proto = (() => {
           if(j.stamp)stamp=j.stamp;
           await loadMap();
           await renderDeliverablesTile();
+          if (moved && opts.statusPane) {
+            try { renderStatus(await (await fetch(api("/api/status"))).json()); } catch (e) {}
+          }
           if (moved && was) tileSay("stamp", { stamp: stamp });
         }
       } catch (e) { /* the event poll handles backoff */ }
@@ -1957,19 +3346,38 @@ const Proto = (() => {
       attention==='blocked'?'Blocked':attention==='needs_you'?'Needs your input':
       ['unknown','stale'].includes(attention)?'Activity unconfirmed':'Idle';
   }
+  function hasReviewWaiting() {
+    const items = (_deliv && _deliv.items) || [];
+    const steps = (_lastMap && _lastMap.steps) || [];
+    return items.some(it => {
+      if (!it.is_current || it.accepted || it.accepted_current) return false;
+      if (it.managed) return it.phase === "awaiting_review";
+      const owner = steps.find(s => s.id === it.owner_step_id);
+      if (!owner || owner.status === "done" || owner.status === "parked" || (owner.refinement || {}).phase === "done") return false;
+      if ((owner.refinement || {}).phase) return false;
+      const nav = owner.navigation || {}, label = String(nav.label || "");
+      if (nav.current === false || nav.role === "support") return false;
+      return /^FOR\s+REVIEW\s*(?:[:\u2014\u2013-]|$)/i.test(String(it.what || ""))
+        || (!/\b(?:not|no longer)\b/i.test(label) && /\b(?:for (?:author |your )?review|awaiting (?:author |your )?review|ready for (?:author |your )?review)\s*$/i.test(label));
+    });
+  }
   // the one state rule: the light's colour and its short word (the pane, the project dot and the bar read it)
   function stateColor(st) {
+    if (!st) return "quiet";
     const attention = (_lastMap && _lastMap.attention) || {};
     const attentionState = st.attention_state || attention.state || "";
-    const working = st.busy || st.working_bg || (st.alive && st.queued);
-    return st.light === "red" ? "red" : working ? "green"
-      : (st.open_question || ["needs_you", "blocked"].includes(attentionState)) ? "orange" : "quiet";
+    const working = st.busy || st.working_bg || (st.alive && st.queued) || attentionState === "working";
+    const hasQuestion = !!st.open_question || !!((st.pending_questions || []).length) || st.light === "orange";
+    const needsHuman = hasQuestion || ["needs_you", "blocked"].includes(attentionState) || hasReviewWaiting();
+    return st.light === "red" ? "red" : (working || st.light === "green") ? "green" : needsHuman ? "orange" : "quiet";
   }
   function stateWord(st) {
+    if (!st) return "";
     const color = stateColor(st), attention = (_lastMap && _lastMap.attention) || {};
     const attentionState = st.attention_state || attention.state || "";
+    const hasQuestion = !!st.open_question || !!((st.pending_questions || []).length);
     return color === "red" ? "needs a look" : color === "green" ? "working"
-      : color === "orange" ? ((st.open_question || attentionState === "needs_you") ? "need your input" : "blocked") : "";
+      : color === "orange" ? ((hasQuestion || attentionState === "needs_you") ? "need your input" : attentionState === "blocked" ? "blocked" : hasReviewWaiting() ? "to review" : "needs your attention") : "";
   }
   function syncCompactActivity(st) {
     if(!st)return;
@@ -1982,16 +3390,34 @@ const Proto = (() => {
   }
 
   function updateState(st) {
-    if (st) { lastState = st; tileSay("state", { light: st.light || "", busy: !!st.busy, alive: !!st.alive, queued: st.queued || 0, word: stateWord(st) || "" }); }
+    if (st) lastState = st;
     st = lastState;
     if (!st) return;
+    const computedColor = stateColor(st);
+    const computedWord = stateWord(st) || "";
+    const readyNow = computedColor === "orange";
+    tileSay("state", { light: computedColor, ready: readyNow, reason: computedWord, busy: !!st.busy, alive: !!st.alive, queued: st.queued || 0, word: computedWord });
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage({
+          proto: "anchor-cockpit-state",
+          pid: PARAMS.get("pid") || window.STEWARD_PID || "",
+          dir: DIR || "",
+          general: !!GENERAL,
+          term: TERM || "",
+          light: computedColor,
+          ready: readyNow,
+          reason: computedWord
+        }, location.origin);
+      } catch (e) {}
+    }
     if(_answerQuestionId && !(st.pending_questions||[]).some(q=>q.id===_answerQuestionId))_answerQuestionId=null;
     const busy = $("[data-busy]");
     if (busy) {
       const word = stateWord(st);
       busy.textContent = st.busy
         ? ((st.quiet_seconds || 0) >= 300
-            ? "thinking " + Math.round(st.quiet_seconds / 60) + " min, no output - Stop turn interrupts"
+            ? "thinking " + Math.round(st.quiet_seconds / 60) + " min, no output"
             : (busySince ? "thinking " + Math.round((Date.now() - busySince) / 1000) + "s"
                          : "working..."))
         : (word ? "\u00b7 " + word : "");
@@ -2008,10 +3434,11 @@ const Proto = (() => {
       const subscriptionCostText = (usage, reportedUsd, cli) => {
         const unpriced = Number.isInteger(usage.unpriced_turns) && usage.unpriced_turns > 0 ? usage.unpriced_turns : 0;
         const family = usage.billing_family || cli || "";
-        const sub = usage.billing_mode === "subscription" || ((cli === "chatgpt" || cli === "grok") && unpriced > 0);
+        const sub = usage.billing_mode === "subscription" || ((cli === "chatgpt" || cli === "grok" || cli === "gemini") && unpriced > 0);
         if (!sub || unpriced <= 0) return null;
-        const label = family === "mixed" ? "ChatGPT/Grok subscription"
+        const label = family === "mixed" ? "ChatGPT/Grok/Gemini subscription"
           : family === "grok" || cli === "grok" ? "Grok subscription"
+          : family === "gemini" || cli === "gemini" ? "Gemini subscription"
           : "ChatGPT subscription";
         const turns = " (" + unpriced.toLocaleString() + " turn" + (unpriced === 1 ? "" : "s") + ")";
         return (typeof reportedUsd === "number" && Number.isFinite(reportedUsd) && reportedUsd > 0)
@@ -2090,29 +3517,181 @@ const Proto = (() => {
       const unpricedTotal = priced.reduce((a, b) => a + num(b.unpriced_turns), 0) + (sessionOnly ? num(st.unpriced_turns) : 0);
       const tokensTotal = [effortUsage, jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.tokens), 0) + (sessionOnly ? num(st.tokens) : 0);
       const unknownTotal = [jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.unknown), 0);
-      const fam = String((effortUsage || st).billing_family || "");
-      const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : fam === "chatgpt" ? "ChatGPT" : "";
+      const fam = String((effortUsage || st).billing_family || st.cli || "");
+      const subName = fam === "mixed" ? "subscription" : fam === "grok" ? "Grok" : fam === "gemini" ? "Gemini" : fam === "chatgpt" ? "ChatGPT" : "";
       const estimatedTotal = priced.reduce((a, b) => a + num(b.estimated_spend), 0) + (sessionOnly ? num(st.estimated_spend_usd) : 0);
       const estimatedTurns = priced.reduce((a, b) => a + num(b.estimated_turns), 0) + (sessionOnly ? num(st.estimated_turns) : 0);
       const stillUnpriced = Math.max(0, unpricedTotal - estimatedTurns);
-      const estimated = estimatedTurns ? "about $" + estimatedTotal.toFixed(2) + " estimated for " + estimatedTurns.toLocaleString() + " ChatGPT turn" + (estimatedTurns === 1 ? "" : "s") + " at API list price" : "";
-      const notPriced = stillUnpriced ? stillUnpriced.toLocaleString() + (subName && !estimatedTurns ? " " + subName + " turn" + (stillUnpriced === 1 ? "" : "s") : "") + " with no dollar amount" : "";
+      const inflightUnpriced = !stillUnpriced && !estimatedTurns && (num(st.unpriced_inflight) > 0 || (effortUsage && effortUsage.cost_complete === false));
+      const turnFamilyLabel = subName || "subscription";
+      const estimated = estimatedTurns ? "about $" + estimatedTotal.toFixed(2) + " estimated for " + estimatedTurns.toLocaleString() + " " + turnFamilyLabel + " turn" + (estimatedTurns === 1 ? "" : "s") + " at API list price" : "";
+      const notPriced = stillUnpriced ? stillUnpriced.toLocaleString() + (subName && !estimatedTurns ? " " + subName + " turn" + (stillUnpriced === 1 ? "" : "s") : "") + " with no dollar amount"
+        : inflightUnpriced ? "in-progress usage with no dollar amount" : "";
       let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (estimated ? " + " + estimated : "") + (notPriced ? " · " + notPriced : "")
         : estimated ? "Total " + estimated + (notPriced ? " · " + notPriced : "")
         : notPriced ? "Total: " + notPriced : "cost unavailable";
       if (tokensTotal) total += " · " + Math.round(tokensTotal).toLocaleString() + " tokens recorded";
       if (unknownTotal) total += " · " + unknownTotal + " run" + (unknownTotal === 1 ? "" : "s") + " with unknown usage";
-      spend.textContent = total +
+      const legacySpendText = total +
         (st.usage_persistence_error ? " · not saved" : "") +
         (!st.alive ? " · " + (GENERAL ? "idle" : "steward asleep") + (st.queued ? " · " + st.queued + " held" : "") : "");
+      const combinedUsd = reportedTotal + estimatedTotal;
+      const fmtTok = (n) => {
+        const v = num(n);
+        if (v >= 1e6) return (v / 1e6).toFixed(2).replace(/\.00$/, "") + "M";
+        if (v >= 1e3) return Math.round(v / 1e3) + "k";
+        return Math.round(v).toLocaleString();
+      };
+      const fmtTime = (s) => {
+        const secTotal = Math.round(num(s));
+        if (!secTotal) return "\u2014";
+        const h = Math.floor(secTotal / 3600);
+        const m = Math.floor((secTotal % 3600) / 60);
+        const sec = secTotal % 60;
+        if (h > 0) return h + "h " + m + "m";
+        if (m > 0) return m + "m" + (sec ? " " + sec + "s" : "");
+        return sec + "s";
+      };
+      const fmtUsd = (u) => "$" + num(u).toFixed(2);
+      const totalSecs = [effortUsage, jobsUsage, seats].filter(Boolean).reduce((a, b) => a + num(b.secs), 0) + (sessionOnly ? num(st.secs) : 0);
+      const compactTok = fmtTok(tokensTotal);
+      const compactDur = totalSecs >= 60 ? (" \u00b7 " + Math.round(totalSecs / 60) + "m") : "";
+      const pillMainText = combinedUsd > 0
+        ? ("Total $" + combinedUsd.toFixed(2) + (tokensTotal ? " \u00b7 " + compactTok + " tok" : "") + compactDur + " \u25be")
+        : (tokensTotal > 0 || notPriced)
+          ? ("Total $0.00" + (tokensTotal ? " \u00b7 " + compactTok + " tok" : "") + compactDur + " \u25be")
+          : "cost unavailable";
+      spend.textContent = "";
+      spend.appendChild(el("span", "spend-pill-main", pillMainText));
+      const srSpan = el("span", "spend-sr", " " + legacySpendText);
+      spend.appendChild(srSpan);
       if (!effortUsage) spend.title = "Session: " + sessionCostText + sessionTokensText;
       if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
       if (kidsText) spend.title += " · Sub-agents" + kidsText.replace(/^ · /, ": ");
       if (seatsText) spend.title += " · Skill seats" + seatsText.replace(/^ · /, ": ") + " · " + recordedTokenText(seats);
       spend.title += " · Reported dollars are recorded charges." +
-        (estimatedTurns ? " Estimated dollars come from each ChatGPT turn's recorded tokens at OpenAI's published " + (st.estimate_basis || "API list price") + ", never a charge; the subscription bills a flat fee." : "") +
+        (estimatedTurns ? " Estimated dollars come from each subscription turn's recorded tokens at the provider's published " + (st.estimate_basis || "API list price") + ", never a charge; the subscription bills a flat fee." : "") +
         (stillUnpriced ? " Subscription turns recorded without a token split, or on a model outside the price table, carry no dollar amount." : "");
       if (st.usage_persistence_error) spend.title = "Usage totals could not be saved. These session counts are in memory and may be lost on restart.";
+
+      const stewUsd = effortUsage ? (num(effortUsage.reported_spend) + num(effortUsage.estimated_spend))
+        : (num(knownSessionUsd(st.reported_spend_usd) ? st.reported_spend_usd : st.spend_usd) + num(st.estimated_spend_usd));
+      const stewTok = effortUsage ? num(effortUsage.tokens) : num(st.tokens);
+      const stewSecs = effortUsage ? num(effortUsage.secs) : num(st.secs);
+      const stewTurns = (effortUsage && effortUsage.checkpoint_coverage && effortUsage.checkpoint_coverage.tracked_invocations) || num(st.turns) || num(st.unpriced_turns);
+      const jobsUsd = jobsUsage ? (num(jobsUsage.reported_spend) + num(jobsUsage.estimated_spend)) : 0;
+      const jobsTok = jobsUsage ? num(jobsUsage.tokens) : 0;
+      const jobsSecs = jobsUsage ? num(jobsUsage.secs) : 0;
+      const jobsCnt = jobsUsage ? num(jobsUsage.count) : 0;
+      const seatsUsd = seats ? (num(seats.reported_spend) + num(seats.estimated_spend)) : 0;
+      const seatsTok = seats ? num(seats.tokens) : 0;
+      const seatsSecs = seats ? num(seats.secs) : 0;
+      const seatsCnt = seats ? num(seats.count) : 0;
+      const kidsTok = kids ? num(kids.tokens) : 0;
+      const kidsCnt = kids ? num(kids.count) : 0;
+      const stewModelName = fam === "chatgpt" ? "gpt-6.1-sol \u00b7 ultra"
+        : fam === "gemini" ? "gemini-4-argon \u00b7 high"
+        : fam === "grok" ? "grok-4.7 \u00b7 xhigh"
+        : "claude-fable-5-1 \u00b7 max";
+      spend._breakdownData = {
+        rows: [
+          {
+            model: stewModelName,
+            role: personaName() + " Steward (" + stewTurns + (stewTurns === 1 ? " turn)" : " turns)"),
+            tokens: stewTok ? fmtTok(stewTok) : "0",
+            time: fmtTime(stewSecs),
+            spend: fmtUsd(stewUsd),
+          },
+          {
+            model: "Coding Family / Foreman",
+            role: "Foreman & Code Jobs (" + jobsCnt + ")",
+            tokens: (jobsCnt || jobsTok) ? fmtTok(jobsTok) : "\u2014",
+            time: fmtTime(jobsSecs),
+            spend: fmtUsd(jobsUsd),
+          },
+          {
+            model: "Cross-Family Reviewers",
+            role: "Crucible / Review Seats (" + seatsCnt + ")",
+            tokens: (seatsCnt || seatsTok) ? fmtTok(seatsTok) : "\u2014",
+            time: fmtTime(seatsSecs),
+            spend: fmtUsd(seatsUsd),
+          },
+        ].concat(kidsCnt > 0 ? [{
+          model: "Sub-agent Swarm",
+          role: "Delegated Sub-agents (" + kidsCnt + ")",
+          tokens: fmtTok(kidsTok),
+          time: "\u2014",
+          spend: "$0.00",
+        }] : []),
+        totalTokens: tokensTotal ? fmtTok(tokensTotal) : "0",
+        totalTime: fmtTime(totalSecs),
+        totalSpend: fmtUsd(combinedUsd),
+        footerNote: "Includes " + personaName() + " steward turns (" + fmtUsd(stewUsd) + "), Foreman/code jobs (" + fmtUsd(jobsUsd) + "), and skill/review seats (" + fmtUsd(seatsUsd) + ").",
+        subNote: estimatedTotal > 0 ? ("($" + reportedTotal.toFixed(2) + " billed + $" + estimatedTotal.toFixed(2) + " subscription API-equivalent)") : "",
+      };
+      spend.dataset.spendSummary = "Combined Total: $" + combinedUsd.toFixed(2) + " ($" + reportedTotal.toFixed(2) + " billed + $" + estimatedTotal.toFixed(2) + " subscription API-equivalent)" + (tokensTotal ? " · " + Math.round(tokensTotal).toLocaleString() + " tokens" : "");
+      spend.style.cursor = "pointer";
+      if (!spend._popWired) {
+        spend._popWired = true;
+        spend.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          let pop = document.querySelector("[data-spend-popover]");
+          if (pop && !pop.hidden) { pop.hidden = true; return; }
+          if (!pop) {
+            pop = el("div", "spend-popover");
+            pop.dataset.spendPopover = "1";
+            document.body.appendChild(pop);
+            document.addEventListener("click", (e2) => {
+              if (pop && !pop.hidden && !pop.contains(e2.target) && e2.target !== spend) pop.hidden = true;
+            });
+          }
+          pop.textContent = "";
+          const h4 = el("h4", "sp-head");
+          h4.appendChild(el("span", "", "Spend, Tokens & Time Breakdown"));
+          const closeX = el("span", "sp-close", "\u2715");
+          closeX.onclick = (e2) => { e2.stopPropagation(); pop.hidden = true; };
+          h4.appendChild(closeX);
+          pop.appendChild(h4);
+
+          const bd = spend._breakdownData || { rows: [], totalTokens: "0", totalTime: "\u2014", totalSpend: "$0.00", footerNote: "" };
+          const tbl = el("table", "sp-table");
+          const thead = el("thead", "");
+          const hr = el("tr", "");
+          ["Model / Seat", "Role", "Tokens", "Time", "Spend"].forEach((col, idx) => {
+            hr.appendChild(el("th", idx >= 2 ? "num" : "", col));
+          });
+          thead.appendChild(hr);
+          tbl.appendChild(thead);
+          const tbody = el("tbody", "");
+          bd.rows.forEach((r) => {
+            const tr = el("tr", "");
+            const tdModel = el("td", "");
+            tdModel.appendChild(el("b", "", r.model));
+            tr.appendChild(tdModel);
+            tr.appendChild(el("td", "", r.role));
+            tr.appendChild(el("td", "num", r.tokens));
+            tr.appendChild(el("td", "num", r.time));
+            tr.appendChild(el("td", "num", r.spend));
+            tbody.appendChild(tr);
+          });
+          const totTr = el("tr", "tot");
+          const totLbl = el("td", "", "Campaign Total");
+          totLbl.colSpan = 2;
+          totTr.appendChild(totLbl);
+          totTr.appendChild(el("td", "num", bd.totalTokens));
+          totTr.appendChild(el("td", "num", bd.totalTime));
+          totTr.appendChild(el("td", "num", bd.totalSpend));
+          tbody.appendChild(totTr);
+          tbl.appendChild(tbody);
+          pop.appendChild(tbl);
+
+          const foot = el("div", "sp-foot");
+          foot.appendChild(el("span", "", bd.footerNote));
+          if (bd.subNote) foot.appendChild(el("span", "sp-subnote", bd.subNote));
+          pop.appendChild(foot);
+          pop.hidden = false;
+        });
+      }
     }
     const wake = $("[data-wake]");
     if (wake) wake.textContent = st.alive ? "Sleep" : "Wake";
@@ -2154,7 +3733,7 @@ const Proto = (() => {
       else txt = "Nothing running — ready";
       const details = [];
       const intr = $("[data-interrupt]");
-      if (intr) intr.hidden = !(st.alive && st.busy);
+      if (intr) intr.hidden = true;
       if (st.cli) details.push(st.cli);
       const policy = st.model_policy;
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
@@ -2165,8 +3744,12 @@ const Proto = (() => {
       if (st.settings_error) txt += " · " + st.settings_error;
       stx.title = details.join(" · ");
       stx.title = [txt,stx.title].filter(Boolean).join(' · ');
-      stx.textContent = color==='red'?'Interrupted':working?'Working':st.open_question?'Needs your input':
-        attentionState==='blocked'?'Blocked':'Idle';
+      const shortState = color==='red'?'Interrupted':working?'Working':st.open_question?'Needs your input':
+        attentionState==='blocked'?'Blocked':color==='orange'?'Needs feedback':'Idle';
+      stx.textContent = shortState;
+      stx.dataset.stateColor = color;
+      const stx2 = $("[data-statetext2]");
+      if (stx2) { stx2.textContent = shortState; stx2.dataset.stateColor = color; }
     }
     paintActionNeeded($("[data-openq]"));
     paintActionNeeded($("[data-status-action]"));
@@ -2199,7 +3782,7 @@ const Proto = (() => {
     // drop or pick, one POST per file through the effort's own upload verb; the list repaints
     // with the next state refresh, and the line here says what happened to each file.
     const up = $("[data-fupload]");
-    if (up && !up._wired) {
+    if (up && !up._wired && !up.hasAttribute("data-cockpit-drop")) {
       up._wired = true;
       const msg = $("[data-fupmsg]"), pick = $("[data-fupfile]");
       const say = (text) => { if (msg) msg.textContent = " · " + text; };
@@ -2230,12 +3813,83 @@ const Proto = (() => {
       if (b._wired) return; b._wired = true;
       b.onclick = () => { _filesSort = b.getAttribute("data-fsort"); sortBtns.forEach(x => x.classList.toggle("on", x === b)); renderFiles(_lastFiles); };
     });
+    wireCockpitDrop();
+  }
+  function wireCockpitDrop() {
+    const bar = $("[data-cockpit-drop]");
+    const mainEl = $(".main");
+    if (!bar || bar._wired) return;
+    bar._wired = true;
+    const msg = $("[data-cockpit-dropmsg]") || $("[data-fupmsg]");
+    const pick = $("[data-cockpit-dropfile]") || $("[data-fupfile]");
+    const say = (text) => { if (msg) msg.textContent = text; };
+    const uploadCockpitFile = async (file) => {
+      say("Uploading " + file.name + "…");
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",")[1] || "");
+        r.onerror = () => rej(new Error("read failed"));
+        r.readAsDataURL(file);
+      });
+      const resp = await post("/api/upload", { name: file.name, data_b64: b64, mode: "keepboth", sub: "" });
+      const j = await resp.json().catch(() => ({}));
+      if (j && j.ok) {
+        const savedName = j.path || j.name || file.name;
+        const targetDir = (_lastMap && _lastMap.dir) || DIR || "cockpit folder";
+        say("\u2713 Saved " + savedName);
+        try {
+          _lastFiles = (_lastFiles || []).concat([{ name: savedName, path: savedName, at: new Date().toISOString(), loaded: true }]);
+          renderFiles(_lastFiles);
+        } catch (e) {}
+        try {
+          addBlock(
+            "steward",
+            personaName().toUpperCase() + " \u00b7 FILE DROP",
+            "📥 Landed **`" + savedName + "`** in `" + targetDir + "`."
+          );
+        } catch (e) {}
+      } else {
+        say(((j && j.error) || "Upload failed") + " (" + file.name + ")");
+      }
+    };
+    const queue = (files) => Array.from(files || []).forEach((f) => uploadCockpitFile(f).catch(() => say("Upload failed (" + f.name + ")")));
+    bar.ondragover = (e) => { e.preventDefault(); bar.classList.add("hot"); };
+    bar.ondragleave = () => bar.classList.remove("hot");
+    bar.ondrop = (e) => { e.preventDefault(); bar.classList.remove("hot"); if (mainEl) mainEl.classList.remove("drop-hot"); queue(e.dataTransfer.files); };
+    if (pick) pick.onchange = () => { queue(pick.files); pick.value = ""; };
+    const dropHost = $(".app") || mainEl;
+    if (dropHost && !dropHost._dropWired) {
+      dropHost._dropWired = true;
+      dropHost.addEventListener("dragover", (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
+          e.preventDefault();
+          if (mainEl) mainEl.classList.add("drop-hot");
+          bar.classList.add("hot");
+        }
+      });
+      dropHost.addEventListener("dragleave", (e) => {
+        if (!dropHost.contains(e.relatedTarget)) {
+          if (mainEl) mainEl.classList.remove("drop-hot");
+          bar.classList.remove("hot");
+        }
+      });
+      dropHost.addEventListener("drop", (e) => {
+        if (mainEl) mainEl.classList.remove("drop-hot");
+        bar.classList.remove("hot");
+        if (e.defaultPrevented || (e.target && e.target.closest && e.target.closest("[data-cockpit-drop], [data-fupload]"))) return;
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        e.preventDefault();
+        queue(files);
+      });
+    }
   }
   // a produced file opens rendered in a new window when it lies inside this effort
   function openProducedFile(f) {
+    const fStr = typeof f === "string" ? f : (f && (f.path || f.name)) || "";
     const root = (_lastMap && _lastMap.dir) || "";
     const norm = (x) => String(x || "").replace(/\\/g, "/");
-    const fn = norm(f), rn = norm(root).replace(/\/$/, "");
+    const fn = norm(fStr), rn = norm(root).replace(/\/$/, "");
     if (rn && fn.toLowerCase().indexOf(rn.toLowerCase() + "/") === 0) {
       const rel = fn.slice(rn.length + 1);
       if (/\.(md|txt|csv|json|log)$/i.test(rel)) { window.open("/report?dir=" + encodeURIComponent(DIR) + "&path=" + encodeURIComponent(rel)); return; }
@@ -2244,7 +3898,27 @@ const Proto = (() => {
         (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : ""));
       return;
     }
-    post("/api/open", { path: f });   // outside the effort: the app opens it, said in the row
+    if (fn && !/^[A-Za-z]:\//.test(fn) && !fn.startsWith("/")) {
+      const isMd = /\.(md|markdown|txt)$/i.test(fn);
+      window.open("/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(DIR) +
+        "&path=" + encodeURIComponent(fn) + (/\.(docx|pptx|xlsx)$/i.test(fn) ? "&view=1" : "") + (isMd ? "&render=1" : "") +
+        (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : ""));
+      return;
+    }
+    post("/api/open", { path: fStr });   // outside the effort: the app opens it, said in the row
+  }
+  function producedFileDownloadHref(f) {
+    const fStr = typeof f === "string" ? f : (f && (f.path || f.name)) || "";
+    const root = (_lastMap && _lastMap.dir) || "";
+    const norm = (x) => String(x || "").replace(/\\/g, "/");
+    const fn = norm(fStr), rn = norm(root).replace(/\/$/, "");
+    let rel = "";
+    if (rn && fn.toLowerCase().indexOf(rn.toLowerCase() + "/") === 0) rel = fn.slice(rn.length + 1);
+    else if (fn && !/^[A-Za-z]:\//.test(fn) && !fn.startsWith("/")) rel = fn;
+    if (!rel || /(?:^|\/)\.\.(?:\/|$)/.test(rel)) return null;
+    return "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") +
+      "&dir=" + encodeURIComponent(DIR) + "&path=" + encodeURIComponent(rel) + "&download=1" +
+      (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
   }
   function renderFiles(files) {
     wireFileTools();
@@ -2273,7 +3947,10 @@ const Proto = (() => {
     _lastFiles = files.slice();
     const q = (($("[data-fsearch]") || {}).value || "").trim().toLowerCase();
     const sort = _filesSort;
-    let rows = files.map((f, i) => ({ f, i, name: f.split(/[\\/]/).pop() }));
+    let rows = files.map((f, i) => {
+      const fStr = typeof f === "string" ? f : (f && (f.path || f.name)) || "";
+      return { f: fStr, i, name: fStr.split(/[\\/]/).pop() };
+    });
     if (q) rows = rows.filter(r => r.name.toLowerCase().indexOf(q) >= 0);
     if (sort === "name") rows.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     else if (sort === "type") rows.sort((a, b) => (a.name.split(".").pop() || "").toLowerCase().localeCompare((b.name.split(".").pop() || "").toLowerCase()) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
@@ -2283,8 +3960,16 @@ const Proto = (() => {
       const row = el("div", "frow");
       const a = document.createElement("a");
       a.className = "fname"; a.textContent = name; a.href = "#";
+      a.title = "Open " + name;
       a.onclick = (ev) => { ev.preventDefault(); openProducedFile(f); };
       row.appendChild(a);
+      const dlHref = producedFileDownloadHref(f);
+      if (dlHref) {
+        const dl = el("a", "ddl-inline", "\u2b07");
+        dl.href = dlHref; dl.target = "_blank"; dl.rel = "noopener";
+        dl.title = "Download " + name;
+        row.appendChild(dl);
+      }
       const btn = el("button", "", "app");
       btn.title = "open on this computer";
       btn.onclick = () => post("/api/open", { path: f });
@@ -2356,18 +4041,36 @@ const Proto = (() => {
   /* ---------- the map ---------- */
   async function loadMap() {
     const r = await fetch(api("/api/map"));
-    map = await r.json();
+    map = (await r.json()) || {};
+    map.heartbeat = map.heartbeat || {};
+    map.freshness = map.freshness || { talked: "—", plan: "—", heartbeat: "—" };
+    map.attention = map.attention || { state: "quiet", reason: "" };
+    map.steps = Array.isArray(map.steps) ? map.steps : [];
+    map.grasscatch = Array.isArray(map.grasscatch) ? map.grasscatch : [];
+    map.steps_done = map.steps_done || 0;
+    map.steps_total = map.steps_total || map.steps.length || 0;
+    map.name = map.name || "Project";
     // The existing managed read route exposes event-derived navigation without a server restart.
     const navigation=(map.refinement && map.refinement.navigation) || {};
     (map.steps || []).forEach(s=>{if(navigation[s.id])s.navigation=navigation[s.id];});
     stamp = map.stamp;
     if (map.steward && !opts._labelSet) {
-      opts.stewardLabel = map.steward.toUpperCase();
+      opts.stewardLabel = (!/^steward$/i.test(String(map.steward).trim()) ? String(map.steward) : personaName()).toUpperCase();
       opts._labelSet = true;
+    }
+    const pName = personaName();
+    const pLabelEl = $("[data-persona-label]");
+    if (pLabelEl) pLabelEl.textContent = pName;
+    const pAvatarEl = $("[data-persona-avatar]");
+    if (pAvatarEl) {
+      pAvatarEl.alt = pName;
+      pAvatarEl.src = /^jarvis$/i.test(pName) ? "/vendor/brand/aladdin-seal-owl.jpg"
+        : /^ecgberht|^echberht/i.test(pName) ? "/vendor/brand/aladdin-seal-dragon.jpg"
+        : "/vendor/brand/aladdin-seal-lamp.jpg";
     }
     const cockpitName = !DIR && map.name === "Campaign" ? (window.STEWARD_MODE || (map.steward === "Aladdin" ? "Star Chart" : map.name)) : map.name;
     const cockpitTitle = cockpitName + " — AI Cockpit";
-    document.title = GENERAL ? map.name + " — steward" : cockpitTitle;
+    document.title = GENERAL ? map.name + " — " + personaName() : cockpitTitle;
     if (opts.renderMap) { opts.renderMap(map); return; }
     // goal tile (one sentence; expands to the full bold-led description)
     const gb = $("[data-goalbrief]");
@@ -2396,7 +4099,48 @@ const Proto = (() => {
     if (goal) goal.textContent = map.goal || "(no goal recorded)";
     const prog = $("[data-progress]");
     if (prog) prog.textContent = map.steps_done + " of " + map.steps_total + " steps done";
+    const progFill = $("[data-progress-fill]");
+    if (progFill) {
+      const pct = map.steps_total ? Math.round(100 * (map.steps_done || 0) / map.steps_total) : 0;
+      progFill.style.width = pct + "%";
+    }
+    const dropDir = $("[data-drop-dir]");
+    if (dropDir) dropDir.textContent = map.dir || DIR || "this cockpit's folder";
+    const scoutBox = $("[data-tool-scout]");
+    if (scoutBox) {
+      const activeStep = (map.steps || []).find(s => s.status === "active") || (map.next_in_plan && map.next_in_plan[0]);
+      const commissioned = (activeStep && activeStep.commissioned_as) || "";
+      const stepLabel = activeStep ? (activeStep.name || activeStep.id) : (map.name || "this effort");
+      const combinedText = ((map.name || "") + " " + (map.goal_brief || "") + " " + stepLabel + " " + ((activeStep && activeStep.summary) || "")).toLowerCase();
+      let matchedTools = "Foreman / Crucible / Gandalf";
+      if (/\b(?:lecture|course|mba|mit|study|flashcard|pedagog|student|module|block|teaching)\b/.test(combinedText)) {
+        matchedTools = "Einstein · Figure-Designer · reading-copy · Gandalf";
+      } else if (/\b(?:anvil|paper|equation|libcost|libcst|parso|equivalence|hypothesis|mathml)\b/.test(combinedText)) {
+        matchedTools = "Anvil · Ramanujan · Foreman · Gandalf";
+      } else if (/\b(?:research|literature|citation|prisma|survey|evidence)\b/.test(combinedText)) {
+        matchedTools = "researchPrime · Literature-Review · Gandalf";
+      } else if (/\b(?:novel|book|chapter|story|character|continuity)\b/.test(combinedText)) {
+        matchedTools = "Chekhov · reading-copy · Gandalf";
+      } else if (/\b(?:deal|valuation|waterfall|cap-table|excel|financial)\b/.test(combinedText)) {
+        matchedTools = "Financial-Analyst · Gandalf";
+      }
+      const isSmallTask = /\b(?:fix typo|rename|lint|format|one-file|minor|quick check|smoke test)\b/.test(combinedText);
+      const challengeBadge = isSmallTask
+        ? "Tier 1 · Small (`--size small`)"
+        : "Tier 2 · Frontier Standard (`≤8k` brief)";
+      scoutBox.hidden = false;
+      scoutBox.textContent = "";
+      scoutBox.appendChild(el("div", "tool-scout-head", "\ud83e\udded Proactive Foundry Tool Scout \u00b7 " + challengeBadge));
+      const body = el("div", "");
+      renderRich(body, commissioned
+        ? ("Active tool commission: **" + commissioned + "** \u00b7 Matched: **" + matchedTools + "** \u00b7 `ft.py scout` ready.")
+        : ("`ft.py scout` matched **" + matchedTools + "** (plus **Foreman / Crucible / Gandalf**) for `" + stepLabel + "`."));
+      scoutBox.appendChild(body);
+    }
     _lastMap = map;
+    if (renderStatus._lastRefreshEta) { try { renderStatus._lastRefreshEta(); } catch (e) {} }
+    renderTopNextSteps();
+    wireCockpitDrop();
     paintStepsList(map);
     try { paintWorkMap(map); } catch (e) { /* overlay optional */ }
     const wait = $("[data-wait]");
@@ -2418,7 +4162,7 @@ const Proto = (() => {
                att.title = map.attention.state +
                  (map.attention.reason ? " - " + map.attention.reason : ""); }
     const name = $("[data-name]");
-    if (name) name.textContent = GENERAL ? map.name : cockpitTitle;
+    if (name) name.textContent = GENERAL ? map.name : cockpitName;
     if(lastState)updateState(lastState);
     if (opts.afterMap) opts.afterMap(map);
   }
@@ -2429,7 +4173,7 @@ const Proto = (() => {
     const j = await r.json();
     (j.turns || []).forEach(t => addBlock(
       t.role === "john" ? "john" : "steward",
-      t.role === "john" ? (opts.johnLabel || "JOHN") : (opts.stewardLabel || "ECGBERHT"),
+      t.role === "john" ? (opts.johnLabel || "JOHN") : (opts.stewardLabel || personaName().toUpperCase()),
       t.text, "hist"));
     if (j.turns && j.turns.length) {
       addLine("divider", "—— live from here ——");
@@ -2463,8 +4207,24 @@ const Proto = (() => {
     const ta = $("[data-say]");
     const send = $("[data-send]");
     if (!ta) return;
-    const grow = () => { ta.style.height = "auto";
-                         ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.4) + "px"; };
+    let _composing = false;
+    ta.addEventListener("compositionstart", () => { _composing = true; });
+    ta.addEventListener("compositionend", () => { _composing = false; grow(); });
+    ta.addEventListener("blur", () => { _composing = false; });
+    const grow = () => {
+      const minimum = parseFloat(getComputedStyle(ta).minHeight) || 46;
+      const prevScroll = ta.scrollTop;
+      if (!_composing) {
+        ta.style.height = "auto";
+        const target = Math.max(minimum, Math.min(ta.scrollHeight + 2, innerHeight * 0.4));
+        ta.style.height = target + "px";
+        if (prevScroll) ta.scrollTop = prevScroll;
+      } else if (ta.scrollHeight > ta.clientHeight) {
+        const targetC = Math.max(minimum, Math.min(ta.scrollHeight + 2, innerHeight * 0.4));
+        if (targetC > (parseFloat(ta.style.height) || 0)) ta.style.height = targetC + "px";
+      }
+      ta.style.overflowY = ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
+    };
     ta.addEventListener("input", grow);
     // R12 (2026-09-28, John: "conversations are saved as they are put in"): the unsent text is kept in this browser
     // on every keystroke (localStorage, keyed to this record) and put back after a crash, a restart or a reload of
@@ -2521,10 +4281,10 @@ const Proto = (() => {
     // used to produce neither a POST nor a record.
     if (send) send.disabled = false;
     ta.addEventListener("keydown", (e) => {
-      // 2026-10-07 (John, evidence E5: a late dictated "new line" sent a fragment): Enter is ALWAYS a new line;
-      // Ctrl+Enter (Cmd+Enter on a Mac) or the Send button sends. Never from a key during an active composition.
+      // 2026-10-13 (John): CLI-style Enter sends immediately; Shift+Enter makes a new line.
+      // Never send from a key during an active composition.
       if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.shiftKey) return;
       e.preventDefault(); submit();
     });
     // Dictation is Win+H (2026-08-25, jrnl 0088): the in-page Web Speech mic
@@ -2559,7 +4319,10 @@ const Proto = (() => {
     const railT = $("[data-railtoggle]");
     if (railT && app) railT.onclick = () => app.classList.toggle("railhide");
     const goalbar = $("[data-goalbar]");
-    if (goalbar) goalbar.onclick = () => goalbar.classList.toggle("open");
+    if (goalbar) goalbar.onclick = (ev) => {
+      if (ev && ev.target && ev.target.closest && ev.target.closest("[data-top-deliverables], a, button, details, summary")) return;
+      goalbar.classList.toggle("open");
+    };
     const paneT = $("[data-panetoggle]");
     const pane = $("[data-statuspane]");
     if (paneT && pane) paneT.onclick = () => pane.classList.toggle("shut");

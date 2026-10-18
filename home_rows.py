@@ -77,9 +77,16 @@ def project_facts(entry, today=None):
         plan = summ.get("plan") if isinstance(summ.get("plan"), dict) else {}
         if not out["needs_you"]:
             out["needs_you"] = _real_wait(plan.get("waiting_on_you"))
+        if isinstance(plan.get("steps_total"), int) and plan.get("steps_total") > 0:
+            out["steps_done"] = int(plan.get("steps_done") or 0)
+            out["steps_total"] = int(plan.get("steps_total") or 0)
     rm = _read_json(root / "roadmap.json")
     if isinstance(rm, dict):
         out["has_record"] = True
+        proj_list = [s for s in (rm.get("roadmap_projection") or []) if isinstance(s, dict)]
+        if proj_list:
+            out["steps_total"] = len(proj_list)
+            out["steps_done"] = sum(1 for s in proj_list if s.get("status") == "done")
         if not rel:
             out["projection"] = rm.get("roadmap_projection") or []   # the ROOT record only: a resolver in the same request keys on the project folder
         dated = []

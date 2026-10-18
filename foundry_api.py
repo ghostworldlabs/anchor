@@ -823,7 +823,7 @@ def _mint_candidate(source):
                      source["repo"], cand]),
         (cand, ["config", "core.hooksPath", no_hooks]),
         (cand, ["config", "user.name", "Anchor sleep candidate"]),
-        (cand, ["config", "user.email", "sleep-candidate@anchor.invalid"]),
+        (cand, ["config", "user.email", "anchor@localhost"]),
         (cand, ["config", "commit.gpgsign", "false"]),
         (cand, ["remote", "remove", "origin"]),
         (cand, ["checkout", "--quiet", "--detach", source["head"]]),

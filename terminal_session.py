@@ -1196,6 +1196,8 @@ def start_doctor_session(seed_context=None, backend=None, resolve=False):
                 "Doctor Diagnose refused for backend %r: no explicitly tested "
                 "read-only argv contract" % (backend,))
         extra = list(readonly_contract)
+        if backend == _reg.BACKEND_GEMINI and os.environ.get("ANCHOR_PTY_BACKEND") != "stub":
+            extra = []
 
     with _DOCTOR_START_LOCK:
         existing = live_doctor_session(

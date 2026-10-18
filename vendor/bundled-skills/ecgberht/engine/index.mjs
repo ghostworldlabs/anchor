@@ -274,6 +274,7 @@ export {
   appendRoadmapEventSpineLaw,
   appendRoadmapEventThroughSpine,
   writeRoadmapThroughSpine,
+  repairRoadmapProjectionsThroughSpine,
   writeStripThroughSpine,
   assertSpineDurableHelpersPresent,
   assertKindsAligned,

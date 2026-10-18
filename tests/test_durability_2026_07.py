@@ -705,3 +705,42 @@ def test_boot_wiring_is_best_effort_per_project(gui_env, tmp_path, monkeypatch):
 
     assert gui._reconcile_gandalf_boot_runs() == 3
     assert set(seen) == {a["id"], b["id"], "__dashboard__"}
+
+
+def test_list_recent_records_bounds_and_sorts(tmp_path, monkeypatch):
+    import job_runner as jr
+    monkeypatch.setattr(jr, "jobs_dir", lambda: tmp_path / "jobs")
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+
+    for i in range(10):
+        rec = {"job_id": f"job-{i:02d}", "project_id": "proj-a", "started_at": 1000 + i, "status": "done"}
+        jr._write_record(rec)
+
+    # list_records without limit returns all 10
+    assert len(jr.list_records()) == 10
+
+    # list_recent_records bounds to limit and returns newest first
+    recent = jr.list_recent_records(limit=3)
+    assert len(recent) == 3
+    assert [r["job_id"] for r in recent] == ["job-09", "job-08", "job-07"]
+
+    # list_records with limit delegates
+    recent_via_lr = jr.list_records(limit=4)
+    assert len(recent_via_lr) == 4
+    assert [r["job_id"] for r in recent_via_lr] == ["job-09", "job-08", "job-07", "job-06"]
+
+
+def test_list_recent_records_filters_project(tmp_path, monkeypatch):
+    import job_runner as jr
+    monkeypatch.setattr(jr, "jobs_dir", lambda: tmp_path / "jobs")
+    (tmp_path / "jobs").mkdir(parents=True, exist_ok=True)
+
+    jr._write_record({"job_id": "job-a1", "project_id": "p1", "started_at": 100, "status": "done"})
+    jr._write_record({"job_id": "job-b1", "project_id": "p2", "started_at": 200, "status": "done"})
+    jr._write_record({"job_id": "job-a2", "project_id": "p1", "started_at": 300, "status": "done"})
+
+    p1_jobs = jr.list_recent_records(project_id="p1", limit=10)
+    assert len(p1_jobs) == 2
+    assert [r["job_id"] for r in p1_jobs] == ["job-a2", "job-a1"]
+
+

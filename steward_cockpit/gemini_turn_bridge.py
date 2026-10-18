@@ -80,6 +80,9 @@ def stdin_message(encoded_prompt: bytes) -> bytes:
     return (json.dumps({"event": "user", "message": {"role": "user", "content": text}}) + "\n").encode("utf-8")
 
 
+_WRITE_TOOLS = ("write_to_file", "replace_file_content", "multi_replace_file_content", "Write", "Edit", "NotebookEdit")
+
+
 class GeminiNormalizer(EventNormalizer):
     provider_label = "Gemini"
 
@@ -87,6 +90,8 @@ class GeminiNormalizer(EventNormalizer):
         super().__init__(model, effort, resume)
         self.expected_id = canonical_conversation_id(resume) if resume else None
         self._tool_steps: set[int] = set()
+        self._write_steps: set[int] = set()
+        self._completed_write_steps: set[int] = set()
         self._streamed = ""
 
     def _receipt(self):
@@ -107,20 +112,44 @@ class GeminiNormalizer(EventNormalizer):
 
     def _tool(self, step: dict[str, Any]):
         index = step.get("step_index")
-        if not isinstance(index, int) or isinstance(index, bool) or index in self._tool_steps:
+        if not isinstance(index, int) or isinstance(index, bool):
+            return []
+        state = step.get("state")
+        if index in self._tool_steps:
+            if index in self._write_steps and index not in self._completed_write_steps and state in ("DONE", "ERROR"):
+                self._completed_write_steps.add(index)
+                return [{"type": "user", "session_id": self.thread_id, "message": {
+                    "role": "user", "content": [{"type": "tool_result", "tool_use_id": f"{self.thread_id}:{index}",
+                        "is_error": state != "DONE"}],
+                }}]
             return []
         self._tool_steps.add(index)
         info = step.get("tool_info") if isinstance(step.get("tool_info"), dict) else {}
         name = _bounded_string(step.get("tool_name") or info.get("name"), 120) or "gemini_tool"
         params = info.get("parameters") if isinstance(info.get("parameters"), dict) else {}
         payload = {"provider_tool": name}
+        if name in _WRITE_TOOLS:
+            fp = _bounded_string(
+                params.get("TargetFile") or params.get("file_path") or params.get("AbsolutePath") or params.get("path"),
+                500,
+            )
+            if fp:
+                payload["file_path"] = fp
+                self._write_steps.add(index)
         skill = _skill_token(name, *[v for v in params.values() if isinstance(v, str)])
         if skill:
             payload["skill"] = skill   # the cockpit marks the skill in use; the folder's name only
-        return [{"type": "assistant", "session_id": self.thread_id, "message": {
+        events = [{"type": "assistant", "session_id": self.thread_id, "message": {
             "role": "assistant", "content": [{"type": "tool_use", "id": f"{self.thread_id}:{index}",
                 "name": name, "input": payload}],
         }}]
+        if index in self._write_steps and state in ("DONE", "ERROR"):
+            self._completed_write_steps.add(index)
+            events.append({"type": "user", "session_id": self.thread_id, "message": {
+                "role": "user", "content": [{"type": "tool_result", "tool_use_id": f"{self.thread_id}:{index}",
+                    "is_error": state != "DONE"}],
+            }})
+        return events
 
     def accept(self, event: dict[str, Any]):
         if self._finished:

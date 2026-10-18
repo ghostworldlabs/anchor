@@ -19,198 +19,36 @@ from urllib.parse import quote as _quote
 
 import home_rows as _hr
 
-_OPEN = ("proposed", "planned", "active", "waiting")
-_TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
-
-
-HIS_NAME = "John"   # how a dialogue row names him on both pages, as the AI Cockpit does (his word, 2026-10-01)
-
-
-def esc(s) -> str:
-    return html.escape(str(s if s is not None else ""), quote=True)
-
-
-def _short(d):
-    return _hr.short_date(d) if d else ""
-
-
-# ── the Campaign record → initiatives with their parts ─────────────────────────────────────────
-
-def campaign_initiatives(steps, resolved=None):
-    """The Campaign's heading steps (each defines its own root group) with their parts.
-
-    An initiative = a step that defines a root navigation group whose id is its own id (PLAN §3);
-    its parts = the steps whose navigation path starts with that id. A part's kind comes from its
-    ``ref`` prefix (project · step · deliverable · calendar) or is a native task; its text, state,
-    date and link come from the resolver when it points at another record."""
-    resolved = resolved or {}
-    steps = [s for s in (steps or ()) if isinstance(s, dict)]
-    heads = []
-    for s in steps:
-        nav = s.get("navigation") if isinstance(s.get("navigation"), dict) else {}
-        groups = nav.get("groups") or []
-        own = next((g for g in groups if isinstance(g, dict) and g.get("id") == s.get("id") and g.get("parent_id") is None), None)
-        if own is not None:
-            heads.append((s, own))
-    out = []
-    for s, own in heads:
-        sid = s.get("id")
-        parts = []
-        for p in steps:
-            if p is s:
-                continue
-            nav = p.get("navigation") if isinstance(p.get("navigation"), dict) else {}
-            path = nav.get("path") or []
-            if path and path[0] == sid:
-                r = resolved.get(str(p.get("id"))) or {}
-                ref = str(p.get("ref") or "")
-                kind = ref.split(":", 1)[0] if ref else "task"
-                state = r.get("state") or ("" if r.get("broken") else str(p.get("status") or ""))
-                parts.append({
-                    "id": p.get("id"), "kind": kind, "name": p.get("name") or "", "text": r.get("what") or p.get("name") or "",
-                    "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
-                    "pid": str(r.get("pid") or ""), "lead": str(r.get("lead") or ""), "dir": str(r.get("dir") or ""),
-                    "href": r.get("href") or "", "status": str(p.get("status") or ""),
-                    "target_status": str(r.get("target_status") or ""),
-                    "broken": bool(r.get("broken")) if ref else False, "gap": r.get("gap") or "",
-                    "waiting_on": str(p.get("waiting_on") or "") if not ref else "",
-                    "needs_you": "waiting on you" in str(state).lower() or (
-                        not ref and str(p.get("status") or "") == "waiting"
-                        and bool(re.search(r"\b(john|you|me)\b", str(p.get("waiting_on") or "").lower()))),
-                    # the seat (2026-09-30, his three levels): a component he works interactively — a cockpit, an
-                    # effort, a desk item — sits in its goal (""), on deck, or active, in his order
-                    "seat": str(p.get("seat")) if p.get("seat") in ("active", "deck") else "",
-                    "seat_order": int(p["seat_order"]) if isinstance(p.get("seat_order"), int) else None,
-                    "goal": sid, "goal_name": s.get("name") or sid,
-                })
-        # W1 (2026-09-28): a referenced part is closed when its RESOLVED target is — done, cancelled, dropped or
-        # parked — not only when the wrapper's own status says so (Grok's live replay, 2026-09-27: a done target
-        # stayed the open "next" part while its wrapper was planned). An unavailable target is broken: named, never
-        # next. Every reader of a part (the light, the rows, the board's chips and ticks) reads these two flags,
-        # never the wrapper's status alone (Grok W1).
-        for p in parts:
-            p["done"] = p["status"] == "done" or p["target_status"] == "done"
-            p["closed"] = p["status"] in ("done", "parked") or p["target_status"] in ("done", "cancelled", "dropped", "parked")
-        open_parts = [p for p in parts if not p["closed"] and not p["broken"]]
-        dates = sorted(p["date"] for p in open_parts if p["date"])
-        out.append({
-            "id": sid, "name": s.get("name") or sid, "tier": int(s["tier"]) if s.get("tier") in (1, 2, 3) else None,
-            "order": int((own or {}).get("order") or 0), "area": str(s.get("area") or ""),
-            "done_when": s.get("done_when") or "", "status": s.get("status") or "",
-            "if_then": str(s.get("if_then") or ""),      # the Star Chart's one if-then step, in his words (2026-10-03)
-            "parts": parts, "next": open_parts[0] if open_parts else None,
-            "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
-            "done_count": sum(1 for p in parts if p["done"]),
-            # the pace he drives the goal toward (2026-09-29); the parts' progress. The goal itself has no seat: its
-            # components do (his three levels, 2026-09-30)
-            "pace": str(s.get("pace") or ""),
-            "open_count": len(open_parts), "part_count": sum(1 for p in parts if not p["broken"]),
-        })
-    out.sort(key=lambda i: (i["tier"] or 9, i["order"], i["name"]))   # an untiered initiative sorts last, its tier shown as missing
-    for n, i in enumerate(out, 1):
-        i["number"] = n
-    return out
-
-
-INITIATIVE_KINDS = ("project", "effort", "task")   # a component he works interactively: a cockpit, an effort, a desk item
-
-
-def is_initiative(part):
-    return part.get("kind") in INITIATIVE_KINDS and not part.get("broken")
-
-
-def part_name(part):
-    """An initiative's own name: the project or effort it points at, else the desk item's words."""
-    return str(part.get("target") or part.get("text") or "")
-
-
-NOGOAL_ID = "__nogoal__"
-
-
-def loose_initiative(steps, resolved=None):
-    """The components with no goal yet - a cockpit or an effort put on the desk from the Candidates (2026-10-02) -
-    as ONE hidden initiative (nogoal=True) so the shelves, the head and the pick-up see them; it is never drawn or
-    counted as a goal. None when there are none."""
-    steps = [s for s in (steps or ()) if isinstance(s, dict)]
-    heads = {s.get("id") for s in steps for g in ((s.get("navigation") or {}).get("groups") or []) if isinstance(g, dict) and g.get("id") == s.get("id") and g.get("parent_id") is None}
-    loose = []
-    for s in steps:
-        nav = s.get("navigation") if isinstance(s.get("navigation"), dict) else {}
-        ref = str(s.get("ref") or "")
-        if s.get("id") in heads or (nav.get("path") or []) or ref.split(":", 1)[0] not in ("project", "effort"):
-            continue
-        x = dict(s); x["navigation"] = {"path": [NOGOAL_ID]}
-        loose.append(x)
-    if not loose:
-        return None
-    head = {"id": NOGOAL_ID, "name": "no goal yet", "status": "active", "tier": 9, "order": 999,
-            "navigation": {"groups": [{"id": NOGOAL_ID, "parent_id": None}]}}
-    out = campaign_initiatives([head] + loose, resolved)
-    if not out:
-        return None
-    out[0]["nogoal"] = True
-    return out[0]
-
-
-def goals_only(initiatives):
-    """The goals - never the hidden no-goal group."""
-    return [i for i in initiatives or () if not i.get("nogoal")]
-
-
-def seated(initiatives, seat):
-    """The components sitting in a seat — (goal, part) pairs in his order (seat_order; then the goal's tier and
-    order; then the name). The one sort for Active and On deck (the head, the pick-up, the shelves)."""
-    out = []
-    for i in initiatives or ():
-        for p in i.get("parts") or ():
-            if p.get("seat") == seat and not p.get("closed"):
-                out.append((i, p))
-    return sorted(out, key=lambda t: (t[1].get("seat_order") if isinstance(t[1].get("seat_order"), int) else 999, t[0].get("tier") or 9, int(t[0].get("order") or 0), part_name(t[1]).lower()))
-
-
-# ── an initiative's light, its one line, its status (the home's Campaign tile and the Campaign page share these) ──
-
-LIGHTS = {"needs": ("&#9873;", "needs you"), "working": ("&#9679;", "working"), "waiting": ("&#9679;", "waiting"), "idle": ("&#9675;", "idle")}
-
-
-def initiative_light(i, working=None):
-    """One word for an initiative, read from its parts (John, 2026-09-27: "whether action is needed — working, waiting,
-    idle"): ``needs`` when a part waits on him; ``working`` when a referenced project has a running session or a busy
-    steward (``ctx["working"]``); ``waiting`` when an open part waits on something else; else ``idle``."""
-    working = working or set()
-    if i.get("needs"):
-        return "needs"
-    open_parts = [p for p in i.get("parts") or () if not p.get("closed", p.get("status") in ("done", "parked")) and not p.get("broken")]
-    if any(p.get("pid") and p["pid"] in working for p in open_parts):
-        return "working"
-    if any(str(p.get("state") or "").startswith("waiting") or p.get("status") == "waiting" for p in open_parts):
-        return "waiting"
-    return "idle"
-
-
-def initiative_line(i):
-    """The one sentence a compact initiative tile carries (Grok R8: the action, not the part's name): when a part waits
-    on him, the wait itself — a project part's "waiting on you: …" without its prefix, a native part's trigger, else
-    the part's text; else the next open part; else what done looks like. Returns (html, kind)."""
-    if i.get("needs"):
-        p = i["needs"][0]
-        state = str(p.get("state") or "")
-        low = state.lower()
-        if "waiting on you:" in low:
-            words = state[low.index("waiting on you:") + len("waiting on you:"):].strip()
-        elif p.get("waiting_on") and str(p["waiting_on"]).strip().lower() not in ("john", "you", "me"):
-            words = "%s &mdash; %s" % (esc(p.get("text") or ""), esc(p["waiting_on"]))
-            return "&#9873; " + words, "wait"
-        else:
-            words = ""
-        text = esc(words) if words else esc(p.get("text") or p.get("target") or "")
-        return "&#9873; " + text, "wait"
-    nxt = i.get("next")
-    if nxt:
-        return "Next: " + esc(nxt.get("text") or "") + ((" &middot; " + esc(_short(nxt["date"]))) if nxt.get("date") else ""), "next"
-    if i.get("done_when"):
-        return "Done looks like: " + esc(i["done_when"]), "done"
-    return "nothing open", "none"
+from high_seat_core import (
+    _OPEN,
+    _TIER_WORDS,
+    HIS_NAME,
+    INITIATIVE_KINDS,
+    KIND_LABEL,
+    KIND_WORDS,
+    LIGHTS,
+    NOGOAL_ID,
+    SEAT_NAMES,
+    SEAT_WORDS,
+    campaign_initiatives,
+    candidates_model,
+    desk_counts,
+    esc,
+    goals_only,
+    initiative_light,
+    initiative_line,
+    is_initiative,
+    loose_initiative,
+    mode_name,
+    part_name,
+    proactive_triage_cards,
+    relevance,
+    ruler_markers,
+    ruler_weeks,
+    seated,
+    short_date as _short,
+    this_week_horizon_buckets,
+)
 
 
 def initiative_status_html(i):
@@ -226,51 +64,6 @@ def initiative_status_html(i):
             esc(p.get("href") or "#"), esc(p.get("target") or p.get("text") or "project"), esc(lead) or "no status recorded yet"))
     return '<div class="istatus"><span class="k">Status</span>%s</div>' % (
         "".join(rows) or '<div class="isrow dim">No project part yet &mdash; the parts below carry their own states.</div>')
-
-
-# ── the ruler ──────────────────────────────────────────────────────────────────────────────────
-
-def ruler_weeks(today):
-    mon = today - timedelta(days=today.weekday())
-    weeks = []
-    for k in range(5):
-        a = mon + timedelta(days=7 * k)
-        b = a + timedelta(days=6)
-        label = "%s–%d" % (_hr.short_date(a.isoformat()), b.day) if a.month == b.month else "%s–%s" % (_hr.short_date(a.isoformat()), _hr.short_date(b.isoformat()))
-        weeks.append({"start": a, "end": b, "label": label, "name": "this week" if k == 0 else "week %d" % (k + 1)})
-    return weeks
-
-
-def ruler_markers(facts, today):
-    """Every open dated step across the records, bucketed into the five weeks and beyond; a date
-    already past sits in this week and says overdue."""
-    weeks = ruler_weeks(today)
-    buckets = {k: [] for k in range(5)}
-    beyond, overdue = [], []
-    for f in facts or ():
-        if not isinstance(f, dict):
-            continue
-        for st in f.get("dated") or ():
-            d = _hr._iso(st.get("due"))
-            if d is None:
-                continue
-            m = {"date": st["due"], "name": st.get("name", ""), "project_id": f.get("id", ""),
-                 "project_name": f.get("name", ""), "needs": bool(f.get("needs_you")),
-                 "overdue": d < today, "label": _hr.due_label(st["due"], today)}
-            if d < weeks[0]["start"]:
-                overdue.append(m)          # before this Monday: overdue, not this week's delivery
-                continue
-            placed = False
-            for k, w in enumerate(weeks):
-                if w["start"] <= d <= w["end"]:
-                    buckets[k].append(m); placed = True; break
-            if not placed:
-                beyond.append(m)
-    for k in buckets:
-        buckets[k].sort(key=lambda m: (m["date"], m["name"]))
-    beyond.sort(key=lambda m: (m["date"], m["name"]))
-    overdue.sort(key=lambda m: (m["date"], m["name"]))
-    return weeks, buckets, beyond, overdue
 
 
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
@@ -402,6 +195,7 @@ def _rail(ctx):
         '<li><button data-rail="email"><span class="n">Email</span><span class="c">not connected</span></button></li>'
         '<li><button data-rail="term"><span class="n">Terminal</span><span class="c" id="railTerm">%d</span></button></li>'
         '</ul>'
+        '<details class="cap provider-history" open><summary>Connections &amp; capacity &middot; Providers</summary><div id="capList">%s</div></details>'
         '<div id="cave-provider-controls" class="provider-controls" aria-label="Provider and quality for new work">'
         '<div><label for="cave-family">Provider</label><select id="cave-family" aria-label="Provider"></select></div>'
         '<div><label for="cave-account">Account</label><select id="cave-account" aria-label="Account"></select></div>'
@@ -409,7 +203,6 @@ def _rail(ctx):
         '<div><label for="cave-effort">Reasoning</label><select id="cave-effort" aria-label="Reasoning"></select></div>'
         '<button id="cave-provider-apply" type="button">Apply to new work</button><button id="cave-provider-settings" type="button">Provider details / Setup</button>'
         '<p id="cave-provider-message" class="provider-control-message" role="status"></p></div>'
-        '<details class="cap provider-history"><summary>Provider-wide Anchor observations</summary><div id="capList">%s</div></details>'
         '</nav>'
     ) % (anchor_mark(ctx["build"]), _brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
          _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
@@ -455,11 +248,20 @@ def _health_banner(ctx):
         return ""
     r = rows[0]
     href = str(r.get("href") or "/doctor")
-    return ('<div class="healthbar" role="alert"><span class="hb-mark">&#9888;</span><span class="hb-t"><b>%s</b> &middot; %s</span>'
+    plain_list = r.get("plain_issues") or []
+    pills_html = ""
+    if plain_list:
+        pills_html = '<span class="hb-pills">' + "".join(
+            '<span class="hb-pill">%s</span>' % esc(str(p)[:110]) for p in plain_list[:3]
+        ) + '</span>'
+    return ('<div class="healthbar" role="alert"><span class="hb-mark">&#9888;</span>'
+            '<span class="hb-t"><b>%s</b> &middot; %s%s</span>'
+            '<button type="button" class="tool hb-fix" data-hb-act="resolve-all" title="Probe live endpoints now and auto-verify/clear if passing">&#9889; One-Click Fix &amp; Verify</button>'
             '<a class="tool" href="%s" target="_blank" rel="noopener">Diagnose</a>'
-            '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button>'
-            '<button class="tool" data-tool="zombie">%sZombie Hunter</button></div>') % (
-        esc(r.get("text") or "Health check found issues"), esc(r.get("why") or ""), esc(href), _brand_img(ctx["build"], "zombie-hunter-radar.jpg"))
+            '<button type="button" class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button>'
+            '<button type="button" class="tool" data-tool="zombie">%sZombie Hunter</button>'
+            '<button type="button" class="tool hb-dismiss" data-hb-act="dismiss" title="Dismiss banner for this report" aria-label="Dismiss health banner">&#10005;</button></div>') % (
+        esc(r.get("text") or "Health check found issues"), esc(r.get("why") or ""), pills_html, esc(href), _brand_img(ctx["build"], "zombie-hunter-radar.jpg"))
 
 
 def _hdr(ctx):
@@ -675,8 +477,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     with no record is a quiet card: the name, its blurb, the cockpit."""
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
-    # A seated component has its own Campaign name; the project is context, not its title.
-    name = esc((step or {}).get("name") or e.get("name"))
+    name = esc(e.get("name") or (step or {}).get("name"))
     # W2c (2026-09-30): on a shelf the card is a seated initiative — it carries its step, drags, has its × and names
     # its goal; a cockpit within a project is its own card on its own effort
     cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
@@ -739,23 +540,34 @@ def _card(e, f, cls, goal=None, step=None, light=None):
                  '<button class="t-eff-open" data-part="status" data-pid="%s" data-dir="%s">see</button></div>') % (n, "" if n == 1 else "s", pid, rel)
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     acts += _resume_act(pid, rel, f.get("resume"))
+    # Wave 6b: 1-click Mark Done button on active/seated cards (uses data-mark-done, never data-part or data-dir so card act counts stay exact)
+    t_folder = str(f.get("folder") or "")
+    if t_folder and f.get("effort"):
+        t_folder = str(Path(t_folder) / str(f.get("effort")))
+    done_btn = (
+        '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-target-dir="%s" title="Mark current step done in this record">&#10003; Done</button>'
+        % (esc((step or {}).get("id") or ""), esc(t_folder))
+    )
+    # "/project/%s?dir=%s&amp;open=effort"
     cockpit_href = "/steward/v1?pid=%s&amp;dir=%s" % (pid, esc(_quote(str(f.get("effort") or ""))))
+    proj_href = "/project/%s%s" % (pid, ("?dir=%s" % rel) if rel else "")
+    st_tot = int(f.get("steps_total") or 0)
+    st_done = int(f.get("steps_done") or 0)
+    prog_html = ""
+    if st_tot > 0:
+        pct = max(0, min(100, int(round(100.0 * st_done / st_tot))))
+        prog_html = ('<div class="t-prog" title="%d of %d plan steps done">'
+                     '<span class="t-prog-bar"><i style="width:%d%%"></i></span>'
+                     '<span class="t-prog-txt">%d/%d steps</span></div>') % (st_done, st_tot, pct, st_done, st_tot)
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top">%s<h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
-        '<a class="t-go" href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div><div class="t-face">%s'
-        '%s<div class="t-more"><div class="t-desc">%s</div>%s</div></div>'
+        '%s<a class="t-go" href="%s" data-project-href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div><div class="t-face">%s'
+        '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>%s</div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % esc(e.get("name"))) if step else (('<span class="t-eff">&middot; %s</span>' % rel) if rel else ""), cockpit_href, xbtn, goal_line,
-         line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
+    ) % (cls, cid, pid, rel, attr, dot, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", done_btn, cockpit_href, proj_href, xbtn, goal_line,
+         line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, prog_html, acts)
 
-
-
-def desk_counts(desk):
-    """(waits, small items open, cockpits) for the Desk tile and the rail; zeros when the Desk is not set up."""
-    if not desk:
-        return 0, 0, 0
-    return int(desk.get("waits") or 0), len((desk.get("small") or {}).get("items") or ()), len(desk.get("cockpits") or ())
 
 
 def _desk_line(ctx):
@@ -786,12 +598,83 @@ def _desk_line(ctx):
     sm = desk.get("small") or {}
     rows = [row("Small items · %d" % n_small, "Small items", sm.get("light"), sm.get("why"))]
     rows += [row(c["name"], c["dir"], c.get("light"), c.get("why"), c.get("seat") or "") for c in desk.get("cockpits") or ()]
+    adhoc_btn = (
+        '<button type="button" class="dchip desk-cockpit-btn" data-open-href="/steward/v1?pid=%s&amp;dir=Small%%20items" '
+        'title="Open the Desktop Ad-Hoc AI Cockpit for quick admin tasks">&#128421; Ad-Hoc AI Cockpit &#8599;</button>' % esc(pid)
+    )
     return (
-        '<section class="camp desk%s" id="deskline"><div class="camp-h" id="deskHead"><span class="tlight %s"></span><span class="k">Desk</span>'
-        '<span class="d">%s</span><span class="sp"></span>' + tasks + '<span class="tog" id="deskTog">Expand</span>'
+        '<section class="camp desk%s" id="deskline"><div class="camp-h" id="deskHead"><span class="tlight %s"></span><span class="k">Desk (Desktop)</span>'
+        '<span class="d">%s</span><span class="sp"></span>%s%s<span class="tog" id="deskTog">Expand</span>'
         '<a class="camp-open" href="/desk" target="_blank" rel="noopener">Open the Desk</a></div>'
         '<div class="camp-body"><div class="drows">%s</div></div></section>'
-    ) % (" ready" if head_light == "orange" else "", head_light, line, "".join(rows))
+    ) % (" ready" if head_light == "orange" else "", head_light, line, adhoc_btn, tasks, "".join(rows))
+
+
+def _this_week_horizon_html(ctx, weeks, buckets, overdue):
+    """Wave 6b/12/15: Two-Horizon Schedule top view — Today & This Week 4-column tactical focus board with
+    HTML5 Drag-and-Drop card rescheduling, 1-click Mark Done, Push +3d controls, and recently closed steps."""
+    hb = this_week_horizon_buckets(ctx)
+    col_overdue = hb["col_overdue"]
+    col_today = hb["col_today"]
+    col_72h = hb["col_72h"]
+    col_week = hb["col_week"]
+    closed_today = hb["closed_today"]
+    tdates = hb["target_dates"]
+
+    def _tw_item(x, badge_cls=""):
+        plus3 = (x["date_obj"] + timedelta(days=3)).isoformat()
+        acts = ""
+        drag_attrs = ""
+        if x.get("folder") and x.get("step_id"):
+            acts = (
+                '<span class="tw-acts">'
+                '<button type="button" class="tw-btn done" data-mark-done="1" data-target-dir="%s" data-target-step="%s" title="Mark step done">&#10003; Done</button>'
+                '<button type="button" class="tw-btn push" data-schedule-date="%s" data-target-dir="%s" data-target-step="%s" title="Push due date +3 days">+3d</button>'
+                '</span>'
+            ) % (esc(x["folder"]), esc(x["step_id"]), esc(plus3), esc(x["folder"]), esc(x["step_id"]))
+            drag_attrs = (
+                ' draggable="true" data-tw-card="1" data-target-dir="%s" data-target-step="%s" title="Drag across columns to reschedule due date"'
+                % (esc(x["folder"]), esc(x["step_id"]))
+            )
+        return (
+            '<div class="tw-card%s"%s><div class="tw-top"><span class="tw-date">%s</span>'
+            '<a class="tw-proj" href="/project/%s" target="_blank" rel="noopener">%s</a>%s</div>'
+            '<div class="tw-name">%s</div></div>'
+        ) % (
+            (" " + badge_cls) if badge_cls else "",
+            drag_attrs,
+            esc(_short(x["due"])),
+            esc(x["project_id"]),
+            esc(x["project_name"]),
+            acts,
+            esc(x["name"]),
+        )
+
+    done_html = "".join(
+        '<div class="tw-card done"><div class="tw-top"><span class="tw-date">&#10003; Done today</span>'
+        '<a class="tw-proj" href="/project/%s" target="_blank" rel="noopener">%s</a></div>'
+        '<div class="tw-name">%s</div></div>' % (esc(c["project_id"]), esc(c["project_name"]), esc(c["name"]))
+        for c in closed_today[:4]
+    )
+
+    c1 = "".join(_tw_item(x, "late") for x in col_overdue[:5]) or '<div class="tw-empty">&#10003; Zero overdue items</div>'
+    c2 = ("".join(_tw_item(x, "now") for x in col_today[:5]) + done_html) or '<div class="tw-empty">No remaining deadlines today</div>'
+    c3 = "".join(_tw_item(x, "soon") for x in col_72h[:5]) or '<div class="tw-empty">Clear for next 72 hours</div>'
+    c4 = "".join(_tw_item(x, "") for x in col_week[:5]) or '<div class="tw-empty">Nothing else due within 7 days</div>'
+
+    return (
+        '<div class="tw-board" id="thisWeekBoard" data-tw-dnd="1">'
+        '<div class="tw-col" data-tw-drop-col="overdue" data-tw-target-date="%s"><div class="tw-col-h"><span class="tw-k">Overdue</span><span class="tw-c">%d</span></div>%s</div>'
+        '<div class="tw-col now" data-tw-drop-col="today" data-tw-target-date="%s"><div class="tw-col-h"><span class="tw-k">Today &amp; Done Today</span><span class="tw-c">%d</span></div>%s</div>'
+        '<div class="tw-col" data-tw-drop-col="72h" data-tw-target-date="%s"><div class="tw-col-h"><span class="tw-k">Next 72 Hours</span><span class="tw-c">%d</span></div>%s</div>'
+        '<div class="tw-col" data-tw-drop-col="week" data-tw-target-date="%s"><div class="tw-col-h"><span class="tw-k">Days 4&ndash;7</span><span class="tw-c">%d</span></div>%s</div>'
+        '</div>'
+    ) % (
+        esc(tdates["overdue"]), len(col_overdue), c1,
+        esc(tdates["today"]), len(col_today) + len(closed_today), c2,
+        esc(tdates["72h"]), len(col_72h), c3,
+        esc(tdates["week"]), len(col_week), c4,
+    )
 
 
 def _ruler(ctx):
@@ -819,17 +702,310 @@ def _ruler(ctx):
     late = ('<div class="shelf-foot late">Overdue, before this week: %s.</div>' % "; ".join(
         '<a href="/project/%s" target="_blank" rel="noopener">%s</a> (%s, %s)' % (esc(m["project_id"]), esc(m["name"]), esc(_short(m["date"])), esc(m["project_name"]))
         for m in overdue[:6])) if overdue else ""
+    tw_html = _this_week_horizon_html(ctx, weeks, buckets, overdue)
+    comms_html = _comms_pulse_html(ctx)
     return (
-        '<section class="shelf" id="shDated"><div class="shelf-h"><h3>Dated deliveries</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
+        '<section class="shelf" id="shDated"><div class="shelf-h"><h3>Dated deliveries &amp; Schedule</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
+        '<div class="hz-tabs" role="tablist" aria-label="Schedule horizon">'
+        '<button type="button" class="hz-tab on" data-hz="both">Today + 6-Week Compact</button>'
+        '<button type="button" class="hz-tab" data-hz="week">Today &amp; This Week Only</button>'
+        '<button type="button" class="hz-tab" data-hz="ruler">6-Week Horizon Only</button></div>'
         '<span class="note">Each marker is a dated open step in a project&rsquo;s record. Click one to balloon it open.</span></div>'
-        '<div class="ruler" id="ruler"><div class="rl-head">%s</div><div class="rl-marks" id="rlMarks">%s</div></div>'
+        '%s'
+        '<div class="ruler compact-ruler" id="ruler"><div class="rl-head">%s</div><div class="rl-marks" id="rlMarks">%s</div></div>'
         '%s<div class="shelf-foot">Each marker points at the one card that owns it &mdash; no project has a second card.</div>'
-        '<section class="cal" id="cal"><button class="cal-h" id="calHead"><span class="k">Calendar</span><span class="state">&middot; not connected</span>'
-        '<span class="cal-tab" id="tabCal">Calendar</span><span class="cal-tab" id="tabMail">Email</span><span class="sp"></span><span class="tog" id="calTog">Open</span></button>'
-        '<div class="cal-body" id="calBody"><p class="conn-zero">No account is connected, so there is nothing to show &mdash; nothing here is sample data. '
-        'Connecting means two app registrations (Google, Microsoft) and a sign-in per account; Anchor would read before it ever writes, and every send or calendar change would ask you first.</p></div></section>'
+        '%s'
         '</section>'
-    ) % (total, "" if total == 1 else "s", head, "".join(cols), late)
+    ) % (total, "" if total == 1 else "s", tw_html, head, "".join(cols), late, comms_html)
+
+
+def _comms_pulse_html(ctx):
+    """Wave 9 & Wave 15: Calendar & Email Pulse on the Cave of Wonders — reconciles configured IMAP/ICS accounts
+    and live project roadmaps with background auto-poller status, two-way reply draft generation, 1-click Mark Step Done,
+    and direct link to Gear (⚙) Setup Stage 4 (`/setup?section=comms`)."""
+    import comms_connector as _cc
+    try:
+        comms = ctx.get("comms") or _cc.reconcile_comms_with_roadmaps(
+            entries=ctx.get("entries") or [],
+            facts=ctx.get("facts") or {},
+            today=ctx.get("today") or date.today(),
+        )
+        p_stat = _cc.poller_status()
+    except Exception:
+        comms = {"accounts_count": 0, "connected_count": 0, "calendar_events": [], "email_threads": [], "last_sync_at": ""}
+        p_stat = {"running": False, "interval_sec": 900}
+
+    conn_n = int(comms.get("connected_count") or 0)
+    acc_n = int(comms.get("accounts_count") or 0)
+    cal_evs = comms.get("calendar_events") or []
+    threads = comms.get("email_threads") or []
+    last_sync = str(comms.get("last_sync_at") or "").strip()
+    poller_min = max(1, int(round(int(p_stat.get("interval_sec") or 900) / 60.0)))
+
+    state_txt = (
+        "&middot; %d account%s connected (OS Vault) &middot; %d calendar &middot; %d correspondence track%s"
+        % (conn_n, "" if conn_n == 1 else "s", len(cal_evs), len(threads), "" if len(threads) == 1 else "s")
+        if acc_n > 0
+        else "&middot; roadmap reconciliation active &middot; %d calendar &middot; %d correspondence track%s"
+        % (len(cal_evs), len(threads), "" if len(threads) == 1 else "s")
+    )
+    if last_sync:
+        state_txt += " &middot; synced %s" % esc(last_sync)
+
+    cal_rows = []
+    for ev in cal_evs[:6]:
+        acts = ""
+        if ev.get("folder") and ev.get("step_id"):
+            acts = (
+                '<button type="button" class="tw-btn done" data-mark-done="1" data-target-dir="%s" data-target-step="%s" title="Mark this calendar/roadmap step done">&#10003; Done</button>'
+                % (esc(ev["folder"]), esc(ev["step_id"]))
+            )
+        proj_link = (
+            '<a class="tw-proj" href="/project/%s" target="_blank" rel="noopener">%s</a>'
+            % (esc(ev["project_id"]), esc(ev.get("project_name") or "Project"))
+            if ev.get("project_id")
+            else '<span class="tw-proj">%s</span>' % esc(ev.get("project_name") or "Calendar")
+        )
+        cal_rows.append(
+            '<div class="comms-item %s"><div class="comms-item-top">'
+            '<span class="comms-badge %s">%s &middot; %s</span>%s%s</div>'
+            '<div class="comms-item-title">%s</div></div>'
+            % (
+                esc(ev.get("tone") or "sky"),
+                esc(ev.get("tone") or "sky"),
+                esc(_short(ev.get("date")) or ev.get("date") or ""),
+                esc(ev.get("time_label") or ""),
+                proj_link,
+                acts,
+                esc(ev.get("title") or ""),
+            )
+        )
+    cal_col_html = "".join(cal_rows) or '<div class="tw-empty">No upcoming calendar or dated delivery items in the next 14 days.</div>'
+
+    mail_rows = []
+    for th in threads[:6]:
+        acts = []
+        acts.append(
+            '<button type="button" class="tw-btn" data-comms-draft-reply="1" data-comms-draft-subject="%s" data-comms-draft-to="%s" data-comms-draft-project="%s" data-comms-draft-step="%s" title="Generate a reply draft (.eml + mailto:) for this correspondence track">&#9998; Draft Reply</button>'
+            % (
+                esc(th.get("subject") or ""),
+                esc(th.get("counterparty") or ""),
+                esc(th.get("project_name") or ""),
+                esc(th.get("step_id") or ""),
+            )
+        )
+        if th.get("can_mark_done") and th.get("folder") and th.get("step_id"):
+            acts.append(
+                '<button type="button" class="tw-btn done" data-mark-done="1" data-target-dir="%s" data-target-step="%s" title="Mark reconciled roadmap step done">&#10003; Mark Step Done</button>'
+                % (esc(th["folder"]), esc(th["step_id"]))
+            )
+        if th.get("project_id"):
+            acts.append(
+                '<a class="tw-btn" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener">Cockpit &#8599;</a>'
+                % esc(th["project_id"])
+            )
+        mail_rows.append(
+            '<div class="comms-item %s"><div class="comms-item-top">'
+            '<span class="comms-badge %s">%s</span>'
+            '<span class="comms-meta">%s &middot; %s</span>'
+            '<span class="comms-acts">%s</span></div>'
+            '<div class="comms-item-title">%s</div>'
+            '<div class="comms-item-sub">%s</div></div>'
+            % (
+                esc(th.get("tone") or "sky"),
+                esc(th.get("tone") or "sky"),
+                esc(th.get("badge") or "Correspondence"),
+                esc(th.get("project_name") or th.get("counterparty") or ""),
+                esc(th.get("date_label") or ""),
+                "".join(acts),
+                esc(th.get("subject") or ""),
+                esc(th.get("summary") or ""),
+            )
+        )
+    mail_col_html = "".join(mail_rows) or '<div class="tw-empty">No active external counsel or email tracks waiting on reconciliation.</div>'
+
+    conn_note = (
+        '<p class="conn-zero">Connected to %d account%s via Windows OS Credential Vault (<code>advapi32</code>) &mdash; background poller + two-way draft composer active.</p>'
+        % (acc_n, "" if acc_n == 1 else "s")
+        if acc_n > 0
+        else '<p class="conn-zero">No external IMAP/ICS account is connected yet, so nothing here is sample data &mdash; items above are reconciled directly from your project roadmaps. '
+             'Use <b>&#9881; Calendar &amp; Email Setup</b> to connect Google/Gmail, Microsoft 365/Outlook (OAuth2 PKCE or App Password), or Custom IMAP/ICS (stored in the Windows OS Vault).</p>'
+    )
+
+    return (
+        '<section class="cal open" id="cal" data-comms-pulse="1">'
+        '<button class="cal-h" id="calHead"><span class="k">&#128236; Calendar &amp; Email Pulse</span>'
+        '<span class="state" id="commsStateBadge">%s</span>'
+        '<span class="cal-tab on" id="tabCal" data-cal-tab="cal">&#128197; Calendar &amp; Deadlines (%d)</span>'
+        '<span class="cal-tab" id="tabMail" data-cal-tab="mail">&#9993; Email &amp; Counsel (%d)</span>'
+        '<span class="sp"></span><span class="tog" id="calTog">Close</span></button>'
+        '<div class="cal-body" id="calBody">'
+        '<div class="comms-toolbar" id="caveCommsPulse">'
+        '<div class="comms-pills">'
+        '<span class="comms-pill emerald">&#9679; OS Vault (advapi32)</span>'
+        '<span class="comms-pill sky" id="commsPollerPill">&#8635; Auto-Poller (%dm)</span>'
+        '<span class="comms-pill sky">&#9998; Two-Way Drafts (.eml)</span>'
+        '</div>'
+        '<div class="cal-quick-row">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCaveCommsSync" data-comms-sync="1">&#8635; Sync Now</button>'
+        '<button type="button" class="mini" id="btnCaveCommsDraftNew" data-comms-draft-reply="1" data-comms-draft-subject="Update on next steps" data-comms-draft-to="" data-comms-draft-project="" data-comms-draft-step="">&#9998; Compose Draft</button>'
+        '<a class="mini comms-setup-btn" id="btnCaveCommsSetup" href="/setup?section=comms" data-open-href="/setup?section=comms">&#9881; Calendar &amp; Email Setup</a>'
+        '<button type="button" class="mini cal-prefill" data-say-prefill="I just emailed / completed: ">&#9993; Log an Email or External Action with the Steward</button>'
+        '<button type="button" class="mini cal-prefill" data-say-prefill="Schedule update for this week: ">&#128197; Update Schedule / Priorities with the Steward</button>'
+        '</div></div>'
+        '<div class="comms-draft-modal" id="caveCommsDraftModal" hidden style="margin:8px 0;padding:12px;border:1px solid #2b3546;border-radius:8px;background:#121822">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+        '<b>&#9998; Two-Way Reply Draft Composer (Saves .eml to .anchor/drafts/ + Optional IMAP Drafts)</b>'
+        '<button type="button" class="mini" id="btnCommsDraftClose">&times; Close</button></div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+        '<input type="text" id="commsDraftTo" placeholder="To (email or counterparty)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<input type="text" id="commsDraftSubject" placeholder="Subject" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '</div>'
+        '<textarea id="commsDraftBody" rows="4" placeholder="Draft message body..." style="width:100%%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3;margin-bottom:8px"></textarea>'
+        '<div style="display:flex;align-items:center;gap:8px">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCommsDraftSave">&#128190; Save Draft (.eml)</button>'
+        '<a class="mini" id="btnCommsDraftMailto" href="#" target="_blank" rel="noopener" hidden>&#9993; Open in Mail App (mailto:)</a>'
+        '<span id="commsDraftStatus" style="font-size:12px;color:#8b949e"></span>'
+        '</div></div>'
+        '<div class="comms-grid" id="commsGrid">'
+        '<div class="comms-col" id="commsCalCol"><div class="comms-col-h">&#128197; Upcoming Calendar &amp; Roadmap Window</div>%s</div>'
+        '<div class="comms-col" id="commsMailCol"><div class="comms-col-h">&#9993; External Correspondence &amp; Counsel Reconciliation</div>%s</div>'
+        '</div>'
+        '%s'
+        '</div></section>'
+    ) % (state_txt, len(cal_evs), len(threads), poller_min, cal_col_html, mail_col_html, conn_note)
+
+
+def _mothership_collab_html(ctx):
+    """Wave 11 & Wave 15: Multi-Mothership Collaboration & Shared Cockpits strip on the Cave of Wonders
+    with custom peer registration modal, .anchor-cockpit.json packet import/export, and 1-click step lease claim/release."""
+    entries = ctx.get("entries") or []
+    try:
+        import mothership_collab as _mc
+        summary = _mc.collab_summary_for_cave(entries=entries, facts=ctx.get("facts"))
+    except Exception:
+        summary = {"mothership": {"id": "anchor-mothership", "label": "Mother Ship"}, "peers": [], "active_leases": [], "shared_cockpits": []}
+
+    ms = summary.get("mothership") or {}
+    peers = summary.get("peers") or []
+    leases = summary.get("active_leases") or []
+    shared = summary.get("shared_cockpits") or []
+
+    peer_rows = []
+    for p in peers[:4]:
+        sync_note = str(p.get("sync_note") or p.get("reachability") or "").strip()
+        peer_rows.append(
+            '<div class="tw-card" data-peer-id="%s">'
+            '<div class="tw-top"><span class="tw-due ok">&#9679; %s</span>'
+            '<span class="tw-proj">%s%s</span>'
+            '<span class="tw-acts"><button type="button" class="tw-act" data-collab-sync-peer="%s">&#8644; Sync Peer</button></span></div>'
+            '<div class="tw-name">%s &middot; <code>%s</code></div>'
+            '</div>'
+            % (esc(p.get("id") or ""), esc(p.get("role") or "collaborator"), esc(p.get("transport") or "git_remote"),
+               (" &middot; " + esc(sync_note[:38])) if sync_note else "",
+               esc(p.get("id") or ""), esc(p.get("label") or p.get("id") or "Peer Mothership"), esc(p.get("endpoint") or ""))
+        )
+    if not peer_rows:
+        peer_rows.append(
+            '<div class="tw-empty">No external collaborator Mothership linked yet &mdash; use <b>+ Link Collaborator Mothership</b> '
+            'or <b>&#128230; Export Portable Cockpit Packet</b> to share a project cockpit with zero personal/host path leakage.</div>'
+        )
+
+    cockpit_rows = []
+    for sc in shared[:4]:
+        first_entry = next((e for e in entries if str(e.get("id") or "") == str(sc.get("pid") or "")), None)
+        cdir_str = str(sc.get("cdir") or (first_entry or {}).get("folder_path") or "")
+        first_step = str(sc.get("first_open_step_id") or "")
+        claim_btn = (
+            '<button type="button" class="tw-act" data-collab-claim-cdir="%s" data-collab-claim-step="%s" title="Claim a conflict-free lease on the next open step">&#128274; Claim Step</button>'
+            % (esc(cdir_str), esc(first_step))
+        ) if (cdir_str and first_step) else ""
+        cockpit_rows.append(
+            '<div class="tw-card" data-shared-pid="%s">'
+            '<div class="tw-top"><span class="tw-due soon">&#129309; %d/%d steps</span>'
+            '<span class="tw-proj">%d active lease%s</span>'
+            '<span class="tw-acts">'
+            '%s'
+            '<button type="button" class="tw-act done" data-collab-export="%s" data-collab-name="%s">&#128230; Export Packet</button>'
+            '<a class="tw-act" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener">Cockpit &#8599;</a>'
+            '</span></div>'
+            '<div class="tw-name">%s</div>'
+            '</div>'
+            % (esc(sc.get("pid") or ""), int(sc.get("steps_done") or 0), int(sc.get("steps_total") or 0),
+               int(sc.get("leases_count") or 0), "" if int(sc.get("leases_count") or 0) == 1 else "s",
+               claim_btn, esc(cdir_str), esc(sc.get("name") or "Project"), esc(sc.get("pid") or ""), esc(sc.get("name") or "Project"))
+        )
+    for ls in leases[:3]:
+        cockpit_rows.append(
+            '<div class="tw-card" data-lease-step="%s">'
+            '<div class="tw-top"><span class="tw-due ok">&#128274; Leased by %s</span>'
+            '<span class="tw-proj">%s</span>'
+            '<span class="tw-acts">'
+            '<button type="button" class="tw-act" data-collab-release-cdir="%s" data-collab-release-step="%s">&#128275; Release</button>'
+            '</span></div>'
+            '<div class="tw-name">%s &middot; <code>%s</code></div>'
+            '</div>'
+            % (
+                esc(ls.get("step_id") or ""),
+                esc(ls.get("holder_label") or ls.get("holder_mothership") or "Mother Ship"),
+                esc(ls.get("project_name") or ""),
+                esc(ls.get("cdir") or ""),
+                esc(ls.get("step_id") or ""),
+                esc(ls.get("step_name") or ls.get("step_id") or ""),
+                esc(ls.get("step_id") or ""),
+            )
+        )
+    if not cockpit_rows:
+        cockpit_rows.append('<div class="tw-empty">No shared project roadmaps detected yet.</div>')
+
+    return (
+        '<section class="cal open" id="caveCollabStrip" data-mothership-collab="1">'
+        '<div class="cal-h"><span class="k">&#129309; Multi-Mothership Collaboration &amp; Shared Cockpits</span>'
+        '<span class="state" id="collabStateBadge">%s &middot; %d peer%s &middot; %d step lease%s</span>'
+        '<span class="sp"></span></div>'
+        '<div class="cal-body">'
+        '<div class="comms-toolbar">'
+        '<div class="comms-pills">'
+        '<span class="comms-pill emerald">&#9679; %s (%s)</span>'
+        '<span class="comms-pill sky">&#128230; Portable Relative Paths (distro.scan_paths Clean)</span>'
+        '</div>'
+        '<div class="cal-quick-row">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCollabSyncNow" data-collab-sync="1">&#8644; Sync Shared Cockpits</button>'
+        '<button type="button" class="mini comms-setup-btn" id="btnCollabAddPeer" data-collab-add-peer="1">+ Link Collaborator Mothership</button>'
+        '<button type="button" class="mini" id="btnCollabOpenImport" data-collab-open-import="1">&#128229; Import Cockpit Packet</button>'
+        '</div></div>'
+        '<div class="collab-modal" id="caveCollabModal" hidden style="margin:8px 0;padding:12px;border:1px solid #2b3546;border-radius:8px;background:#121822">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+        '<b>&#129309; Register Collaborator Mothership / Import Portable Cockpit Packet</b>'
+        '<button type="button" class="mini" id="btnCollabModalClose">&times; Close</button></div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:6px;margin-bottom:10px">'
+        '<input type="text" id="collabPeerId" placeholder="Peer ID (e.g. lab-peer-01)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<input type="text" id="collabPeerLabel" placeholder="Label (e.g. Lab Partner Mothership)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<select id="collabPeerTransport" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<option value="tailscale_http">tailscale_http</option><option value="git_remote">git_remote</option><option value="packet_bundle">packet_bundle</option></select>'
+        '<input type="text" id="collabPeerEndpoint" placeholder="Endpoint (http://100.x.y.z:8777 or git URL)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCollabPeerSave">Save Peer</button>'
+        '</div>'
+        '<div style="display:grid;grid-template-columns:1fr 2fr auto;gap:6px;align-items:start">'
+        '<input type="text" id="collabImportTargetDir" placeholder="Target folder for Packet Import (e.g. C:/dev/Project)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<textarea id="collabImportJson" rows="2" placeholder="Paste .anchor-cockpit.json packet JSON here to merge..." style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></textarea>'
+        '<button type="button" class="mini" id="btnCollabPacketImport">&#128229; Import Packet</button>'
+        '</div>'
+        '<div id="collabModalStatus" style="margin-top:6px;font-size:12px;color:#8b949e"></div>'
+        '</div>'
+        '<div class="comms-grid" id="collabGrid">'
+        '<div class="comms-col" id="collabPeersCol"><div class="comms-col-h">&#127760; Linked Collaborator Motherships</div>%s</div>'
+        '<div class="comms-col" id="collabCockpitsCol"><div class="comms-col-h">&#128230; Shared Cockpits &amp; Step Leases (1-Click Handoff Packet)</div>%s</div>'
+        '</div>'
+        '<pre class="collab-packet-box" id="collabPacketPreview" hidden></pre>'
+        '</div></section>'
+    ) % (
+        esc(ms.get("label") or "Mother Ship"),
+        len(peers), "" if len(peers) == 1 else "s",
+        len(leases), "" if len(leases) == 1 else "s",
+        esc(ms.get("label") or "Mother Ship"), esc(ms.get("id") or "anchor-mothership"),
+        "".join(peer_rows), "".join(cockpit_rows),
+    )
 
 
 TERM_ENGINES = (("claude", "Claude"), ("chatgpt", "ChatGPT"), ("grok", "Grok"), ("gemini", "Gemini"), ("shell", "Shell"))
@@ -894,108 +1070,9 @@ def _cockpit_dates(folder):
     return d(born), d(last)
 
 
-def relevance(c, today, override=None):
-    """The steward's relevance score (0-100) for a candidate, with its reasons (his word, 2026-10-02: "how likely the
-    user is to want to/need to work on the project"). The steward's own score, when it has written one for this
-    candidate (Campaign/.ecgberht/relevance.json), stands; else the record's: what waits on him, how near its date,
-    its goal's tier, how recently it was worked, how long it has lain still."""
-    if isinstance(override, dict) and isinstance(override.get("score"), (int, float)):
-        return max(0, min(100, int(override["score"]))), str(override.get("why") or "the steward's own score")
-    from datetime import date as _date
-    score, why = 20, []
-    if c.get("needs"):
-        score += 35; why.append("waits on you")
-    due = str(c.get("due") or "")
-    if due:
-        try:
-            days = (_date.fromisoformat(due[:10]) - today).days
-            if days < 0:
-                score += 30; why.append("overdue")
-            elif days <= 7:
-                score += 22; why.append("due in %d day%s" % (days, "" if days == 1 else "s"))
-            elif days <= 21:
-                score += 10; why.append("due %s" % due[:10])
-        except ValueError:
-            pass
-    tier = c.get("tier")
-    if tier == 1:
-        score += 15; why.append("a tier-1 goal")
-    elif tier == 2:
-        score += 7; why.append("a tier-2 goal")
-    worked = str(c.get("worked") or "")
-    if worked:
-        try:
-            ago = (today - _date.fromisoformat(worked[:10])).days
-            if ago <= 3:
-                score += 12; why.append("worked %s" % ("today" if ago == 0 else "%d day%s ago" % (ago, "" if ago == 1 else "s")))
-            elif ago <= 14:
-                score += 5; why.append("worked %d days ago" % ago)
-            elif ago > 45:
-                score -= 10; why.append("still for %d days" % ago)
-        except ValueError:
-            pass
-    return max(0, min(100, score)), (", ".join(why) or "nothing presses")
-
-
 def candidates(ctx):
-    """Everything he could put on deck or make active (his word, 2026-10-02: "a tile that can be expanded, right below
-    the on deck that shows all of the candidates -- those would be anything with an AI Cockpit as well as any open
-    tasks/efforts, e.g. of an admin nature in the desk"): (1) the open components inside a goal with no seat yet - a
-    cockpit, an effort, a desk item; (2) every AI cockpit (a project, or one of its efforts, with a steward record)
-    that is not on the Campaign at all. Read from the page's own context; nothing new is read from disk."""
-    inits = [i for i in ctx.get("initiatives") or () if i.get("status") not in ("done", "parked")]
-    in_goal = []
-    on_map = set()
-    for i in ctx.get("initiatives") or ():
-        for p in i.get("parts") or ():
-            if p.get("kind") in ("project", "effort") and p.get("pid"):
-                on_map.add((p["pid"], p.get("dir") or ""))
-                if p.get("kind") == "project":
-                    on_map.add((p["pid"], "*"))
-    facts = ctx.get("facts") or {}
-    today = ctx.get("today")
-    if today is None:
-        from datetime import date as _date
-        today = _date.today()
-    ev = ctx.get("campaign_step_dates") or {}
-    over = ctx.get("relevance_override") or {}
-    for i in goals_only(inits):
-        for p in i.get("parts") or ():
-            if p.get("kind") in KIND_LABEL and not p.get("seat") and not p.get("closed") and not p.get("broken"):
-                made, touched = (ev.get(p.get("id")) or ("", ""))
-                if p.get("pid") and facts.get(p["pid"], {}).get("folder"):
-                    import os as _os
-                    b, l = cockpit_dates(_os.path.join(facts[p["pid"]]["folder"], p.get("dir") or ""))
-                    touched = max(touched or "", l or "")
-                p["c_created"], p["c_worked"] = made, touched
-                p["c_score"], p["c_why"] = relevance({"needs": p.get("needs_you"), "due": p.get("date"), "tier": i.get("tier"), "worked": touched},
-                                                     today, over.get(p.get("id")))
-                in_goal.append((i, p))
-    camp = (ctx.get("campaign") or {}).get("pid")
-    loose = []
-    for e in ctx.get("entries") or ():
-        pid = e.get("id")
-        f = facts.get(pid) or {}
-        if not pid or pid == camp or not f.get("has_record") or (pid, "*") in on_map:
-            continue
-        effs = [x for x in (f.get("efforts") or []) if isinstance(x, dict)]
-        if not effs:
-            if (pid, "") not in on_map:
-                loose.append({"ref": "project:%s" % pid, "name": f.get("name") or e.get("name") or pid[:8], "where": "a project", "needs": bool(f.get("needs_you")), "folder": f.get("folder") or ""})
-            continue
-        for x in effs:
-            rel = str(x.get("rel") or "")
-            if (pid, rel) in on_map:
-                continue
-            nm = f.get("name") or e.get("name") or pid[:8]
-            loose.append({"ref": ("effort:%s/%s" % (pid, _quote(rel))) if rel else ("project:%s" % pid),
-                          "name": ("%s · %s" % (nm, x.get("name") or rel)) if rel else nm,
-                          "where": ("an effort of %s" % nm) if rel else "a project", "needs": bool(x.get("needs_you")),
-                          "folder": (f.get("folder") or "") + (("/" + rel) if rel else "")})
-    for c in loose:
-        c["created"], c["worked"] = cockpit_dates(c["folder"]) if c.get("folder") else ("", "")
-        c["score"], c["why"] = relevance({"needs": c["needs"], "worked": c["worked"]}, today, over.get(c["ref"]))
-    return in_goal, loose
+    """Everything he could put on deck or make active — delegated to high_seat_core.candidates_model (Wave 12)."""
+    return candidates_model(ctx, dates_fn=cockpit_dates)
 
 
 def _candidates_tile(ctx):
@@ -1117,12 +1194,6 @@ def _dialogue(ctx):
     return conversation_view(ctx["steward"]["label"], (ctx.get("campaign") or {}).get("pid") or "", "cave", CAVE_EFFORT, "the Cave of Wonders")
 
 
-def mode_name(st):
-    """The Campaign page's name in the steward's goals-and-foresight mode, per persona (John, 2026-10-03: Aladdin
-    the Star Chart, Jarvis the Chart Room, Ecgberht the Beacon); every label that names that page says it."""
-    return str((st or {}).get("campaign_name") or "Campaign")
-
-
 def lane_html(n, resume_from=""):
     """The interrupt lane (John, 2026-10-03: on the Cave of Wonders, "seen more regularly ... the main day to day work
     page"): a dated item within three days, at the top of the board, once. Opening it keeps a ready-to-resume note of
@@ -1186,7 +1257,7 @@ def _panel(ctx):
         '<button id="cave-provider-capacity" class="provider-capacity" type="button" aria-label="Provider capacity and details"><strong>Provider capacity</strong><span>Unknown · reading host settings</span></button>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Ask %s, discuss, or tell it what to do &mdash; it answers above as it writes; a %s verb applies on the record"></textarea>'
-        '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the Cave&rsquo;s steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
+        '<div class="comp-row"><span class="hint">Enter sends &middot; Shift+Enter new line &middot; the Cave&rsquo;s steward answers above &middot; start a new project called &lt;name&gt; at &lt;folder&gt;</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></aside>'
     ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
          resume_html(ctx.get("resume")), nudge_html(ctx.get("nudge"), "brief"), _dialogue(ctx), esc(st["label"]), esc(mode_name(st)))
@@ -1238,6 +1309,50 @@ def _tile_names(ctx):
         _json.dumps(mode_name(st)), _json.dumps(pic(st.get("campaign_icon"))))
 
 
+def _proactive_triage_strip(ctx):
+    """Wave 6b & Wave 15: Chief-of-Staff Proactive Triage Strip at the top of the Cave of Wonders board
+    with 1-click Synthesize Executive Brief button and live folder/commitment cards."""
+    cards = proactive_triage_cards(ctx)
+    desk_pid = str(ctx.get("desk_pid") or "")
+    desk_href = ("/steward/v1?pid=%s&amp;dir=Small%%20items" % esc(desk_pid)) if desk_pid else "/desk"
+    items_html = []
+    for c in cards:
+        acts = []
+        if c.get("is_desk"):
+            acts.append('<a class="tc-btn primary" href="%s" target="_blank" rel="noopener">&#128421; Open Ad-Hoc Cockpit &#8599;</a>' % desk_href)
+            acts.append('<a class="tc-btn" href="/desk" target="_blank" rel="noopener">Desk Board</a>')
+        else:
+            if c.get("folder"):
+                acts.append(
+                    '<button type="button" class="tc-btn done" data-mark-done="1" data-target-dir="%s" data-target-step="%s" title="Mark this step done">&#10003; Mark Done</button>'
+                    % (esc(c["folder"]), esc(c.get("step_id") or ""))
+                )
+            if c.get("pid"):
+                acts.append(
+                    '<a class="tc-btn" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener">Cockpit &#8599;</a>'
+                    % esc(c["pid"])
+                )
+        items_html.append(
+            '<div class="triage-card %s" id="%s"><div class="tc-rule">%s</div>'
+            '<div class="tc-title">%s</div><div class="tc-why">%s</div>'
+            '<div class="tc-acts">%s</div></div>'
+            % (esc(c["tone"]), esc(c["id"]), esc(c["rule"]), esc(c["title"]), esc(c["why"]), "".join(acts))
+        )
+    return (
+        '<section class="triage-strip" id="shTriage">'
+        '<div class="ts-head"><div class="ts-title"><span class="ts-badge">&#9733; Proactive Chief-of-Staff Triage</span>'
+        '<span class="ts-sub">Parable of the Oranges &middot; live folder inspection, commitments &amp; 1-click completion</span></div>'
+        '<div class="ts-quick">'
+        '<button type="button" class="ts-pill" id="btnTriageSynthesize" data-triage-synthesize="1" title="Synthesize a cross-portfolio Chief-of-Staff Executive Brief">&#10022; Synthesize Brief</button>'
+        '<a class="ts-pill desk" href="%s" target="_blank" rel="noopener" title="Run ad-hoc admin tasks in the Desktop AI Cockpit">&#128421; Desktop (Ad-Hoc AI Cockpit)</a>'
+        '<button type="button" class="ts-pill" data-jump="#shDated">&#128197; Today &amp; Week Calendar</button>'
+        '<button type="button" class="ts-pill" data-jump="#cal">&#9993; Email &amp; Counsel</button>'
+        '</div></div>'
+        '<div class="triage-exec-brief" id="triageExecBrief" hidden style="margin:0 0 10px;padding:10px 14px;border-radius:8px;border:1px solid #2b3546;background:#121822;font-size:13px;color:#e6edf3"></div>'
+        '<div class="ts-grid">%s</div></section>'
+    ) % (desk_href, "".join(items_html))
+
+
 def render_high_seat_html(ctx) -> str:
     """The whole page from the context dict (see the module docstring)."""
     if ctx.get("auth_required") and not ctx.get("logged_in"):
@@ -1258,8 +1373,8 @@ def render_high_seat_html(ctx) -> str:
     ctx["orphans"] = [e for e in entries if e.get("id") and e["id"] not in in_goal and e["id"] != camp_pid and e["id"] not in parked_ids]
     ctx["quiet_n"] = sum(1 for e in entries if not (facts.get(e.get("id")) or {}).get("has_record") and e.get("id") not in parked_ids)
     ctx["on_board"] = {p["pid"]: SEAT_NAMES[seat] for seat in ("deck", "active") for g, p in seated(live_inits, seat) if p.get("pid")}      # Active wins when a project has cards on both (Grok's read of W2c)
-    board = ('<div class="board">' + lane_html(ctx.get("lane"), ctx.get("resume_from") or "") + _campaign_tile(ctx) + _seat_shelves(ctx) + _candidates_tile(ctx) + _projects_tile(ctx)
-             + _desk_line(ctx) + _ruler(ctx) + _terminal(ctx) + '</div>')
+    board = ('<div class="board">' + lane_html(ctx.get("lane"), ctx.get("resume_from") or "") + _proactive_triage_strip(ctx) + _campaign_tile(ctx) + _seat_shelves(ctx) + _candidates_tile(ctx) + _projects_tile(ctx)
+             + _desk_line(ctx) + _ruler(ctx) + _mothership_collab_html(ctx) + _terminal(ctx) + '</div>')
     page = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
@@ -1273,5 +1388,5 @@ def render_high_seat_html(ctx) -> str:
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
          esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(HIS_NAME), esc(str(ctx.get("health_sig") or "")), _tile_names(ctx), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
-    return page.replace('</head>', '<link rel="stylesheet" href="/static/provider-setup.css"></head>').replace('</body>',
-        '<script src="/static/provider-controls.js"></script></body>')
+    return page.replace('</head>', '<link rel="stylesheet" href="/static/provider-setup.css?v=%s"></head>' % esc(ctx["build"])).replace('</body>',
+        '<script src="/static/provider-controls.js?v=%s"></script></body>' % esc(ctx["build"]))

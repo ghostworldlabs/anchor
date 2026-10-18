@@ -76,7 +76,7 @@ DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
 #: Gemini-only host cannot run Crucible/Foreman) is the separate, honest
 #: fallback in :func:`select_engine_plan`, which :func:`launch_lane` consults so
 #: the fallback is enforced at launch — not merely surfaced in the UI badge.
-GEMINI_LANES = frozenset((LANE_RESEARCH, "general", LANE_PLAN, LANE_BUILD))
+GEMINI_LANES = frozenset((LANE_RESEARCH, "general", LANE_PLAN, "planning", LANE_BUILD))
 
 
 class EngineNotAllowedError(ValueError):

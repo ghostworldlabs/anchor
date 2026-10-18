@@ -457,22 +457,22 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 /* a place open: the board scrolls whole - the place at its natural height, the bands below it (the mock-up he locked) */
 .board.placed{overflow-y:auto;padding-right:4px}.board.placed .bands{flex:none;overflow:visible}.board.placed .place{max-height:none;overflow:visible}.board.placed .boardfoot{flex:none}
 /* a place open: the goals stay on top as SHORT tiles - the name, its tier and light - the opened one marked; the place under them */
-.board.placed .band .tiles{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px}
-.board.placed .gtile{padding:4px 8px 5px}.board.placed .gtile .ggoal,.board.placed .gtile .iline,.board.placed .gtile .gfacts{display:none}
+.board.placed .band .tiles{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px}
+.board.placed .gtile{padding:4px 9px 5px}.board.placed .gtile .ggoal,.board.placed .gtile .iline,.board.placed .gtile .gcock,.board.placed .gtile .gfacts{display:none}
 .board.placed .band{padding:4px 8px 6px}.board.placed .band-h{padding-bottom:4px}
 #placeSlot{flex:none}.board.placed #placeSlot{margin-top:8px}
 .ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.pname{font-size:17px;font-weight:700}.ptop .imore{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--text-dim)}.ptop .pact{font-size:11px;color:var(--text-dim)}.ptop .mini{margin-left:auto}
 .linkish{color:var(--accent-t);text-decoration:underline;text-underline-offset:2px;font-size:11px;padding:0}
-.pcols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin-top:6px}
-.place .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:10px}.place .k .h{text-transform:none;letter-spacing:0;color:var(--text-dim2);font-weight:500}
-.place .g{font-size:13.5px;color:var(--text);margin-top:2px;cursor:text;padding:4px 6px;border:1px dashed transparent;border-radius:6px}.place .g:hover{border-color:var(--border);background:var(--surface2)}
+.pcols{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;margin-top:6px}
+.place .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:8px}.place .k .h{text-transform:none;letter-spacing:0;color:var(--text-dim2);font-weight:500}
+.place .g{font-size:13px;color:var(--text);margin-top:2px;cursor:text;padding:3px 6px;border:1px dashed transparent;border-radius:6px}.place .g:hover{border-color:var(--border);background:var(--surface2)}
 .place .g textarea{width:100%;min-height:58px;background:#0a0c11;border:1px solid var(--accent);border-radius:6px;color:var(--text);font:inherit;padding:6px}.place .g .row2{display:flex;gap:8px;margin-top:5px;align-items:center}.place .g .row2 .hint{font-size:10.5px;color:var(--text-dim2);flex:1}
 .place .save{background:var(--accent);color:#0b1220;border-radius:7px;padding:3px 10px;font-size:12px;font-weight:650}
-.stand{font-size:12.5px;color:var(--text-warm);margin-top:2px}.stand b{color:var(--text)}.stand .am{color:var(--amber-t)}
-.facts3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.fact .v{font-size:12.5px;color:var(--text);font-weight:600}.fact .v.click{cursor:pointer;border-bottom:1px dashed var(--text-dim2)}.fact .v.click:hover{color:var(--accent-t)}.fact .v .soon{color:var(--amber-t)}.fact .v .over{color:var(--danger)}
+.stand{font-size:12px;color:var(--text-warm);margin-top:2px}.stand b{color:var(--text)}.stand .am{color:var(--amber-t)}
+.facts3{display:grid;grid-template-columns:minmax(110px,auto) minmax(0,1fr);gap:14px}.fact .v{font-size:12px;color:var(--text);font-weight:600;line-height:1.4}.fact .v.click{cursor:pointer;border-bottom:1px dashed var(--text-dim2)}.fact .v.click:hover{color:var(--accent-t)}.fact .v .soon{color:var(--amber-t)}.fact .v .over{color:var(--danger)}
 .fact input{background:#0a0c11;border:1px solid var(--accent);border-radius:6px;color:var(--text);font:inherit;font-size:12px;padding:2px 6px;width:130px}
 .place .obody{margin-top:6px}.place .pl-h{margin-top:0}
-.proj{font-size:12.5px;margin-top:3px}.proj a{color:var(--accent-t)}.proj .st{font-size:11px;color:var(--text-dim);display:block}.proj.dim{color:var(--text-dim2)}
+.proj{font-size:12px;margin-top:3px;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}.proj a{color:var(--accent-t);font-weight:600}.proj .st{font-size:11px;color:var(--text-dim);margin-left:auto}.proj.dim{color:var(--text-dim2)}
 .gconv{border:1px solid var(--border);border-radius:10px;background:#0f1219;padding:8px 10px;display:flex;flex-direction:column}
 .gthread{list-style:none;max-height:340px;overflow-y:auto;padding-right:4px}
 .gcomp{margin-top:8px}
@@ -526,3 +526,42 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .panel>.exwrap.cview{min-height:110px}
 .panel .exwrap .cview-frame{min-height:70px}
 .panel>.composer textarea{max-height:25vh}
+
+/* Wave 4.2 (2026-10-14): segmented multi-step/wave rollup pips on Star Chart goal tiles */
+.gpips{display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
+.gpips .gp{display:inline-block;width:7px;height:4px;border-radius:2px;background:var(--border)}
+.gpips .gp.d{background:var(--success,#4ade80)}
+.gpips .gp.n{background:var(--amber,#fbbf24)}
+
+/* Wave 7 (2026-10-15): Strategic Foresight & Portfolio Alignment Strip + Live Cockpit Step Badges + 1-Click Done */
+.tool.cave{background:rgba(108,156,252,.10);border-color:rgba(108,156,252,.40);color:var(--accent-t);text-decoration:none}
+.tool.cave:hover{background:rgba(108,156,252,.20);border-color:var(--accent)}
+.tool.desk{background:rgba(79,201,194,.10);border-color:rgba(79,201,194,.40);color:#5eead4;text-decoration:none}
+.tool.desk:hover{background:rgba(79,201,194,.20);border-color:#5eead4}
+.foresight-strip{flex:none;border:1px solid rgba(108,156,252,.32);border-radius:10px;background:linear-gradient(180deg,rgba(108,156,252,.07),rgba(18,22,30,.95));padding:7px 10px 8px;margin-bottom:8px}
+.fs-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.fs-h-title{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent-t)}
+.fs-h-sub{font-size:10.5px;color:var(--text-dim2)}
+.fs-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (max-width:1100px){.fs-grid{grid-template-columns:1fr}}
+.fs-card{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:7px 9px 8px;display:flex;flex-direction:column;gap:4px;min-width:0;border-left:3px solid var(--accent)}
+.fs-card.tier1{border-left-color:#3fb950}
+.fs-card.chain{border-left-color:var(--amber)}
+.fs-card.portfolio{border-left-color:#a78bfa}
+.fs-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.fs-kicker{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+.fs-badge{font-size:9.5px;font-weight:650;padding:1px 6px;border-radius:999px;border:1px solid var(--border);background:var(--surface2);color:var(--text-warm);white-space:nowrap}
+.fs-title{font-size:12px;font-weight:700;color:var(--text);line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fs-body{font-size:11px;color:var(--text-warm);line-height:1.38}
+.fs-body b{color:var(--text)}
+.fs-acts{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:3px}
+.fs-btn{font-size:10px;font-weight:650;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text-warm)}
+.fs-btn:hover{border-color:var(--accent);color:var(--accent-t)}
+.fs-btn.primary{border-color:rgba(108,156,252,.45);color:var(--accent-t);background:rgba(108,156,252,.10)}
+.fs-btn.done,.mchip.done-act{border-color:rgba(63,185,80,.48);color:#3fb950;background:rgba(63,185,80,.10);font-weight:650;cursor:pointer}
+.fs-btn.done:hover,.mchip.done-act:hover{background:rgba(63,185,80,.20);border-color:#3fb950}
+.psteps{font-size:9.5px;font-weight:600;padding:0 5px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text-dim);margin-left:4px;vertical-align:middle}
+.ilight.working,.gcock .gpc.working,.lg.working{color:#3fb950}
+.board.placed .foresight-strip{display:none}
+
+

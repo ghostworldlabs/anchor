@@ -179,6 +179,15 @@ class ProviderService:
                     if not report["windows"] and carries_figures("allowance", prior) and prior.get("observed_at"):
                         report = {**prior, "state": "stale", "attempted_at": now, "error": report["state"]}
                     out["allowance"] = report
+                elif (connection["family"] == "chatgpt" and connection["mode"] == "subscription"
+                      and isinstance(self.native, native.NativeProviders)
+                      and out.get("allowance", {}).get("state") == "fresh"
+                      and out["allowance"].get("windows")):
+                    try:
+                        import usage_allowance_monitor as _uam
+                        _uam.record_rate_limit_event(connection["id"], "chatgpt", {"allowance": out["allowance"]})
+                    except Exception:
+                        pass
             except (native.NativeError, ValueError, OSError) as exc:
                 state = exc.state if isinstance(exc, native.NativeError) else "error"
                 out = old
@@ -262,6 +271,11 @@ class ProviderService:
                             "anchor_observed": usage_report(usage, connection["id"]),
                             "api_spend": {**unknown("Provider API billing report", "unsupported"), "amount": None, "currency": None},
                             "subscription_price": {**unknown("Provider subscription billing", "unsupported"), "amount": None}})
+        try:
+            from steward_cockpit import steward_routes as _scr
+            usage_summary, _ = _scr.global_usage_summary()
+        except Exception:
+            usage_summary = None
         return {"ok": True, "host": host_state(), "settings_revision": settings["settings_revision"],
                 "settings_error": settings.get("settings_error"), "preferences": deepcopy(settings["provider_preferences"]),
                 "default_family": settings["default_cli"], "connections": out, "api_storage_available": provider_secrets.available(),
@@ -269,6 +283,7 @@ class ProviderService:
                                      "enrollment": bool(capabilities[family].get("isolated") and capabilities[family].get("login")),
                                      "api_execution": False, "prerequisite": capabilities[family].get("limit")}
                                     for family in metadata.FAMILIES],
+                "usage_summary": usage_summary,
                 "product_complete": False}
 
     def add(self, body):

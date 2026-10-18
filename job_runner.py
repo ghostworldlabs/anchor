@@ -327,14 +327,56 @@ def load_record(job_id: str):
     return None
 
 
-def list_records() -> list:
+def list_recent_records(project_id: str = "", limit: int = 50) -> list:
+    """Recent persisted job records, newest first (best-effort).
+
+    Unlike :func:`list_records` which scans every persisted record on disk
+    (untenable once jobs_dir() has tens of thousands of records), this scans
+    directory entries by mtime descending and loads only enough records to
+    satisfy ``limit`` (default 50).
+    """
+    d = jobs_dir()
+    if not d.exists():
+        return []
+    try:
+        entries = [e for e in os.scandir(d)
+                   if e.name.endswith(".json") and not e.name.endswith((".gate.json", ".cursor.json"))]
+    except OSError:
+        return []
+    try:
+        entries.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+    except OSError:
+        pass
+
+    out = []
+    inspect_ceiling = min(len(entries), max(limit * 3, 150)) if not project_id else min(len(entries), 2000)
+    for e in entries[:inspect_ceiling]:
+        try:
+            rec = json.loads(Path(e.path).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if project_id and rec.get("project_id") != project_id:
+            continue
+        out.append(rec)
+        if len(out) >= limit:
+            break
+
+    out.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
+    return out[:limit]
+
+
+def list_records(limit: int | None = None, project_id: str = "") -> list:
     """All persisted job records (best-effort; skips unreadable ones).
 
     A job's durable GATE file (``<job_id>.gate.json`` — durability 2026-07
     Wave 2) and its durable read-CURSOR file (``<job_id>.cursor.json`` — rearch
     W15) live in the same directory and match the ``*.json`` glob; neither is a
     job record and both are skipped so no phantom job ever surfaces here.
+
+    If ``limit`` is specified and > 0, delegates to :func:`list_recent_records`.
     """
+    if limit is not None and limit > 0:
+        return list_recent_records(project_id=project_id, limit=limit)
     d = jobs_dir()
     if not d.exists():
         return []
@@ -343,10 +385,14 @@ def list_records() -> list:
         if p.name.endswith((".gate.json", ".cursor.json")):
             continue
         try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
+            rec = json.loads(p.read_text(encoding="utf-8"))
+            if project_id and rec.get("project_id") != project_id:
+                continue
+            out.append(rec)
         except (json.JSONDecodeError, OSError):
             continue
     return out
+
 
 
 # John 2026-10-11 (#5 speed): a boot read every record (20k+ files, cold from disk: 90-130 s before Anchor

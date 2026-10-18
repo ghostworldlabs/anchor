@@ -856,3 +856,134 @@ def test_native_report_authentication_failure_marks_expired_subscription(stack,m
     result=native.NativeProviders().observe(metadata.default_connections()[1])
     assert result['auth']=='expired' and result['test']=='failed'
     assert result['allowance']['state']=='expired'
+
+
+def test_wave3_setup_chart_api_and_dom_contracts(server):
+    origin, (_, _, data, _) = server
+    opener = authenticated(origin)
+
+    # Unauthenticated requests to /api/steward/setup_chart are rejected
+    unauth_code, _ = http_request(build_opener(), origin, "/api/steward/setup_chart")
+    assert unauth_code in (401, 403)
+    unauth_post, _ = http_request(build_opener(), origin, "/api/steward/setup_chart", {"action": "set_root", "path": "D:\\dev"})
+    assert unauth_post in (401, 403)
+
+    # /setup page includes Wave 1, Wave 2, and Wave 3 DOM landmarks
+    code, html = http_request(opener, origin, "/setup")
+    assert code == 200
+    for required_id in (
+        'id="setup-section-host"',
+        'id="setup-section-providers"',
+        'id="setup-section-chart"',
+        'id="wave2-provider-matrix"',
+        'id="panel-workspace-root"',
+        'id="folder-list-container"',
+        'id="projects-grid-container"',
+        'id="goals-grid-container"',
+        'id="tab-mode-projects"',
+        'id="tab-mode-starchart"',
+        'id="tab-mode-guide"',
+    ):
+        assert required_id in html, required_id
+
+    # GET /api/steward/setup_chart is read-only and does not create state file on disk
+    state_file = data / ".anchor" / "setup-chart-state.json"
+    assert not state_file.exists()
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart")
+    assert code == 200
+    chart = json.loads(raw)
+    assert chart["ok"] is True
+    assert chart["primary_root"] == r"C:\dev"
+    assert len(chart["folders"]) >= 8
+    assert len(chart["project_groups"]) >= 4
+    assert len(chart["goal_tiles"]) >= 3
+    assert not state_file.exists()
+
+    # POST set_root persists primary_root
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "set_root",
+        "path": r"D:\MotherShipDev",
+        "create_if_missing": True,
+    })
+    assert code == 200
+    res = json.loads(raw)
+    assert res["ok"] is True and res["state"]["primary_root"] == r"D:\MotherShipDev"
+    assert state_file.exists()
+
+    # POST set_folder_role updates 3-state role & subordinate parent linkage
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "set_folder_role",
+        "folderId": "f-fin",
+        "role": "subordinate",
+        "parentId": "f-anchor",
+    })
+    assert code == 200
+    folders_by_id = {f["id"]: f for f in json.loads(raw)["state"]["folders"]}
+    assert folders_by_id["f-fin"]["role"] == "subordinate"
+    assert folders_by_id["f-fin"]["parentId"] == "f-anchor"
+    assert folders_by_id["f-fin"]["groupId"] == folders_by_id["f-anchor"]["groupId"]
+
+    # POST add_external and unlink_external
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "add_external",
+        "path": r"E:\BioComputeVault",
+        "mode": "read_only",
+    })
+    assert code == 200
+    st = json.loads(raw)["state"]
+    assert any(e["path"] == r"E:\BioComputeVault" for e in st["external_roots"])
+    assert any(f["path"] == r"E:\BioComputeVault" and f["source"] == "external" for f in st["folders"])
+
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "unlink_external",
+        "path": r"E:\BioComputeVault",
+    })
+    assert code == 200
+    st = json.loads(raw)["state"]
+    assert not any(e["path"] == r"E:\BioComputeVault" for e in st["external_roots"])
+
+    # POST add_cockpit and shape_goals
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "add_cockpit",
+        "folderId": "f-anchor",
+        "name": "Wave 3 Verification Shark",
+        "engine": "Gemini 3.1 Pro",
+    })
+    assert code == 200
+    anchor_folder = next(f for f in json.loads(raw)["state"]["folders"] if f["id"] == "f-anchor")
+    assert any(cp["name"] == "Wave 3 Verification Shark" for cp in anchor_folder["cockpits"])
+
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "shape_goals",
+        "rawText": "Ship Star Chart Wave 3\n- Wire 3-state folders\n- Persist goal tiles",
+        "linkedGroup": "grp-core",
+    })
+    assert code == 200
+    shaped = json.loads(raw)["shaped"]
+    assert shaped["title"] == "Ship Star Chart Wave 3"
+    assert len(shaped["milestones"]) == 2
+
+    # POST search_pull_copy and search_pull_undo
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "search_pull_copy",
+        "name": "Quant-Alpha-Notebook",
+        "src": r"C:\Users\john\Downloads\Quant-Alpha-Notebook",
+        "destSubpath": r"imported\Quant-Alpha-Notebook",
+        "files": 17,
+        "size": "1.9 MB",
+        "groupId": "grp-quant",
+    })
+    assert code == 200
+    pull_res = json.loads(raw)
+    pull_id = pull_res["manifest"]["id"]
+    assert (data / ".anchor" / "pulls" / f"{pull_id}.json").exists()
+    assert any(f.get("pullId") == pull_id for f in pull_res["state"]["folders"])
+
+    code, raw = http_request(opener, origin, "/api/steward/setup_chart", {
+        "action": "search_pull_undo",
+        "pullId": pull_id,
+    })
+    assert code == 200
+    undone_state = json.loads(raw)["state"]
+    assert not any(f.get("pullId") == pull_id for f in undone_state["folders"])
+

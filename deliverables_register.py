@@ -127,12 +127,18 @@ def active_step(effort_dir, hint=None) -> str:
     h = _norm_cell(hint)
     try:
         from steward_cockpit import steward_campaign as _campaign
-        steps = (_campaign.read_map(str(effort_dir)) or {}).get("steps") or []
+        m = _campaign.read_map(str(effort_dir)) or {}
+        steps = m.get("steps") or []
         if h:
             for i, s in enumerate(steps, start=1):
                 if h.lower() == str((s or {}).get("id") or "").strip().lower():
                     return str(i)
             return h
+        cur_id = str((m.get("heartbeat") or {}).get("current_step_id") or "").strip().lower()
+        if cur_id:
+            for i, s in enumerate(steps, start=1):
+                if cur_id == str((s or {}).get("id") or "").strip().lower():
+                    return str(i)
         for i, s in enumerate(steps, start=1):
             if (s or {}).get("status") == "active":
                 return str(i)
@@ -156,6 +162,20 @@ def _existing_rows(text):
     return rows
 
 
+def _insert_row_top(text: str, row: str) -> str:
+    """Insert a pipe-table row immediately after the table header separator line so newest deliverables sit at top."""
+    lines = text.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith("|") and s.endswith("|"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if cells and all(set(c) <= {"-", " ", ":"} and "-" in c for c in cells if c):
+                return "".join(lines[:idx + 1]) + ("" if lines[idx].endswith("\n") else "\n") + row + "".join(lines[idx + 1:])
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text + row
+
+
 def register(effort_dir, what, where, *, date=None, step=None,
              project_folder=None, notify=True) -> dict:
     """Append ONE row to ``<effort_dir>/DELIVERABLES.md`` — idempotent, locked,
@@ -163,13 +183,14 @@ def register(effort_dir, what, where, *, date=None, step=None,
 
     Whitespace is normalized; an exact (what, where) already on file is a
     no-op ``{'written': False, 'reason': 'dup'}``. Otherwise the row is
-    appended under :data:`paths.WRITE_LOCK` via a UNIQUE-named temp file +
-    ``os.replace``, minting the header when the file is absent. ``date``
-    defaults to today; ``step`` (a hint — a step id/name) wins over the map's
-    active step (see :func:`active_step`). ``project_folder`` is accepted for
-    call-site symmetry with :func:`where_for` (the Where is resolved by the
-    caller). A failure is returned as ``{'written': False, 'reason': ...}``
-    for the hook to journal — never an exception up a finishing run."""
+    inserted at the top of the table under :data:`paths.WRITE_LOCK` via a
+    UNIQUE-named temp file + ``os.replace``, minting the header when the file
+    is absent. ``date`` defaults to today; ``step`` (a hint — a step id/name)
+    wins over the map's active step (see :func:`active_step`).
+    ``project_folder`` is accepted for call-site symmetry with :func:`where_for`
+    (the Where is resolved by the caller). A failure is returned as
+    ``{'written': False, 'reason': ...}`` for the hook to journal — never an
+    exception up a finishing run."""
     try:
         what_n = _norm_cell(what)
         where_n = _norm_cell(where)
@@ -198,17 +219,16 @@ def register(effort_dir, what, where, *, date=None, step=None,
                     return {"written": False, "reason": "dup"}
             else:
                 text = HEADER + "\n" + HEADER_SEP + "\n"
-            if text and not text.endswith("\n"):
-                text += "\n"
             row = "| %s | %s | %s | %s |\n" % (
                 what_n, where_n,
                 _norm_cell(date) or time.strftime("%Y-%m-%d"),
                 active_step(effort_dir, hint=step))
+            new_text = _insert_row_top(text, row)
             fd, tmp = tempfile.mkstemp(prefix=".deliverables-", suffix=".tmp",
                                        dir=str(d))
             try:
                 with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-                    fh.write(text + row)
+                    fh.write(new_text)
                     fh.flush()
                     os.fsync(fh.fileno())
                 os.replace(tmp, target)

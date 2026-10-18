@@ -7,7 +7,9 @@ saying so, with Retry and Change address - never a browser error.
 """
 import html
 import json
+import os
 import ssl
+import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -16,6 +18,8 @@ from urllib.parse import urlsplit
 LOCAL = "http://127.0.0.1:8777"
 EXAMPLE = "https://mother-ship.example"
 APP_PATH = "/static/app.html"
+DEFAULT_GITHUB_REPO = "https://github.com/johncliechty/ghostworldlabs-anchor.git"
+FALLBACK_GITHUB_REPO = "https://github.com/johncliechty/anchor-plus-skills.git"
 
 
 def settings_file(data_dir):
@@ -124,7 +128,8 @@ def setup_page(prefill="", message=""):
 <label for="addr">Mother ship address</label>
 <input id="addr" value="%s" aria-describedby="address-example" spellcheck="false" autofocus onkeydown="if(event.key==='Enter')act('connect',this.value)">
 <p class="example" id="address-example">Example only: <code>%s</code>. Use your own address.</p>
-<div class="row"><button class="btn go" onclick="act('connect',document.getElementById('addr').value)">Connect</button></div>
+<div class="row"><button class="btn go" onclick="act('connect',document.getElementById('addr').value)">Connect</button>
+<button id="discover-tailscale" class="btn" onclick="act('discover_tailscale')">Find Tailscale mother ship</button></div>
 <div class="msg" id="msg">%s</div></div></main>%s</body></html>""" % (
         _STYLE, _BAR, html.escape(prefill or "", quote=True), html.escape(EXAMPLE), html.escape(message), _SCRIPT)
 
@@ -172,6 +177,156 @@ def installation_page(package_root):
     missing = ", ".join(state["package"]["missing"]) or "Trusted source and completed service installation"
     return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anchor host installation</title>%s</head><body>%s<main><div class="card">
 <h1>Install your mother ship</h1><p>%s</p><p>Required package files: <code>%s</code>.</p>
-<p>%s</p><div class="row"><button id="retry-host-setup" class="btn go" onclick="act('select_mother_ship')">Check installed mother ship</button>
+<p>%s</p>
+<label for="github-repo">GitHub Mother Ship Repository</label>
+<input id="github-repo" value="%s" spellcheck="false">
+<div class="row"><button id="retry-host-setup" class="btn go" onclick="act('select_mother_ship')">Check installed mother ship</button>
+<button id="install-from-github" class="btn" onclick="act('install_from_github',document.getElementById('github-repo').value)">Pull &amp; install from GitHub</button>
 <button class="btn" onclick="act('change_address')">Connect to an existing host instead</button></div><div class="msg" id="msg"></div></div></main>%s</body></html>""" % (
-        _STYLE, _BAR, html.escape(state["prerequisite"]), html.escape(missing), html.escape(state["resume"]), _SCRIPT)
+        _STYLE, _BAR, html.escape(state["prerequisite"]), html.escape(missing), html.escape(state["resume"]), html.escape(DEFAULT_GITHUB_REPO, quote=True), _SCRIPT)
+
+
+def pull_and_install_mothership(target_dir=None, repo_url=DEFAULT_GITHUB_REPO, run_onboard=True, runner_fn=None):
+    """Clone or update the clean Anchor+Skills mother-ship repository from GitHub and optionally run onboard.cmd."""
+    import onboard_bootstrap
+    url = (repo_url or DEFAULT_GITHUB_REPO).strip()
+    if not url.startswith("https://github.com/"):
+        return {
+            "ok": False,
+            "target_dir": str(target_dir or ""),
+            "repo_url": url,
+            "onboard_ready": False,
+            "message": "Only https://github.com/ repositories are supported for mother-ship installation.",
+        }
+    dest = Path(target_dir) if target_dir else (Path.home() / "Anchor-Mothership")
+    run = runner_fn or (lambda cmd, cwd=None: subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=180))
+    used_url = url
+    try:
+        if (dest / ".git").is_dir():
+            res = run(["git", "-C", str(dest), "pull", "--ff-only"], cwd=str(dest))
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            res = run(["git", "clone", used_url, str(dest)], cwd=str(dest.parent))
+            if getattr(res, "returncode", 1) != 0 and used_url == DEFAULT_GITHUB_REPO:
+                used_url = FALLBACK_GITHUB_REPO
+                res = run(["git", "clone", used_url, str(dest)], cwd=str(dest.parent))
+        if getattr(res, "returncode", 1) != 0:
+            err = (getattr(res, "stderr", "") or getattr(res, "stdout", "") or "git clone/pull failed").strip()
+            return {
+                "ok": False,
+                "target_dir": str(dest),
+                "repo_url": used_url,
+                "onboard_ready": False,
+                "message": "GitHub pull failed: %s" % err[:240],
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "target_dir": str(dest),
+            "repo_url": used_url,
+            "onboard_ready": False,
+            "message": "Could not run git: %s" % exc,
+        }
+
+    pkg = onboard_bootstrap.package_root_has_cold_start(dest)
+    if not pkg.get("ok"):
+        return {
+            "ok": False,
+            "target_dir": str(dest),
+            "repo_url": used_url,
+            "onboard_ready": False,
+            "message": "Repository cloned to %s, but missing cold-start files: %s" % (dest, ", ".join(pkg.get("missing") or [])),
+        }
+
+    if run_onboard:
+        onboard_cmd = dest / "onboard.cmd"
+        try:
+            ob_res = run(["cmd.exe", "/c", str(onboard_cmd)], cwd=str(dest))
+            if getattr(ob_res, "returncode", 1) != 0:
+                return {
+                    "ok": False,
+                    "target_dir": str(dest),
+                    "repo_url": used_url,
+                    "onboard_ready": True,
+                    "message": "Pulled mother ship to %s. Complete setup by running %s." % (dest, onboard_cmd),
+                }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "target_dir": str(dest),
+                "repo_url": used_url,
+                "onboard_ready": True,
+                "message": "Pulled mother ship to %s (%s). Run onboard.cmd to finish." % (dest, exc),
+            }
+
+    return {
+        "ok": True,
+        "target_dir": str(dest),
+        "repo_url": used_url,
+        "onboard_ready": True,
+        "message": "Mother ship pulled from %s into %s." % (used_url, dest),
+    }
+
+
+def discover_tailscale_motherships(runner_fn=None):
+    """Query local Tailscale status for online peer machines that may host an Anchor mother ship over HTTPS."""
+    run = runner_fn or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=10))
+    try:
+        res = run(["tailscale", "status", "--json"])
+        if getattr(res, "returncode", 1) != 0:
+            return {
+                "ok": False,
+                "backend_state": "Unavailable",
+                "self_dns": "",
+                "peers": [],
+                "message": "Tailscale is not running or not installed. Start Tailscale to connect to a remote mother ship.",
+            }
+        payload = json.loads(getattr(res, "stdout", "") or "{}")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "backend_state": "Error",
+            "self_dns": "",
+            "peers": [],
+            "message": "Could not query Tailscale (%s). Ensure Tailscale is installed and signed in." % exc,
+        }
+
+    backend_state = str(payload.get("BackendState") or "Unknown")
+    self_node = payload.get("Self") or {}
+    self_dns = str(self_node.get("DNSName") or "").rstrip(".")
+    peers_map = payload.get("Peer") or {}
+    peers = []
+    for _key, peer in peers_map.items():
+        if not isinstance(peer, dict):
+            continue
+        dns = str(peer.get("DNSName") or "").rstrip(".")
+        host = str(peer.get("HostName") or "").strip()
+        online = bool(peer.get("Online", False))
+        if dns:
+            peers.append({
+                "hostname": host or dns.split(".")[0],
+                "dns_name": dns,
+                "https_url": "https://%s" % dns,
+                "online": online,
+            })
+    peers.sort(key=lambda p: (not p["online"], p["hostname"].lower()))
+    if backend_state != "Running":
+        msg = "Tailscale state is '%s'. Sign in to Tailscale first." % backend_state
+        return {"ok": False, "backend_state": backend_state, "self_dns": self_dns, "peers": peers, "message": msg}
+    online_peers = [p for p in peers if p["online"]]
+    if online_peers:
+        msg = "Found %d online Tailscale peer(s): %s" % (
+            len(online_peers),
+            ", ".join(p["https_url"] for p in online_peers[:4]),
+        )
+    elif self_dns:
+        msg = "Tailscale is running (%s), no other online peers found." % ("https://" + self_dns)
+    else:
+        msg = "Tailscale is running, but no peers with MagicDNS names were found."
+    return {
+        "ok": True,
+        "backend_state": backend_state,
+        "self_dns": self_dns,
+        "peers": peers,
+        "message": msg,
+    }

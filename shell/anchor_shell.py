@@ -252,6 +252,26 @@ class HostApi:
         self._show(connect.setup_page(self._address))
         return ""
 
+    def install_from_github(self, repo_url=""):
+        import connect
+        result = connect.pull_and_install_mothership(repo_url=repo_url or connect.DEFAULT_GITHUB_REPO)
+        if connect.reachable(connect.LOCAL):
+            connect.save_address(DATA, connect.LOCAL)
+            self._address = connect.LOCAL
+            self._html = ""
+            self._window.load_url(self._address + "/setup")
+            return ""
+        return result.get("message") or "Mother ship repository pulled. Run onboard.cmd to start Anchor."
+
+    def discover_tailscale(self):
+        import connect
+        result = connect.discover_tailscale_motherships()
+        online = [p for p in (result.get("peers") or []) if p.get("online")]
+        if online and not self._address:
+            self._show(connect.setup_page(online[0]["https_url"], result.get("message") or ""))
+            return ""
+        return result.get("message") or "No online Tailscale mother ships found."
+
     def _show(self, page):
         self._html = page
         self._window.load_html(page)

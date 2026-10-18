@@ -801,3 +801,96 @@ def test_an_owned_copy_unchanged_from_the_base_is_still_checked_against_its_inpu
     (tmp_path / "B" / "report.md").write_text("# R", encoding="utf-8")
     job = {"outputs": ["B/report.md", "B/report.html"], "copy_prints": {"B/report.html": "an older fingerprint"}}
     assert cj.stale_owned(job, tmp_path, ["B/report.html"], ["B/report.md"]) == ["B/report.html"]
+
+
+def test_integration_resets_dirty_worktree_ecgberht_before_merge(project):
+    """0042: a steward checkpoint committing .ecgberht/turn-timing.jsonl while the worktree engine also dirties it does not block git merge."""
+    root, workers, factory = project
+    (root / ".ecgberht").mkdir(exist_ok=True)
+    (root / ".ecgberht" / "turn-timing.jsonl").write_text('{"turn": 1}\n', encoding="utf-8")
+    git(root, "add", ".ecgberht/turn-timing.jsonl")
+    git(root, "commit", "-qm", "track turn-timing")
+    out = cj.start(root / "A", root / "B", "write B/result.py", PASS, engine_factory=factory)
+    assert out["ok"]
+    job = cj.read_jobs(root / "A")[out["job"]]
+    wt = Path(job["worktree"])
+    # Main repo commits a newer .ecgberht/turn-timing.jsonl while worktree also dirties it
+    (root / ".ecgberht" / "turn-timing.jsonl").write_text('{"turn": 1}\n{"turn": 2}\n', encoding="utf-8")
+    git(root, "add", "-f", ".ecgberht/turn-timing.jsonl")
+    git(root, "commit", "-qm", "steward cadence checkpoint")
+    (wt / ".ecgberht").mkdir(exist_ok=True)
+    (wt / ".ecgberht" / "turn-timing.jsonl").write_text('{"turn": 1}\n{"coder_turn": 99}\n', encoding="utf-8")
+    workers[0].produce({"B/result.py": "answer = 42\n"})
+    done = await_job(root / "A", out["job"])
+    assert done["landed"], done["land_note"]
+
+
+def test_reviewer_family_override_in_start_and_recover(project, monkeypatch):
+    """0041: --reviewer overrides the Reviewer seat in start and recover while refusing self-review."""
+    root, workers, factory = project
+    # Self-review refused at start
+    bad = cj.start(root / "A", root / "B", "write B/result.py", PASS, engine_factory=factory, coder="claude", reviewer="claude")
+    assert not bad["ok"] and "must differ from coder family" in bad["error"]
+    # Valid reviewer override saved on job
+    out = cj.start(root / "A", root / "B", "write B/result.py", FAIL, engine_factory=factory, coder="claude", reviewer="gemini")
+    assert out["ok"]
+    job = cj.read_jobs(root / "A")[out["job"]]
+    assert job["reviewer_family"] == "gemini"
+    workers[0].produce({"B/result.py": "answer = 42\n"})
+    await_job(root / "A", out["job"])
+    monkeypatch.setattr(ch, "process_state", lambda *a, **kw: "dead")
+    # Self-review refused at recover
+    bad_rec = ch.recover(root / "A", out["job"], check=PASS, reviewer="claude")
+    assert not bad_rec["ok"] and "is an author's family" in bad_rec["error"]
+    # Valid reviewer override at recover
+    ok_rec = ch.recover(root / "A", out["job"], check=PASS, reviewer="chatgpt")
+    assert ok_rec["ok"]
+    done = await_job(root / "A", out["job"], attempt=2)
+    assert done["landed"] and done["reviewer_family"] == "chatgpt"
+
+
+def test_snapshot_matches_candidate_commit_after_commit_manifest_interruption(project):
+    """When _commit_manifest commits the candidate before a review crash, snapshot_matches accepts it without git reset."""
+    root, workers, factory = project
+    out = cj.start(root / "A", root / "B", "write B/result.py", PASS, engine_factory=factory)
+    job = cj.read_jobs(root / "A")[out["job"]]
+    wt = Path(job["worktree"])
+    (wt / "B" / "result.py").write_text("answer = 42\n", encoding="utf-8")
+    job["manifest"] = ["B/result.py"]
+    pre_commit_snap = ch.snapshot(job)
+    assert cj._commit_manifest(wt, job, ["B/result.py"]) == ""
+    post_commit_snap = ch.snapshot(job)
+    assert post_commit_snap["head"] != pre_commit_snap["head"]
+    assert ch.snapshot_matches(job, post_commit_snap, pre_commit_snap) is True
+    # Tampering with file content after commit is rejected
+    (wt / "B" / "result.py").write_text("answer = 999\n", encoding="utf-8")
+    assert ch.snapshot_matches(job, ch.snapshot(job), pre_commit_snap) is False
+
+
+def test_orphaned_finalizer_does_not_hold_busy_repos_and_steward_may_write_cockpit_records(project, monkeypatch):
+    """An orphaned finalizer drops from busy_repos(), and steward Write/Edit to DELIVERABLES.md/roadmap.json/strip.json is allowed during active jobs."""
+    from steward_cockpit import steward_engine as se
+    root, workers, factory = project
+    out = cj.start(root / "A", root / "B", "write B/result.py", PASS, engine_factory=factory)
+    assert cj._norm(root) in cj.busy_repos()
+    # Simulate an active steward in root / "A"
+    eng = se.Engine(str(root / "A"), fake=True)
+    eng.fake = False
+    eng.busy = True
+    interrupted = []
+    monkeypatch.setattr(eng, "_interrupt_turn_locked", lambda r: interrupted.append(r) or {"ok": True})
+    monkeypatch.setattr(eng, "_wake_locked", lambda *a, **kw: (True, ""))
+    # Writing DELIVERABLES.md, roadmap.json, strip.json is allowed even while a code job owns root
+    for rec_file in ("DELIVERABLES.md", "roadmap.json", "strip.json", ".ecgberht/note.md"):
+        assert eng._guard_turn({"name": "Write", "input": {"file_path": str(root / "A" / rec_file)}}) is False
+    assert interrupted == []
+    # Writing a source file in the busy repo IS still blocked
+    assert eng._guard_turn({"name": "Write", "input": {"file_path": str(root / "B" / "app.py")}}) is True
+    assert interrupted == ["one writer: a code job is working on that repository"]
+    # When the job transitions to finishing and its finalizer dies (orphaned_finalizer=True), busy_repos() releases it
+    cj._transition(root / "A", out["job"], ("running",), status="finishing", finalizer_active=True,
+                   claim={"pid": 999999, "birth": 1.0})
+    monkeypatch.setattr(ch, "orphaned_finalizer", lambda j: True)
+    assert cj._norm(root) not in cj.busy_repos()
+
+

@@ -115,9 +115,36 @@ def _last_event(text):
     return None
 
 
-def latest_limit_signal(now=None, directory=None, max_logs=80, connection_id=None):
+def latest_limit_signal(now=None, directory=None, max_logs=300, connection_id=None):
     """The newest rate_limit_event a Claude run wrote into a job log inside the week, or None."""
     now = now or datetime.now(timezone.utc)
+    if directory is None:
+        try:
+            import usage_allowance_monitor as _uam
+            persisted = _uam.load_persisted_rate_limit(connection_id or "claude-default")
+            if isinstance(persisted, dict) and isinstance(persisted.get("rate_limit_info"), dict):
+                mtime = float(persisted.get("mtime") or 0)
+                if mtime >= (now - WEEK).timestamp():
+                    info = persisted["rate_limit_info"]
+                    uw = info.get("unifiedWindows") if isinstance(info.get("unifiedWindows"), dict) else {}
+                    def _pwin(key):
+                        w = uw.get(key) if isinstance(uw.get(key), dict) else {}
+                        u, r = w.get("utilization"), w.get("resetsAt")
+                        try:
+                            u = float(u) if u is not None else None
+                        except Exception:
+                            u = None
+                        try:
+                            r = int(r) if r else None
+                        except Exception:
+                            r = None
+                        return {"utilization": u, "resets_at": r}
+                    seen = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                    return {"five_hour": _pwin("five_hour"), "seven_day": _pwin("seven_day"),
+                            "status": str(info.get("status") or ""), "type": str(info.get("rateLimitType") or ""),
+                            "threshold": info.get("surpassedThreshold"), "seen_at": seen.isoformat(), "log": "steward-live"}
+        except Exception:
+            pass
     d = directory or jobs_dir()
     cut = (now - WEEK).timestamp()
     try:

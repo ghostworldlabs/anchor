@@ -47,7 +47,8 @@ _log = logging.getLogger(__name__)
 
 def skill_roots():
     env = os.environ.get("ANCHOR_SKILL_ROOTS")
-    roots = env.split(os.pathsep) if env else [r"C:\dev\trio", r"C:\dev\Skill Foundry\skills"]
+    ws = Path(__file__).resolve().parents[2]
+    roots = env.split(os.pathsep) if env else [str(ws / "trio"), str(ws / "Skill Foundry" / "skills")]
     return [Path(r).resolve() for r in roots if r]
 
 
@@ -642,7 +643,7 @@ def retry_pending(cdir, *, engine):
     pending = [j for j in read_jobs(cdir).values() if isinstance(j, dict) and (j.get("handoff") or {}).get("state") == "pending"]
     if pending:
         job = min(pending, key=lambda j: (j.get("handoff") or {}).get("last_try", 0))
-        return notify(cdir, job["id"], engine=engine)
+        return notify(cdir, job["id"], engine=engine, wake=True)
     return False
 
 
@@ -682,6 +683,12 @@ def inspect(cdir, job_id):
 
 def _report(cdir, job):
     """The job ended: its result is written durably first, then the steward is woken to read it and tell John."""
+    try:
+        if job.get("status") == "done":
+            from steward_cockpit import steward_engine as _se
+            _se.publish_delivery_receipts(cdir, since=float(job.get("started_epoch") or 0.0))
+    except Exception:
+        pass
     receipt = materialize(cdir, job["id"])
     if receipt and receipt.get("state") == "pending":
         notify(cdir, job["id"], wake=True)

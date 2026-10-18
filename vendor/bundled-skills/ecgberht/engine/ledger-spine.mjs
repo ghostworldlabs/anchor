@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { northStarRevision, FACE_FILE_NAME } from './face-strip.mjs';
 import { overCap, missingSpine } from './write-authority.mjs';
-import { prepareRefinementEvent, publishRefinementProjections } from './refinement.mjs';
+import { prepareRefinementEvent, publishRefinementProjections, refinementProjectionStatus, refinementRoadmapStatus, refinementResult } from './refinement.mjs';
 import { foldRefinements } from './refinement-state.mjs';
 
 import {
@@ -38,6 +38,7 @@ import {
 import {
   appendRoadmapEvent,
   loadProjectRoadmap,
+  healRoadmap,
   emptyRoadmap,
   projectRoadmapBytes,
   roadmapEventCarrierRecord,
@@ -83,7 +84,7 @@ const ROADMAP_FILE_NAME = SPINE_LEDGER_FILE;
  * v6: + goal_flip (Wave 17 — steward slice loop; re-read the North Star on close)
  * v7: + kickoff_proposal / kickoff_confirm (Wave 18 — conversational kickoff lineage)
  */
-export const ROADMAP_EVENT_KINDS_VERSION = 8;
+export const ROADMAP_EVENT_KINDS_VERSION = 9;
 
 /**
  * Kinds admitted at the current version. Mirror of roadmap.mjs ROADMAP_EVENT_KINDS.
@@ -93,6 +94,8 @@ export const ROADMAP_EVENT_KINDS_VERSION = 8;
  * Wave 16 (v5): attention_projection_published (altitude contract).
  * Wave 17 (v6): goal_flip (steward slice loop).
  * Wave 18 (v7): kickoff_proposal / kickoff_confirm (versioned human confirmation).
+ * Steward revision W4 (v9, 2026-09-28): repair_proposal / repair_resolve (a repair shown, applied on his word) and
+ * reorder (his own act on the plan's order).
  */
 export const SPINE_EVENT_KINDS = Object.freeze([
   'step_create',
@@ -115,6 +118,9 @@ export const SPINE_EVENT_KINDS = Object.freeze([
   'kickoff_proposal',
   'kickoff_confirm',
   'refinement_update',
+  'repair_proposal',
+  'repair_resolve',
+  'reorder',
 ]);
 
 // ── Typed-store allow-list ─────────────────────────────────────────────────
@@ -841,6 +847,58 @@ export function writeRoadmapThroughSpine(projectPath, roadmap, opts = {}) {
     single_writer: SPINE_SINGLE_WRITER,
     sot_written: true,
   };
+}
+
+/**
+ * Supported managed repair. No caller-supplied replacement or event mutation:
+ * reload and derive both cached projections under the existing writer lock.
+ * Normal appends and container replacements retain their drift/refusal guards.
+ */
+export function repairRoadmapProjectionsThroughSpine(projectPath, opts = {}) {
+  const storeGate=assertStoreDeclared('roadmap_events');
+  if(!storeGate.ok) return storeGate;
+  const root=path.resolve(projectPath),ledgerPath=roadmapLedgerPath(root);
+  let repair;
+  try {
+    return withFileLock(ledgerPath,()=>{
+      const loaded=loadProjectRoadmap(root);
+      if(!loaded.ok || !loaded.exists) return {ok:false,error:'backing-store-unreadable'};
+      const base=loaded.roadmap,state=foldRefinements(base.roadmap_events);
+      if(!state.managed) return {ok:false,error:'unmanaged-campaign'};
+      const healed=healRoadmap(base);
+      if(!healed.ok) return healed;
+      const roadmap={...healed.roadmap,refinement_projection:state};
+      const valid=refinementRoadmapStatus(roadmap);
+      if(!valid.consistent) return {ok:false,error:valid.error,issues:valid.issues,invalid_issues:valid.invalid_issues};
+      // Authenticate every document before any repair write. An external edit
+      // is a conflict, even when a cached roadmap projection also needs repair.
+      const documents=refinementProjectionStatus(root,base);
+      if(documents.error) return {ok:false,...documents};
+      const changed=['roadmap_projection','refinement_projection'].filter(
+        field=>JSON.stringify(base[field])!==JSON.stringify(roadmap[field]));
+      repair={repaired_fields:[],
+        events_rewritten:false,locked:true,persisted:false,updated_documents:[]};
+      if(changed.length) {
+        writeFileAtomicSync(ledgerPath,projectRoadmapBytes(roadmap));
+        repair.persisted=true;
+        repair.repaired_fields=changed;
+      }
+      const publication=publishRefinementProjections(root,roadmap);
+      repair.updated_documents=publication.updated_documents || [];
+      repair.finished=publication.finished || null;
+      const saved=loadProjectRoadmap(root);
+      if(!saved.ok || !saved.exists) return {ok:false,error:'backing-store-unreadable',repair};
+      const view=refinementResult(root,saved.roadmap);
+      return {...view,ok:publication.ok && publication.consistent && view.consistent,repair,
+        ...(!publication.ok || !publication.consistent || !view.consistent ? {
+          error:publication.error || publication.finished?.error || 'projection-lag',
+          detail:publication.detail || publication.finished?.detail,
+        } : {})};
+    },{timeoutMs:opts.timeoutMs ?? LOCK_TIMEOUT_MS});
+  } catch(e) {
+    if(e?.code==='ELOCKTIMEOUT') return spineFailure(SPINE_CODE.LOCK_TIMEOUT,{error:'lock-contended'});
+    return {ok:false,error:e.code || 'projection-repair-failed',detail:e.message,...(repair ? {repair} : {})};
+  }
 }
 
 /**

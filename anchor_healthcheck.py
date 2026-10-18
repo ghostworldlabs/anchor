@@ -2394,13 +2394,14 @@ def check_rnd_v6_surface(report: Report, server_proc, rnd_env: dict):
                 # project folder (not git), so no extra commit is needed.
 
                 # Research session = chain root.
-                rrec = _ts.start_session(pid, "research", label="hc v6 research")
+                rrec = _ts.start_session(pid, "research", backend="claude",
+                                         label="hc v6 research")
                 rsid = rrec["session_id"]
                 root_chain_ok = (rrec.get("parent_session_id", "") == ""
                                  and rrec.get("chain_id") == rsid)
 
                 # Advance to a LINKED planning session (parent = research).
-                prec = _ts.start_session(pid, "planning",
+                prec = _ts.start_session(pid, "planning", backend="claude",
                                          label="hc v6 planning",
                                          parent_session_id=rsid,
                                          seed_context="advance from research")
@@ -6246,7 +6247,10 @@ def check_running_service(report: Report):
         with urllib.request.urlopen("http://127.0.0.1:%d/api/version" % TEST_PORT, timeout=10) as r:
             checked = str((json.loads(r.read().decode("utf-8")) or {}).get("version") or "")
     except Exception:
-        checked = ""
+        try:
+            checked = str(_import_anchor_gui()._compute_build_id() or "")
+        except Exception:
+            checked = ""
     if ok and "+" in build and "+" in checked:
         report.check("the running service runs the checked code", build.split("+", 1)[1] == checked.split("+", 1)[1],
                      "running sources %s, checked %s" % (build.split("+", 1)[1][:12], checked.split("+", 1)[1][:12]))

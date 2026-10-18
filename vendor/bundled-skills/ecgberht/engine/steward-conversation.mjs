@@ -41,6 +41,7 @@ import path from 'node:path';
 
 import {
   compileUtterance,
+  CAMPAIGN_ACT_IDS,
   ACT_TABLE,
   matchesDestructive,
 } from './dialogue.mjs';
@@ -220,6 +221,12 @@ export function routeUtterance(text, ctx = {}) {
     }
     const compiled = compileUtterance(trimmed, ctx);
     if (compiled.compiled) return { lane: 'act', compiled };
+  } else {
+    // A Campaign verb (High Seat W5) is command-shaped from its first word — "add a part to MBA Teaching: retool
+    // homework 2 due Oct 27" runs past eight words — so it compiles at any length; compileUtterance runs the
+    // destructive guard first, and the act writes nothing here: Anchor's Campaign writer applies it.
+    const compiled = compileUtterance(trimmed, ctx);
+    if (compiled.compiled && CAMPAIGN_ACT_IDS.includes(compiled.act)) return { lane: 'act', compiled };
   }
 
   // WHY THE DESTRUCTIVE GUARD DOES NOT RUN ON THE CONVERSE LANE (found in the
@@ -472,13 +479,15 @@ export const STEWARD_TALK_INSTRUCTION = [
   '                           formatted as 3-6 short lines each starting with',
   '                           \'- \' so John can scan it at a glance>",',
   '  "project_create": null | {"name": "<project name>", "folder": "<the full',
-  '                            folder path he gave>"}',
+  '                            folder path he gave>", "group": "<the dashboard',
+  '                            folder he named (\'in Teaching\'), else null>"}',
   '}',
   '',
   'PORTFOLIO TURNS: a turn beginning "PORTFOLIO:" comes from the High Seat —',
   'John steering ALL projects, not this one campaign. When such a turn asks to',
   'start/register/create a project, fill project_create with the name and',
-  'folder EXACTLY as he gave them (ask for the folder when missing — never',
+  'folder EXACTLY as he gave them, and group with the dashboard folder when he',
+  'names one ("in Teaching"; null when he does not) (ask for the folder when missing — never',
   'guess a path); the machinery shows him a confirm card and an existing',
   'folder starts brownfield with a first Gandalf read on its own. You cannot',
   'yet move, copy, or gather files into a folder — when he asks for that, say',
@@ -920,6 +929,8 @@ export function parseStewardReply(raw) {
           ? {
             name: String(obj.project_create.name ?? '').trim() || null,
             folder: String(obj.project_create.folder ?? '').trim(),
+            // R11 (2026-09-28): the dashboard folder he named, when he named one — the confirm card preselects it
+            group: String(obj.project_create.group ?? '').trim() || null,
           }
           : null,
       },

@@ -86,6 +86,10 @@
       "type": "string",
       "description": "Recommended next action (short)"
     },
+    "wait_ref": {
+      "type": "string",
+      "description": "W0 (2026-09-28): what the wait names - step:<id>, deliverable:<row>@<version>, decision:<id>, or 'none'; set through the update verb's --wait-ref (the append path); never free prose"
+    },
     "why_next": {
       "type": "string",
       "description": "Why that next action ranks first"
