@@ -33,7 +33,67 @@ APP_ID = "GhostWorldLabs.Anchor"
 TITLE = "Anchor"
 DEFAULT_URL = "http://127.0.0.1:8777/static/app.html"
 FROZEN = bool(getattr(sys, "frozen", False))           # the packaged Anchor.exe
-ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_package_root():
+    if not FROZEN:
+        return Path(__file__).resolve().parent.parent
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        for cand in (exe_dir, exe_dir.parent, Path(r"C:\dev\Anchor"), Path(r"C:\dev\anchor-plus-skills")):
+            if (cand / "launch_anchor_dashboard.py").is_file() or (cand / "onboard.cmd").is_file():
+                return cand
+        return exe_dir
+    except OSError:
+        return Path(__file__).resolve().parent.parent
+
+
+def unblock_extracted_files(base_dirs=None):
+    """Strip Windows Mark-of-the-Web (:Zone.Identifier) streams from extracted package files before .NET loads."""
+    if os.name != "nt":
+        return 0
+    dirs = list(base_dirs or [])
+    if not dirs:
+        try:
+            exe_dir = Path(sys.executable).resolve().parent
+            dirs.append(exe_dir)
+            if (exe_dir.parent / "launch_anchor_dashboard.py").is_file() or (exe_dir.parent / "anchor_gui.py").is_file():
+                dirs.append(exe_dir.parent)
+        except OSError:
+            pass
+    removed = 0
+    seen = set()
+    for d in dirs:
+        try:
+            dp = Path(d).resolve()
+        except OSError:
+            dp = Path(d)
+        key = str(dp).lower()
+        if key in seen or not dp.exists():
+            continue
+        seen.add(key)
+        try:
+            os.remove(str(dp) + ":Zone.Identifier")
+            removed += 1
+        except OSError:
+            pass
+        for root_dir, subdirs, files in os.walk(str(dp)):
+            # Skip deep git/venv folders if walking an outer workspace
+            subdirs[:] = [s for s in subdirs if s not in (".git", ".venv", "node_modules", "__pycache__")]
+            for name in files:
+                fpath = os.path.join(root_dir, name)
+                try:
+                    os.remove(fpath + ":Zone.Identifier")
+                    removed += 1
+                except OSError:
+                    pass
+    return removed
+
+
+if FROZEN:
+    unblock_extracted_files()
+
+ROOT = _resolve_package_root()
 ICON = (Path(sys._MEIPASS) / "anchor-icon.ico") if FROZEN else ROOT / "vendor" / "brand" / "anchor-icon.ico"
 # ANCHOR_SHELL_TEST=<name>: a test copy beside his running Anchor - its own settings and profile, window title and
 # single-instance lock, and it never touches his Start-menu shortcut.
@@ -231,7 +291,7 @@ class HostApi:
 
     def select_mother_ship(self):
         import connect
-        result = connect.select_mother_ship(DATA, ROOT)
+        result = connect.select_mother_ship(DATA, ROOT, auto_bootstrap=FROZEN)
         if not result["ok"]:
             self._show(connect.installation_page(ROOT))
             return ""
@@ -242,6 +302,8 @@ class HostApi:
 
     def retry(self):
         import connect
+        if self._address == connect.LOCAL and not connect.reachable(self._address):
+            connect.ensure_local_service_running(ROOT, check_system_dirs=True)
         if connect.reachable(self._address):
             self._open(self._address)
             return ""
@@ -326,6 +388,8 @@ def main(argv=None):
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     ensure_shortcut()
+    if FROZEN:
+        unblock_extracted_files()
 
     import webview                                      # the venv's; imported after the single-instance check
     webview.settings["ALLOW_DOWNLOADS"] = True
@@ -361,6 +425,13 @@ def main(argv=None):
     if not address:
         host._html = connect.setup_page(host._address) if host._address else connect.first_launch_page()
         page = dict(html=host._html)
+    elif address == connect.LOCAL and FROZEN and not connect.reachable(address):
+        connect.ensure_local_service_running(ROOT, check_system_dirs=True)
+        if not connect.reachable(address):
+            host._html = connect.offline_page(address)
+            page = dict(html=host._html)
+        else:
+            page = dict(url=address + connect.APP_PATH)
     elif address != connect.LOCAL and not connect.reachable(address):
         host._html = connect.offline_page(address)
         page = dict(html=host._html)
@@ -408,9 +479,15 @@ def main(argv=None):
     win.events.shown += on_shown
     try:
         webview.start(gui="edgechromium", private_mode=False, storage_path=str(PROFILE))
-    except Exception as exc:                             # no WebView2 runtime (rare: Windows 11 / current Edge have it)
-        _message("Anchor needs Microsoft's WebView2 runtime, which this PC doesn't have yet.\n\n"
-                 "Install it from %s and start Anchor again.\n\n(%s)" % (WEBVIEW2_URL, exc))
+    except Exception as exc:                             # no WebView2 runtime or Mark-of-the-Web blocked DLL
+        err_text = str(exc)
+        if any(tok in err_text for tok in ("0x80131515", "FileLoadException", "Zone.Identifier", "clr_loader", "Unblock")):
+            unblock_extracted_files()
+            _message("Windows blocked the downloaded WebView2 DLLs (Mark-of-the-Web).\n\n"
+                     "Anchor just unblocked its files automatically — please launch Anchor.exe one more time.\n\n(%s)" % exc)
+        else:
+            _message("Anchor needs Microsoft's WebView2 runtime, which this PC doesn't have yet.\n\n"
+                     "Install it from %s and start Anchor again.\n\n(%s)" % (WEBVIEW2_URL, exc))
         return 1
     kernel32.CloseHandle(mutex)
     return 0
