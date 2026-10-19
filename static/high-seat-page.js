@@ -689,7 +689,20 @@
       if (l0 && !l1) l0.remove(); else if (l1 && !l0 && bd) bd.insertAdjacentElement('afterbegin', document.importNode(l1, true)); else if (l0 && l1) morph(l0, l1);
     }
     // the steward's nudge (W3b), proactive triage strip, this-week board, comms pulse, collab strip, and the seeds
+    var openHzBtn = $('#shTriage .chz-card.open'), openHzKey = openHzBtn ? openHzBtn.getAttribute('data-hz-toggle') : '';
+    var calWasOpen = $('#cal') && $('#cal').classList.contains('open');
+    var collabWasOpen = $('#caveCollabStrip') && $('#caveCollabStrip').classList.contains('open');
     ['shTriage', 'thisWeekBoard', 'cal', 'caveCollabStrip', 'nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
+    if (openHzKey) {
+      var nb = $('#shTriage .chz-card[data-hz-toggle="' + openHzKey + '"]'), nd = document.getElementById('hzDrawer-' + openHzKey);
+      if (nb && nd) { nb.classList.add('open'); nb.setAttribute('aria-expanded', 'true'); nd.hidden = false; }
+    }
+    if (calWasOpen && $('#cal')) { $('#cal').classList.add('open'); if ($('#calTog')) $('#calTog').textContent = 'Collapse'; }
+    if (collabWasOpen && $('#caveCollabStrip')) {
+      $('#caveCollabStrip').classList.add('open');
+      if ($('#caveCollabBody')) $('#caveCollabBody').hidden = false;
+      var ct = $('#caveCollabStrip .cal-tog'); if (ct) ct.textContent = 'Collapse';
+    }
     // the goals: the line and the rows, the rows he opened kept open
     var cb0 = $('#campBody'), cb1 = doc.getElementById('campBody'), cl0 = $('#campLine'), cl1 = doc.getElementById('campLine');
     if (cl0 && cl1) morph(cl0, cl1);
@@ -1682,5 +1695,80 @@
       });
     }
   });
-})();
 
+  // Wave 19 (2026-10-19): 5-Horizon Chief-of-Staff drawer toggles, Level-3 item detail expansion,
+  // Dated Schedule Ruler toggle, Multi-Mothership Collab strip toggle, and 4 Foundry-Icon Steward action buttons
+  document.addEventListener('click', function (e) {
+    var hzCard = e.target.closest && e.target.closest('[data-hz-toggle]');
+    if (hzCard) {
+      e.preventDefault();
+      var key = hzCard.getAttribute('data-hz-toggle') || '';
+      var drawer = document.getElementById('hzDrawer-' + key);
+      var wasOpen = hzCard.classList.contains('open');
+      $$('#shTriage .chz-card').forEach(function (c) {
+        c.classList.remove('open');
+        c.setAttribute('aria-expanded', 'false');
+      });
+      $$('#shTriage .chz-drawer').forEach(function (d) { d.hidden = true; });
+      if (!wasOpen && drawer) {
+        hzCard.classList.add('open');
+        hzCard.setAttribute('aria-expanded', 'true');
+        drawer.hidden = false;
+      }
+      return;
+    }
+    var hzClose = e.target.closest && e.target.closest('[data-hz-close]');
+    if (hzClose) {
+      e.preventDefault();
+      $$('#shTriage .chz-card').forEach(function (c) {
+        c.classList.remove('open');
+        c.setAttribute('aria-expanded', 'false');
+      });
+      $$('#shTriage .chz-drawer').forEach(function (d) { d.hidden = true; });
+      return;
+    }
+    var hzItem = e.target.closest && e.target.closest('.hz-item');
+    if (hzItem && !e.target.closest('a, button')) {
+      hzItem.classList.toggle('expanded');
+      return;
+    }
+    var toggleDated = e.target.closest && e.target.closest('[data-toggle-dated]');
+    if (toggleDated) {
+      e.preventDefault();
+      var wrap = document.getElementById('datedScheduleWrap');
+      if (wrap) {
+        wrap.hidden = !wrap.hidden;
+        if (!wrap.hidden) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    var collabHead = e.target.closest && e.target.closest('#caveCollabStrip > .cal-h');
+    if (collabHead && !e.target.closest('button, a, input')) {
+      var strip = document.getElementById('caveCollabStrip');
+      var body = document.getElementById('caveCollabBody');
+      if (strip && body) {
+        var open = !strip.classList.contains('open');
+        strip.classList.toggle('open', open);
+        body.hidden = !open;
+        var tog = strip.querySelector('.cal-tog');
+        if (tog) tog.textContent = open ? 'Collapse' : 'Expand';
+      }
+      return;
+    }
+    var fBtn = e.target.closest && e.target.closest('[data-foundry-action]');
+    if (fBtn && say) {
+      e.preventDefault();
+      var actKey = fBtn.getAttribute('data-foundry-action') || '';
+      var prompts = {
+        new_cockpit: 'Create a new AI Cockpit for project "',
+        brainstorm: 'Let\u2019s brainstorm on ',
+        modify_today: 'Update Today\u2019s priorities / move cockpit status: ',
+        desk_calendar: 'Add to Desk / schedule deadline: '
+      };
+      say.value = prompts[actKey] || '';
+      say.dispatchEvent(new Event('input'));
+      say.focus();
+      return;
+    }
+  });
+})();

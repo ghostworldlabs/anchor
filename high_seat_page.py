@@ -705,7 +705,9 @@ def _ruler(ctx):
     tw_html = _this_week_horizon_html(ctx, weeks, buckets, overdue)
     comms_html = _comms_pulse_html(ctx)
     return (
-        '<section class="shelf" id="shDated"><div class="shelf-h"><h3>Dated deliveries &amp; Schedule</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
+        '<section class="shelf" id="shDated">'
+        '<div class="dated-schedule-wrap" id="datedScheduleWrap" hidden>'
+        '<div class="shelf-h"><h3>Dated deliveries &amp; Schedule</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
         '<div class="hz-tabs" role="tablist" aria-label="Schedule horizon">'
         '<button type="button" class="hz-tab on" data-hz="both">Today + 6-Week Compact</button>'
         '<button type="button" class="hz-tab" data-hz="week">Today &amp; This Week Only</button>'
@@ -714,6 +716,7 @@ def _ruler(ctx):
         '%s'
         '<div class="ruler compact-ruler" id="ruler"><div class="rl-head">%s</div><div class="rl-marks" id="rlMarks">%s</div></div>'
         '%s<div class="shelf-foot">Each marker points at the one card that owns it &mdash; no project has a second card.</div>'
+        '</div>'
         '%s'
         '</section>'
     ) % (total, "" if total == 1 else "s", tw_html, head, "".join(cols), late, comms_html)
@@ -833,12 +836,12 @@ def _comms_pulse_html(ctx):
     )
 
     return (
-        '<section class="cal open" id="cal" data-comms-pulse="1">'
+        '<section class="cal" id="cal" data-comms-pulse="1">'
         '<button class="cal-h" id="calHead"><span class="k">&#128236; Calendar &amp; Email Pulse</span>'
         '<span class="state" id="commsStateBadge">%s</span>'
         '<span class="cal-tab on" id="tabCal" data-cal-tab="cal">&#128197; Calendar &amp; Deadlines (%d)</span>'
         '<span class="cal-tab" id="tabMail" data-cal-tab="mail">&#9993; Email &amp; Counsel (%d)</span>'
-        '<span class="sp"></span><span class="tog" id="calTog">Close</span></button>'
+        '<span class="sp"></span><span class="tog" id="calTog">Expand</span></button>'
         '<div class="cal-body" id="calBody">'
         '<div class="comms-toolbar" id="caveCommsPulse">'
         '<div class="comms-pills">'
@@ -959,10 +962,10 @@ def _mothership_collab_html(ctx):
         cockpit_rows.append('<div class="tw-empty">No shared project roadmaps detected yet.</div>')
 
     return (
-        '<section class="cal open" id="caveCollabStrip" data-mothership-collab="1">'
-        '<div class="cal-h"><span class="k">&#129309; Multi-Mothership Collaboration &amp; Shared Cockpits</span>'
+        '<section class="cal" id="caveCollabStrip" data-mothership-collab="1">'
+        '<div class="cal-h" id="collabHead"><span class="k">&#129309; Multi-Mothership Collaboration &amp; Shared Cockpits</span>'
         '<span class="state" id="collabStateBadge">%s &middot; %d peer%s &middot; %d step lease%s</span>'
-        '<span class="sp"></span></div>'
+        '<span class="sp"></span><span class="tog" id="collabTog">Expand</span></div>'
         '<div class="cal-body">'
         '<div class="comms-toolbar">'
         '<div class="comms-pills">'
@@ -987,7 +990,7 @@ def _mothership_collab_html(ctx):
         '<button type="button" class="mini comms-sync-btn" id="btnCollabPeerSave">Save Peer</button>'
         '</div>'
         '<div style="display:grid;grid-template-columns:1fr 2fr auto;gap:6px;align-items:start">'
-        '<input type="text" id="collabImportTargetDir" placeholder="Target folder for Packet Import (e.g. C:/dev/Project)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<input type="text" id="collabImportTargetDir" placeholder="Target folder for Packet Import (relative project path)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
         '<textarea id="collabImportJson" rows="2" placeholder="Paste .anchor-cockpit.json packet JSON here to merge..." style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></textarea>'
         '<button type="button" class="mini" id="btnCollabPacketImport">&#128229; Import Packet</button>'
         '</div>'
@@ -1174,16 +1177,45 @@ def conversation_view(label, camp_pid, inst="main", dir_="", title="the conversa
     ``dir_`` names the conversation: "" the Campaign's, CAVE_EFFORT the Cave of Wonders' own. The Deliverables bar
     lists what that conversation made."""
     src = "/steward/v1?embed=1&amp;view=talk&amp;inst=%s&amp;pid=%s&amp;dir=%s" % (esc(inst), esc(camp_pid), esc(_quote(dir_)))
+    foundry_bar = ""
+    head_ico = ""
+    if inst == "cave":
+        foundry_bar = (
+            '<div class="cos-foundry-bar" id="cosFoundryBar" aria-label="Steward quick actions">'
+            '<button type="button" class="cos-fbtn" data-foundry-action="new_cockpit" title="Ask Steward to create and place a new AI Cockpit">'
+            '<img src="/vendor/brand/new-cockpit-icon.jpg" alt=""><span>+ New AI Cockpit</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="brainstorm" title="Start a structured brainstorm with the Steward">'
+            '<img src="/vendor/brand/brainstorm-icon.jpg" alt=""><span>Brainstorm</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="modify_today" title="Rebalance Today priorities or move a cockpit status">'
+            '<img src="/vendor/brand/crucible-icon.svg" alt=""><span>Modify Today / Status</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="desk_calendar" title="Add an admin item to the Desk or schedule a deadline">'
+            '<img src="/vendor/brand/desk-tab-aladdin.png" alt=""><span>+ Desk / Calendar</span></button>'
+            '</div>'
+        )
+    elif inst == "campaign":
+        head_ico = '<img class="w20-mini-ico" src="/vendor/brand/campaign-aladdin-star-chart.jpg" alt="">'
+        foundry_bar = (
+            '<div class="cos-foundry-bar" id="cosFoundryBar" aria-label="Star Chart Steward quick actions">'
+            '<button type="button" class="cos-fbtn" data-foundry-action="diamond" title="Run a Don Hambrick Strategy Diamond alignment audit">'
+            '<img src="/vendor/brand/campaign-aladdin-star-chart.jpg" alt=""><span>Strategy Diamond</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="new_goal" title="Create a new Goal or AI Cockpit">'
+            '<img src="/vendor/brand/new-cockpit-icon.jpg" alt=""><span>+ New Goal / Cockpit</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="brainstorm" title="Brainstorm strategy &amp; resource timing with the Steward">'
+            '<img src="/vendor/brand/brainstorm-icon.jpg" alt=""><span>Brainstorm</span></button>'
+            '<button type="button" class="cos-fbtn" data-foundry-action="rebalance" title="Rebalance Star Chart tiers &amp; Cave of Wonders shelves">'
+            '<img src="/vendor/brand/crucible-icon.svg" alt=""><span>Rebalance Tiers</span></button>'
+            '</div>'
+        )
     return (
-        '<section class="exwrap cview" id="dialogue" data-dir="%s"><div class="exhead"><h3>%s &mdash; %s</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
+        '<section class="exwrap cview" id="dialogue" data-dir="%s"><div class="exhead">%s<h3>%s &mdash; %s</h3><span class="exstate" id="exState" data-state="">&hellip;</span>'
         '<a class="note" href="/steward/v1?pid=%s&amp;dir=%s" target="_blank" rel="noopener" title="this conversation in its cockpit, full size">open in the cockpit &#8599;</a></div>'
         '<iframe class="cview-frame" src="%s" title="%s &mdash; %s"></iframe>'
-        '<ul class="ex" id="exList" hidden></ul></section>'
+        '<ul class="ex" id="exList" hidden></ul>%s</section>'
         '<section class="delivbar" id="delivBar" data-pid="%s" data-dir="%s"><button class="db-h" id="delivToggle" type="button" aria-expanded="false" aria-controls="delivList">'
         '<span class="db-t">Deliverables</span><span class="db-c" id="delivCount">&hellip;</span><span class="db-caret">&#9662;</span></button>'
         '<ul class="db-list" id="delivList" hidden></ul></section>'
-    ) % (esc(dir_), esc(label), esc(title), esc(camp_pid), esc(_quote(dir_)),
-         src, esc(label), esc(title), esc(camp_pid), esc(dir_))
+    ) % (esc(dir_), head_ico, esc(label), esc(title), esc(camp_pid), esc(_quote(dir_)),
+         src, esc(label), esc(title), foundry_bar, esc(camp_pid), esc(dir_))
 
 
 def _dialogue(ctx):
@@ -1310,12 +1342,15 @@ def _tile_names(ctx):
 
 
 def _proactive_triage_strip(ctx):
-    """Wave 6b & Wave 15: Chief-of-Staff Proactive Triage Strip at the top of the Cave of Wonders board
-    with 1-click Synthesize Executive Brief button and live folder/commitment cards."""
+    """Wave 6b, Wave 15 & Wave 19: Compact 5-Horizon Chief-of-Staff Triage Strip at the top of the Cave of Wonders board
+    (Today · This Week · This Month · This Quarter · This Year) with expandable Level-2/Level-3 drawers,
+    1-click Synthesize Executive Brief button, and live folder/commitment cards."""
     cards = proactive_triage_cards(ctx)
     desk_pid = str(ctx.get("desk_pid") or "")
     desk_href = ("/steward/v1?pid=%s&amp;dir=Small%%20items" % esc(desk_pid)) if desk_pid else "/desk"
-    items_html = []
+
+    # Build Today drawer items (preserving .triage-card, data-mark-done, and Desktop Ad-Hoc AI Cockpit links)
+    today_items_html = []
     for c in cards:
         acts = []
         if c.get("is_desk"):
@@ -1332,25 +1367,185 @@ def _proactive_triage_strip(ctx):
                     '<a class="tc-btn" href="/steward/v1?pid=%s&amp;dir=" target="_blank" rel="noopener">Cockpit &#8599;</a>'
                     % esc(c["pid"])
                 )
-        items_html.append(
-            '<div class="triage-card %s" id="%s"><div class="tc-rule">%s</div>'
-            '<div class="tc-title">%s</div><div class="tc-why">%s</div>'
-            '<div class="tc-acts">%s</div></div>'
-            % (esc(c["tone"]), esc(c["id"]), esc(c["rule"]), esc(c["title"]), esc(c["why"]), "".join(acts))
+        badge_cls = "q2" if c.get("tone") == "focus" else ("q1" if c.get("tone") in ("warn", "urgent") else "q3")
+        today_items_html.append(
+            '<div class="hz-item triage-card %s" id="%s">'
+            '<div class="hz-item-row">'
+            '<span class="hz-qbadge %s tc-rule">%s</span>'
+            '<span class="hz-item-title tc-title">%s</span>'
+            '<span class="hz-item-meta">%s</span>'
+            '<div class="tc-acts">%s</div>'
+            '</div>'
+            '<div class="hz-detail"><div class="tc-why">%s</div></div>'
+            '</div>'
+            % (esc(c["tone"]), esc(c["id"]), badge_cls, esc(c["rule"]), esc(c["title"]), esc(c["rule"]), "".join(acts), esc(c["why"]))
         )
+
+    # Build This Week drawer items from this_week_horizon_buckets(ctx)
+    hb = this_week_horizon_buckets(ctx)
+    week_items_html = []
+    week_total = 0
+    week_labels = []
+    for bucket_lbl, bucket_cls, items_list in (
+        ("Overdue", "q1", hb.get("col_overdue") or []),
+        ("Today", "q2", hb.get("col_today") or []),
+        ("Next 72h", "q2", hb.get("col_72h") or []),
+        ("Days 4-7", "q3", hb.get("col_week") or []),
+    ):
+        for it in items_list:
+            week_total += 1
+            nm = it.get("name") or "Step"
+            pnm = it.get("project_name") or ""
+            pid = it.get("project_id") or ""
+            due_s = _short(it.get("due") or "")
+            if len(week_labels) < 3:
+                week_labels.append(nm)
+            act_btn = ('<a class="tc-btn" href="/project/%s" target="_blank" rel="noopener">Project &#8599;</a>' % esc(pid)) if pid else ""
+            week_items_html.append(
+                '<div class="hz-item">'
+                '<div class="hz-item-row">'
+                '<span class="hz-qbadge %s">%s</span>'
+                '<span class="hz-item-title">%s</span>'
+                '<span class="hz-item-meta">%s &middot; %s</span>'
+                '<div class="tc-acts">%s</div>'
+                '</div>'
+                '<div class="hz-detail">%s &mdash; due %s (%s)</div>'
+                '</div>'
+                % (bucket_cls, esc(bucket_lbl), esc(nm), esc(due_s), esc(pnm), act_btn, esc(nm), esc(due_s), esc(pnm))
+            )
+    if not week_items_html:
+        week_items_html.append(
+            '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">This Week</span>'
+            '<span class="hz-item-title">Clear 7-Day Horizon &mdash; Deep Work Focus</span><span class="hz-item-meta">0 due</span>'
+            '<div class="tc-acts"><button type="button" class="tc-btn" data-toggle-dated="1">Dated Ruler</button></div></div>'
+            '<div class="hz-detail">No open dated steps due within the next 7 days.</div></div>'
+        )
+
+    # Build This Month, This Quarter, This Year drawers from initiatives & goals
+    inits = ctx.get("initiatives") or []
+    goals = goals_only(inits)
+    active_or_deck = [i for i in inits if (i.get("seat") in ("active", "on_deck") or i.get("status") in ("in_progress", "active"))]
+    month_items_html = []
+    for i in (active_or_deck or inits)[:6]:
+        nm = i.get("title") or i.get("name") or i.get("id") or "Initiative"
+        why = i.get("done_when") or i.get("summary") or "Monthly deliverable target"
+        month_items_html.append(
+            '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">Month</span>'
+            '<span class="hz-item-title">%s</span><span class="hz-item-meta">%s</span>'
+            '<div class="tc-acts"><a class="tc-btn" href="/campaign">Star Chart &#8599;</a></div></div>'
+            '<div class="hz-detail">%s</div></div>' % (esc(nm), esc(i.get("seat") or "deliverable"), esc(why))
+        )
+    if not month_items_html:
+        month_items_html.append(
+            '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">Month</span>'
+            '<span class="hz-item-title">Monthly Campaign Deliverables &amp; System Hardening</span><span class="hz-item-meta">Month arc</span>'
+            '<div class="tc-acts"><a class="tc-btn" href="/campaign">Star Chart &#8599;</a></div></div>'
+            '<div class="hz-detail">Click into Star Chart to review monthly campaign milestones.</div></div>'
+        )
+
+    quarter_items_html = []
+    for g in (goals or inits)[:6]:
+        nm = g.get("title") or g.get("name") or g.get("id") or "Quarter Goal"
+        why = g.get("done_when") or g.get("summary") or "Quarterly campaign milestone"
+        quarter_items_html.append(
+            '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">&#9733; Quarter</span>'
+            '<span class="hz-item-title">%s</span><span class="hz-item-meta">Star Chart Goal</span>'
+            '<div class="tc-acts"><a class="tc-btn" href="/campaign">Star Chart &#8599;</a></div></div>'
+            '<div class="hz-detail">%s</div></div>' % (esc(nm), esc(why))
+        )
+    if not quarter_items_html:
+        quarter_items_html.append(
+            '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">&#9733; Quarter</span>'
+            '<span class="hz-item-title">Quarterly Star Chart Campaign Objectives</span><span class="hz-item-meta">Star Chart</span>'
+            '<div class="tc-acts"><a class="tc-btn" href="/campaign">Star Chart &#8599;</a></div></div>'
+            '<div class="hz-detail">Ties directly into Star Chart quarterly rocks and milestones.</div></div>'
+        )
+
+    year_items_html = [
+        '<div class="hz-item"><div class="hz-item-row"><span class="hz-qbadge q2">&#9733; Year Vision</span>'
+        '<span class="hz-item-title">%s</span><span class="hz-item-meta">Annual North Star</span>'
+        '<div class="tc-acts"><a class="tc-btn" href="/campaign">Star Chart &#8599;</a></div></div>'
+        '<div class="hz-detail">%s</div></div>'
+        % (esc((g.get("title") or g.get("name") or "Annual Flagship Goal")), esc(g.get("done_when") or "Annual academic & deep-work vision on the Star Chart."))
+        for g in (goals[:4] if goals else [{"title": "Academic Deep-Work & Anchor Collaboration Platform", "done_when": "Full year research, book/manuscript creation, and Anchor + Skill Foundry release."}])
+    ]
+
+    today_sum = " &middot; ".join(esc(c.get("title") or "")[:36] for c in cards[:2]) or "Deep Work &amp; Priority Triage"
+    week_sum = " &middot; ".join(esc(lbl)[:32] for lbl in week_labels[:2]) or "Weekly Sprints &amp; Deadlines"
+    month_cnt = max(len(active_or_deck), len(month_items_html))
+    quarter_cnt = max(len(goals), len(quarter_items_html))
+    year_cnt = max(len(goals), 1)
+    mode_lbl = esc(mode_name(ctx.get("steward") or {}))
+
     return (
-        '<section class="triage-strip" id="shTriage">'
-        '<div class="ts-head"><div class="ts-title"><span class="ts-badge">&#9733; Proactive Chief-of-Staff Triage</span>'
-        '<span class="ts-sub">Parable of the Oranges &middot; live folder inspection, commitments &amp; 1-click completion</span></div>'
-        '<div class="ts-quick">'
+        '<section class="triage-strip compact-horizons" id="shTriage">'
+        '<div class="ts-head chz-head">'
+        '<div class="ts-title chz-title"><span class="ts-badge chz-badge">&#9733; Proactive Chief-of-Staff Triage</span>'
+        '<span class="ts-sub chz-sub">Newport Deep Work &middot; Covey Q2 &middot; Eisenhower &mdash; click any horizon to expand</span></div>'
+        '<div class="ts-quick chz-quick">'
         '<button type="button" class="ts-pill" id="btnTriageSynthesize" data-triage-synthesize="1" title="Synthesize a cross-portfolio Chief-of-Staff Executive Brief">&#10022; Synthesize Brief</button>'
         '<a class="ts-pill desk" href="%s" target="_blank" rel="noopener" title="Run ad-hoc admin tasks in the Desktop AI Cockpit">&#128421; Desktop (Ad-Hoc AI Cockpit)</a>'
-        '<button type="button" class="ts-pill" data-jump="#shDated">&#128197; Today &amp; Week Calendar</button>'
+        '<button type="button" class="ts-pill" data-toggle-dated="1" title="Toggle Dated Schedule Ruler">&#128197; Dated Ruler</button>'
         '<button type="button" class="ts-pill" data-jump="#cal">&#9993; Email &amp; Counsel</button>'
         '</div></div>'
-        '<div class="triage-exec-brief" id="triageExecBrief" hidden style="margin:0 0 10px;padding:10px 14px;border-radius:8px;border:1px solid #2b3546;background:#121822;font-size:13px;color:#e6edf3"></div>'
-        '<div class="ts-grid">%s</div></section>'
-    ) % (desk_href, "".join(items_html))
+        '<div class="triage-exec-brief" id="triageExecBrief" hidden style="margin:0 0 8px;padding:8px 12px;border-radius:8px;border:1px solid #2b3546;background:#121822;font-size:12px;color:#e6edf3"></div>'
+        '<div class="chz-grid ts-grid">'
+        '<button type="button" class="chz-card today" data-hz-toggle="today" aria-expanded="false" aria-controls="hzDrawer-today">'
+        '<div class="chz-top"><span class="chz-name">Today</span><span class="chz-cnt">%d items &#9662;</span></div>'
+        '<div class="chz-sum">%s</div>'
+        '<div class="chz-tag"><span class="dot g"></span>Deep Work + Q1/Desk</div></button>'
+        '<button type="button" class="chz-card week" data-hz-toggle="week" aria-expanded="false" aria-controls="hzDrawer-week">'
+        '<div class="chz-top"><span class="chz-name">This Week</span><span class="chz-cnt">%d items &#9662;</span></div>'
+        '<div class="chz-sum">%s</div>'
+        '<div class="chz-tag"><span class="dot b"></span>7-Day Horizon</div></button>'
+        '<button type="button" class="chz-card" data-hz-toggle="month" aria-expanded="false" aria-controls="hzDrawer-month">'
+        '<div class="chz-top"><span class="chz-name">This Month</span><span class="chz-cnt">%d items &#9662;</span></div>'
+        '<div class="chz-sum">Active &amp; On-Deck Deliverables</div>'
+        '<div class="chz-tag"><span class="dot p"></span>30-Day Milestones</div></button>'
+        '<button type="button" class="chz-card star" data-hz-toggle="quarter" aria-expanded="false" aria-controls="hzDrawer-quarter">'
+        '<div class="chz-top"><span class="chz-name">This Quarter</span><span class="chz-cnt">%d goals &#9662;</span></div>'
+        '<div class="chz-sum">Quarterly Rocks &amp; Campaign Arcs</div>'
+        '<div class="chz-tag">&#9733; %s</div></button>'
+        '<button type="button" class="chz-card star" data-hz-toggle="year" aria-expanded="false" aria-controls="hzDrawer-year">'
+        '<div class="chz-top"><span class="chz-name">This Year</span><span class="chz-cnt">%d pillars &#9662;</span></div>'
+        '<div class="chz-sum">Annual Vision &amp; Flagship Research</div>'
+        '<div class="chz-tag">&#9733; %s</div></button>'
+        '</div>'
+        '<div class="chz-drawer" id="hzDrawer-today" hidden>'
+        '<div class="chz-drawer-head"><span><strong>Today &mdash; Chief-of-Staff Priority Stack</strong> (click any item for detail or action)</span>'
+        '<button type="button" class="mini" data-hz-close="1">Close &#10005;</button></div>'
+        '<div class="hz-list">%s</div></div>'
+        '<div class="chz-drawer" id="hzDrawer-week" hidden>'
+        '<div class="chz-drawer-head"><span><strong>This Week &mdash; 7-Day Sprints &amp; Commitments</strong></span>'
+        '<button type="button" class="mini" data-hz-close="1">Close &#10005;</button></div>'
+        '<div class="hz-list">%s</div></div>'
+        '<div class="chz-drawer" id="hzDrawer-month" hidden>'
+        '<div class="chz-drawer-head"><span><strong>This Month &mdash; 30-Day Deliverables</strong></span>'
+        '<button type="button" class="mini" data-hz-close="1">Close &#10005;</button></div>'
+        '<div class="hz-list">%s</div></div>'
+        '<div class="chz-drawer" id="hzDrawer-quarter" hidden>'
+        '<div class="chz-drawer-head"><span><strong>This Quarter &mdash; %s Quarterly Rocks</strong></span>'
+        '<button type="button" class="mini" data-hz-close="1">Close &#10005;</button></div>'
+        '<div class="hz-list">%s</div></div>'
+        '<div class="chz-drawer" id="hzDrawer-year" hidden>'
+        '<div class="chz-drawer-head"><span><strong>This Year &mdash; Annual %s Vision</strong></span>'
+        '<button type="button" class="mini" data-hz-close="1">Close &#10005;</button></div>'
+        '<div class="hz-list">%s</div></div>'
+        '</section>'
+    ) % (
+        desk_href,
+        len(cards), today_sum,
+        week_total, week_sum,
+        month_cnt,
+        quarter_cnt, mode_lbl,
+        year_cnt, mode_lbl,
+        "".join(today_items_html),
+        "".join(week_items_html),
+        "".join(month_items_html),
+        mode_lbl, "".join(quarter_items_html),
+        mode_lbl, "".join(year_items_html),
+    )
+
 
 
 def render_high_seat_html(ctx) -> str:

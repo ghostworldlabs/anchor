@@ -15,8 +15,8 @@
 .gchip{font-size:9px;letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--accent-t);border:1px solid rgba(158,192,255,.35);border-radius:999px;padding:0 6px;line-height:1.5;background:transparent}
 .gchip:hover{background:rgba(108,156,252,.12)}
 .ex{list-style:none;padding-right:4px}
-.exrow{padding:6px 0;border-top:1px solid #1e2330}
-.exrow:first-child{border-top:0}
+.exrow{padding:0;margin:0 0 14px;border-top:0}
+.exrow:last-child{margin-bottom:2px}
 /* W2e-7 (his word): the rows as the cockpit paints them (shared.css .blk) - the name in mono caps, John gold, the steward blue */
 .exw{display:flex;align-items:baseline;gap:7px;font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;font-size:11.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600}
 .exw.you{color:#e8c268}

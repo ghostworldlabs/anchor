@@ -1082,6 +1082,70 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .comms-item-sub{font-size:11px;color:var(--text-dim);line-height:1.35}
 .collab-packet-box{margin:8px 0 0;padding:10px 12px;border-radius:8px;background:#0a0e15;border:1px solid var(--border);color:#a5d6ff;font:11px/1.45 Consolas,monospace;max-height:220px;overflow:auto;white-space:pre-wrap}
 
+/* Wave 19 (2026-10-19): Compact 5-Horizon Chief-of-Staff Bar + Unboxed Dialogue + Single-Screen Center Board */
+.triage-strip.compact-horizons{padding:8px 12px!important;margin:0 0 8px!important;border-radius:10px}
+.chz-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px!important}
+.chz-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chz-badge{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#f0b84c;background:rgba(226,169,63,.14);border:1px solid rgba(226,169,63,.42);padding:2px 8px;border-radius:999px}
+.chz-sub{font-size:11px;color:var(--text-dim)}
+.chz-quick{display:flex;gap:5px;flex-wrap:wrap}
+.chz-quick .ts-pill{padding:2px 8px;font-size:10.5px}
+.chz-grid{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:6px!important}
+@media(max-width:1100px){.chz-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+.chz-card{text-align:left;background:#121722;border:1px solid var(--border);border-radius:8px;padding:6px 9px;cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:border-color .14s,background .14s;color:var(--text);font-family:inherit}
+.chz-card:hover{border-color:var(--accent);background:#161d2b}
+.chz-card.today{border-left:3px solid #3fb950}
+.chz-card.week{border-left:3px solid #6c9cfc}
+.chz-card.star{border-left:3px solid #e2a93f}
+.chz-card.open{border-color:#e2a93f;background:linear-gradient(180deg,rgba(226,169,63,.12),#151c28);box-shadow:0 0 0 1px rgba(226,169,63,.3)}
+.chz-top{display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%}
+.chz-name{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#f0f6fc}
+.chz-card.today .chz-name{color:#4ade80}
+.chz-card.star .chz-name{color:#f0b84c}
+.chz-cnt{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:#1e2636;color:#c9d1d9;border:1px solid #30394b;white-space:nowrap}
+.chz-sum{font-size:11px;color:#b8c2d1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;width:100%}
+.chz-tag{font-size:9.5px;color:#7d8590;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chz-tag .dot{width:5px;height:5px;border-radius:50%;display:inline-block;flex-shrink:0}
+.chz-tag .dot.g{background:#3fb950}.chz-tag .dot.b{background:#6c9cfc}.chz-tag .dot.p{background:#a371f7}
 
+.chz-drawer{margin-top:7px;padding:8px 10px;background:#0e131d;border:1px solid rgba(226,169,63,.38);border-radius:8px}
+.chz-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:5px;margin-bottom:6px;border-bottom:1px solid var(--line);font-size:11.5px;color:#e6edf3}
+.hz-list{display:flex;flex-direction:column;gap:4px}
+.hz-item{background:#151b26;border:1px solid #263042;border-radius:6px;padding:5px 8px;cursor:pointer;transition:border-color .12s;margin:0}
+.hz-item:hover{border-color:#6c9cfc}
+.hz-item-row{display:flex;align-items:center;gap:8px;font-size:11.5px}
+.hz-qbadge{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:4px;text-transform:uppercase;white-space:nowrap;margin:0}
+.hz-qbadge.q2{background:rgba(63,185,80,.15);color:#4ade80;border:1px solid rgba(63,185,80,.38)}
+.hz-qbadge.q1{background:rgba(248,81,73,.15);color:#ff7b72;border:1px solid rgba(248,81,73,.38)}
+.hz-qbadge.q3{background:rgba(108,156,252,.15);color:#9ecbff;border:1px solid rgba(108,156,252,.38)}
+.hz-item-title{font-weight:650;color:#e6edf3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;margin:0}
+.hz-item-meta{font-size:10.5px;color:#8b949e;white-space:nowrap}
+.hz-detail{display:none;margin-top:5px;padding-top:5px;border-top:1px dashed #263042;font-size:11px;color:#9da7b6;line-height:1.4}
+.hz-item.expanded .hz-detail{display:block}
 
+/* Compact single-screen Cave of Wonders center board overrides */
+.board{padding:6px 14px 16px}
+.camp{padding:0;margin:0 0 6px;border-radius:8px}
+.camp-h{flex-wrap:nowrap;padding:5px 10px;gap:8px}
+.camp-h .d{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.camp-h .sp{display:none}
+.shelf{margin:0 0 6px;padding:2px 0}
+.shelf-h{padding:0 2px 4px;align-items:center}
+.shelf-h .note{max-width:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shelf-foot{display:none}
+.ptile{margin-bottom:6px}
+.ptile:not(.open) > .orphans{display:none}
+.ptile-h{padding:5px 10px;min-height:28px}
+.deskline{padding:5px 10px;margin:4px 0}
+.cal{margin:4px 0;border-radius:8px}
+.cal-h{padding:5px 10px;min-height:28px}
+.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:4px}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.tile{padding:6px 9px;gap:2px}
 
+/* 4 Foundry-Icon Steward Action Buttons at bottom of Right-Hand Dialogue */
+.cos-foundry-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:6px 8px;background:#10151f;border-top:1px solid var(--line)}
+.cos-fbtn{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;border:1px solid #2b3547;background:#161d2a;color:#e6edf3;font:650 11px/1.2 inherit;cursor:pointer;text-align:left;transition:border-color .14s,background .14s}
+.cos-fbtn:hover{border-color:#e2a93f;background:#1b2436;color:#f0b84c}
+.cos-fbtn img{width:17px;height:17px;border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.14)}
+.cos-fbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
