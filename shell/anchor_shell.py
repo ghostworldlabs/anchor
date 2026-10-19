@@ -252,15 +252,24 @@ class HostApi:
         self._show(connect.setup_page(self._address))
         return ""
 
-    def install_from_github(self, repo_url=""):
+    def install_from_github(self, repo_url="", target_dir=""):
         import connect
-        result = connect.pull_and_install_mothership(repo_url=repo_url or connect.DEFAULT_GITHUB_REPO)
-        if connect.reachable(connect.LOCAL):
-            connect.save_address(DATA, connect.LOCAL)
-            self._address = connect.LOCAL
-            self._html = ""
-            self._window.load_url(self._address + "/setup")
-            return ""
+        import time
+        if isinstance(repo_url, dict):
+            target_dir = repo_url.get("target_dir") or target_dir
+            repo_url = repo_url.get("repo_url") or ""
+        result = connect.pull_and_install_mothership(
+            repo_url=repo_url or connect.DEFAULT_GITHUB_REPO,
+            workspace_dir=target_dir or connect.DEFAULT_INSTALL_ROOT,
+        )
+        for _ in range(10 if result.get("onboard_ready") else 1):
+            if connect.reachable(connect.LOCAL):
+                connect.save_address(DATA, connect.LOCAL)
+                self._address = connect.LOCAL
+                self._html = ""
+                self._window.load_url(self._address + "/setup")
+                return ""
+            time.sleep(0.5)
         return result.get("message") or "Mother ship repository pulled. Run onboard.cmd to start Anchor."
 
     def discover_tailscale(self):
@@ -321,6 +330,29 @@ def main(argv=None):
     import webview                                      # the venv's; imported after the single-instance check
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # ms-word:, mailto:, other sites -> Windows
+    try:
+        from webview.platforms import edgechromium as _edge
+        _orig_new_win = getattr(_edge.EdgeChrome, "on_new_window_request", None)
+        if callable(_orig_new_win) and not getattr(_edge.EdgeChrome, "_anchor_patched", False):
+            def _anchor_new_window_request(self_ec, sender, args):
+                try:
+                    uri = str(args.get_Uri() or "")
+                    base = (host._address or connect.LOCAL or "http://127.0.0.1:8777").rstrip("/")
+                    if uri.startswith(base) or uri.startswith("http://127.0.0.1:") or uri.startswith("http://localhost:"):
+                        args.set_Handled(True)
+                        if "download=1" not in uri:
+                            import json as _json
+                            self_ec.pywebview_window.evaluate_js(
+                                "window.ANCHOR_APP && window.ANCHOR_APP.open(" + _json.dumps(uri) + ", '_blank')"
+                            )
+                        return
+                except Exception:
+                    pass
+                return _orig_new_win(self_ec, sender, args)
+            _edge.EdgeChrome.on_new_window_request = _anchor_new_window_request
+            _edge.EdgeChrome._anchor_patched = True
+    except Exception:
+        pass
     PROFILE.mkdir(parents=True, exist_ok=True)
 
     host = HostApi()

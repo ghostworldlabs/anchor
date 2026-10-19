@@ -81,7 +81,7 @@ class Wave18CockpitRedesignTest(unittest.TestCase):
         self.assertIn("APPROVAL NEEDED", self.js)
         self.assertIn("redFlagFlash", self.css)
         # Deliverable chips in approval bar trigger enterSecondWindowMode
-        self.assertIn("window.enterSecondWindowMode()", self.js)
+        self.assertIn("window.enterSecondWindowMode(", self.js)
 
     def test_status_table_multiline_eta_and_previous_updates(self):
         # Unclipped status facts up to 280-320 chars
@@ -156,16 +156,41 @@ class Wave18CockpitRedesignTest(unittest.TestCase):
         self.assertIn("paneWave", self.mockup)
 
         # 4. Collapsing Plan and Status rails to edge tiles and auto-collapsing on Deliverable open
-        self.assertIn("function enterSecondWindowMode()", self.v1)
-        self.assertIn("function exitSecondWindowMode()", self.v1)
+        self.assertIn("function enterSecondWindowMode(", self.v1)
+        self.assertIn("function exitSecondWindowMode(", self.v1)
         self.assertIn('app.classList.add("railhide")', self.v1)
         self.assertIn('app.classList.remove("statusopen")', self.v1)
         self.assertIn("data-railtoggle2", self.v1)
         self.assertIn("data-statustoggle", self.v1)
 
+    def test_split_screen_right_window_steward_summaries_and_no_tower_of_letters(self):
+        """Verify deliverable opens in right split-screen pane (not Status or Chrome), Steward summaries are human-readable, and map tiles never compress into towers of letters."""
+        app_js = (REPO / "static" / "app.js").read_text(encoding="utf-8")
+        app_frame_js = (REPO / "static" / "app-frame.js").read_text(encoding="utf-8")
+        shell_py = (REPO / "shell" / "anchor_shell.py").read_text(encoding="utf-8")
 
+        # 1. Split-screen right window + clean close + no external Chrome
+        self.assertIn('topApp.open(href, "_blank", window)', self.v1)
+        self.assertIn("topApp.closeRightDeliverable()", self.v1)
+        self.assertIn("closeRightDeliverable", app_js)
+        self.assertIn('t.frame.src = "about:blank"', app_js)
+        self.assertIn("if (app.download(url, window)) return null;", app_frame_js)
+        self.assertIn("EdgeChrome.on_new_window_request", shell_py)
+        self.assertIn("window.ANCHOR_APP.open(", shell_py)
 
+        # 2. Credible Steward review summaries in approval bar and For Review deliverable cards
+        self.assertIn("buildStewardReviewNote", self.js)
+        self.assertIn("approval-review-digest", self.js)
+        self.assertIn("file-row-review-summary", self.js)
+        self.assertIn(".approval-review-digest", self.css)
+        self.assertIn(".app3 .pdeliv .file-row-review-summary", self.css)
+
+        # 3. Map & Wave tiles have full-width titles and normal word-wrapping (no tower of letters)
+        self.assertIn("min-width: 340px;", self.css)
+        self.assertIn(".wpcol { flex: 1 1 240px; min-width: 240px; }", self.css)
+        self.assertIn("order: 4;\n  flex: 1 1 100%;\n  width: 100%;\n  min-width: 100%;", self.css)
 
 
 if __name__ == "__main__":
     unittest.main()
+
