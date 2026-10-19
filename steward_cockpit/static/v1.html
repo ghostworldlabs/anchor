@@ -26,31 +26,8 @@
     <button data-boneyard title="archive this effort to the boneyard">🪦</button>
     <button data-min title="collapse back to the cockpit">—</button>
   </div>
-  <div class="aegis-overlay" data-aegis-overlay hidden>
-    <div class="aegis-dialog">
-      <div class="aegis-dialog-head">
-        <div style="display:flex;align-items:center;gap:10px">
-          <img src="/vendor/brand/aegis-icon.svg" alt="Aegis" width="26" height="26" style="border-radius:6px">
-          <div>
-            <div style="font-weight:700;font-size:14px;color:#fff">Aegis Defensive Security Audit &amp; Auto-Remediation</div>
-            <div style="font-size:11px;color:var(--dim)" data-aegis-seating>Deterministic AST taint/sink scanner across 6 CWE/OWASP families (`AEG-01` – `AEG-06`)</div>
-          </div>
-        </div>
-        <button type="button" data-aegis-close>✕ Close</button>
-      </div>
-      <div class="aegis-dialog-body">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <label style="font-size:11.5px;color:var(--dim);font-weight:600">Target Path:</label>
-          <input type="text" data-aegis-target value="." placeholder="e.g. . or C:\dev\Anchor\steward_cockpit" style="flex:1;min-width:220px;background:#0d1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-family:var(--mono);font-size:12px">
-          <button type="button" data-aegis-scan style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.6);color:#d1fae5;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer">▶ Run Security Scan</button>
-          <button type="button" data-aegis-remediate style="background:rgba(56,189,248,0.18);border:1px solid rgba(56,189,248,0.55);color:#e0f2fe;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer">🛠 Auto-Remediate Fixable Issues</button>
-        </div>
-        <div data-aegis-summary style="padding:10px 12px;border-radius:8px;background:#0d1117;border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--text)">
-          Click <strong>▶ Run Security Scan</strong> to audit your codebase across CWE-78, CWE-94/502, CWE-22, CWE-918, CWE-208/328, and CWE-798.
-        </div>
-        <div data-aegis-findings style="display:flex;flex-direction:column;gap:8px"></div>
-      </div>
-    </div>
+  <div class="anvil-takeover-live" data-aegis-takeover hidden>
+    <iframe class="anvil-takeover-live-frame" data-aegis-frame src="about:blank"></iframe>
   </div>
   <div class="anvil-takeover-live" data-anvil-takeover hidden>
     <div class="anvil-takeover-live-bar">
@@ -250,6 +227,8 @@ function exitSecondWindowMode() {
     app.classList.toggle("statusopen", wantOpen);
   }
 }
+window.enterSecondWindowMode = enterSecondWindowMode;
+window.exitSecondWindowMode = exitSecondWindowMode;
 window.addEventListener("anchor-app-split", (ev) => {
   if (ev && ev.detail && ev.detail.split) enterSecondWindowMode();
   else exitSecondWindowMode();
@@ -291,21 +270,30 @@ const anvilToggleBtn = document.querySelector("[data-anvil-toggle]");
 const anvilTakeover = document.querySelector("[data-anvil-takeover]");
 const anvilFrame = document.querySelector("[data-anvil-frame]");
 const anvilCockpitName = document.querySelector("[data-anvil-cockpit-name]");
+const aegisToggleBtn = document.querySelector("[data-aegis-toggle]");
+const aegisTakeover = document.querySelector("[data-aegis-takeover]");
+const aegisFrame = document.querySelector("[data-aegis-frame]");
 const _anvilQ = new URLSearchParams(location.search || "");
 const _isEmbeddedAnvilDock = _anvilQ.get("inst") === "anvil" || _anvilQ.get("view") === "tile";
 const anvilStorageKey = "anchor_anvil_open:" + (_anvilQ.get("pid") || "") + ":" + (_anvilQ.get("dir") || "");
+const aegisStorageKey = "anchor_aegis_open:" + (_anvilQ.get("pid") || "") + ":" + (_anvilQ.get("dir") || "");
+
 function setAnvilTakeover(open) {
   if (!anvilTakeover || _isEmbeddedAnvilDock) return;
   const shouldOpen = typeof open === "boolean" ? open : anvilTakeover.hidden;
-  try { sessionStorage.setItem(anvilStorageKey, shouldOpen ? "1" : "0"); } catch (_) {}
+  try {
+    sessionStorage.setItem(anvilStorageKey, shouldOpen ? "1" : "0");
+    if (shouldOpen) sessionStorage.setItem(aegisStorageKey, "0");
+  } catch (_) {}
   if (shouldOpen) {
+    if (aegisTakeover) aegisTakeover.hidden = true;
     const titleEl = document.querySelector("[data-name]");
     if (anvilCockpitName && titleEl && titleEl.textContent) {
       anvilCockpitName.textContent = titleEl.textContent.trim();
     }
     if (anvilFrame) {
       const p = new URLSearchParams(location.search || "");
-      p.set("v", window.STEWARD_BUILD || "14");
+      p.set("v", window.STEWARD_BUILD || "17");
       p.set("from", "cockpit");
       if (!p.get("pid") && window.STEWARD_PID) p.set("pid", window.STEWARD_PID);
       if (!p.get("token") && window.STEWARD_TOKEN) p.set("token", window.STEWARD_TOKEN);
@@ -318,158 +306,72 @@ function setAnvilTakeover(open) {
     app.classList.add("anvil-mode");
   } else {
     anvilTakeover.hidden = true;
-    app.classList.remove("anvil-mode");
+    if (!aegisTakeover || aegisTakeover.hidden) {
+      app.classList.remove("anvil-mode");
+    }
   }
 }
+
+function setAegisTakeover(open) {
+  if (!aegisTakeover || _isEmbeddedAnvilDock) return;
+  const shouldOpen = typeof open === "boolean" ? open : aegisTakeover.hidden;
+  try {
+    sessionStorage.setItem(aegisStorageKey, shouldOpen ? "1" : "0");
+    if (shouldOpen) sessionStorage.setItem(anvilStorageKey, "0");
+  } catch (_) {}
+  if (shouldOpen) {
+    if (anvilTakeover) anvilTakeover.hidden = true;
+    if (aegisFrame) {
+      const p = new URLSearchParams(location.search || "");
+      p.set("v", window.STEWARD_BUILD || "17");
+      p.set("from", "cockpit");
+      if (!p.get("pid") && window.STEWARD_PID) p.set("pid", window.STEWARD_PID);
+      if (!p.get("token") && window.STEWARD_TOKEN) p.set("token", window.STEWARD_TOKEN);
+      const targetSrc = "/steward-static/aegis.html?" + p.toString();
+      if (aegisFrame.getAttribute("src") !== targetSrc) {
+        aegisFrame.setAttribute("src", targetSrc);
+      }
+    }
+    aegisTakeover.hidden = false;
+    app.classList.add("anvil-mode");
+  } else {
+    aegisTakeover.hidden = true;
+    if (!anvilTakeover || anvilTakeover.hidden) {
+      app.classList.remove("anvil-mode");
+    }
+  }
+}
+
 if (anvilToggleBtn) anvilToggleBtn.addEventListener("click", () => setAnvilTakeover(true));
+if (aegisToggleBtn) aegisToggleBtn.addEventListener("click", () => setAegisTakeover(true));
 document.querySelectorAll("[data-anvil-return],[data-anvil-return2]").forEach(btn => {
   btn.addEventListener("click", () => setAnvilTakeover(false));
 });
+
 window.addEventListener("message", (ev) => {
-  if (ev && ev.origin === window.location.origin && (!anvilFrame || ev.source === anvilFrame.contentWindow) && ev.data) {
+  if (ev && ev.origin === window.location.origin && ev.data) {
     if (ev.data.type === "anvil-return-cockpit") {
       setAnvilTakeover(false);
     } else if (ev.data.type === "anvil-open-aegis") {
-      openAegisModal();
+      setAegisTakeover(true);
+    } else if (ev.data.type === "aegis-return-cockpit") {
+      setAegisTakeover(false);
+    } else if (ev.data.type === "aegis-switch-to-anvil") {
+      setAnvilTakeover(true);
     }
   }
 });
+
 if (!_isEmbeddedAnvilDock) {
   try {
+    const savedAegis = sessionStorage.getItem(aegisStorageKey);
     const savedAnvil = sessionStorage.getItem(anvilStorageKey);
-    if (savedAnvil === "1" || (savedAnvil === null && _anvilQ.get("dir") === "Anchor Refactoring")) {
+    if (savedAegis === "1" || _anvilQ.get("tool") === "aegis") {
+      setAegisTakeover(true);
+    } else if (savedAnvil === "1" || _anvilQ.get("tool") === "anvil") {
       setAnvilTakeover(true);
     }
   } catch (_) {}
-}
-
-// Wave 17: Aegis Security Audit & Auto-Remediation top-bar tile + interactive modal
-const aegisToggleBtn = document.querySelector("[data-aegis-toggle]");
-const aegisOverlay = document.querySelector("[data-aegis-overlay]");
-const aegisCloseBtn = document.querySelector("[data-aegis-close]");
-const aegisTargetInput = document.querySelector("[data-aegis-target]");
-const aegisScanBtn = document.querySelector("[data-aegis-scan]");
-const aegisRemediateBtn = document.querySelector("[data-aegis-remediate]");
-const aegisSummaryEl = document.querySelector("[data-aegis-summary]");
-const aegisFindingsEl = document.querySelector("[data-aegis-findings]");
-const aegisSeatingEl = document.querySelector("[data-aegis-seating]");
-
-function _aegisUrl() {
-  const p = new URLSearchParams();
-  const d = _anvilQ.get("dir") || "";
-  const pid = _anvilQ.get("pid") || window.STEWARD_PID || "";
-  const tok = _anvilQ.get("token") || window.STEWARD_TOKEN || "";
-  if (d) p.set("dir", d);
-  if (pid) p.set("pid", pid);
-  if (tok) p.set("token", tok);
-  return "/api/steward/aegis?" + p.toString();
-}
-
-function renderAegisState(data) {
-  if (!data || !aegisSummaryEl || !aegisFindingsEl) return;
-  const sess = data.session || {};
-  const seating = sess.model_seating || data.model_seating || {};
-  if (aegisSeatingEl && seating.coding_short) {
-    aegisSeatingEl.textContent = "Coding Seat: " + seating.coding_short + " · Adversarial Review: " + (seating.review_short || "claude-fable-5-1 · max");
-  }
-  if (sess.target_spec && aegisTargetInput && (!aegisTargetInput.value || aegisTargetInput.value === ".")) {
-    aegisTargetInput.value = sess.target_spec;
-  }
-  const scan = sess.scan;
-  if (!scan) {
-    aegisSummaryEl.textContent = "No scan run yet in this cockpit. Enter a target path and click ▶ Run Security Scan.";
-    aegisFindingsEl.replaceChildren();
-    return;
-  }
-  const sev = scan.severity_counts || {};
-  const rem = sess.last_remediation;
-  const remNote = rem && rem.applied ? (" · Auto-Remediated " + (rem.patches_count || 0) + " patch(es)") : "";
-  aegisSummaryEl.textContent =
-    "Verdict: " + (scan.verdict || "PASS") +
-    " · Scanned " + (scan.files_scanned || 0) + " Python file(s) in " + (scan.target || ".") +
-    " · Open Findings: " + (scan.total_findings || 0) +
-    " (" + (scan.auto_fixable_count || 0) + " auto-fixable)" +
-    " [CRITICAL " + (sev.CRITICAL || 0) + " · HIGH " + (sev.HIGH || 0) + " · MEDIUM " + (sev.MEDIUM || 0) + " · LOW " + (sev.LOW || 0) + "]" +
-    remNote + " · Saved to AEGIS-SECURITY-REPORT.md";
-  aegisFindingsEl.replaceChildren();
-  const findings = Array.isArray(scan.findings) ? scan.findings : [];
-  if (!findings.length) {
-    const okDiv = document.createElement("div");
-    okDiv.style.cssText = "padding:10px 12px;border-radius:8px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.4);color:#6ee7b7;font-weight:600";
-    okDiv.textContent = "✓ Zero open vulnerabilities detected across all 6 OWASP/CWE families (AEG-01 through AEG-06).";
-    aegisFindingsEl.appendChild(okDiv);
-    return;
-  }
-  findings.slice(0, 30).forEach(f => {
-    const card = document.createElement("div");
-    card.style.cssText = "padding:9px 12px;border-radius:8px;background:#0d1117;border:1px solid rgba(239,68,68,0.4);display:flex;flex-direction:column;gap:4px";
-    const head = document.createElement("div");
-    head.style.cssText = "font-weight:700;color:#fca5a5;font-family:var(--mono);font-size:11.5px";
-    head.textContent = f.rule_id + " (" + f.cwe + " · " + f.severity + ") — " + f.file + ":" + f.line + " — " + f.message;
-    const cur = document.createElement("div");
-    cur.style.cssText = "font-family:var(--mono);font-size:11px;color:var(--dim)";
-    cur.textContent = "Current:  " + f.snippet;
-    const fix = document.createElement("div");
-    fix.style.cssText = "font-family:var(--mono);font-size:11px;color:#6ee7b7";
-    fix.textContent = "Proposed: " + f.proposed_fix;
-    card.appendChild(head);
-    card.appendChild(cur);
-    card.appendChild(fix);
-    aegisFindingsEl.appendChild(card);
-  });
-}
-
-async function openAegisModal() {
-  if (!aegisOverlay) return;
-  aegisOverlay.hidden = false;
-  try {
-    const r = await fetch(_aegisUrl());
-    const j = await r.json();
-    renderAegisState(j);
-  } catch (_) {}
-}
-
-if (aegisToggleBtn) aegisToggleBtn.addEventListener("click", openAegisModal);
-if (aegisCloseBtn) aegisCloseBtn.addEventListener("click", () => { if (aegisOverlay) aegisOverlay.hidden = true; });
-if (aegisScanBtn) {
-  aegisScanBtn.addEventListener("click", async () => {
-    aegisScanBtn.disabled = true;
-    const orig = aegisScanBtn.textContent;
-    aegisScanBtn.textContent = "Scanning…";
-    try {
-      const body = {
-        action: "scan",
-        target: (aegisTargetInput && aegisTargetInput.value.trim()) || ".",
-        dir: _anvilQ.get("dir") || "",
-        pid: _anvilQ.get("pid") || window.STEWARD_PID || "",
-      };
-      const r = await fetch(_aegisUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      renderAegisState(await r.json());
-    } finally {
-      aegisScanBtn.disabled = false;
-      aegisScanBtn.textContent = orig;
-    }
-  });
-}
-if (aegisRemediateBtn) {
-  aegisRemediateBtn.addEventListener("click", async () => {
-    aegisRemediateBtn.disabled = true;
-    const orig = aegisRemediateBtn.textContent;
-    aegisRemediateBtn.textContent = "Remediating…";
-    try {
-      const body = {
-        action: "remediate",
-        apply: true,
-        dir: _anvilQ.get("dir") || "",
-        pid: _anvilQ.get("pid") || window.STEWARD_PID || "",
-      };
-      const r = await fetch(_aegisUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      renderAegisState(await r.json());
-    } finally {
-      aegisRemediateBtn.disabled = false;
-      aegisRemediateBtn.textContent = orig;
-    }
-  });
 }
 </script>
 </body></html>

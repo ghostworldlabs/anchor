@@ -146,7 +146,7 @@ SKILL_ICONS = {
     "researchPrime": "research-prime-icon.jpg", "Crucible": "crucible-icon.svg",
     "Foreman": "foreman-icon.svg", "Gandalf": "gandalf-icon.jpg", "Jumper": "jumper-icon.jpg",
     "Superjump": "superjump-icon.jpg", "Anvil": "anvil-icon.jpg", "anvil": "anvil-icon.jpg",
-    "Aegis": "gwl-m-icon.svg", "aegis": "gwl-m-icon.svg",
+    "Aegis": "aegis-icon.svg", "aegis": "aegis-icon.svg",
     "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
@@ -1967,8 +1967,16 @@ def handle_get(cdir, verb, qs):
             pass
         return _as.get_session_status(cdir), 200
     if verb == "aegis":
+        import importlib
         from steward_cockpit import aegis_session as _aeg
-        return _aeg.get_cockpit_aegis_state(cdir), 200
+        try:
+            _aeg_mtime = Path(_aeg.__file__).stat().st_mtime_ns
+            if getattr(_aeg, "_LOADED_MTIME_NS", None) != _aeg_mtime:
+                _aeg = importlib.reload(_aeg)
+                _aeg._LOADED_MTIME_NS = _aeg_mtime
+        except Exception:
+            pass
+        return _aeg.get_cockpit_aegis_state(cdir, auto_init=True), 200
     if verb == "session-files":
         # legacy project-level view: files WORK SESSIONS wrote (engine state),
         # distinct from the curated effort register above
@@ -2414,13 +2422,22 @@ def handle_post(cdir, verb, body):
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}, 400
     if verb == "aegis":
+        import importlib
         from steward_cockpit import aegis_session as _aeg
+        try:
+            _aeg_mtime = Path(_aeg.__file__).stat().st_mtime_ns
+            if getattr(_aeg, "_LOADED_MTIME_NS", None) != _aeg_mtime:
+                _aeg = importlib.reload(_aeg)
+                _aeg._LOADED_MTIME_NS = _aeg_mtime
+        except Exception:
+            pass
         act = str(body.get("action") or "scan").strip()
-        if act == "scan":
+        if act in ("scan", "bind_target"):
             res = _aeg.run_cockpit_aegis_scan(
                 cdir,
                 target_spec=str(body.get("target") or "."),
                 signed_off_ids=body.get("signed_off_ids") if isinstance(body.get("signed_off_ids"), list) else None,
+                sync_anvil=bool(body.get("sync_anvil", act == "bind_target")),
             )
             try:
                 import deliverables_register as _dr
@@ -2449,6 +2466,31 @@ def handle_post(cdir, verb, body):
                 apply=bool(body.get("apply")),
                 rule_filter=str(body.get("rule") or ""),
             )
+            return res, 200
+        if act == "sign_off":
+            res = _aeg.sign_off_aegis_finding(
+                cdir,
+                str(body.get("finding_id") or ""),
+            )
+            return res, 200
+        if act == "chat":
+            q_str = str(body.get("question") or "").strip()
+            res = _aeg.chat_in_aegis_session(
+                cdir,
+                q_str,
+                str(body.get("target") or ""),
+            )
+            try:
+                eng = get_engine(cdir, create=False)
+                if eng is not None and q_str:
+                    dlg = ((res.get("session") or {}).get("dialogue") or [])
+                    last_asst = next((m.get("text") for m in reversed(dlg) if m.get("role") == "assistant" and m.get("text")), "")
+                    eng._emit({"t": "john", "text": q_str})
+                    if last_asst:
+                        eng._emit({"t": "delta", "text": str(last_asst)})
+                        eng._emit({"t": "turn_end", "tokens": 0})
+            except Exception:
+                pass
             return res, 200
         return {"ok": False, "error": f"unknown aegis action: {act}"}, 400
     if verb == "refinement-accept":

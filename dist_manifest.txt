@@ -351,6 +351,9 @@ steward_cockpit/static/v1.html
 steward_cockpit/static/v3.html
 steward_cockpit/static/report.html
 steward_cockpit/static/anvil.html
+steward_cockpit/static/aegis.html
+steward_cockpit/static/wave17-aegis-cockpit-mockup.html
+steward_cockpit/static/wave18-cockpit-redesign-mockup.html
 steward_cockpit/static/shared.js
 steward_cockpit/static/notebook-actions.js
 steward_cockpit/static/shared.css
@@ -460,6 +463,7 @@ anchor.ico
 
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
+vendor/brand/aegis-icon.svg
 # Steward persona icon pairs (2026-07-29): the selectable steward UI
 # (anchor_settings.STEWARDS) renders these on the High Seat + Projects
 # tiles; product art, ships with the bundle.
