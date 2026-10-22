@@ -3617,12 +3617,23 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
     import tempfile as _tf
     steps: list[tuple[str, bool, str]] = []
 
+    # This walk runs in the Doctor process alongside a separate dashboard.
+    # Its process-local WRITE_LOCK cannot protect a shared sessions.json from
+    # the dashboard's registry writes. Keep the entire synthetic lifecycle,
+    # including boneyard registration and cleanup, outside the live data root.
+    import pty_manager as _pty
+    previous_ptys = set(_pty.live_sessions())
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    probe_data = Path(_tf.mkdtemp(prefix="anchor-hc-v10-data-"))
+    rnd_env.setdefault("v3_temp_dirs", []).append(probe_data)
     prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
     prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
     prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
     prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
     os.environ["ANCHOR_PTY_BACKEND"] = "stub"
     os.environ.pop("ANCHOR_TERMINAL_SEED", None)  # rely on the built-in greet seed
+    os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)  # background summary no-ops
     wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v10-wt-"))
     os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
     os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
@@ -3638,6 +3649,8 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
 
     pid = None
     try:
+        os.environ["ANCHOR_DATA_DIR"] = str(probe_data)
+        _paths.ensure_data_dirs()
         import rnd_registry as _rnd
         import terminal_session as _ts
         import session_registry as _sreg
@@ -3659,7 +3672,8 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v10", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
-        rnd_env["created_ids"].append(pid)
+        # Private project: remove it before restoring the outer data root,
+        # never hand its id to the later live-registry cleanup.
         steps.append(("register v10 project", bool(pid), str(pid)))
 
         # ── (a) PASTE substrate (W1): pending → flush UNSENT once after greet ──
@@ -3958,28 +3972,32 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
     except Exception as e:
         steps.append(("exception", False, f"{type(e).__name__}: {e}"))
     finally:
-        # Reap any stub PTY sessions this walk left live (defensive).
+        # Reap only this walk's stub PTYs, preserving earlier checks' sessions.
+        # All registry cleanup still resolves the private data root here.
         try:
             import pty_manager as _pty2
             import session_registry as _sreg2
-            for sid in list(_pty2.live_sessions()):
+            for sid in set(_pty2.live_sessions()) - previous_ptys:
                 try:
                     _pty2.kill(sid)
                 except Exception:
                     pass
-            for pid_ in rnd_env.get("created_ids", []):
-                for srec in _sreg2.list_sessions(project_id=pid_):
+            if pid:
+                for srec in _sreg2.list_sessions(project_id=pid):
                     try:
                         _sreg2.remove_session(srec.get("session_id"))
                     except Exception:
                         pass
+                _rnd.remove_project(pid)
         except Exception:
             pass
         # Restore every env var we forced for this walk.
-        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+        for var, prev in (("ANCHOR_DATA_DIR", prev_data),
+                          ("ANCHOR_PTY_BACKEND", prev_pty),
                           ("ANCHOR_WORKTREE_BASE", prev_wtbase),
                           ("ANCHOR_TERMINAL_SEED", prev_seed),
-                          ("ANCHOR_RUNNER_CMD", prev_runner)):
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive)):
             if prev is None:
                 os.environ.pop(var, None)
             else:
@@ -6794,7 +6812,7 @@ def check_supervisor_seam(report: Report):
             "research", project_id="hc-sup-pid", folder_path=str(folder),
             cwd=str(folder), backend="claude",
             extra_args=["--lines", "6", "--line-interval",
-                                         "0.15", "--sleep", "6"])
+                                         "0.15", "--sleep", "20"])
         jid = rec["job_id"]
 
         # Let a couple of lines drip, then record the durable cursor.
