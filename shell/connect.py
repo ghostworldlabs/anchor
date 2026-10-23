@@ -25,6 +25,23 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
+def _apply_bundled_test_mode():
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        for cand in (exe_dir / "anchor-test-mode.json", exe_dir.parent / "anchor-test-mode.json"):
+            if cand.is_file():
+                cfg = json.loads(cand.read_text(encoding="utf-8"))
+                for k, v in cfg.items():
+                    if k.startswith("ANCHOR_SHELL_") and v:
+                        os.environ.setdefault(k, str(v))
+                break
+    except Exception:
+        pass
+
+
+_apply_bundled_test_mode()
 LOCAL_PORT = int(os.environ.get("ANCHOR_SHELL_PORT") or (8787 if os.environ.get("ANCHOR_SHELL_TEST") else 8777))
 LOCAL = os.environ.get("ANCHOR_SHELL_LOCAL_URL") or ("http://127.0.0.1:%d" % LOCAL_PORT)
 EXAMPLE = "https://mother-ship.example"
