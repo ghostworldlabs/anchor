@@ -334,19 +334,34 @@ class HostApi:
         if isinstance(repo_url, dict):
             target_dir = repo_url.get("target_dir") or target_dir
             repo_url = repo_url.get("repo_url") or ""
+        try:
+            self._window.evaluate_js("window._updateInstallProgress && window._updateInstallProgress(22, 2, 'Step 2/4: Pulling Anchor Mother Ship & 19 Foundry Skills...')")
+        except Exception:
+            pass
         result = connect.pull_and_install_mothership(
             repo_url=repo_url or connect.DEFAULT_GITHUB_REPO,
             workspace_dir=target_dir or connect.DEFAULT_INSTALL_ROOT,
             run_onboard=False,
         )
-        if result.get("target_dir") and not connect.reachable(connect.LOCAL):
-            connect.ensure_local_service_running(result["target_dir"], check_system_dirs=True)
-        for _ in range(10 if result.get("onboard_ready") else 1):
+        target_path = os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup"
+        if result.get("target_dir"):
+            try:
+                self._window.evaluate_js("window._updateInstallProgress && window._updateInstallProgress(82, 4, 'Step 4/4: Starting local Anchor service & opening Onboarding Wizard...')")
+            except Exception:
+                pass
+            connect._apply_bundled_core_overlay(Path(result["target_dir"]))
+            if connect.reachable(connect.LOCAL) and target_path != "/setup" and not connect.route_reachable(connect.LOCAL, target_path):
+                connect.stop_local_service_on_port(connect.LOCAL_PORT)
+            if not connect.reachable(connect.LOCAL):
+                connect.ensure_local_service_running(result["target_dir"], check_system_dirs=True)
+        for _ in range(16 if result.get("onboard_ready") else 1):
             if connect.reachable(connect.LOCAL):
+                if target_path != "/setup" and not connect.route_reachable(connect.LOCAL, target_path) and connect.route_reachable(connect.LOCAL, "/setup"):
+                    target_path = "/setup"
                 connect.save_address(DATA, connect.LOCAL)
                 self._address = connect.LOCAL
                 self._html = ""
-                self._window.load_url(self._address + (os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup"))
+                self._window.load_url(self._address + target_path)
                 return ""
             time.sleep(0.5)
         return result.get("message") or "Mother ship repository pulled. Run onboard.cmd to start Anchor."

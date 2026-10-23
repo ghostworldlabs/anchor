@@ -161,6 +161,50 @@ def reachable(address, timeout=5.0):
         return False
 
 
+def route_reachable(address, path="/setup", timeout=3.0):
+    """Return True when ``address + path`` responds with HTTP 200."""
+    try:
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(address.rstrip("/") + path, timeout=timeout, context=ctx) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _apply_bundled_core_overlay(dest: Path) -> bool:
+    """Extract bundled anchor-core-overlay.zip into ``dest`` so local Mother Ship always has the latest Onboarding Wizard & routes."""
+    if not dest:
+        return False
+    dest_path = Path(dest)
+    candidates = []
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.extend([
+            exe_dir / "anchor-core-overlay.zip",
+            exe_dir.parent / "anchor-core-overlay.zip",
+        ])
+    except Exception:
+        pass
+    try:
+        here_dir = Path(__file__).resolve().parent
+        candidates.extend([
+            here_dir / "anchor-core-overlay.zip",
+            here_dir.parent / "static" / "downloads" / "anchor-core-overlay.zip",
+        ])
+    except Exception:
+        pass
+    for zcand in candidates:
+        if zcand.is_file():
+            try:
+                dest_path.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zcand, "r") as zf:
+                    zf.extractall(dest_path)
+                return True
+            except Exception:
+                pass
+    return False
+
+
 def any_service_on_port(address=LOCAL, port=8777, timeout=1.0):
     """Return True if any server (including pre-1.3.2 Anchor without /static/app.html) is listening on port."""
     for path in ("/api/version", "/api/status", "/"):
@@ -600,6 +644,7 @@ def ensure_local_service_running(package_root=None, check_system_dirs=False, pro
 
     ws_home = Path(DEFAULT_INSTALL_ROOT) if Path(DEFAULT_INSTALL_ROOT).is_dir() else root.parent
     try:
+        _apply_bundled_core_overlay(root)
         _sync_workspace_skills_and_governance(root, ws_home)
         _ensure_local_token_and_claude_skills(root, ws_home, overwrite=False)
     except Exception:
@@ -737,17 +782,30 @@ def installation_state(package_root, which_fn=None):
 def select_mother_ship(data_dir, package_root, probe_fn=None, auto_bootstrap=False):
     probe = probe_fn or reachable
     last_error = ""
+    target_path = os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup"
     if auto_bootstrap and probe_fn is None:
         sync = ensure_mothership_up_to_date_and_running(package_root=package_root, probe_fn=probe)
         save_attempted_upgrade_version(data_dir, BUNDLED_VERSION)
         if sync.get("ok") and probe(LOCAL):
+            if target_path != "/setup" and not route_reachable(LOCAL, target_path):
+                t_root = sync.get("root") or find_local_anchor_root(package_root=package_root, check_system_dirs=True)
+                if t_root:
+                    _apply_bundled_core_overlay(Path(t_root))
+                    stop_local_service_on_port(LOCAL_PORT)
+                    ensure_local_service_running(t_root, check_system_dirs=True, probe_fn=probe)
             save_address(data_dir, LOCAL)
             upg = bool(sync.get("upgraded"))
-            return {"ok": True, "address": LOCAL, "path": os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup", "installed": upg, "upgraded": upg}
+            return {"ok": True, "address": LOCAL, "path": target_path, "installed": upg, "upgraded": upg}
         last_error = str(sync.get("message") or "")
     if probe(LOCAL):
+        if probe_fn is None and target_path != "/setup" and not route_reachable(LOCAL, target_path):
+            t_root = find_local_anchor_root(package_root=package_root, check_system_dirs=True)
+            if t_root:
+                _apply_bundled_core_overlay(Path(t_root))
+                stop_local_service_on_port(LOCAL_PORT)
+                ensure_local_service_running(t_root, check_system_dirs=True, probe_fn=probe)
         save_address(data_dir, LOCAL)
-        return {"ok": True, "address": LOCAL, "path": os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup", "installed": False, "upgraded": False}
+        return {"ok": True, "address": LOCAL, "path": target_path, "installed": False, "upgraded": False}
     if probe_fn is None:
         started = ensure_local_service_running(package_root, check_system_dirs=auto_bootstrap, probe_fn=probe)
         if started.get("ok") and probe(LOCAL):
@@ -944,6 +1002,8 @@ def pull_and_install_mothership(target_dir=None, repo_url=DEFAULT_GITHUB_REPO, r
             "message": "Repository cloned to %s, but missing cold-start files: %s" % (dest, ", ".join(pkg.get("missing") or [])),
         }
 
+    if runner_fn is None:
+        _apply_bundled_core_overlay(dest)
     installed_skills = _sync_workspace_skills_and_governance(dest, ws_home, overwrite=(runner_fn is None))
     if runner_fn is None:
         _ensure_local_token_and_claude_skills(dest, ws_home, overwrite=True)

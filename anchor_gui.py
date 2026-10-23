@@ -23345,7 +23345,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 import onboard_wizard as _ow
                 q = parse_qs(urlparse(self.path).query)
                 is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
-                self._send_html(_ow.render_onboard_wizard_html(sandbox=is_sb))
+                _ck = self._local_login_cookie()
+                self._send_html(_ow.render_onboard_wizard_html(sandbox=is_sb), cookie=_ck)
             elif _path_only == "/api/onboard-wizard/state":
                 import onboard_wizard as _ow
                 q = parse_qs(urlparse(self.path).query)
