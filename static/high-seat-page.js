@@ -238,15 +238,37 @@
   // the Candidates: a search and a sort (his word, 2026-10-02: by date created, last date worked on, the steward's relevance)
   var candApply = function () {};
 
+  function measureNaturalTextWidth(el) {
+    if (!el) return 0;
+    var prevDisplay = el.style.display;
+    var prevWidth = el.style.width;
+    el.style.display = 'inline-block';
+    el.style.width = 'auto';
+    var w = el.scrollWidth || el.offsetWidth || 0;
+    el.style.display = prevDisplay;
+    el.style.width = prevWidth;
+    return w;
+  }
+
   function syncCompactActs() {
+    // Switch to compact dots SOONER rather than later: keep at least 96px of breathing room
+    // after the cockpit name (and collapse whenever the tile is under 520px wide) so names
+    // never get cramped or close to truncating before the blue/green dots + arrow appear.
+    var SAFETY_BUFFER_PX = 96;
+    var MIN_FULL_BTN_TILE_WIDTH = 520;
     $$('.tile').forEach(function (tile) {
-      var nm = tile.querySelector('.t-name .t-nm') || tile.querySelector('.t-name');
+      var nmWrap = tile.querySelector('.t-name');
+      var nm = tile.querySelector('.t-name .t-nm') || nmWrap;
       var eff = tile.querySelector('.t-name .t-eff');
-      if (!nm) return;
+      if (!nm || !nmWrap) return;
       tile.classList.remove('compact-acts');
+      var availW = nmWrap.clientWidth || 0;
+      var nmW = measureNaturalTextWidth(nm);
+      var effW = measureNaturalTextWidth(eff);
+      var earlyCrowd = (nmW + SAFETY_BUFFER_PX > availW) || (effW > 0 && (effW + SAFETY_BUFFER_PX > availW));
       var nmTrunc = (nm.scrollWidth > nm.clientWidth + 1);
       var effTrunc = eff ? (eff.scrollWidth > eff.clientWidth + 1) : false;
-      if (nmTrunc || effTrunc || tile.clientWidth < 360) {
+      if (earlyCrowd || nmTrunc || effTrunc || tile.clientWidth < MIN_FULL_BTN_TILE_WIDTH) {
         tile.classList.add('compact-acts');
       }
     });
