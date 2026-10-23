@@ -589,8 +589,8 @@ def _running_job_ids():
     return ids
 
 
-_JOB_STATUS = {}   # record path -> ((mtime_ns, size), status, job_id)
-_JOB_STATUS_LOCK = threading.Lock()   # the boot warm-up and a request never fill it at once
+_JOB_STATUS = globals().get("_JOB_STATUS") if isinstance(globals().get("_JOB_STATUS"), dict) else {}   # record path -> ((mtime_ns, size), status, job_id)
+_JOB_STATUS_LOCK = globals().get("_JOB_STATUS_LOCK") or threading.Lock()   # the boot warm-up and a request never fill it at once
 
 
 def _running_record_ids(jr):
@@ -977,7 +977,7 @@ def _other_recorded_usage(cdir):
     return result
 
 
-_ROLLUP_CACHE, _ROLLUP_LOCK = {}, threading.Lock()
+_ROLLUP_CACHE = globals().get("_ROLLUP_CACHE") if isinstance(globals().get("_ROLLUP_CACHE"), dict) else {}; _ROLLUP_LOCK = globals().get("_ROLLUP_LOCK") or threading.Lock()
 
 
 def _rollup_ttl():
@@ -1211,7 +1211,7 @@ def _usage_rollup_fresh(cdir, estate=None):
     return {"steward": stew, "terms": term, "jobs": jobs, "children": children, "seats": seats, "total": total}
 
 
-_GLOBAL_USAGE_CACHE, _GLOBAL_USAGE_LOCK = {}, threading.Lock()
+_GLOBAL_USAGE_CACHE = globals().get("_GLOBAL_USAGE_CACHE") if isinstance(globals().get("_GLOBAL_USAGE_CACHE"), dict) else {}; _GLOBAL_USAGE_LOCK = globals().get("_GLOBAL_USAGE_LOCK") or threading.Lock()
 
 _FAMILY_DEFAULT_MODELS = {
     "claude": "claude-opus-5-5",
@@ -1690,7 +1690,7 @@ def global_usage_summary(qs=None):
     return copy.deepcopy(value), 200
 
 
-_STATE_CACHE, _STATE_LOCK = {}, threading.Lock()
+_STATE_CACHE = globals().get("_STATE_CACHE") if isinstance(globals().get("_STATE_CACHE"), dict) else {}; _STATE_LOCK = globals().get("_STATE_LOCK") or threading.Lock()
 
 
 def _state_cached(eng, cdir):

@@ -163,14 +163,34 @@ def _existing_rows(text):
 
 
 def _insert_row_top(text: str, row: str) -> str:
-    """Insert a pipe-table row immediately after the table header separator line so newest deliverables sit at top."""
+    """Insert a pipe-table row immediately after the table header separator line so newest deliverables sit at top.
+    If the incoming row is an unlanded kept-job output (or Supporting row) and the table already starts with designated
+    START HERE / FOR REVIEW rows, insert immediately below those designated rows so curated review items stay on top."""
     lines = text.splitlines(keepends=True)
+    row_what = ""
+    if row.strip().startswith("|"):
+        rcells = [c.strip() for c in row.strip().strip("|").split("|")]
+        row_what = rcells[0] if rcells else ""
+    is_supporting_or_kept = bool(re.search(r"^(?:Supporting|Historical|Earlier|Superseded)\b|\bkept\s*\(not\s+landed\)", row_what, re.I))
     for idx, line in enumerate(lines):
         s = line.strip()
         if s.startswith("|") and s.endswith("|"):
             cells = [c.strip() for c in s.strip("|").split("|")]
             if cells and all(set(c) <= {"-", " ", ":"} and "-" in c for c in cells if c):
-                return "".join(lines[:idx + 1]) + ("" if lines[idx].endswith("\n") else "\n") + row + "".join(lines[idx + 1:])
+                ins_idx = idx + 1
+                if is_supporting_or_kept:
+                    while ins_idx < len(lines):
+                        ns = lines[ins_idx].strip()
+                        if not (ns.startswith("|") and ns.endswith("|")):
+                            break
+                        ncells = [c.strip() for c in ns.strip("|").split("|")]
+                        nwhat = ncells[0] if ncells else ""
+                        if re.match(r"^(?:START\s+HERE|FOR\s+REVIEW|CURRENT)\b", nwhat, re.I):
+                            ins_idx += 1
+                        else:
+                            break
+                prev_line = lines[ins_idx - 1]
+                return "".join(lines[:ins_idx]) + ("" if prev_line.endswith("\n") else "\n") + row + "".join(lines[ins_idx:])
     if text and not text.endswith("\n"):
         text += "\n"
     return text + row
@@ -287,20 +307,24 @@ def _file_url(pid, effort_rel, rel_path, file_hash=None, **extra):
         "%s=%s" % (k, quote(str(v or ""), safe="")) for k, v in q)
 
 
-def _contained(effort_dir, rel):
+def _contained(effort_dir, rel, *, _root_real=None, _priv_homes=None):
     """The resolved file when ``rel`` is a file inside ``effort_dir`` and not a private host credential; else None -
     the same rule the serving route applies, so a target is never offered that would 404 or 403."""
     try:
-        root = Path(effort_dir).resolve()
+        root = _root_real if _root_real is not None else Path(effort_dir).resolve()
         fp = (root / rel).resolve()
         if fp != root and root not in fp.parents:
             return None
-        try:
-            from provider_native import private_account_path
-            if private_account_path(str(fp)):
+        if _priv_homes is not None:
+            if any(fp.is_relative_to(home) for home in _priv_homes):
                 return None
-        except ImportError:
-            pass
+        else:
+            try:
+                from provider_native import private_account_path
+                if private_account_path(str(fp)):
+                    return None
+            except ImportError:
+                pass
         return fp if fp.is_file() else None
     except (OSError, ValueError):
         return None
@@ -337,7 +361,7 @@ def _route_pdf_is_current(path, pdf_query, deck_query):
         return False
 
 
-def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None):
+def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None, _root_real=None, _priv_homes=None):
     """How John reads one product version: ``{"read": url|None, "download": url|None, "preparing": bool}``.
 
     ``product`` is a register item (``path`` relative to the effort, or a classified ``route``; managed items carry
@@ -381,7 +405,7 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
     rel = str(product.get("open_path") or product.get("path") or "").replace(chr(92), "/").strip()
     if not rel or not pid:
         return out
-    fp = _contained(effort_dir, rel) if effort_dir is not None else None
+    fp = _contained(effort_dir, rel, _root_real=_root_real, _priv_homes=_priv_homes) if effort_dir is not None else None
     if effort_dir is not None and fp is None:
         return out
     file_hash = product.get("hash") if product.get("managed") else None
@@ -396,7 +420,7 @@ def reading_target(product, *, pid, effort_rel, effort_dir=None, registered=None
         out["read"] = _file_url(pid, effort_rel, rel, file_hash, view="1")
     elif ext == ".pptx":
         sibling = rel[: -len(ext)] + ".pdf"
-        pdf = _contained(effort_dir, sibling) if effort_dir is not None else None
+        pdf = _contained(effort_dir, sibling, _root_real=_root_real, _priv_homes=_priv_homes) if effort_dir is not None else None
         if product.get("managed"):
             # a managed deck reads ONLY through its ledger-bound companion (the route verifies both hashes)
             if product.get("visual_companion"):

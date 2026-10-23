@@ -4,9 +4,26 @@
   "generated_from": {
     "schema": "foundry-map/v2",
     "map_version": 2,
-    "skill_count": 12
+    "skill_count": 13
   },
   "resolved": [
+    {
+      "ref": "skill:anvil",
+      "name": "anvil",
+      "version": "1.0.0",
+      "source": "skills/anvil",
+      "dependencies": [
+        {
+          "ref": "skill:gandalf",
+          "type": "compose",
+          "range": "^1.0.0",
+          "pinned": "1.2.0"
+        }
+      ],
+      "closure": [
+        "skill:gandalf@1.2.0"
+      ]
+    },
     {
       "ref": "skill:chekhov",
       "name": "chekhov",

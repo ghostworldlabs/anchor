@@ -183,3 +183,24 @@ Intake `2026-10-05-01-stopped-mit-teaching-job-left-old-slides` records MIT Lect
 
 
 5 October recovery delivery: job `20261005-173455-5810f8` completed, and root integrated artifact-only commit `536af19` as MAIN `aecb937`. The 25-slide translation revision, Section 4 plan v2 PDF and course plan v2 PDF open through actual authenticated conversation and Current work links in the native PDF viewer; exact bytes and refresh persistence passed. Root corrected three legacy register labels to `CURRENT —` after live inspection found the delimiter missing, restored receipt-bound CRLF text after git conversion, and inspected all six viewer screenshots separately from a failed root embed selector. Evidence: MIT Lectures journal0028 and `translation-v2/checks/finished-main-inspection.json`. Attention is quiet and human feedback remains open. The independent text review actually returned; saved-file native Office reopening remains unavailable. Local recovery is delivered, while shared restart/status repair remains open and uninstalled.
+
+## 7 October: Cave keeps a resolved Doctor failure banner
+
+John reported the health warning still visible after the R&D v6 correctness
+repair. The [banner diagnosis and live evidence](2026-10-07-cave-health-banner-cleanup.md)
+establish a separate display defect: Cave keeps its iframe for the app session,
+while its refresh reconciles cards/nudge/lane but omits `.healthbar`. Health-only
+changes also do not move the campaign stamp that triggers those refreshes.
+The current report has zero correctness issues; Doctor's startup-speed warning
+does not create a Cave correctness banner.
+
+A normal authenticated fresh app has no banner. A guarded, inspection-only
+browser reproduction fetched fresh Cave HTML with no banner while retaining
+the old visible warning and its composer node. John's exact existing client
+was unavailable to capture; this is qualified evidence of the same mechanism,
+not proof of cleanup on his screen. The previous completion gate missed that
+visible boundary. The [canonical open friction intake](../../friction/2026-10-07-01-cave-retains-resolved-doctor-health-bann.json)
+preserves John's original words and appears in the existing generated brief.
+Require in-place health refresh for report-only changes,
+with real existing-client acceptance and preserved drafts/failure visibility.
+This analysis is journaled; the display implementation remains open.

@@ -150,3 +150,40 @@ export function KnowledgeMap({ map, resources, steps, externalSelection }) {
     </>}
   </div>;
 }
+
+export function AnvilMap({ anvil, skillId }) {
+  const [stepIdx, setStepIdx] = useState(0);
+  if (!anvil || anvil.status === 'unfinished') {
+    return <p className="empty">Anvil 3-level progressive map and step-through not generated for this skill yet.</p>;
+  }
+  const nodes = anvil.progressive_nodes || [];
+  const remap = anvil.remapping_proposal || {};
+  const frames = anvil.interactive_walkthrough || [];
+  const frame = frames[Math.max(0, Math.min(stepIdx, frames.length - 1))];
+  return <div className="anvil-view">
+    <p className="qualification">Programmatic AST analysis ({anvil.total_loc || 0} LOC · {anvil.ast_functions_count || 0} symbols) · Cognitive load reduction: -{remap.cognitive_load_reduction_pct || 35}%</p>
+    <p><a className="btn" href={`/foundry/anvil?skill=${encodeURIComponent(skillId)}`}>Open Full Interactive Anvil &amp; Step-Through Workbench ↗</a></p>
+    {frame && <section className="anvil-walkthrough-box">
+      <h3>Interactive Step-Through Debugger (Step {frame.step_index} of {frames.length}: {frame.title})</h3>
+      <div className="map-toolbar">
+        <button className="btn" onClick={() => setStepIdx((stepIdx - 1 + frames.length) % frames.length)}>← Prev Step</button>
+        <button className="btn" onClick={() => setStepIdx((stepIdx + 1) % frames.length)}>Next Step →</button>
+      </div>
+      <p><strong>Stage:</strong> {frame.stage} · <strong>Status:</strong> {frame.claimed_vs_actual_status} · <strong>Operation:</strong> {frame.operation_performed}</p>
+      <p><strong>Tools:</strong> {(frame.tools_invoked || []).join(', ') || 'None'} · <strong>Peer Skills:</strong> {(frame.peer_skills_invoked || []).join(', ') || 'None'} · <strong>KB Reads:</strong> {(frame.librarian_kb_reads || []).join(', ') || 'None'}</p>
+    </section>}
+    <section>
+      <h3>3-Level Progressive Abstraction Nodes (Ingest → Compute → Verify → Emit)</h3>
+      {nodes.map(n => <details key={n.id}>
+        <summary>{n.title} ({n.stage} · {n.orange_role})</summary>
+        <p><strong>Level 1 (Role &amp; I/O):</strong> {n.level1_summary?.purpose}</p>
+        <p><strong>Tools:</strong> {(n.level1_summary?.tools_used || []).join(', ')} · <strong>Peers:</strong> {(n.level1_summary?.peer_skills || []).join(', ')} · <strong>KB:</strong> {(n.level1_summary?.kb_sources || []).join(', ')}</p>
+        <p><strong>Level 2 (Invariant &amp; Diff):</strong> {n.level2_mechanics?.formal_invariant_or_equation} — {n.level2_mechanics?.old_to_new_diff}</p>
+      </details>)}
+    </section>
+    <section>
+      <h3>Functional Core / Imperative Shell Remapping Proposal</h3>
+      <p>{remap.current_architecture}</p>
+    </section>
+  </div>;
+}

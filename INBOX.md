@@ -15,3 +15,18 @@
 
 - BACKUP HEALTH FAIL [2026-09-05] - 1 red finding(s): GWL-Restic-Cold - last=2026-09-04 18:00 result=0x1
   (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
+
+- BACKUP HEALTH FAIL [2026-10-06] - 2 red finding(s): local snapshot - newest is 215 min old (threshold 120) - paths: C:\Users\john\.claude, C:\Users\john\.gemini, C:\Users\john\.openclaw, C:\dev; GWL-Restic-Local - last=2026-10-06 16:11 result=0x41301
+  (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
+
+- BACKUP HEALTH FAIL [2026-10-11] - 1 red finding(s): GWL-Restic-Local - last=2026-10-11 08:36 result=0x41301
+  (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
+
+- BACKUP HEALTH FAIL [2026-10-12] - 1 red finding(s): GWL-Restic-Local - last=2026-10-12 08:36 result=0x41301
+  (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
+
+- BACKUP HEALTH FAIL [2026-10-13] - 1 red finding(s): GWL-Restic-Local - last=2026-10-13 08:36 result=0x1
+  (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
+
+- BACKUP HEALTH FAIL [2026-10-14] - 3 red finding(s): local snapshot - newest is 323 min old (threshold 120) - paths: C:\Users\john\.claude, C:\Users\john\.gemini, C:\Users\john\.openclaw, C:\dev; GWL-Restic-Local - last=2026-10-14 08:36 result=0x1; GWL-Restic-Cold - last=2026-10-13 18:00 result=0x1
+  (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)

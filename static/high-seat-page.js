@@ -547,7 +547,7 @@
     (function next(i) {
       if (i >= list.length) return;
       var f = list[i];
-      if (f.size > 30000000) { dropNote(card, f.name + ' is over 30 MB \u2014 not loaded', true); next(i + 1); return; }
+      if (f.size > 250000000) { dropNote(card, f.name + ' is over 250 MB \u2014 not loaded', true); next(i + 1); return; }
       var r = new FileReader();
       r.onerror = function () { dropNote(card, f.name + ' could not be read', true); next(i + 1); };
       r.onload = function () {
@@ -870,7 +870,11 @@
     }
     Promise.all([worker(),worker(),worker(),worker()]).finally(function () {
       feedbackBusy = false;
-      if (moved) refreshFaces();
+      var nowMs = Date.now();
+      if (moved && (!window._lastFaceRefreshAt || (nowMs - window._lastFaceRefreshAt) > 15000)) {
+        window._lastFaceRefreshAt = nowMs;
+        refreshFaces();
+      }
       if (feedbackAgain) { feedbackAgain = false; refreshFeedback(); }
     });
   }
@@ -1243,6 +1247,13 @@
         if (j && j.ok && j.talk && dlg) { dlg.send(text, null, dlg.mainList(), send, say, DRAFT_KEY); return; }   // not a verb: the steward, in the dialogue
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
         say.value = ''; say.dispatchEvent(new Event('input')); clearDraft(); receipt(j.say || '…', false, j.undo || null);
+        if (window.StewardDialogue && typeof window.StewardDialogue.speakConciseSummary === 'function' && (j.spoken_summary || j.say)) {
+          try { window.StewardDialogue.speakConciseSummary(j.spoken_summary || j.say); } catch (e) {}
+        }
+        if (j.act === 'open_deliverable' && j.open_deliverable_url && window.StewardDialogue && typeof window.StewardDialogue.openCaveDeliverableDrawer === 'function') {
+          window.StewardDialogue.openCaveDeliverableDrawer(j.open_deliverable_title || 'Deliverable', j.open_deliverable_url);
+          return;
+        }
         if (j.campaign_act && !j.read_only) { renewInPlace(); return; }   // W4: the change is placed in the page; the line and its undo stay
         if (j.project_create && j.project_create.folder) projectCard(j.project_create);   // R11: the card is here, not on the old dashboard
       })

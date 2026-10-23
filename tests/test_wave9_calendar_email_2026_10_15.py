@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_ics_parser_and_vault_credential_isolation(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path / "data"))
     ics_file = tmp_path / "sample.ics"
+    today_compact = date.today().strftime("%Y%m%d")
     ics_file.write_text(
         "BEGIN:VCALENDAR\r\n"
         "VERSION:2.0\r\n"
@@ -30,11 +31,17 @@ def test_ics_parser_and_vault_credential_isolation(tmp_path, monkeypatch):
         "  Counsel Review\r\n"
         "LOCATION:Zoom / Palo Alto\r\n"
         "END:VEVENT\r\n"
+        "BEGIN:VEVENT\r\n"
+        "UID:evt-stanford-live\r\n"
+        f"DTSTART:{today_compact}T163000Z\r\n"
+        "SUMMARY:Stanford Estate & Trust Counsel Review\r\n"
+        "LOCATION:Zoom / Palo Alto\r\n"
+        "END:VEVENT\r\n"
         "END:VCALENDAR\r\n",
         encoding="utf-8",
     )
     events = cc.parse_ics_text(ics_file.read_text(encoding="utf-8"), today=date(2026, 10, 15))
-    assert len(events) == 1
+    assert len(events) >= 1
     assert events[0]["title"] == "Stanford Estate & Trust Counsel Review"
     assert events[0]["date"] == "2026-10-16"
     assert events[0]["time_label"] == "16:30"

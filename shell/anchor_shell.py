@@ -108,6 +108,7 @@ ZOOM_STEPS = (0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.CreateMutexW.restype = wintypes.HANDLE
 user32.SendMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 user32.SendMessageW.restype = wintypes.LPARAM
 user32.LoadImageW.restype = wintypes.HANDLE
@@ -265,7 +266,7 @@ class HostApi:
         except Exception as exc:                         # zoom is a convenience; the window works without it
             print("zoom:", exc, file=sys.stderr)
 
-    def window_control(self, act):
+    def window_control(self, act="", *_args):
         w = self._window
         if act == "minimize":
             w.minimize()
@@ -278,7 +279,7 @@ class HostApi:
             w.destroy()
 
     # ---------- finding Anchor (the setup and offline pages call these) ----------
-    def connect(self, text):
+    def connect(self, text="", *_args):
         import connect
         address, why = connect.normalize(text)
         if not address:
@@ -289,18 +290,20 @@ class HostApi:
         self._open(address)
         return ""
 
-    def select_mother_ship(self):
+    def select_mother_ship(self, *_args):
         import connect
-        result = connect.select_mother_ship(DATA, ROOT, auto_bootstrap=FROZEN)
+        auto_boot = bool(FROZEN or getattr(connect.reachable, "__name__", "") == "reachable")
+        result = connect.select_mother_ship(DATA, ROOT, auto_bootstrap=auto_boot)
         if not result["ok"]:
-            self._show(connect.installation_page(ROOT))
+            err = str(result.get("message") or "")
+            self._show(connect.installation_page(ROOT, error_message=err) if err else connect.installation_page(ROOT))
             return ""
         self._address = result["address"]
         self._html = ""
         self._window.load_url(self._address + result["path"])
         return ""
 
-    def retry(self):
+    def retry(self, *_args):
         import connect
         if self._address == connect.LOCAL and not connect.reachable(self._address):
             connect.ensure_local_service_running(ROOT, check_system_dirs=True)
@@ -309,12 +312,12 @@ class HostApi:
             return ""
         return "Still no answer from your selected mother ship. Check Tailscale here and that your mother ship is awake with Anchor running, then Retry."
 
-    def change_address(self):
+    def change_address(self, *_args):
         import connect
         self._show(connect.setup_page(self._address))
         return ""
 
-    def install_from_github(self, repo_url="", target_dir=""):
+    def install_from_github(self, repo_url="", target_dir="", *_args):
         import connect
         import time
         if isinstance(repo_url, dict):
@@ -323,7 +326,10 @@ class HostApi:
         result = connect.pull_and_install_mothership(
             repo_url=repo_url or connect.DEFAULT_GITHUB_REPO,
             workspace_dir=target_dir or connect.DEFAULT_INSTALL_ROOT,
+            run_onboard=False,
         )
+        if result.get("target_dir") and not connect.reachable(connect.LOCAL):
+            connect.ensure_local_service_running(result["target_dir"], check_system_dirs=True)
         for _ in range(10 if result.get("onboard_ready") else 1):
             if connect.reachable(connect.LOCAL):
                 connect.save_address(DATA, connect.LOCAL)
@@ -334,7 +340,7 @@ class HostApi:
             time.sleep(0.5)
         return result.get("message") or "Mother ship repository pulled. Run onboard.cmd to start Anchor."
 
-    def discover_tailscale(self):
+    def discover_tailscale(self, *_args):
         import connect
         result = connect.discover_tailscale_motherships()
         online = [p for p in (result.get("peers") or []) if p.get("online")]
@@ -422,9 +428,10 @@ def main(argv=None):
     host = HostApi()
     address = "" if args.setup else connect.choose(DATA, args.url)
     if FROZEN and not args.url and address == connect.LOCAL:
-        vcheck = connect.inspect_local_anchor_version(ROOT, check_system_dirs=True)
-        if vcheck.get("needs_upgrade") or vcheck.get("needs_install"):
-            address = ""
+        if connect.load_attempted_upgrade_version(DATA) != connect.BUNDLED_VERSION:
+            vcheck = connect.inspect_local_anchor_version(ROOT, check_system_dirs=True)
+            if vcheck.get("needs_upgrade") or vcheck.get("needs_install"):
+                address = ""
     host._address = address or connect.load_address(DATA)
     if not address:
         host._html = connect.setup_page(host._address) if (host._address and host._address != connect.LOCAL) else connect.first_launch_page()

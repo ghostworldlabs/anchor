@@ -273,12 +273,22 @@ def test_connect_discover_tailscale_motherships_hermetic():
     assert res["peers"][0]["https_url"] == "https://ghostworld-mothership.tailnet.ts.net"
     assert res["peers"][0]["online"] is True
 
-    # Verify UI pages contain the new buttons while preserving existing selectors
+    # Verify UI pages contain the new buttons and recommended C:\dev folder while preserving existing selectors
     inst_html = connect.installation_page(REPO_ROOT)
     assert "Install your mother ship" in inst_html
     assert 'id="retry-host-setup"' in inst_html
     assert 'id="install-from-github"' in inst_html
     assert 'id="github-repo"' in inst_html
+    assert 'id="install-target-dir"' in inst_html
+    assert r'value="C:\dev"' in inst_html
+
+    dest_repo, ws_home = connect._resolve_mothership_paths(workspace_dir=r"C:\dev")
+    assert dest_repo == Path(r"C:\dev\Anchor")
+    assert ws_home == Path(r"C:\dev")
+
+    custom_repo, custom_home = connect._resolve_mothership_paths(workspace_dir=r"D:\MerrillWorkspace")
+    assert custom_repo == Path(r"D:\MerrillWorkspace\Anchor")
+    assert custom_home == Path(r"D:\MerrillWorkspace")
 
     setup_html = connect.setup_page()
     assert 'id="addr"' in setup_html

@@ -1854,6 +1854,20 @@ def complete_package_b_dual_gate(
 
     # 2. HTTP probe (truth for dual gate — not service status alone).
     probe = probe_local_dashboard(url, probe_fn=probe_fn)
+    if (
+        not probe.get("ok")
+        and probe_fn is None
+        and start_service_fn is None
+        and not skip_service_start
+        and service.get("started")
+        and not os.environ.get("PYTEST_CURRENT_TEST")
+    ):
+        import time as _time
+        for _ in range(30):
+            _time.sleep(0.5)
+            probe = probe_local_dashboard(url, probe_fn=probe_fn)
+            if probe.get("ok"):
+                break
 
     # 3. Branded desktop shortcut (prefer .lnk + anchor.ico + service-aware launcher).
     ico = ensure_home_anchor_ico(root)
@@ -3658,6 +3672,7 @@ def run_interactive_onboard(
         for cand in (
             _REPO_ROOT / "vendor" / "bundled-skills",
             _REPO_ROOT / "bundled-skills",
+            _REPO_ROOT / "skills",
         ):
             if cand.is_dir():
                 src = cand

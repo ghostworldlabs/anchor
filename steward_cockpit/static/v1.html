@@ -92,7 +92,7 @@
           <div class="row">
             <span class="hint">Enter to send · Shift+Enter for newline · Steward checks unreviewed items &amp; plan impact automatically</span>
             <button data-interrupt hidden style="display:none" title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
-            <button class="send" data-send disabled>Send</button>
+            <button class="send" data-send>Send</button>
           </div>
         </div>
       </div>
@@ -100,6 +100,8 @@
         <div class="dv-head">
           <span class="dv-title" data-dv-title>📄 Deliverable Viewer</span>
           <div style="display:flex;gap:6px;align-items:center;">
+            <button type="button" class="dv-scroll-btn" data-dv-scroll-up onmousedown="event.preventDefault()" onclick="window.scrollOpenDeliverable && window.scrollOpenDeliverable(-1)" title="Scroll Deliverable Up (PageUp / Alt+Up — keeps Win+H dictation active)">⬆ Page Up</button>
+            <button type="button" class="dv-scroll-btn" data-dv-scroll-down onmousedown="event.preventDefault()" onclick="window.scrollOpenDeliverable && window.scrollOpenDeliverable(1)" title="Scroll Deliverable Down (PageDown / Alt+Down — keeps Win+H dictation active)">⬇ Page Down</button>
             <a class="file-dl" data-dv-newtab href="#" target="_blank" rel="noopener" style="font-size:11px;padding:3px 8px;">↗ New Tab</a>
             <button type="button" class="btn-approve" style="font-size:11px;padding:3px 9px;" onclick="exitSecondWindowMode()">🗖 Close Deliverable &amp; Return to 1-Window (Auto-Reopen Panels)</button>
           </div>
@@ -151,9 +153,11 @@
         <h2 data-filestoggle hidden>Files produced <span class="pcount" data-filecount></span></h2>
         <div class="fupload cockpit-dropbar right-drop-zone" data-fupload data-cockpit-drop>
           <span>📥 Drop files here to attach to campaign <code data-drop-dir hidden>cockpit folder</code></span>
-          <label class="cockpit-droppick" style="color:var(--steward);cursor:pointer;font-weight:600;">Browse files…<input type="file" data-fupfile data-cockpit-dropfile multiple style="display:none"></label>
+          <button type="button" class="cockpit-droppick mothership-browse-trigger" data-mothership-browse-btn style="background:none;border:none;padding:0;font:inherit;color:var(--steward);cursor:pointer;font-weight:600;" title="Browse files on the Mothership where this AI Cockpit lives">Browse files…</button>
+          <input type="file" data-fupfile data-cockpit-dropfile multiple style="display:none">
           <span class="cockpit-dropmsg" data-fupmsg data-cockpit-dropmsg></span>
         </div>
+        <div class="mothership-browser-drawer" data-mothership-browser hidden></div>
         <div class="ftools" hidden><input type="text" data-fsearch placeholder="search files…">
           <button data-fsort="name">name</button><button data-fsort="type">type</button><button data-fsort="date" class="on">date</button></div>
         <div class="flist" data-flist></div>
@@ -240,9 +244,66 @@ function getTopAnchorApp() {
   } catch (e) {}
   return null;
 }
+function toScrollableDeliverableHref(rawHref) {
+  if (!rawHref || typeof rawHref !== "string") return rawHref;
+  try {
+    const u = new URL(rawHref, location.href);
+    if (u.pathname === "/api/steward/deliverable-file" && u.searchParams.get("download") !== "1") {
+      const p = (u.searchParams.get("path") || "").toLowerCase();
+      if ((p.endsWith(".pdf") || (p.endsWith(".pptx") && u.searchParams.get("view") === "1")) && !u.searchParams.has("scrollview")) {
+        u.searchParams.set("scrollview", "1");
+      }
+      if (!u.searchParams.has("token")) {
+        let tok = new URLSearchParams(location.search).get("token") || "";
+        if (!tok) { try { tok = sessionStorage.getItem("anchor_token") || localStorage.getItem("anchor_token") || ""; } catch (_e) {} }
+        if (tok) u.searchParams.set("token", tok);
+      }
+      return u.pathname + u.search + u.hash;
+    }
+  } catch (e) {}
+  return rawHref;
+}
+function scrollOpenDeliverable(dirOrDelta) {
+  const delta = Math.abs(Number(dirOrDelta) || 1) <= 5
+    ? (Number(dirOrDelta) || 1) * Math.max(380, Math.round(window.innerHeight * 0.72))
+    : Number(dirOrDelta);
+  const topApp = getTopAnchorApp();
+  if (topApp && typeof topApp.scrollDeliverable === "function") {
+    try {
+      if (topApp.scrollDeliverable(delta)) {
+        if (typeof window.__restoreSayFocusIfActive === "function") window.__restoreSayFocusIfActive();
+        return true;
+      }
+    } catch (e) {}
+  }
+  const dvFrame = document.querySelector("[data-dv-frame]");
+  if (dvFrame && dvFrame.contentWindow) {
+    try { dvFrame.contentWindow.scrollBy({ top: delta, behavior: "smooth" }); } catch (e) {}
+    try { dvFrame.contentWindow.postMessage({ type: "anchor-scroll-deliverable", deltaY: delta }, "*"); } catch (e) {}
+  }
+  if (typeof window.__restoreSayFocusIfActive === "function") window.__restoreSayFocusIfActive();
+  return true;
+}
+window.scrollOpenDeliverable = scrollOpenDeliverable;
+window.__restoreSayFocusIfActive = function () {
+  try {
+    const sayEl = document.querySelector("[data-say]");
+    if (!sayEl) return;
+    const now = Date.now();
+    const recentSay = window.__lastSayFocusTs && (now - window.__lastSayFocusTs < 90000);
+    if (window.__dictationActive || recentSay) {
+      if (document.activeElement !== sayEl) {
+        const pos = typeof sayEl.selectionEnd === "number" ? sayEl.selectionEnd : (sayEl.value || "").length;
+        sayEl.focus({ preventScroll: true });
+        try { sayEl.setSelectionRange(pos, pos); } catch (_e) {}
+      }
+    }
+  } catch (e) {}
+};
 function enterSecondWindowMode() {
   const title = arguments[0];
-  const href = arguments[1];
+  const rawHref = arguments[1];
+  const href = toScrollableDeliverableHref(rawHref);
   const fromSplitEvent = Boolean(arguments[2]);
   if (!app.dataset.secondwin) {
     app.dataset.secondwin = "1";
@@ -263,13 +324,16 @@ function enterSecondWindowMode() {
       const dvFrame = document.querySelector("[data-dv-frame]");
       const dvNewTab = document.querySelector("[data-dv-newtab]");
       if (dvTitle && title) dvTitle.textContent = "📄 Deliverable Viewer · " + title;
-      if (dvNewTab) { dvNewTab.href = href; dvNewTab.style.display = "none"; }
+      if (dvNewTab) { dvNewTab.href = rawHref || href; dvNewTab.style.display = "none"; }
       if (dvFrame && dvFrame.getAttribute("src") !== href) dvFrame.setAttribute("src", href);
       app.classList.add("secondwin");
     }
   }
   app.classList.add("railhide");
   app.classList.remove("statusopen");
+  if (typeof window.__restoreSayFocusIfActive === "function") {
+    setTimeout(window.__restoreSayFocusIfActive, 60);
+  }
 }
 function exitSecondWindowMode() {
   const fromSplitEvent = Boolean(arguments[0]);
@@ -409,6 +473,8 @@ function setAegisTakeover(open) {
 }
 
 if (anvilToggleBtn) anvilToggleBtn.addEventListener("click", () => setAnvilTakeover(true));
+const anvilWtBtn = document.querySelector("[data-anvil-walkthrough-toggle]");
+if (anvilWtBtn) anvilWtBtn.addEventListener("click", () => { setAnvilTakeover(true); setTimeout(() => { try { if (anvilFrame && anvilFrame.contentWindow) anvilFrame.contentWindow.postMessage({ type: "anvil-open-walkthrough" }, window.location.origin); } catch (_) {} }, 350); });
 if (aegisToggleBtn) aegisToggleBtn.addEventListener("click", () => setAegisTakeover(true));
 document.querySelectorAll("[data-anvil-return],[data-anvil-return2]").forEach(btn => {
   btn.addEventListener("click", () => setAnvilTakeover(false));

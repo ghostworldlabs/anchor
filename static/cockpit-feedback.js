@@ -33,10 +33,10 @@
       var question = !!st.open_question || !!((st.pending_questions || []).length) || st.light === 'orange';   // W4 (2026-10-05): one rule - the light is orange exactly when something waits on him
       if (early) early(st, question);
       var stamp = String(st.stamp || ''), cached = old && old.identity === key && old.stamp === stamp && Date.now() < old.until;
-      var record = cached ? Promise.resolve(old) : target.general ? Promise.resolve({identity:key,stamp:stamp,until:Date.now()+15000,review:false})
+      var record = cached ? Promise.resolve(old) : target.general ? Promise.resolve({identity:key,stamp:stamp,until:Date.now()+120000,review:false})
         : Promise.all([get('/api/steward/map' + q, headers), get('/api/steward/deliverables' + q, headers)]).then(function (data) {
           if (!Array.isArray(data[0].steps) || !Array.isArray(data[1].items)) throw new Error('incomplete review record');
-          return {identity:key,stamp:stamp,until:String(data[0].stamp || '')===stamp?Date.now()+15000:0,review:review(data[0],data[1])};
+          return {identity:key,stamp:stamp,until:String(data[0].stamp || '')===stamp?Date.now()+120000:0,review:review(data[0],data[1])};
         });
       return record.then(function (rec) {
         return {state:st,record:rec,ready:question || rec.review,reason:question?'needs your answer':rec.review?'review waiting':''};

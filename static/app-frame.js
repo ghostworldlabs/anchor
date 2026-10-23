@@ -23,8 +23,17 @@
   if (!app || window === window.top) return;
   window.__anchorFrame = true;
 
+  function toSplitVideoUrl(rawUrl, title) {
+    var m = String(rawUrl || "").trim().match(/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,15})/i);
+    if (!m) return "";
+    return "/steward-static/video.html?v=" + encodeURIComponent(m[1]) +
+      "&url=" + encodeURIComponent(String(rawUrl || "").trim()) +
+      (title ? "&title=" + encodeURIComponent(String(title).trim()) : "");
+  }
   var nativeOpen = window.open;
   window.open = function (url, target, features) {
+    var vUrl = toSplitVideoUrl(url, "");
+    if (vUrl && location.pathname !== "/steward-static/video.html") url = vUrl;
     try { if (app.download(url, window)) return null; } catch (e) {}
     var w = null;
     try { w = app.open(url, target, window, features); } catch (e) { w = null; }
@@ -48,6 +57,12 @@
     try { if (app.download(a.href, window)) { ev.preventDefault(); return; } } catch (e) { /* the link goes as it was */ }
     if (/^(ms-\w+|mailto|tel|file):/i.test(href)) {          // an app link: Windows opens it, never the frame
       ev.preventDefault(); nativeOpen.call(window, href, "_blank"); return;
+    }
+    var vidHref = (location.pathname !== "/steward-static/video.html") ? toSplitVideoUrl(a.href || href, a.textContent || "") : "";
+    if (vidHref) {
+      var vw = null;
+      try { vw = app.open(vidHref, "_blank", window); } catch (e) { vw = null; }
+      if (vw) { ev.preventDefault(); return; }
     }
     var t = (a.getAttribute("target") || "").toLowerCase();
     if (!t || t === "_self" || t === "_parent" || t === "_top") return;

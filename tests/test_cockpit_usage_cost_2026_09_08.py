@@ -190,12 +190,13 @@ def test_dismiss_deliverable_hides_until_file_is_modified_on_disk(tmp_path):
     res = steward_campaign.dismiss_deliverable(str(tmp_path), "PLAN.md")
     assert res["ok"] and res["dismissed"]["path"] == "PLAN.md"
     after_dismiss = steward_campaign.read_deliverables(str(tmp_path))["items"]
-    assert not any(d["path"] == "PLAN.md" for d in after_dismiss)
+    assert not any(d["path"] == "PLAN.md" and d.get("is_current") for d in after_dismiss)
+    assert any(d["path"] == "PLAN.md" and d.get("reviewed_done") for d in after_dismiss)
 
-    # Modifying the file on disk automatically un-dismisses it so updated deliverables reappear.
+    # Modifying the file on disk automatically un-dismisses it so updated deliverables reappear in For Review.
     doc.write_text("# Updated Plan v2\n", encoding="utf-8")
     after_edit = steward_campaign.read_deliverables(str(tmp_path))["items"]
-    assert any(d["path"] == "PLAN.md" for d in after_edit)
+    assert any(d["path"] == "PLAN.md" and not d.get("reviewed_done") for d in after_edit)
 
 
 def test_global_usage_summary_decumulates_resumed_session_turns_and_prices_active_models(tmp_path, monkeypatch):

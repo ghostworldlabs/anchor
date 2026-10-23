@@ -134,7 +134,12 @@
         if (live.line) {
           each(live.line, function (li) {
             li.classList.remove('live');
-            if (li.querySelector('.ext').textContent.trim()) { md(li); return; }
+            var rawTxt = li._raw || li.querySelector('.ext').textContent.trim();
+            if (rawTxt) {
+              md(li);
+              try { speakConciseSummary(rawTxt); } catch (e) {}
+              return;
+            }
             if (mine) { li.querySelector('.ext').textContent = SILENT; li.classList.add('dim'); var w = li.querySelector('.exw .t'); if (w) w.textContent = ''; }
             else li.remove();      // a wordless turn this page did not send leaves no row (Grok, 2026-10-02)
           });
@@ -198,6 +203,8 @@
       })();
     }
     function send(text, goal, list, btn, box, DK) {
+      if (box && typeof box._stopDictation === 'function') { try { box._stopDictation(); } catch (e) {} }
+      if (box) box._composing = false;
       btn.disabled = true; btn.textContent = 'Thinking…';
       (live.polling ? Promise.resolve() : primeSeq()).then(function () {
         return fetch('/api/steward/say', { method: 'POST', headers: headers(), body: JSON.stringify({ pid: PID, dir: DIR, text: text, goal: goal || undefined }) });
@@ -222,11 +229,23 @@
             receipt(why, true); live.target = list; live.goal = goal || null; appendLine('sys', 'Not sent — ' + why, 'dim'); live.target = null; live.goal = null; return;
           }
           try { if (DK) localStorage.removeItem(DK); } catch (e) {}
-          if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo are his
-            live.target = list; live.goal = goal || null; appendLine('you', text); appendLine('st', j.say || j.receipt || 'Done.'); live.target = null; live.goal = null;
-            if (j.open_url && j.act === 'open_cockpit') { box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {} receipt(j.say, false); window.location.href = j.open_url; return; }
-            if (o.onRecord) { box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {} o.onRecord(j.say, j.undo || null, false); return; }
-            keep(j.say, false, j.undo || null);
+          if (j.campaign_act) {   // a Campaign verb or fast Steward answer: shown immediately in the dialogue
+            live.target = list; live.goal = goal || null; live.skipJohn = text;
+            appendLine('you', text); var stPair = appendLine('st', j.say || j.receipt || 'Done.'); each(stPair, md);
+            live.target = null; live.goal = null;
+            box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {}
+            if (j.spoken_summary || j.say) {
+              try { speakConciseSummary(j.spoken_summary || j.say); } catch (e) {}
+            }
+            if (j.act === 'open_deliverable' && j.open_deliverable_url) {
+              receipt(j.receipt || j.say || 'Opened deliverable.', false);
+              openCaveDeliverableDrawer(j.open_deliverable_title || 'Deliverable', j.open_deliverable_url);
+              return;
+            }
+            if (j.read_only) { receipt(j.receipt || j.say || 'Answered.', false); return; }
+            if (j.open_url && j.act === 'open_cockpit') { receipt(j.say, false); window.location.href = j.open_url; return; }
+            if (o.onRecord) { o.onRecord(j.receipt || j.say, j.undo || null, false); return; }
+            keep(j.receipt || j.say, false, j.undo || null);
             location.reload(); return;
           }
           box.value = ''; try { box.dispatchEvent(new Event('input')); } catch (e) {}
@@ -342,6 +361,10 @@
       box.addEventListener('compositionend', function () { box._composing = false; fitComposer(box); });
       box.addEventListener('blur', function () { box._composing = false; });
     }
+    if (!box._spellWired) {
+      box._spellWired = true;
+      wireSpellcheckOnTextarea(box);
+    }
     var minimum = parseFloat(getComputedStyle(box).minHeight) || 0;
     var prevScroll = box.scrollTop;
     if (!box._composing) {
@@ -355,6 +378,509 @@
     }
     box.style.overflowY = box.scrollHeight > box.clientHeight ? 'auto' : 'hidden';
   }
-  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox }; window.StewardDialogue.fitComposer = fitComposer;
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', deliverablesBar); else deliverablesBar();   // authHeaders: the one way a GET on these pages carries the token; loginBox: the one login script
+
+  /* ---------- Split-Screen Deliverable / Video Drawer for Cave of Wonders & Star Chart ---------- */
+  function ensureCaveEnhanceStyles() {
+    if (document.getElementById('cave-steward-enhance-css')) return;
+    var st = document.createElement('style');
+    st.id = 'cave-steward-enhance-css';
+    st.textContent = [
+      '.anchor-spell-popup { position:fixed; z-index:99999; min-width:210px; max-width:300px; background:#0f172a; border:1px solid rgba(56,189,248,0.45); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,0.75); padding:6px; color:#f1f5f9; font-family:system-ui,-apple-system,sans-serif; font-size:12.5px; }',
+      '.anchor-spell-popup .asp-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 8px 6px; border-bottom:1px solid rgba(148,163,184,0.16); margin-bottom:4px; font-size:11px; color:#94a3b8; }',
+      '.anchor-spell-popup .asp-word { color:#f87171; font-weight:700; text-decoration:underline wavy #ef4444; }',
+      '.anchor-spell-popup .asp-close { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:13px; padding:0 4px; }',
+      '.anchor-spell-popup .asp-list { display:flex; flex-direction:column; gap:2px; }',
+      '.anchor-spell-popup .asp-item { display:flex; align-items:center; justify-content:space-between; width:100%; text-align:left; padding:6px 10px; border-radius:6px; border:1px solid transparent; background:rgba(30,41,59,0.65); color:#e2e8f0; font-size:13px; font-weight:600; cursor:pointer; }',
+      '.anchor-spell-popup .asp-item:hover { background:rgba(56,189,248,0.18); border-color:rgba(56,189,248,0.45); color:#38bdf8; }',
+      '.anchor-spell-popup .asp-badge { font-size:10px; font-weight:600; color:#38bdf8; background:rgba(56,189,248,0.12); padding:1px 6px; border-radius:4px; }',
+      '.anchor-spell-popup .asp-empty { padding:8px 10px; color:#94a3b8; font-style:italic; font-size:12px; }',
+      '.anchor-spell-popup .asp-foot { margin-top:4px; padding-top:4px; border-top:1px solid rgba(148,163,184,0.16); display:flex; justify-content:space-between; gap:4px; }',
+      '.anchor-spell-popup .asp-action-btn { flex:1; background:transparent; border:1px solid rgba(148,163,184,0.25); color:#94a3b8; border-radius:5px; padding:4px 6px; font-size:11px; cursor:pointer; }',
+      '.anchor-spell-popup .asp-action-btn:hover { color:#e2e8f0; border-color:rgba(148,163,184,0.5); background:rgba(255,255,255,0.05); }',
+      '.cave-voice-btn { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:7px; border:1px solid rgba(148,163,184,0.28); background:rgba(15,23,42,0.75); color:#cbd5e1; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; }',
+      '.cave-voice-btn:hover { border-color:rgba(56,189,248,0.5); color:#f8fafc; }',
+      '.cave-voice-btn.recording { border-color:rgba(239,68,68,0.75); background:rgba(239,68,68,0.18); color:#fca5a5; }',
+      '.cave-voice-btn.talk-active { border-color:rgba(52,211,153,0.65); background:rgba(16,185,129,0.16); color:#6ee7b7; }',
+      '#caveSplitDrawer { position:fixed; top:0; right:0; width:min(52vw, 820px); height:100vh; z-index:99990; background:#090d16; border-left:2px solid rgba(56,189,248,0.45); box-shadow:-12px 0 40px rgba(0,0,0,0.8); display:flex; flex-direction:column; }',
+      '#caveSplitDrawer .csd-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; background:#0f172a; border-bottom:1px solid rgba(56,189,248,0.25); color:#f8fafc; font-family:system-ui,-apple-system,sans-serif; }',
+      '#caveSplitDrawer .csd-title { font-size:13px; font-weight:700; color:#38bdf8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
+      '#caveSplitDrawer .csd-close { padding:5px 12px; border-radius:6px; border:1px solid rgba(248,113,113,0.55); background:rgba(239,68,68,0.18); color:#fca5a5; font-size:12px; font-weight:700; cursor:pointer; }',
+      '#caveSplitDrawer .csd-close:hover { background:rgba(239,68,68,0.32); color:#fff; }',
+      '#caveSplitDrawer iframe { flex:1; width:100%; height:100%; border:0; background:#0b111e; }'
+    ].join('\n');
+    document.head.appendChild(st);
+  }
+
+  function closeCaveDeliverableDrawer() {
+    var d = document.getElementById('caveSplitDrawer');
+    if (d) d.remove();
+  }
+  window.closeCaveDeliverableDrawer = closeCaveDeliverableDrawer;
+
+  function openCaveDeliverableDrawer(title, url) {
+    if (!url) return;
+    try {
+      if (window.top && window.top.ANCHOR_APP && typeof window.top.ANCHOR_APP.openSecondWindow === 'function') {
+        window.top.ANCHOR_APP.openSecondWindow(url, title || 'Deliverable', window, true);
+        return;
+      }
+    } catch (e) {}
+    ensureCaveEnhanceStyles();
+    closeCaveDeliverableDrawer();
+    var drawer = document.createElement('div');
+    drawer.id = 'caveSplitDrawer';
+    var bar = document.createElement('div');
+    bar.className = 'csd-bar';
+    var tSpan = document.createElement('span');
+    tSpan.className = 'csd-title';
+    tSpan.textContent = '📄 ' + (title || 'Deliverable Preview');
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'csd-close';
+    closeBtn.textContent = '✕ Close Split Window';
+    closeBtn.onclick = closeCaveDeliverableDrawer;
+    bar.appendChild(tSpan);
+    bar.appendChild(closeBtn);
+    var ifr = document.createElement('iframe');
+    var tok = '';
+    try { tok = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+    var fullUrl = url;
+    if (tok && fullUrl.indexOf('token=') < 0 && fullUrl.indexOf('/api/') === 0) {
+      fullUrl += (fullUrl.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tok);
+    }
+    ifr.src = fullUrl;
+    drawer.appendChild(bar);
+    drawer.appendChild(ifr);
+    document.body.appendChild(drawer);
+  }
+  window.openCaveDeliverableDrawer = openCaveDeliverableDrawer;
+
+  /* ---------- Talk-Back Mode (concise 1-2 sentence verbal summary) ---------- */
+  var TALK_MODE_KEY = 'anchor:steward:talk_mode';
+  function isTalkModeOn() {
+    try { return localStorage.getItem(TALK_MODE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setTalkModeOn(on) {
+    try { localStorage.setItem(TALK_MODE_KEY, on ? '1' : '0'); } catch (e) {}
+    Array.prototype.forEach.call(document.querySelectorAll('[data-cave-talk-btn]'), function (btn) {
+      btn.classList.toggle('talk-active', !!on);
+      btn.textContent = on ? '🔊 Talk: ON' : '🔈 Talk Mode';
+    });
+    if (!on && window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+  }
+  function speakConciseSummary(rawText, forceSpeak) {
+    if (!forceSpeak && !isTalkModeOn()) return;
+    var clean = String(rawText || '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*_`#>~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean) return;
+    var sents = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+    var picked = sents.slice(0, 2).join(' ');
+    if (picked.length > 210) picked = picked.slice(0, 207).replace(/\s+\S*$/, '') + '...';
+    if (window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function') {
+      try {
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(picked);
+        u.rate = 1.06;
+        window.speechSynthesis.speak(u);
+      } catch (e) {}
+    }
+  }
+
+  /* ---------- Native Windows 11 Spellcheck Suggestion Popup (left-click / right-click) ---------- */
+  var _spellPop = null;
+  function closeSpellPop() {
+    if (_spellPop) { _spellPop.remove(); _spellPop = null; }
+  }
+  document.addEventListener('mousedown', function (ev) {
+    if (_spellPop && !_spellPop.contains(ev.target)) closeSpellPop();
+  });
+  function extractWordAt(text, idx) {
+    var str = String(text || '');
+    if (!str) return null;
+    var pos = Math.max(0, Math.min(idx, str.length));
+    if (pos === str.length || !/[A-Za-z'\u2019]/.test(str.charAt(pos))) {
+      if (pos > 0 && /[A-Za-z'\u2019]/.test(str.charAt(pos - 1))) pos = pos - 1;
+      else return null;
+    }
+    var start = pos;
+    while (start > 0 && /[A-Za-z'\u2019]/.test(str.charAt(start - 1))) start--;
+    var end = pos + 1;
+    while (end < str.length && /[A-Za-z'\u2019]/.test(str.charAt(end))) end++;
+    var word = str.slice(start, end).replace(/^['\u2019]+|['\u2019]+$/g, '');
+    var lead = str.slice(start, end).match(/^['\u2019]+/);
+    var rStart = start + (lead ? lead[0].length : 0);
+    var rEnd = rStart + word.length;
+    if (word.length < 2) return null;
+    return { word: word, start: rStart, end: rEnd };
+  }
+  function wireSpellcheckOnTextarea(ta) {
+    if (!ta || ta._caveSpellWired) return;
+    ta._caveSpellWired = true;
+    ta.setAttribute('spellcheck', 'true');
+    ta.setAttribute('lang', 'en-US');
+    ensureCaveEnhanceStyles();
+    function checkAtCursor(ev, isRightClick) {
+      var val = ta.value || '';
+      if (!val.trim()) return;
+      setTimeout(function () {
+        if (ta.selectionStart !== ta.selectionEnd && !isRightClick) return;
+        var caret = typeof ta.selectionStart === 'number' ? ta.selectionStart : 0;
+        var hit = extractWordAt(val, caret);
+        if (!hit || !hit.word) return;
+        var tok = '';
+        try { tok = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+        var hdrs = tok ? { 'Authorization': 'Bearer ' + tok, 'X-Anchor-Token': tok } : {};
+        fetch('/api/steward/spellcheck?word=' + encodeURIComponent(hit.word), { headers: hdrs })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (!res || !res.ok || res.correct) {
+              if (!isRightClick) closeSpellPop();
+              return;
+            }
+            closeSpellPop();
+            var pop = document.createElement('div');
+            pop.className = 'anchor-spell-popup';
+            pop.dataset.misspelledWord = hit.word;
+            var head = document.createElement('div');
+            head.className = 'asp-head';
+            var wSpan = document.createElement('span');
+            wSpan.className = 'asp-word';
+            wSpan.textContent = 'Spelling: "' + hit.word + '"';
+            var cBtn = document.createElement('button');
+            cBtn.className = 'asp-close';
+            cBtn.type = 'button';
+            cBtn.textContent = '×';
+            cBtn.onclick = function (e) { e.stopPropagation(); closeSpellPop(); };
+            head.appendChild(wSpan);
+            head.appendChild(cBtn);
+            pop.appendChild(head);
+
+            var list = document.createElement('div');
+            list.className = 'asp-list';
+            var sugs = Array.isArray(res.suggestions) ? res.suggestions : [];
+            if (sugs.length) {
+              sugs.slice(0, 6).forEach(function (sug, idx) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'asp-item';
+                var sTxt = document.createElement('span');
+                sTxt.textContent = sug;
+                b.appendChild(sTxt);
+                if (idx === 0) {
+                  var bdg = document.createElement('span');
+                  bdg.className = 'asp-badge';
+                  bdg.textContent = 'Recommended';
+                  b.appendChild(bdg);
+                }
+                b.onclick = function (e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  var cur = ta.value || '';
+                  ta.value = cur.slice(0, hit.start) + sug + cur.slice(hit.end);
+                  var nc = hit.start + sug.length;
+                  closeSpellPop();
+                  ta.focus();
+                  try { ta.setSelectionRange(nc, nc); } catch (err) {}
+                  ta.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+                list.appendChild(b);
+              });
+            } else {
+              var emp = document.createElement('div');
+              emp.className = 'asp-empty';
+              emp.textContent = 'No replacement suggestions found';
+              list.appendChild(emp);
+            }
+            pop.appendChild(list);
+
+            var foot = document.createElement('div');
+            foot.className = 'asp-foot';
+            var addB = document.createElement('button');
+            addB.type = 'button';
+            addB.className = 'asp-action-btn';
+            addB.textContent = '+ Add "' + hit.word + '" to dictionary';
+            addB.onclick = function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              closeSpellPop();
+              fetch('/api/steward/spellcheck', {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs),
+                body: JSON.stringify({ action: 'add', word: hit.word })
+              }).catch(function () {});
+              ta.focus();
+            };
+            var ignB = document.createElement('button');
+            ignB.type = 'button';
+            ignB.className = 'asp-action-btn';
+            ignB.textContent = 'Ignore';
+            ignB.onclick = function (e) { e.preventDefault(); e.stopPropagation(); closeSpellPop(); ta.focus(); };
+            foot.appendChild(addB);
+            foot.appendChild(ignB);
+            pop.appendChild(foot);
+
+            document.body.appendChild(pop);
+            _spellPop = pop;
+            var rect = ta.getBoundingClientRect();
+            var cx = (ev && typeof ev.clientX === 'number' && ev.clientX > 0) ? ev.clientX : (rect.left + 80);
+            var cy = (ev && typeof ev.clientY === 'number' && ev.clientY > 0) ? ev.clientY : rect.top;
+            var pr = pop.getBoundingClientRect();
+            var left = Math.min(window.innerWidth - pr.width - 12, Math.max(12, cx - 20));
+            var top = cy - pr.height - 12;
+            if (top < 12) top = Math.min(window.innerHeight - pr.height - 12, cy + 20);
+            pop.style.left = left + 'px';
+            pop.style.top = top + 'px';
+          })
+          .catch(function () {});
+      }, 15);
+    }
+    ta.addEventListener('click', function (ev) { checkAtCursor(ev, false); });
+    ta.addEventListener('contextmenu', function (ev) {
+      var val = ta.value || '';
+      var caret = typeof ta.selectionStart === 'number' ? ta.selectionStart : 0;
+      var hit = extractWordAt(val, caret);
+      if (hit && hit.word) {
+        ev.preventDefault();
+        checkAtCursor(ev, true);
+      }
+    });
+  }
+
+  function wireCaveComposerButtons() {
+    ensureCaveEnhanceStyles();
+    var exSay = document.getElementById('exSay') || document.getElementById('say');
+    var exSend = document.getElementById('exSend') || document.getElementById('sendBtn');
+    if (!exSay) return;
+    wireSpellcheckOnTextarea(exSay);
+    var host = exSend ? exSend.parentElement : exSay.parentElement;
+    if (!host || !exSend || host.querySelector('[data-cave-dictate-btn]')) return;
+
+    var dictBtn = document.createElement('button');
+    dictBtn.type = 'button';
+    dictBtn.className = 'cave-voice-btn';
+    dictBtn.dataset.caveDictateBtn = '1';
+    dictBtn.textContent = '🎤 Dictate';
+    dictBtn.title = 'Start/stop continuous voice dictation (with auto-punctuation) · Win+H also supported';
+    var recog = null, active = false, pollT = null, restartT = null, dictSeq = 0, recent = [];
+    var audioStream = null, audioCtx = null, audioSource = null, audioProcessor = null;
+    var pcmFrames = [], preRollFrames = [], speechDetected = false, speechStartTs = 0, lastVoiceTs = 0;
+    function encodeCaveWav16kBase64(float32Chunks, inputSampleRate) {
+      var totalLen = 0;
+      for (var i = 0; i < float32Chunks.length; i++) totalLen += float32Chunks[i].length;
+      if (!totalLen) return '';
+      var merged = new Float32Array(totalLen);
+      var offset = 0;
+      for (var j = 0; j < float32Chunks.length; j++) { merged.set(float32Chunks[j], offset); offset += float32Chunks[j].length; }
+      var targetRate = 16000;
+      var ratio = (inputSampleRate && inputSampleRate > 0) ? (inputSampleRate / targetRate) : 1;
+      var outLen = Math.max(1, Math.round(merged.length / ratio));
+      var pcm16 = new Int16Array(outLen);
+      for (var k = 0; k < outLen; k++) {
+        var srcIdx = Math.min(merged.length - 1, Math.floor(k * ratio));
+        var s = Math.max(-1, Math.min(1, merged[srcIdx]));
+        pcm16[k] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      var wavBuf = new ArrayBuffer(44 + pcm16.length * 2);
+      var view = new DataView(wavBuf);
+      function writeStr(pos, str) { for (var m = 0; m < str.length; m++) view.setUint8(pos + m, str.charCodeAt(m)); }
+      writeStr(0, 'RIFF'); view.setUint32(4, 36 + pcm16.length * 2, true); writeStr(8, 'WAVE');
+      writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+      view.setUint32(24, targetRate, true); view.setUint32(28, targetRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+      writeStr(36, 'data'); view.setUint32(40, pcm16.length * 2, true);
+      var bytes = new Uint8Array(wavBuf);
+      bytes.set(new Uint8Array(pcm16.buffer), 44);
+      var binary = '';
+      var chunkSz = 0x8000;
+      for (var n = 0; n < bytes.length; n += chunkSz) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(n, n + chunkSz));
+      }
+      return btoa(binary);
+    }
+    function appendChunk(txt) {
+      var norm = String(txt || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+      if (!norm) return;
+      var now = Date.now();
+      recent = recent.filter(function (c) { return now - c.ts < 3800; });
+      if (recent.some(function (c) { return c.norm === norm; })) return;
+      recent.push({ norm: norm, ts: now });
+      var cur = exSay.value || '';
+      var sep = (cur && !/\s$/.test(cur)) ? ' ' : '';
+      exSay.value = cur + sep + String(txt || '').trim();
+      exSay.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function flushCaveAudio() {
+      if (!speechDetected || !pcmFrames.length) {
+        pcmFrames = []; speechDetected = false; speechStartTs = 0;
+        return Promise.resolve();
+      }
+      var frames = pcmFrames.slice();
+      var rate = (audioCtx && audioCtx.sampleRate) ? audioCtx.sampleRate : 48000;
+      pcmFrames = []; speechDetected = false; speechStartTs = 0;
+      var b64 = encodeCaveWav16kBase64(frames, rate);
+      if (!b64) return Promise.resolve();
+      if (active) dictBtn.textContent = '⏳ Transcribing…';
+      return fetch('/api/steward/dictate', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ action: 'transcribe', audio_b64: b64 })
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.text) appendChunk(j.text);
+      }).catch(function () {}).finally(function () {
+        if (active) dictBtn.textContent = '⏹ Listening…';
+      });
+    }
+    function teardownCaveAudio() {
+      if (audioProcessor) { try { audioProcessor.onaudioprocess = null; audioProcessor.disconnect(); } catch (e) {} audioProcessor = null; }
+      if (audioSource) { try { audioSource.disconnect(); } catch (e) {} audioSource = null; }
+      if (audioStream) { try { audioStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} audioStream = null; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    }
+    function stopRec() {
+      active = false;
+      if (restartT) { clearTimeout(restartT); restartT = null; }
+      if (pollT) { clearInterval(pollT); pollT = null; }
+      flushCaveAudio();
+      teardownCaveAudio();
+      dictBtn.classList.remove('recording');
+      dictBtn.textContent = '🎤 Dictate';
+      if (recog) { try { recog.onend = null; recog.onerror = null; recog.onresult = null; recog.stop(); } catch (e) {} recog = null; }
+      exSay._composing = false;
+      fetch('/api/steward/dictate', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ action: 'stop' })
+      }).catch(function () {});
+    }
+    exSay._stopDictation = stopRec;
+    exSay.addEventListener('keydown', function (ev) {
+      if ((ev.key === 'Enter' || ev.keyCode === 13) && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229) {
+        if (active) stopRec();
+        exSay._composing = false;
+      }
+    }, true);
+    function startCaveMic() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+        .then(function (stream) {
+          if (!active) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+          audioStream = stream;
+          var Ctx = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new Ctx();
+          audioSource = audioCtx.createMediaStreamSource(stream);
+          audioProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+          var silent = audioCtx.createGain();
+          silent.gain.value = 0;
+          audioSource.connect(audioProcessor);
+          audioProcessor.connect(silent);
+          silent.connect(audioCtx.destination);
+          pcmFrames = []; preRollFrames = []; speechDetected = false; speechStartTs = 0; lastVoiceTs = 0;
+          audioProcessor.onaudioprocess = function (ev) {
+            if (!active) return;
+            var input = ev.inputBuffer.getChannelData(0);
+            var copy = new Float32Array(input.length);
+            copy.set(input);
+            var sumSq = 0;
+            for (var i = 0; i < copy.length; i++) sumSq += copy[i] * copy[i];
+            var rms = Math.sqrt(sumSq / Math.max(1, copy.length));
+            var now = Date.now();
+            if (rms > 0.0072) {
+              if (!speechDetected) {
+                speechDetected = true;
+                speechStartTs = now;
+                preRollFrames.forEach(function (pr) { pcmFrames.push(pr); });
+                preRollFrames = [];
+              }
+              lastVoiceTs = now;
+              pcmFrames.push(copy);
+              dictBtn.textContent = '🔴 Speaking…';
+              if (now - speechStartTs >= 5500) flushCaveAudio();
+            } else {
+              if (speechDetected) {
+                pcmFrames.push(copy);
+                if (now - lastVoiceTs >= 680) flushCaveAudio();
+              } else {
+                preRollFrames.push(copy);
+                if (preRollFrames.length > 3) preRollFrames.shift();
+              }
+            }
+          };
+        })
+        .catch(function () {});
+    }
+    dictBtn.onclick = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (active) { stopRec(); return; }
+      active = true;
+      dictBtn.classList.add('recording');
+      dictBtn.textContent = '⏹ Listening…';
+      exSay.focus();
+      startCaveMic();
+      fetch('/api/steward/dictate', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ action: 'start' })
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && typeof j.last_seq === 'number') dictSeq = j.last_seq;
+      }).catch(function () {});
+      if (pollT) clearInterval(pollT);
+      pollT = setInterval(function () {
+        if (!active) return;
+        fetch('/api/steward/dictate', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+          body: JSON.stringify({ action: 'poll', since: dictSeq })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (!active || !j) return;
+          if (Array.isArray(j.chunks)) {
+            j.chunks.forEach(function (c) {
+              if (c && typeof c.seq === 'number' && c.seq > dictSeq) dictSeq = c.seq;
+              if (c && c.text) appendChunk(c.text);
+            });
+          }
+        }).catch(function () {});
+      }, 500);
+    };
+    host.insertBefore(dictBtn, exSend);
+
+    var talkBtn = document.createElement('button');
+    talkBtn.type = 'button';
+    talkBtn.className = 'cave-voice-btn' + (isTalkModeOn() ? ' talk-active' : '');
+    talkBtn.dataset.caveTalkBtn = '1';
+    talkBtn.textContent = isTalkModeOn() ? '🔊 Talk: ON' : '🔈 Talk Mode';
+    talkBtn.title = 'Toggle Talk-Back Mode — Anchor speaks a concise 1–2 sentence verbal summary of what is going on';
+    talkBtn.onclick = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var next = !isTalkModeOn();
+      setTalkModeOn(next);
+      if (next) {
+        var tok = '';
+        try { tok = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+        var hdrs = tok ? { 'Authorization': 'Bearer ' + tok, 'X-Anchor-Token': tok } : {};
+        fetch('/api/steward/fleet-brief', { headers: hdrs })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            speakConciseSummary((j && j.spoken_summary) || 'Talk mode enabled. Ask me what is ready for your input or tell me which deliverable to open.', true);
+          })
+          .catch(function () {
+            speakConciseSummary('Talk mode enabled. Ask me what is ready for your input.', true);
+          });
+      }
+    };
+    host.insertBefore(talkBtn, exSend);
+  }
+
+  window.StewardDialogue = { init: init, authHeaders: authHeaders, loginBox: loginBox, fitComposer: fitComposer, wireSpellcheckOnTextarea: wireSpellcheckOnTextarea, openCaveDeliverableDrawer: openCaveDeliverableDrawer, speakConciseSummary: speakConciseSummary };
+  function bootCaveDialogueExtras() {
+    deliverablesBar();
+    wireCaveComposerButtons();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootCaveDialogueExtras); else bootCaveDialogueExtras();
 })();

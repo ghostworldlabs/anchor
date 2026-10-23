@@ -373,15 +373,25 @@ CONTRACT = (
     "asks - the target is zero; (12) commit as you go IS enforced: every cadence "
     "tick that finds the working tree dirty gets a commit with a sensible "
     "message before you continue; "
-    "(12b) IMMEDIATE RESPONSIVENESS & COCKPIT SYNC (John, 2026-10-15): on every "
+    "(12b) IMMEDIATE RESPONSIVENESS & COCKPIT SYNC (John, 2026-10-15 / 2026-10-21): on every "
     "human turn, ALWAYS write one direct opening sentence addressing John's question "
     "or confirming what you are checking BEFORE invoking any tool, and keep status/file "
     "inspections bounded (<= 4 fast reads) so he never waits in silence. Whenever work "
     "lands or changes version, update strip.json (active_effort, current_step_id, "
     "human_wait, next_recommended), roadmap.json (the active step's name, done_when, "
-    "waiting_on, and navigation.featured_paths), and DELIVERABLES.md (new rows at the "
-    "TOP of the table with 'START HERE - FOR REVIEW' and superseded versions relabeled "
-    "'Supporting - ...') in the same turn; "
+    "waiting_on, and navigation.featured_paths), .ecgberht/status_card.json (the clean "
+    "10-minute status summary fields: timestamp, run_type, project, effort, doing, "
+    "status, tests, blocker, procs, journal, eta, todo), and DELIVERABLES.md in the same turn. "
+    "(12c) TWO-TIER DELIVERABLES & IMPLICIT APPROVAL ON FEEDBACK (John, 2026-10-21): in "
+    "DELIVERABLES.md, reserve 'START HERE - FOR REVIEW' ONLY for the 1-2 MAIN deliverables "
+    "John asked for (e.g. the chapter manuscript and the visual summary); label all "
+    "building-block / supporting artifacts (Gandalf analyses, Beta-Reader reports, "
+    "scene blueprints, audits) as 'Supporting - (Companion) ...' so they fold into the "
+    "Supplemental drawer instead of cluttering Pending / For Review. Never ask John to "
+    "click 'Mark All Done': when he looks at the main deliverables and gives feedback "
+    "to advance to the next stage or revision, treat that feedback as implicit completion "
+    "of the prior review shelf and relabel the prior stage's rows to 'Supporting - ...' "
+    "so they move down into All Deliverables automatically; "
     ""
 )
 
@@ -2408,6 +2418,15 @@ class Engine:
             if not human:
                 self._emit({"t": "sys", "text": text})
             text = _scoped_text(text, goal, goal_name)      # the model is told which goal he is in; his shown words stay his own
+            if human and not self.general:
+                try:
+                    from steward_cockpit import campaign_say as _cs_guard
+                    if _cs_guard.is_campaign_folder(self.dir) or _cs_guard.is_cave_folder(self.dir):
+                        scope_guard = _cs_guard._campaign_scope_prompt_block(self.dir, his_words)
+                        if scope_guard:
+                            text += scope_guard
+                except Exception:
+                    pass
             if not human and not _is_machine_text(text):
                 text = MACHINE_MARK + text                   # persisted with the entry: never delivered as John's
             if answer_context:

@@ -80,6 +80,10 @@ def _href(raw: str) -> str:
         raw = raw[1:-1].strip()
     if re.match(r"^\s*(?:javascript|data|vbscript):", raw, re.I) or not _SAFE_HREF.match(raw):
         return ""
+    yt = re.match(r"^(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{6,15})", raw, re.I)
+    if yt:
+        from urllib.parse import quote
+        return html.escape(f"/steward-static/video.html?v={quote(yt.group(1))}&url={quote(raw)}", quote=True)
     return html.escape(raw.replace(" ", "%20"), quote=True)
 
 
@@ -356,6 +360,10 @@ def reader_html(md_text: str, title: str = "Report",
         "      });\n"
         "    }\n"
         "  });\n"
+        "  function restoreParentSayFocus(){try{if(window.parent&&window.parent!==window&&typeof window.parent.__restoreSayFocusIfActive==='function'){window.parent.__restoreSayFocusIfActive();}}catch(_e){}}\n"
+        "  window.addEventListener('message', function(ev){if(ev&&ev.data&&ev.data.type==='anchor-scroll-deliverable'){window.scrollBy({top:Number(ev.data.deltaY)||420,behavior:'smooth'});}});\n"
+        "  document.addEventListener('mouseup', function(){try{var s=window.getSelection?String(window.getSelection()):'';if(!s)restoreParentSayFocus();}catch(_e){}});\n"
+        "  window.addEventListener('wheel', function(){restoreParentSayFocus();},{passive:true});\n"
         "</script>\n</body>\n</html>\n"
     )
 

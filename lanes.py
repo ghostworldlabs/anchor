@@ -429,6 +429,9 @@ def _chatgpt_available(env) -> bool:
     return (Path(home) / ".codex" / "bin" / "codex.exe").is_file()
 
 
+_HOST_PROFILE_CACHE: dict = {"until": 0.0, "profile": None, "which_fn": None, "path_val": None}
+
+
 def detect_host_profile(env=None) -> dict:
     """Probe the host for which engine subscriptions are available.
 
@@ -436,14 +439,31 @@ def detect_host_profile(env=None) -> dict:
     ``env`` defaults to ``os.environ`` and is the seam through which the gate
     forces a profile deterministically.
     """
+    is_default_env = env is None or env is os.environ
     if env is None:
         env = os.environ
-    return {
+    if is_default_env:
+        now_m = time.monotonic()
+        path_val = env.get("PATH", "")
+        if (
+            _HOST_PROFILE_CACHE["profile"] is not None
+            and now_m < _HOST_PROFILE_CACHE["until"]
+            and _HOST_PROFILE_CACHE["which_fn"] is shutil.which
+            and _HOST_PROFILE_CACHE["path_val"] == path_val
+        ):
+            return dict(_HOST_PROFILE_CACHE["profile"])
+    res = {
         "claude": _claude_available(env),
         "gemini": _gemini_available(env),
         "grok": _grok_available(env),
         "chatgpt": _chatgpt_available(env),
     }
+    if is_default_env:
+        _HOST_PROFILE_CACHE["profile"] = dict(res)
+        _HOST_PROFILE_CACHE["until"] = time.monotonic() + 30.0
+        _HOST_PROFILE_CACHE["which_fn"] = shutil.which
+        _HOST_PROFILE_CACHE["path_val"] = env.get("PATH", "")
+    return res
 
 
 def selected_families(env=None) -> dict:

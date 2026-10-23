@@ -511,7 +511,12 @@ starter/**
 # (the frontend off-switch flag); stdlib-only.
 static/**
 pillar_flags.py
+anchor_agent_protocol.py
+gwl_clearinghouse.py
+cockpit_baton_and_tiers.py
+foundry_federation.py
 mothership_collab.py
+website_portal.py
 
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml

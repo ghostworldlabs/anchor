@@ -7586,7 +7586,7 @@ def _working_pids(entries, sessions):
                 continue
         for cdir, eng in list(_engines.items()):
             try:
-                if not ((eng.alive() and (getattr(eng, "busy", False) or getattr(eng, "queue", None))) or eng.light() == "green"):
+                if not ((eng.alive() and (getattr(eng, "busy", False) or getattr(eng, "queue", None))) or _engine_light(cdir)["light"] == "green"):
                     continue
                 c = Path(str(cdir)).resolve()
                 for f, pid in folders:
@@ -17800,8 +17800,8 @@ def _doctor_sync_live_code():
         pass
     try:
         import importlib
-        for mod_name in ("doctor_plain", "proc_probe", "lanes", "deliverables_register", "home_rows", "high_seat_page",
-                         "campaign_page", "desk", "desk_page", "mothership_collab",
+        for mod_name in ("proc_probe", "lanes", "deliverables_register", "home_rows", "high_seat_page",
+                         "campaign_page", "desk", "desk_page", "mothership_collab", "website_portal",
                          "foundry_page", "foundry_api", "usage_allowance_monitor",
                          "steward_cockpit.gui_ingress_routes", "steward_cockpit.gui_domain_core",
                          "steward_cockpit.gui_surface_emit",
@@ -17809,7 +17809,7 @@ def _doctor_sync_live_code():
                          "steward_cockpit.campaign_acts", "steward_cockpit.campaign_say",
                          "steward_cockpit.anvil_session", "steward_cockpit.aegis_session",
                          "steward_cockpit.steward_routes",
-                         "terminal_session"):
+                         "terminal_session", "comms_connector", "doctor_plain"):
             if mod_name in sys.modules:
                 try:
                     importlib.reload(sys.modules[mod_name])
@@ -23318,12 +23318,33 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # gone; the doctor gate regression-tests its absence.
                 _lock, _ck = self._locked_page()        # the Doctor (locked 2026-10-03)
                 self._send_html(_lock or render_doctor_page_html(), cookie=None if _lock else _ck)
+            elif _path_only in ("/website", "/download-portal"):
+                import website_portal as _wp
+                self._send_html(_wp.render_public_website_html())
+            elif _path_only == "/api/website/catalog":
+                import website_portal as _wp
+                self._send_json(_wp.get_portal_state(), 200)
             elif _path_only == "/api/foundry/page":
                 self._send_json(_fpage.catalog())
             elif _path_only == "/api/foundry/skill":
                 q = parse_qs(urlparse(self.path).query)
                 detail = _fpage.skill_detail((q.get("skill") or [""])[0])
                 self._send_json(detail or {"error": "unknown skill"}, 200 if detail else 404)
+            elif _path_only == "/api/foundry/anvil":
+                q = parse_qs(urlparse(self.path).query)
+                anvil = _fpage.anvil_detail((q.get("skill") or [""])[0])
+                self._send_json(anvil or {"error": "unknown skill"}, 200 if anvil else 404)
+            elif _path_only == "/api/foundry/librarian":
+                q = parse_qs(urlparse(self.path).query)
+                payload = _fpage.librarian_payload(query=(q.get("q") or [""])[0], skill_id=(q.get("skill") or [""])[0], kind=(q.get("kind") or [""])[0], focus=(q.get("focus") or [""])[0], budget=(q.get("budget") or ["1500"])[0])
+                self._send_json(payload, 200)
+            elif _path_only == "/foundry/anvil":
+                q = parse_qs(urlparse(self.path).query)
+                page = _fpage.anvil_page((q.get("skill") or ["researchprime"])[0])
+                if page is None:
+                    self._send_json({"error": "unknown skill"}, 404)
+                else:
+                    self._send_html(page)
             elif _path_only == "/foundry/source":
                 q = parse_qs(urlparse(self.path).query)
                 # embed=1 (sent by the SANDBOXED display dialog, which blocks
@@ -23965,6 +23986,34 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # open POST would be honored (rearch W8: post-middleware consults the
         # route-table auth policy).
         _path_only = urlparse(self.path).path
+        if _path_only == "/api/website/license/accept":
+            import website_portal as _wp
+            _b = body if isinstance(body, dict) else {}
+            _out = _wp.accept_non_resale_license(
+                _b.get("pseudonym_or_handle") or _b.get("pseudonym") or "",
+                _b.get("accepted_non_resale"),
+                intended_use=_b.get("intended_use") or "personal_or_research",
+                version=_b.get("version") or _wp.LICENSE_VERSION,
+            )
+            self._send_json(_out, int(_out.get("code") or (200 if _out.get("ok") else 400)))
+            return
+        if _path_only == "/api/website/download":
+            import website_portal as _wp
+            _b = body if isinstance(body, dict) else {}
+            _out = _wp.authorize_package_download(
+                _b.get("package_id") or "",
+                _b.get("platform_os") or "windows",
+                _b.get("license_token") or _b.get("receipt"),
+                arch=_b.get("arch") or "x64",
+            )
+            self._send_json(_out, int(_out.get("code") or (200 if _out.get("ok") else 403)))
+            return
+        if _path_only == "/api/website/feedback":
+            import website_portal as _wp
+            _b = body if isinstance(body, dict) else {}
+            _out = _wp.submit_portal_feedback(_b)
+            self._send_json(_out, int(_out.get("code") or (200 if _out.get("ok") else 400)))
+            return
         _post_route = _routes.match("POST", _path_only)
         _post_open = (_post_route is not None
                       and _post_route.auth == _routes.AUTH_OPEN)

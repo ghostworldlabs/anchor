@@ -3,7 +3,7 @@ import Markdown from './components/Markdown';
 import SleepTrainingTile from './components/SleepTrainingTile';
 import ControlPlaneModal from './components/ControlPlaneModal';
 import KnowledgeGraphTile from './components/KnowledgeGraphTile';
-import { Library, KnowledgeMap, ProcessMap, Issues } from './components/SkillMaps';
+import { Library, KnowledgeMap, ProcessMap, Issues, AnvilMap } from './components/SkillMaps';
 
 async function read(url, signal) {
   const res = await fetch(url, { signal });
@@ -110,6 +110,7 @@ export default function App() {
             <h1>{selected.name}</h1><p className="purpose">{selected.purpose}</p>
             <div className="actions">{files.map(r => <a className="btn" href={r.href} key={r.id} target="_blank" rel="noreferrer">{r.title === 'SKILL.md' ? 'Skill instructions' : r.title === 'HUMAN.md' ? 'Human guide' : r.title}</a>)}
               <button className="btn" onClick={() => { const el = document.getElementById('files'); el.open = true; el.scrollIntoView({ block: 'start' }); }}>Program files</button>
+              <a className="btn" href={`/foundry/anvil?skill=${encodeURIComponent(selected.id)}`}>Anvil &amp; Step-Through</a>
             </div>
           </div></div>
           <p className="qualification">{detail.knowledgeMap.nodes.length && detail.processMap.steps.length ?
@@ -129,6 +130,9 @@ export default function App() {
           </Tile>
           <Tile title="Process map" preview={detail.processMap.status} id="process-map">
             <ProcessMap map={detail.processMap} resources={resources} nodes={detail.knowledgeMap.nodes} onExploreNode={id => { setSelectedNode(id); const el = document.getElementById('knowledge-map'); el.open = true; el.scrollIntoView({block:'start'}); }} />
+          </Tile>
+          <Tile title="Anvil 3-level map, remapping & step-through" preview={detail.anvilMap?.status || 'unfinished'} id="anvil-map">
+            <AnvilMap anvil={detail.anvilMap} skillId={selected.id} />
           </Tile>
           <Tile title="Core capabilities" preview="Read the real instruction sections">
             {detail.capabilities.map(c => <details key={c.title}><summary>{c.title}</summary><Markdown source={c.detail} /></details>)}

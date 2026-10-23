@@ -179,3 +179,20 @@ test_tmp*/
 # silently drop it from the committed wave; the gate verifies it byte-for-byte.
 !.foreman-job/wave1-evidence/*.pdf
 /.foreman-job/foreman-run.log
+
+# Wave 21-24 runtime stores & test temp dirs (auto-generated at runtime)
+/.anchor_librarian_kb.sqlite3*
+/.provider-schema-*/
+/.anvil/
+/ .anchor/shared_cockpits/
+/.anchor/shared_cockpits/
+/.anchor/foundry_quarantine/
+/.anchor/gwl_clearinghouse/
+/.anchor/cas/
+/.anchor/mothership_identity.json
+/.anchor/collab_peers.json
+/.anchor/acl_grants.json
+/.anchor/license_acceptances.json
+/.anchor/project_batons.json
+/.anchor/distilled_lessons.json
+

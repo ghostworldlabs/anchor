@@ -1499,7 +1499,8 @@ def render_summary_page(folder_path, project_id, lane, session_id,
 # ─────────────────────────────────────────────────────────────────────────────
 
 #: File names probed (in order) for the "what the project IS" seed corpus.
-PROJECT_SEED_FILES = ("CLAUDE.md", "README.md", "README", "Anchor.md")
+PROJECT_SEED_FILES = ("CLAUDE.md", "README.md", "README", "Anchor.md",
+                      "ECGBERHT.md", "DELIVERABLES.md")
 #: Glob-ish relative locations of the most-recent plan docs to seed from.
 PROJECT_PLAN_DOC_NAMES = ("MASTER-PLAN.md", "IMPLEMENTATION-PLAN.md")
 PROJECT_PLAN_DIR = "planning"
@@ -1622,7 +1623,9 @@ def project_extraction_seed(folder_path, project_id) -> dict:
     doc_chars = 0
     corpus_parts = []
 
-    # 1. "What the project IS" — first existing identity doc (bounded read).
+    # 1. "What the project IS" — identity docs (bounded read across all present
+    # seed files so an 83-byte starter CLAUDE.md stub never masks ECGBERHT.md /
+    # DELIVERABLES.md / README.md).
     for name in PROJECT_SEED_FILES:
         path = folder / name
         text = _read_bounded(path)
@@ -1634,7 +1637,6 @@ def project_extraction_seed(folder_path, project_id) -> dict:
             doc_chars += len(text)
             for heading, body in _lift_sections(text, _SECTION_SIGNALS["planning"]):
                 anchors.append({"heading": heading, "body": body, "from": name})
-            break
 
     # 2. Most-recent plan docs (goal / north-star / key decisions).
     for path in _recent_plan_docs(folder):
@@ -1699,11 +1701,10 @@ def _project_seed_prompt(seed: dict) -> str:
     unchanged.
     """
     lines = [
-        "Write a clear, informative paragraph (3-5 sentences) summarizing what this project is, "
-        "its main purpose, and its current state. Write it in simple, human-readable language. "
-        "Make it highly informative and easy to understand at a glance. Be specific and grounded only "
-        "in the material below; do NOT pad with generic feature lists. Output the statement as "
-        "a few lines of plain text, nothing else.",
+        "State this project's OBJECTIVE in 1-2 sentences: what it is FOR \u2014 its "
+        "task/purpose and the problem it solves. Be specific and grounded only "
+        "in the material below; do NOT pad with generic feature lists. Output "
+        "the statement as 1-2 lines (one sentence per line), nothing else.",
         f"Title: {seed.get('title', '')}",
         "Anchors from the project documents:",
     ]

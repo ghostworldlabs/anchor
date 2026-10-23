@@ -276,9 +276,9 @@
         <button data-sort-date>date</button>
       </div>
       <div class="dropzone cockpit-dropbar" data-dropzone data-cockpit-drop>📥 drop files here to load them into <code data-drop-dir>this folder</code>
-        — or <label class="cockpit-droppick" style="text-decoration:underline;cursor:pointer">pick one<input
-        type="file" data-upfile data-cockpit-dropfile multiple style="display:none"></label>
+        — or <button type="button" class="cockpit-droppick mothership-browse-btn" data-mothership-browse-btn title="Browse files on the Mothership where this AI Cockpit lives">Browse files… (Mothership)</button>
         <span class="cockpit-dropmsg" data-upmsg data-cockpit-dropmsg></span></div>
+      <div class="mothership-browser-drawer" data-mothership-browser hidden></div>
       <div class="crumb" data-crumb></div>
       <div data-filelist></div>
     </div>
@@ -1280,8 +1280,8 @@ async function uploadOne(file) {
   const msg = document.querySelector("[data-upmsg]");
   const topMsg = document.querySelector("[data-cockpit-dropmsg]");
   const setMsg = (t) => { if (msg) msg.textContent = t; if (topMsg) topMsg.textContent = t.replace(/^\s*·\s*/, ""); };
-  if (file.size > 30000000) {
-    setMsg(" · " + file.name + " is over the 30 MB limit");
+  if (file.size > 250000000) {
+    setMsg(" · " + file.name + " is over the 250 MB limit");
     return;
   }
   try {
@@ -1331,23 +1331,173 @@ dz.addEventListener("drop", (e) => {
   e.preventDefault(); dz.classList.remove("hot");
   enqueueUploads(e.dataTransfer.files);
 });
-document.querySelector("[data-upfile]").addEventListener("change", (ev) => {
-  enqueueUploads(ev.target.files);
-  ev.target.value = "";
-});
+const msBrowseBtn = document.querySelector("[data-mothership-browse-btn]");
+const msBrowserDrawer = document.querySelector("[data-mothership-browser]");
+let msCurPath = "";
+let msFilterQ = "";
+async function loadMothershipBrowser(targetPath, queryStr) {
+  if (!msBrowserDrawer) return;
+  msBrowserDrawer.innerHTML = `<div class="ms-browser-loading">Loading Mothership files…</div>`;
+  try {
+    const u = "/api/mothership-files?dir=&path=" + encodeURIComponent(targetPath || "") +
+      (queryStr ? "&q=" + encodeURIComponent(queryStr) : "");
+    const res = await fetch(u);
+    const data = await res.json();
+    if (!data || !data.ok) {
+      msBrowserDrawer.innerHTML = `<div class="ms-browser-err">Could not read Mothership folder: ${(data && data.error) || "error"}</div>`;
+      return;
+    }
+    msCurPath = data.current_dir || "";
+    const hostLabel = data.mothership_host || "Mothership";
+    const roots = Array.isArray(data.roots) ? data.roots : [];
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+
+    const head = el("div", "ms-browser-head");
+    const titleWrap = el("div", "ms-browser-title-wrap");
+    titleWrap.appendChild(el("span", "ms-browser-badge", "🛸 Mothership · " + hostLabel));
+    const pathEl = el("code", "ms-browser-path", msCurPath);
+    pathEl.title = msCurPath;
+    titleWrap.appendChild(pathEl);
+    head.appendChild(titleWrap);
+    const closeBtn = el("button", "ms-browser-close", "✕ Close");
+    closeBtn.type = "button";
+    closeBtn.onclick = () => { msBrowserDrawer.hidden = true; };
+    head.appendChild(closeBtn);
+
+    const rootsBar = el("div", "ms-browser-roots");
+    roots.forEach(r => {
+      const rb = el("button", "ms-root-chip" + (r.path === msCurPath ? " active" : ""), r.label || r.path);
+      rb.type = "button";
+      rb.title = r.path;
+      rb.onclick = () => { msFilterQ = ""; loadMothershipBrowser(r.path, ""); };
+      rootsBar.appendChild(rb);
+    });
+    if (data.parent_dir) {
+      const upBtn = el("button", "ms-root-chip ms-up-chip", "⬆ Up (..)");
+      upBtn.type = "button";
+      upBtn.title = data.parent_dir;
+      upBtn.onclick = () => loadMothershipBrowser(data.parent_dir, msFilterQ);
+      rootsBar.appendChild(upBtn);
+    }
+
+    const searchBar = el("div", "ms-browser-searchbar");
+    const searchInp = el("input", "ms-browser-search");
+    searchInp.type = "text";
+    searchInp.placeholder = "Filter files in this Mothership folder…";
+    searchInp.value = queryStr || "";
+    searchInp.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        msFilterQ = searchInp.value.trim();
+        loadMothershipBrowser(msCurPath, msFilterQ);
+      }
+    };
+    const filterBtn = el("button", "ms-browser-filter-btn", "Filter");
+    filterBtn.type = "button";
+    filterBtn.onclick = () => {
+      msFilterQ = searchInp.value.trim();
+      loadMothershipBrowser(msCurPath, msFilterQ);
+    };
+    searchBar.appendChild(searchInp);
+    searchBar.appendChild(filterBtn);
+
+    const listEl = el("div", "ms-browser-list");
+    if (!entries.length) {
+      listEl.appendChild(el("div", "ms-browser-empty", queryStr ? "No matching files in this Mothership folder." : "(Empty folder on Mothership)"));
+    } else {
+      entries.forEach(item => {
+        const row = el("div", "ms-browser-row" + (item.dir ? " is-dir" : " is-file"));
+        const nameBtn = el("button", "ms-browser-name", (item.dir ? "📁 " : "📄 ") + item.name);
+        nameBtn.type = "button";
+        nameBtn.title = item.path;
+        if (item.dir) {
+          nameBtn.onclick = () => loadMothershipBrowser(item.path, "");
+        } else {
+          nameBtn.onclick = () => {
+            if (item.in_cockpit && item.rel_to_cockpit) {
+              const isText = /\.(md|markdown|txt|py|js|ts|json|yaml|yml|toml|csv|log|html|css|sh|ps1)$/i.test(item.name);
+              const href = isText
+                ? "/report?dir=&path=" + encodeURIComponent(item.rel_to_cockpit)
+                : "/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") +
+                  "&dir=&path=" + encodeURIComponent(item.rel_to_cockpit) +
+                  (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+              window.open(href, "_blank", "noopener");
+            }
+          };
+        }
+        row.appendChild(nameBtn);
+        row.appendChild(el("span", "ms-browser-meta", item.dir ? "Folder" : fmtSize(item.size)));
+        const acts = el("div", "ms-browser-acts");
+        if (item.dir) {
+          const openDirBtn = el("button", "ms-act-btn", "Open folder →");
+          openDirBtn.type = "button";
+          openDirBtn.onclick = () => loadMothershipBrowser(item.path, "");
+          acts.appendChild(openDirBtn);
+        } else if (item.in_cockpit && item.rel_to_cockpit) {
+          const viewBtn = el("button", "ms-act-btn", "Open ◫");
+          viewBtn.type = "button";
+          viewBtn.onclick = () => nameBtn.click();
+          acts.appendChild(viewBtn);
+          const badge = el("span", "ms-in-cockpit-tag", "✓ In Cockpit");
+          acts.appendChild(badge);
+        } else {
+          const attachBtn = el("button", "ms-act-btn primary", "📥 Attach to Cockpit");
+          attachBtn.type = "button";
+          attachBtn.onclick = async () => {
+            attachBtn.disabled = true;
+            attachBtn.textContent = "Copying…";
+            try {
+              const r = await fetch("/api/mothership-files", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dir: "", sub: SUB, action: "attach", src_path: item.path })
+              });
+              const rj = await r.json();
+              const msg = document.querySelector("[data-upmsg]");
+              if (rj && rj.ok) {
+                if (msg) msg.textContent = " · ✓ attached " + rj.name + " from Mothership";
+                attachBtn.textContent = "✓ Attached (" + rj.name + ")";
+                loadFiles();
+              } else {
+                if (msg) msg.textContent = " · " + ((rj && rj.error) || "Attach failed");
+                attachBtn.disabled = false;
+                attachBtn.textContent = "📥 Attach to Cockpit";
+              }
+            } catch (err) {
+              attachBtn.disabled = false;
+              attachBtn.textContent = "📥 Attach to Cockpit";
+            }
+          };
+          acts.appendChild(attachBtn);
+        }
+        row.appendChild(acts);
+        listEl.appendChild(row);
+      });
+    }
+    msBrowserDrawer.innerHTML = "";
+    msBrowserDrawer.appendChild(head);
+    msBrowserDrawer.appendChild(rootsBar);
+    msBrowserDrawer.appendChild(searchBar);
+    msBrowserDrawer.appendChild(listEl);
+  } catch (err) {
+    msBrowserDrawer.innerHTML = `<div class="ms-browser-err">Failed to load Mothership files.</div>`;
+  }
+}
+if (msBrowseBtn && msBrowserDrawer) {
+  msBrowseBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const willOpen = msBrowserDrawer.hidden;
+    msBrowserDrawer.hidden = !willOpen;
+    if (willOpen) loadMothershipBrowser(msCurPath || "", msFilterQ);
+  });
+}
 if (topDz) {
   topDz.addEventListener("dragover", (e) => { e.preventDefault(); topDz.classList.add("hot"); });
   topDz.addEventListener("dragleave", () => topDz.classList.remove("hot"));
   topDz.addEventListener("drop", (e) => {
     e.preventDefault(); topDz.classList.remove("hot");
     enqueueUploads(e.dataTransfer.files);
-  });
-}
-const topUp = document.querySelector("[data-cockpit-dropfile]");
-if (topUp) {
-  topUp.addEventListener("change", (ev) => {
-    enqueueUploads(ev.target.files);
-    ev.target.value = "";
   });
 }
 document.body.addEventListener("dragover", (e) => {

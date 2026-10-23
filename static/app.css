@@ -127,3 +127,6 @@ body.resizing { cursor: col-resize; }
   .tile.cave { padding-right: 7px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.head .pane-scroll { border: 1px solid var(--line); background: #182030; color: var(--dim); font: 600 11px/1 var(--sans); cursor: pointer; height: 20px; padding: 0 6px; border-radius: 5px; user-select: none; }
+.head .pane-scroll:hover { color: var(--text); background: #2a3344; border-color: var(--blue); }

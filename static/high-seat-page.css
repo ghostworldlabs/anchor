@@ -1022,6 +1022,8 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tc-btn.done:hover,.t-done-btn:hover,.tw-btn.done:hover{background:rgba(74,222,128,.22);border-color:#4ade80}
 .tc-btn.primary{border-color:rgba(108,156,252,.5);background:rgba(108,156,252,.16);color:var(--accent-t)}
 .t-done-btn{font-size:10.5px;padding:2px 8px;border-radius:6px;border:1px solid rgba(74,222,128,.45);margin-right:4px;white-space:nowrap}
+.t-seat-btn{font-size:10.5px;padding:2px 7px;border-radius:6px;border:1px solid rgba(108,156,252,.42);background:rgba(108,156,252,.11);color:var(--accent-t);font-weight:650;margin-right:4px;white-space:nowrap;cursor:pointer}
+.t-seat-btn:hover{background:rgba(108,156,252,.22);border-color:var(--accent)}
 .desk-cockpit-btn{border-color:rgba(108,156,252,.5)!important;background:rgba(108,156,252,.14)!important;color:var(--accent-t)!important;font-weight:650}
 
 /* Two-Horizon Schedule: Today & This Week 4-column board + height-capped 6-Week Compact Horizon */

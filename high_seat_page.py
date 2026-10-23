@@ -352,6 +352,19 @@ def _campaign_tile(ctx):
     ) % (line, esc(camp["pid"]), esc(mode_name(ctx.get("steward"))), body)
 
 
+def _seat_move_btn(step):
+    """1-click tier move button on seated Cave of Wonders cards (Active <-> On deck)."""
+    if not isinstance(step, dict):
+        return ""
+    sid = esc(step.get("id") or "")
+    st = step.get("seat")
+    if not sid or st not in ("active", "deck"):
+        return ""
+    if st == "active":
+        return '<button type="button" class="t-seat-btn" data-seat="deck" data-step="%s" title="Move down to On deck">&#9662; On deck</button>' % sid
+    return '<button type="button" class="t-seat-btn" data-seat="active" data-step="%s" title="Elevate to Active">&#9652; Active</button>' % sid
+
+
 def _desk_card(ctx, g, p):
     """A desk item's card (W2c): the item, its goal, its state and date; the × sends it home; it is talked through at the
     Desk — the Campaign's own cockpit in its Desk view (Grok's read of W2c: the door the Desk line already opens)."""
@@ -361,11 +374,13 @@ def _desk_card(ctx, g, p):
         line = '<div class="t-line"><span class="k">State</span>%s</div>' % esc(p.get("state") or p.get("status") or "planned")
     date = (' &middot; %s' % esc(_hr.due_label(p["date"], ctx["today"]))) if p.get("date") else ""
     dot = '<span class="tlight %s" title="%s"></span>' % (("orange", "needs you") if p.get("needs_you") else ("gray", "idle"))      # a desk card has a light too (Grok's read of W2e)
+    s_btn = _seat_move_btn(p)
+    d_btn = '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" title="Done for now — move off the board">&#10003; Done</button>' % esc(p["id"])
     return (
         '<article class="tile desk%s" id="card-%s" data-step="%s" data-name="%s" draggable="true"><div class="t-top">' + dot + '<h3 class="t-name"><span class="t-nm">%s</span><span class="t-eff">at the desk%s</span></h3>'
-        '<button class="t-x" data-home="%s" title="back to its goal">&times;</button></div><div class="t-goal">in <b>%s</b></div>%s'
+        '%s%s<button class="t-x" data-home="%s" title="back to its goal">&times;</button></div><div class="t-goal">in <b>%s</b></div>%s'
         '<div class="t-acts"><a class="t-talk" href="/project/%s?view=desk" target="_blank" rel="noopener">talk to the desk &#8599;</a></div></article>'
-    ) % (" need" if p.get("needs_you") else "", esc(p["id"]), esc(p["id"]), esc(part_name(p)), esc(part_name(p)), date, esc(p["id"]), esc(g["name"]), line,
+    ) % (" need" if p.get("needs_you") else "", esc(p["id"]), esc(p["id"]), esc(part_name(p)), esc(part_name(p)), date, s_btn, d_btn, esc(p["id"]), esc(g["name"]), line,
          esc((ctx.get("campaign") or {}).get("pid") or ""))
 
 
@@ -490,13 +505,15 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     if lclass == "orange":   # W4 (2026-10-05, his rule): the edge pulses exactly when the light is orange
         import hashlib as _hl
         attr += ' data-ready="%s"' % _hl.sha1((str(lt.get("why") or "") + "|" + str(f.get("needs_you") or "")).encode("utf-8")).hexdigest()[:10]
+    seat_btn = _seat_move_btn(step) if step else ""
     xbtn = ('<button class="t-x" data-home="%s" title="back to its goal">&times;</button>' % esc(step["id"])) if step else ""
     goal_line = ('<div class="t-goal">in <b>%s</b> &middot; %s</div>' % (esc(goal["name"]), "a cockpit within the project" if step.get("kind") == "effort" else "the project&rsquo;s cockpit")) if (goal and step) else ""
     if not f.get("has_record"):
+        q_done = ('<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" title="Done for now — move off the board">&#10003; Done</button>' % esc(step["id"])) if step else ""
         return (
-            '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top">%s<h3 class="t-name">%s</h3>%s</div>%s'
+            '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top">%s<h3 class="t-name">%s</h3>%s%s%s</div>%s'
             '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
-        ) % (cls, cid, pid, attr, dot, name, xbtn, goal_line, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
+        ) % (cls, cid, pid, attr, dot, name, seat_btn, q_done, xbtn, goal_line, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
     wait = " ".join(str(f.get("needs_you") or "").split())[:160]
     nxt = esc((f.get("next") or "")[:160]) or "not stated"
     # W1 (2026-09-28): EVERY effort's wait, each opening its own record (the Status part on that effort) — a
@@ -544,8 +561,8 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     t_folder = str(f.get("folder") or "")
     if t_folder and f.get("effort"):
         t_folder = str(Path(t_folder) / str(f.get("effort")))
-    done_btn = (
-        '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-target-dir="%s" title="Mark current step done in this record">&#10003; Done</button>'
+    done_btn = seat_btn + (
+        '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-target-dir="%s" title="Done for now — move off the board and mark current step done">&#10003; Done</button>'
         % (esc((step or {}).get("id") or ""), esc(t_folder))
     )
     # "/project/%s?dir=%s&amp;open=effort"

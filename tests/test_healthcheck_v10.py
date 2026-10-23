@@ -47,6 +47,7 @@ def hc(tmp_path, monkeypatch):
     monkeypatch.delenv("ANCHOR_PTY_BACKEND", raising=False)
     monkeypatch.delenv("ANCHOR_WORKTREE_BASE", raising=False)
     monkeypatch.delenv("ANCHOR_TERMINAL_SEED", raising=False)
+    monkeypatch.delenv("ANCHOR_PROACTIVE_SUMMARY", raising=False)
     import paths
     importlib.reload(paths)
     paths.ensure_data_dirs()
@@ -104,15 +105,73 @@ def test_check_rnd_v10_surface_is_green(hc):
     assert ok, f"v10 surface check failed: {detail}"
 
 
+def test_v10_walk_survives_live_registry_tmp_collision(hc, monkeypatch):
+    """A concurrent live-registry writer consuming the ambient .anchor/sessions.json.tmp
+    just before boneyard registration's replace must not break check_rnd_v10_surface.
+    """
+    import session_registry as reg
+
+    hc_mod, tmp_path = hc
+    live = reg.register_session("live-project", "general", label="Before")
+    ambient_tmp = tmp_path / ".anchor" / "sessions.json.tmp"
+    ambient_target = tmp_path / ".anchor" / "sessions.json"
+    orig_replace = reg._atomic_replace
+    interleaved = []
+
+    def replace_with_ambient_collision(tmp, target):
+        if not interleaved and ambient_tmp.exists():
+            os.replace(str(ambient_tmp), str(ambient_target))
+            interleaved.append(True)
+        return orig_replace(tmp, target)
+
+    monkeypatch.setattr(reg, "_atomic_replace", replace_with_ambient_collision)
+    rnd_env = _rnd_env(hc_mod, tmp_path, "collision")
+    report = hc_mod.Report()
+    try:
+        hc_mod.check_rnd_v10_surface(report, object(), rnd_env)
+        v10 = [c for c in report.checks if c[0] == "R&D v10 surface"]
+        assert v10 and v10[0][1], f"v10 surface check failed: {v10}"
+        assert os.environ.get("ANCHOR_DATA_DIR") == str(tmp_path)
+        assert reg.get_session(live["session_id"]) == live
+    finally:
+        hc_mod._cleanup_synthetic_rnd(rnd_env, report)
+    assert reg.get_session(live["session_id"]) == live
+
+
+def test_v10_walk_preserves_existing_session_and_pty(hc, monkeypatch):
+    import pty_manager as pty
+    import session_registry as reg
+
+    hc_mod, tmp_path = hc
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    sid = pty.start(["stub"])
+    live = reg.register_session(
+        "live-project", "research", session_id=sid,
+        status=reg.STATUS_RUNNING)
+    rnd_env = _rnd_env(hc_mod, tmp_path, "live")
+    rnd_env["created_ids"].append(live["project_id"])
+    report = hc_mod.Report()
+    try:
+        hc_mod.check_rnd_v10_surface(report, object(), rnd_env)
+        assert pty.live_sessions() == [sid]
+        assert reg.get_session(sid) == live
+    finally:
+        rnd_env["created_ids"].remove(live["project_id"])
+        if sid in pty.live_sessions():
+            pty.kill(sid)
+        hc_mod._cleanup_synthetic_rnd(rnd_env, report)
+
+
 def test_v10_walk_restores_env(hc, monkeypatch):
     """The walk restores ANCHOR_PTY_BACKEND / WORKTREE_BASE / TERMINAL_SEED /
-    ANCHOR_RUNNER_CMD to their prior values (snapshot → call → assert)."""
+    ANCHOR_RUNNER_CMD / ANCHOR_PROACTIVE_SUMMARY to their prior values."""
     hc_mod, tmp_path = hc
     monkeypatch.setenv("ANCHOR_PTY_BACKEND", "sentinel-prev")
     prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
     # WORKTREE_BASE / TERMINAL_SEED were deleted by the fixture → must stay absent.
     assert "ANCHOR_WORKTREE_BASE" not in os.environ
     assert "ANCHOR_TERMINAL_SEED" not in os.environ
+    assert "ANCHOR_PROACTIVE_SUMMARY" not in os.environ
     rnd_env = _rnd_env(hc_mod, tmp_path, "2")
     report = hc_mod.Report()
     try:
@@ -122,10 +181,45 @@ def test_v10_walk_restores_env(hc, monkeypatch):
     assert os.environ.get("ANCHOR_PTY_BACKEND") == "sentinel-prev"
     assert "ANCHOR_WORKTREE_BASE" not in os.environ
     assert "ANCHOR_TERMINAL_SEED" not in os.environ
+    assert "ANCHOR_PROACTIVE_SUMMARY" not in os.environ
     assert os.environ.get("ANCHOR_RUNNER_CMD") == prev_runner
 
 
-def test_v10_walk_never_8777_no_orphans(hc):
+@pytest.mark.parametrize("previous_data", [None, "", "configured"])
+def test_v10_data_scope_restored_after_failure(hc, monkeypatch, previous_data):
+    import paths
+    import session_registry as reg
+
+    hc_mod, tmp_path = hc
+    monkeypatch.setattr(paths, "CODE_DIR", tmp_path)
+    if previous_data is None:
+        monkeypatch.delenv("ANCHOR_DATA_DIR")
+    else:
+        if previous_data:
+            previous_data = str(tmp_path)
+        monkeypatch.setenv("ANCHOR_DATA_DIR", previous_data)
+    live = reg.register_session("live-project", "general")
+    observed = []
+
+    def fail_after_entering_scope(folder):
+        observed.append(paths.data_dir())
+        raise RuntimeError("injected v10 setup failure")
+
+    monkeypatch.setattr(hc_mod, "_git_init_repo", fail_after_entering_scope)
+    rnd_env = _rnd_env(hc_mod, tmp_path, "early-error")
+    report = hc_mod.Report()
+    try:
+        hc_mod.check_rnd_v10_surface(report, object(), rnd_env)
+        assert observed and observed[0] != tmp_path
+        assert os.environ.get("ANCHOR_DATA_DIR") == previous_data
+        assert reg.get_session(live["session_id"]) == live
+        result = next(c for c in report.checks if c[0] == "R&D v10 surface")
+        assert not result[1] and "injected v10 setup failure" in result[2]
+    finally:
+        hc_mod._cleanup_synthetic_rnd(rnd_env, report)
+
+
+def test_v10_walk_never_8777_no_orphans(hc, monkeypatch):
     """No preview bound to :8777, no orphan synthetic project, no live PTY /
     managed session after teardown."""
     import preview_server
@@ -137,10 +231,13 @@ def test_v10_walk_never_8777_no_orphans(hc):
     report = hc_mod.Report()
     try:
         hc_mod.check_rnd_v10_surface(report, object(), rnd_env)
-        # The only registry projects are the synthetic probe(s).
-        for pid in rnd_env["created_ids"]:
-            proj = rnd_registry.get_project(pid)
-            assert proj is None or "__healthcheck__" in proj.get("name", "")
+        private_roots = [d for d in rnd_env["v3_temp_dirs"]
+                         if Path(d).name.startswith("anchor-hc-v10-data-")]
+        assert len(private_roots) == 1
+        with monkeypatch.context() as private:
+            private.setenv("ANCHOR_DATA_DIR", str(private_roots[0]))
+            assert session_registry.list_sessions() == []
+            assert rnd_registry.list_projects(with_effective_state=False) == []
     finally:
         hc_mod._cleanup_synthetic_rnd(rnd_env, report)
 
@@ -166,7 +263,7 @@ def test_v10_walk_torn_down_temp_dirs(hc):
     finally:
         hc_mod._cleanup_synthetic_rnd(rnd_env, report)
     for d in created:
-        if Path(d).name.startswith("anchor-hc-v10-wt-"):
+        if Path(d).name.startswith(("anchor-hc-v10-data-", "anchor-hc-v10-wt-")):
             assert not Path(d).exists(), f"temp dir not cleaned: {d}"
 
 

@@ -20,7 +20,19 @@ _OPEN = ("proposed", "planned", "active", "waiting")
 
 def _read_json(p):
     try:
-        return json.loads(Path(p).read_text(encoding="utf-8"))
+        path = Path(p)
+        st = path.stat()
+        key = str(path)
+        sig = (st.st_mtime_ns, st.st_size)
+        cache = globals().setdefault("_JSON_MEM_CACHE", {})
+        cached = cache.get(key)
+        if cached is not None and cached[0] == sig[0] and cached[1] == sig[1]:
+            return cached[2]
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if len(cache) > 256:
+            cache.clear()
+        cache[key] = (sig[0], sig[1], data)
+        return data
     except Exception:
         return None
 

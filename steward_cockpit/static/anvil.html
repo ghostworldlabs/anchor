@@ -1296,6 +1296,127 @@
     border: 1px solid rgba(56, 189, 248, 0.28);
     color: #bae6fd;
   }
+
+  /* Anvil v2: 3-Level Progressive Expansion, Live Walkthrough Stepper & 5-Seat Beta-Reader Panel */
+  .beta-reader-strip {
+    background: rgba(15, 23, 42, 0.78);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .beta-seat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+
+  .beta-seat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 11.5px;
+  }
+
+  .beta-seat-card.status-pass { border-left: 3px solid var(--green); }
+  .beta-seat-card.status-advisory { border-left: 3px solid var(--amber); }
+  .beta-seat-card.status-action { border-left: 3px solid var(--red); }
+
+  .walkthrough-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(11, 15, 23, 0.96));
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .walkthrough-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+
+  .walkthrough-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .walkthrough-card h5 {
+    margin: 0;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--cyan);
+  }
+
+  .prog-level-bar {
+    display: inline-flex;
+    border: 1px solid var(--border-bright);
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--bg-elev);
+  }
+
+  .prog-level-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+
+  .prog-level-btn:last-child { border-right: 0; }
+
+  .prog-level-btn.active {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fde68a;
+  }
+
+  .prog-box {
+    background: rgba(11, 15, 23, 0.78);
+    border: 1px solid var(--border-bright);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 6px;
+    font-size: 11.5px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .prog-code-pre {
+    margin: 0;
+    padding: 10px 12px;
+    background: #050811;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    color: #e2e8f0;
+    max-height: 300px;
+    overflow: auto;
+    white-space: pre;
+  }
 </style>
 <link rel="stylesheet" href="/static/foundry-display/display.css">
 <script src="/static/foundry-display/flow-diagram.js"></script>
@@ -1317,6 +1438,9 @@
       <span class="target-pill" id="paperTargetPill" hidden></span>
     </div>
     <div class="topbar-right">
+      <button type="button" class="btn" id="btnWalkthroughCode" style="background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.6);color:#bae6fd;font-weight:700" title="Launch Anvil v2 Live Code Walkthrough Stepper (claims, concrete input data, actual calculation & output, and accuracy verdict)">
+        <span>▶ Walkthrough Code</span>
+      </button>
       <button type="button" class="btn" id="btnOpenAegisWorkbench" style="background:rgba(16,185,129,0.16);border-color:rgba(16,185,129,0.55);color:#6ee7b7;font-weight:700" title="Switch to the Aegis Security Workbench on this same bound codebase">
         <img src="/vendor/brand/aegis-icon.svg" alt="Aegis" width="16" height="16" style="border-radius:3px">
         <span>🛡 Switch to Aegis Workbench</span>
@@ -1394,6 +1518,31 @@
               </button>
             </div>
           </div>
+
+          <!-- Card 3: Walkthrough Code (Section-by-Section Runtime Validator) -->
+          <div class="launch-card" data-launch-card="walkthrough" style="border-color:rgba(56,189,248,0.45)">
+            <h2>
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:rgba(56,189,248,0.18);color:var(--cyan);font-size:13px">▶</span>
+              3. Walkthrough Code (Section-by-Section)
+            </h2>
+            <p class="desc">
+              Step through your software block-by-block with <strong>1. What Code Claims To Do</strong>, <strong>2. Concrete Input Data &amp; Entrypoint</strong>, <strong>3. Actual Runtime Calculation &amp; Output</strong>, and <strong>4. Accuracy Verdict</strong>.
+            </p>
+            <div class="field-group">
+              <label for="walkthroughCodeTargetInput">Software Path (inside Cockpit or Workspace) or GitHub Repo URL</label>
+              <input type="text" id="walkthroughCodeTargetInput" class="field-input" value="." placeholder="e.g. . or C:\dev\Anchor\steward_cockpit">
+              <div class="candidate-chips" id="walkthroughCandidateChips"></div>
+            </div>
+            <div class="field-group">
+              <label for="walkthroughBlockFilterInput">Optional Starting Section / Module Filter</label>
+              <input type="text" id="walkthroughBlockFilterInput" class="field-input" value="" placeholder="Optional: specific module or block ID (leave blank for all sections)">
+            </div>
+            <div style="margin-top:auto;padding-top:6px">
+              <button type="button" class="btn btn-primary" id="btnStartWalkthrough" style="width:100%;justify-content:center;padding:9px 14px;background:linear-gradient(135deg,#0284c7,#2563eb);color:#fff">
+                ▶ Launch Code Walkthrough
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1403,14 +1552,17 @@
           <button type="button" class="tab-btn active" data-tab="map">
             1. Conceptual &amp; Process Map <span class="tab-badge" id="badgeMapCount">0</span>
           </button>
+          <button type="button" class="tab-btn" data-tab="walkthrough">
+            2. ▶ Walkthrough Code <span class="tab-badge" id="badgeWalkthroughCount">0 steps</span>
+          </button>
           <button type="button" class="tab-btn" data-tab="validate">
-            2. Block Drill-Down &amp; Live Probe <span class="tab-badge" id="badgeValidateCount">0/0</span>
+            3. Block Drill-Down &amp; Live Probe <span class="tab-badge" id="badgeValidateCount">0/0</span>
           </button>
           <button type="button" class="tab-btn" data-tab="remap">
-            3. Old-to-New Map &amp; ∅ Null Space <span class="tab-badge" id="badgeRemapCount">0</span>
+            4. Old-to-New Map &amp; ∅ Null Space <span class="tab-badge" id="badgeRemapCount">0</span>
           </button>
           <button type="button" class="tab-btn" data-tab="paper">
-            4. Paper-to-Software Process &amp; Math Map <span class="tab-badge" id="badgePaperCount">0</span>
+            5. Paper-to-Software Process &amp; Math Map <span class="tab-badge" id="badgePaperCount">0</span>
           </button>
         </div>
 
@@ -1436,11 +1588,18 @@
                 <button type="button" class="view-btn" data-filter-stage="compute">Essential Core</button>
                 <button type="button" class="view-btn" data-filter-stage="emit">Emit</button>
               </div>
+              <div class="prog-level-bar" id="progLevelBarMap" title="Anvil v2 3-Level Progressive Map Expansion">
+                <button type="button" class="prog-level-btn active" data-prog-level="1">Level 1: Role &amp; I/O</button>
+                <button type="button" class="prog-level-btn" data-prog-level="2">Level 2: Sub-Flow + Math + Diff</button>
+                <button type="button" class="prog-level-btn" data-prog-level="3">Level 3: Numbered Code</button>
+              </div>
+              <button type="button" class="btn" id="btnMapWalkthroughCode" style="background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.6);color:#bae6fd;font-weight:700;padding:4px 10px;font-size:11.5px">▶ Walkthrough Code</button>
             </div>
           </div>
 
           <div class="orange-banner" id="orangeRecommendationBanner"></div>
           <div class="metrics-row" id="mapMetricsRow"></div>
+          <div class="beta-reader-strip" id="betaReaderPanelStrip"></div>
 
           <!-- View 1A: Conceptual Groupings (Cards with Functions & AI Agent Seams) -->
           <div id="conceptualView">
@@ -1455,7 +1614,53 @@
         </div>
 
         <!-- ================================================================== -->
-        <!-- MODE 2: Single-Block Drill-Down, Inner Process Map & Live Probe    -->
+        <!-- MODE: WALKTHROUGH CODE (First-Class Section-by-Section Stepper)    -->
+        <!-- ================================================================== -->
+        <div class="tab-content" data-tab-panel="walkthrough" id="walkthroughTabPanel">
+          <div class="mode-header">
+            <div>
+              <h2 class="mode-title">2. ▶ Walkthrough Code — Section-by-Section Claim vs. Actual Runtime Validator</h2>
+              <p class="mode-subtitle">
+                Step through every conceptual block of the software in sequence: inspect <strong>1. What Code Claims To Do</strong>, <strong>2. Concrete Input Data &amp; Entrypoint</strong>, <strong>3. Actual Runtime Calculation &amp; Output</strong>, and <strong>4. Accuracy Verdict</strong>.
+              </p>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <div class="prog-level-bar" id="progLevelBarWt" title="Anvil v2 3-Level Progressive Expansion">
+                <button type="button" class="prog-level-btn active" data-prog-level="1">Level 1: Role &amp; I/O</button>
+                <button type="button" class="prog-level-btn" data-prog-level="2">Level 2: Sub-Flow + Math + Diff</button>
+                <button type="button" class="prog-level-btn" data-prog-level="3">Level 3: Numbered Code</button>
+              </div>
+              <button type="button" class="btn" id="btnWtOpenDrill">🔍 Open Section in Block Drill-Down</button>
+            </div>
+          </div>
+
+          <div class="walkthrough-panel" id="walkthroughTabMount"></div>
+          <div id="wtTabProgressiveBox"></div>
+          <div id="wtTabBetaReaderBox" class="beta-reader-strip"></div>
+
+          <div class="section-box">
+            <h3>
+              <span>All Software Sections in Walkthrough Sequence</span>
+              <span class="badge badge-ok" id="wtAllStepsSummaryBadge">0 sections</span>
+            </h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Software Section / Module</th>
+                  <th>Stage</th>
+                  <th>Entrypoint &amp; Concrete Input</th>
+                  <th>Claimed vs. Actual Verdict</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="wtAllStepsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ================================================================== -->
+        <!-- MODE 3: Single-Block Drill-Down, Inner Process Map & Live Probe    -->
         <!-- ================================================================== -->
         <div class="tab-content" data-tab-panel="validate">
           <div class="drill-header">
@@ -1472,10 +1677,23 @@
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <div class="prog-level-bar" id="progLevelBarDrill" title="Anvil v2 3-Level Progressive Expansion">
+                <button type="button" class="prog-level-btn active" data-prog-level="1">Level 1: Role &amp; I/O</button>
+                <button type="button" class="prog-level-btn" data-prog-level="2">Level 2: Sub-Flow + Math + Diff</button>
+                <button type="button" class="prog-level-btn" data-prog-level="3">Level 3: Numbered Code</button>
+              </div>
+              <button type="button" class="btn" id="btnDrillWalkthroughCode" style="background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.6);color:#bae6fd;font-weight:700">▶ Walkthrough Code</button>
               <button type="button" class="btn btn-primary" id="btnRunBlockProbe">▶ Run Code &amp; Test Claim</button>
               <button type="button" class="btn btn-success" id="btnLockBlockDesc">✓ Lock Validated Description → Anvil Report</button>
             </div>
           </div>
+
+          <!-- Anvil v2 Live Code Walkthrough Stepper -->
+          <div class="walkthrough-panel" id="walkthroughPanel"></div>
+
+          <!-- Anvil v2 3-Level Progressive Expansion Inspector + Block 5-Seat Beta-Reader Strip -->
+          <div id="drillProgressiveBox"></div>
+          <div id="drillBetaReaderBox"></div>
 
           <!-- 1. Inner Process Map (How the Functions Inside This Block Interact) -->
           <div class="inner-map-box">
@@ -1687,15 +1905,17 @@
           <span>🛡 Review: <strong>claude-fable-5-1 · max</strong></span>
         </div>
         <div id="anvilLiveQuickBar" hidden style="display:flex;flex-wrap:wrap;gap:4px">
+          <button type="button" class="cand-chip" id="btnQuickWalkthrough" style="font-size:10px;padding:3px 7px;color:#bae6fd;border-color:rgba(56,189,248,0.45);background:rgba(56,189,248,0.15)">▶ Walkthrough Code</button>
           <button type="button" class="cand-chip" id="btnQuickVerifyAll" style="font-size:10px;padding:3px 7px;color:#fde68a;border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.1)">✓ Verify All Buckets</button>
           <button type="button" class="cand-chip" id="btnQuickSignOffNull" style="font-size:10px;padding:3px 7px;color:#86efac;border-color:rgba(34,197,94,0.35);background:rgba(34,197,94,0.1)">✓ Sign Off ∅ Null Space</button>
           <button type="button" class="cand-chip" id="btnQuickAegisAudit" style="font-size:10px;padding:3px 7px;color:#c4b5fd;border-color:rgba(167,139,250,0.35);background:rgba(167,139,250,0.12)">🛡 Aegis Security Audit</button>
         </div>
         <div class="agent-modes" id="agentModePillsBar">
           <button type="button" class="mode-pill active" data-agent-mode="map">1. Map</button>
-          <button type="button" class="mode-pill" data-agent-mode="validate">2. Probe</button>
-          <button type="button" class="mode-pill" data-agent-mode="remap">3. Remap</button>
-          <button type="button" class="mode-pill" data-agent-mode="paper">4. Paper</button>
+          <button type="button" class="mode-pill" data-agent-mode="walkthrough">2. Walkthrough</button>
+          <button type="button" class="mode-pill" data-agent-mode="validate">3. Probe</button>
+          <button type="button" class="mode-pill" data-agent-mode="remap">4. Remap</button>
+          <button type="button" class="mode-pill" data-agent-mode="paper">5. Paper</button>
         </div>
       </div>
       <div id="cockpitLiveDialogueWrap" hidden style="flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg-deep)">
@@ -1727,12 +1947,305 @@
   let currentStageFilter = "all";
   let currentMapSubView = "conceptual"; // "conceptual" | "process"
   let currentRemapSubView = "overview"; // "overview" | "drill"
+  let currentProgLevel = 1; // 1: Role & I/O | 2: Sub-Flow + Math + Diff | 3: Full Numbered Code
+  let currentWalkthroughStepIdx = 0;
   let selectedDrillBlockId = "";
   let selectedNewBlockId = "new-block-compute";
   let currentAgentMode = "map";
   let currentAgentTarget = "";
   let preLaunchMessages = [];
   let dialogueSurfaceMode = pid ? "cockpit" : "log"; // "cockpit" (real AI Cockpit v1 tileview) | "log" (Anvil session log/setup)
+
+  function syncProgLevelButtons() {
+    document.querySelectorAll("[data-prog-level]").forEach(btn => {
+      const lv = Number(btn.getAttribute("data-prog-level") || 1);
+      btn.classList.toggle("active", lv === currentProgLevel);
+    });
+  }
+
+  function renderBetaReaderPanelInto(hostEl, panel, headingPrefix) {
+    if (!hostEl) return;
+    if (!panel || !Array.isArray(panel.seats) || !panel.seats.length) {
+      hostEl.innerHTML = "";
+      hostEl.hidden = true;
+      return;
+    }
+    hostEl.hidden = false;
+    const ov = String(panel.overall_status || "PASS");
+    const ovCls = ov === "PASS" ? "badge-ok" : (ov === "ACTION_REQUIRED" ? "badge-warn" : "badge-core");
+    const seatsHtml = panel.seats.map(s => {
+      const st = String(s.status || "PASS");
+      const cardCls = st === "PASS" ? "status-pass" : (st === "ACTION_REQUIRED" ? "status-action" : "status-advisory");
+      const badgeCls = st === "PASS" ? "badge-ok" : (st === "ACTION_REQUIRED" ? "badge-warn" : "badge-core");
+      const findings = (s.findings || []).slice(0, 3).map(f => `<div style="color:var(--text-dim);font-size:11px">• ${esc(f)}</div>`).join("");
+      return `
+        <div class="beta-seat-card ${cardCls}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--amber);font-weight:700">SEAT ${esc(s.seat_num)}</span>
+            <span class="badge ${badgeCls}">${esc(st)}</span>
+          </div>
+          <div style="font-weight:700;color:#fff;font-size:12px">${esc(s.role)}</div>
+          <div style="color:#e2e8f0;font-size:11.5px">${esc(s.verdict || "")}</div>
+          ${findings}
+        </div>`;
+    }).join("");
+    hostEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;color:var(--amber)">
+            🛡 ${esc(headingPrefix || "Anvil v2 · 5-Seat Software Beta-Reader Panel")}
+          </div>
+          <div style="font-size:11.5px;color:var(--text-dim)">${esc(panel.summary || "")}</div>
+        </div>
+        <span class="badge ${ovCls}">Overall: ${esc(ov)}</span>
+      </div>
+      <div class="beta-seat-grid">${seatsHtml}</div>`;
+  }
+
+  function buildProgressiveExpansionHtml(block, level) {
+    const prog = (block && block.progressive_levels) || {};
+    const l1 = prog.level_1 || {};
+    const l2 = prog.level_2 || {};
+    const l3 = prog.level_3 || {};
+    if (level === 1) {
+      const inputs = (l1.inputs || []).slice(0, 4).join(" · ") || "module parameters";
+      const outputs = (l1.outputs || []).slice(0, 3).join(" · ") || "typed state / return dict";
+      return `
+        <div class="prog-box">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+            <strong style="color:var(--amber);font-size:11px;text-transform:uppercase">Level 1 · Plain-English Role &amp; I/O Contract</strong>
+            <span style="font-family:var(--mono);font-size:10.5px;color:var(--cyan)">${esc(l1.function_count || (block.functions || []).length)} fn · ${esc(l1.line_count || block.total_lines || 0)}L</span>
+          </div>
+          <div style="color:#e2e8f0">${esc(l1.plain_english_role || block.validated_description || block.summary || "")}</div>
+          <div style="font-family:var(--mono);font-size:10.5px;color:var(--cyan)">
+            <div><strong>Inputs:</strong> ${esc(inputs)}</div>
+            <div><strong>Outputs:</strong> ${esc(outputs)}</div>
+          </div>
+        </div>`;
+    }
+    if (level === 2) {
+      const eqs = (l2.governing_equations || []);
+      const eqHtml = eqs.length
+        ? eqs.slice(0, 2).map(eq => {
+            const mml = sanitizeMathML(eq.mathml || "");
+            return `<div style="margin-top:4px"><span class="badge badge-purp">${esc(eq.claim_id || "EQ")}</span> <strong>${esc(eq.title || "")}</strong>${mml ? `<div class="math-display-box" style="margin-top:4px">${mml}</div>` : `<div style="font-family:var(--mono);font-size:10.5px;color:var(--cyan)">${esc(eq.latex || "")}</div>`}</div>`;
+          }).join("")
+        : `<div style="color:var(--text-muted);font-size:11px">No explicit LaTeX/MathML equation tied; governed by deterministic AST/stage invariants.</div>`;
+      const assumptions = (l2.key_assumptions || []).map(a => `<div>• ${esc(a)}</div>`).join("");
+      const diff = l2.old_to_new_diff_summary || {};
+      return `
+        <div class="prog-box">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+            <strong style="color:var(--amber);font-size:11px;text-transform:uppercase">Level 2 · Sub-Flow, Governing Math, Assumptions &amp; Old-to-New Diff</strong>
+            <span class="badge badge-core">${esc((diff.target_stage || block.pipeline_stage || "compute").toUpperCase())}</span>
+          </div>
+          <div><strong style="color:var(--cyan)">Governing Math / Invariant:</strong>${eqHtml}</div>
+          <div><strong style="color:var(--cyan)">Key Assumptions:</strong>${assumptions}</div>
+          <div style="font-family:var(--mono);font-size:10.5px;background:rgba(15,23,42,0.85);padding:6px 8px;border-radius:5px;border:1px solid var(--border)">
+            <strong>Old-to-New Diff Summary:</strong> Ingest=${esc(diff.ingest_count || 0)} · Core=${esc(diff.compute_count || 0)} · Emit=${esc(diff.emit_count || 0)} · NullSpace=${esc(diff.null_space_count || 0)} — ${esc(diff.refactoring_action || "")}
+          </div>
+        </div>`;
+    }
+    const snippets = (l3.functions || []);
+    const codeText = l3.numbered_source_preview || snippets.map(fn => `# ${fn.name} (${fn.file || block.file}:${fn.lineno}-${fn.end_lineno})\n${fn.numbered_source || ""}`).join("\n\n") || "# Source preview unavailable";
+    return `
+      <div class="prog-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <strong style="color:var(--amber);font-size:11px;text-transform:uppercase">Level 3 · Exact Numbered Source Code &amp; Line Spans (${esc((l3.member_files || [block.file]).join(", "))})</strong>
+          <span class="badge badge-scaf">${esc(snippets.length)} function spans</span>
+        </div>
+        <pre class="prog-code-pre">${esc(codeText)}</pre>
+      </div>`;
+  }
+
+  function renderWalkthroughStepperInto(host, sess, suffix) {
+    if (!host) return;
+    const wt = (sess && (sess.walkthrough || sess.walkthrough_trace)) || {};
+    const steps = wt.steps || [];
+    if (!steps.length) {
+      host.innerHTML = "";
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
+    if (currentWalkthroughStepIdx < 0 || currentWalkthroughStepIdx >= steps.length) {
+      currentWalkthroughStepIdx = 0;
+    }
+    const st = steps[currentWalkthroughStepIdx] || steps[0];
+    const verd = String(st.accuracy_verdict || "ACCURATE");
+    const verdCls = verd === "ACCURATE" ? "badge-ok" : (verd === "MISMATCH" ? "badge-warn" : "badge-core");
+    const stepOpts = steps.map((s, idx) => `
+      <option value="${idx}" ${idx === currentWalkthroughStepIdx ? "selected" : ""}>
+        Step ${idx + 1}/${steps.length}: ${esc(s.title || s.block_id)} (${esc(s.accuracy_verdict || "ACCURATE")})
+      </option>`).join("");
+    const eqList = (st.equations || []).map(eq => `<div style="font-family:var(--mono);font-size:10.5px;color:#d8b4fe">📐 ${esc(eq.claim_id)}: ${esc(eq.title)}</div>`).join("");
+
+    host.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;color:var(--cyan)">
+            ▶ Anvil v2 Live Code Walkthrough Stepper — Step ${currentWalkthroughStepIdx + 1} of ${steps.length}
+          </div>
+          <div style="font-size:11.5px;color:var(--text-dim)">${esc(wt.summary || "")}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <button type="button" class="btn" id="btnWtPrev${suffix}" style="padding:4px 9px;font-size:11px">◀ Prev Step</button>
+          <select id="wtStepSelect${suffix}" class="drill-select" style="min-width:230px;font-size:11.5px">${stepOpts}</select>
+          <button type="button" class="btn" id="btnWtNext${suffix}" style="padding:4px 9px;font-size:11px">Next Step ▶</button>
+          <span class="badge ${verdCls}">Verdict: ${esc(verd)}</span>
+        </div>
+      </div>
+      <div class="walkthrough-grid">
+        <div class="walkthrough-card">
+          <h5>1. What Code Claims To Do</h5>
+          <div style="font-weight:700;color:#fff">${esc(st.title || st.block_id)}</div>
+          <div style="font-family:var(--mono);font-size:10.5px;color:var(--amber)">Module: ${esc(st.module || "")} (${esc(st.lines || "")} lines · ${esc((st.stage || "compute").toUpperCase())})</div>
+          <div style="color:#e2e8f0">${esc(st.what_code_claims_to_do || "")}</div>
+        </div>
+        <div class="walkthrough-card">
+          <h5>2. Concrete Input Data &amp; Entrypoint</h5>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--cyan)">Entry: ${esc(st.entrypoint_signature || "")}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:#e2e8f0;background:rgba(11,15,23,0.75);padding:7px 9px;border-radius:6px;border:1px solid var(--border)">
+            ${esc(st.concrete_input_data || "")}
+          </div>
+        </div>
+        <div class="walkthrough-card">
+          <h5>3. Actual Runtime Calculation &amp; Output</h5>
+          <div style="color:#e2e8f0;font-size:11.5px">${esc(st.actual_calculation_and_output || "")}</div>
+          ${eqList}
+          <pre class="prog-code-pre" style="max-height:110px;font-size:10.5px">${esc(st.actual_probe_output || "")}</pre>
+        </div>
+        <div class="walkthrough-card">
+          <h5>4. Accuracy Verdict (Claim vs. Actual)</h5>
+          <div><span class="badge ${verdCls}" style="font-size:11.5px;padding:4px 9px">${esc(verd)}</span></div>
+          <div style="color:#e2e8f0;font-size:11.5px">${esc(st.verdict_rationale || "")}</div>
+          <div style="margin-top:auto;padding-top:6px;display:flex;gap:6px">
+            <button type="button" class="btn btn-primary" id="btnWtRunLive${suffix}" style="padding:3px 9px;font-size:11px">↻ Re-Run Live Step Probe</button>
+          </div>
+        </div>
+      </div>`;
+
+    const prevBtn = document.getElementById("btnWtPrev" + suffix);
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        currentWalkthroughStepIdx = (currentWalkthroughStepIdx - 1 + steps.length) % steps.length;
+        const stepObj = steps[currentWalkthroughStepIdx];
+        if (stepObj && stepObj.block_id) selectedDrillBlockId = stepObj.block_id;
+        renderWalkthroughTab(sess);
+        renderValidateTab(sess);
+      });
+    }
+    const nextBtn = document.getElementById("btnWtNext" + suffix);
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        currentWalkthroughStepIdx = (currentWalkthroughStepIdx + 1) % steps.length;
+        const stepObj = steps[currentWalkthroughStepIdx];
+        if (stepObj && stepObj.block_id) selectedDrillBlockId = stepObj.block_id;
+        renderWalkthroughTab(sess);
+        renderValidateTab(sess);
+      });
+    }
+    const sel = document.getElementById("wtStepSelect" + suffix);
+    if (sel) {
+      sel.addEventListener("change", function() {
+        currentWalkthroughStepIdx = Number(this.value || 0);
+        const stepObj = steps[currentWalkthroughStepIdx];
+        if (stepObj && stepObj.block_id) selectedDrillBlockId = stepObj.block_id;
+        renderWalkthroughTab(sess);
+        renderValidateTab(sess);
+      });
+    }
+    const runBtn = document.getElementById("btnWtRunLive" + suffix);
+    if (runBtn) {
+      runBtn.addEventListener("click", function() {
+        triggerWalkthroughCode(st.block_id || selectedDrillBlockId, this);
+      });
+    }
+  }
+
+  function renderWalkthroughPanel(sess) {
+    renderWalkthroughStepperInto(document.getElementById("walkthroughPanel"), sess, "");
+  }
+
+  function renderWalkthroughTab(sess) {
+    const wt = (sess && (sess.walkthrough || sess.walkthrough_trace)) || {};
+    const steps = wt.steps || [];
+    const buckets = (sess && sess.code_map && sess.code_map.conceptual_buckets) || [];
+    const badgeEl = document.getElementById("badgeWalkthroughCount");
+    if (badgeEl) badgeEl.textContent = steps.length + " steps";
+    const sumBadge = document.getElementById("wtAllStepsSummaryBadge");
+    if (sumBadge) sumBadge.textContent = steps.length + " sections";
+
+    renderWalkthroughStepperInto(document.getElementById("walkthroughTabMount"), sess, "Tab");
+
+    const curStep = steps[currentWalkthroughStepIdx] || steps[0] || {};
+    const curBlock = buckets.find(b => b.id === (curStep.block_id || selectedDrillBlockId)) || buckets[0] || null;
+    const progHost = document.getElementById("wtTabProgressiveBox");
+    if (progHost) {
+      progHost.innerHTML = curBlock ? buildProgressiveExpansionHtml(curBlock, currentProgLevel) : "";
+    }
+    const betaHost = document.getElementById("wtTabBetaReaderBox");
+    if (betaHost) {
+      renderBetaReaderPanelInto(
+        betaHost,
+        (curBlock && curBlock.beta_reader_panel) || (sess && sess.beta_reader_panel) || null,
+        "5-Seat Beta-Reader Audit — " + ((curBlock && (curBlock.title || curBlock.id)) || "Walkthrough Section")
+      );
+    }
+
+    const tbody = document.getElementById("wtAllStepsTableBody");
+    if (tbody) {
+      tbody.innerHTML = steps.map((s, idx) => {
+        const v = String(s.accuracy_verdict || "ACCURATE");
+        const vCls = v === "ACCURATE" ? "badge-ok" : (v === "MISMATCH" ? "badge-warn" : "badge-core");
+        const activeRow = idx === currentWalkthroughStepIdx;
+        return `
+          <tr style="${activeRow ? 'background:rgba(56,189,248,0.12)' : ''}">
+            <td style="font-family:var(--mono);font-weight:700;color:var(--cyan)">Step ${idx + 1}</td>
+            <td>
+              <div style="font-weight:700;color:#fff;cursor:pointer" data-wt-jump="${idx}">${esc(s.title || s.block_id)}</div>
+              <div style="font-family:var(--mono);font-size:10.5px;color:var(--text-dim)">${esc(s.module || "")} (${esc(s.lines || "")}L)</div>
+            </td>
+            <td><span class="badge ${s.stage === 'compute' ? 'badge-core' : 'badge-scaf'}">${esc((s.stage || "compute").toUpperCase())}</span></td>
+            <td style="font-family:var(--mono);font-size:11px;color:var(--cyan)">${esc(s.entrypoint_signature || "")}</td>
+            <td><span class="badge ${vCls}">${esc(v)}</span></td>
+            <td>
+              <button type="button" class="btn ${activeRow ? 'btn-primary' : ''}" data-wt-jump="${idx}" style="padding:3px 9px;font-size:11px">
+                ${activeRow ? '● Viewing' : '▶ Step Here'}
+              </button>
+            </td>
+          </tr>`;
+      }).join("");
+      tbody.querySelectorAll("[data-wt-jump]").forEach(el => {
+        el.addEventListener("click", () => {
+          currentWalkthroughStepIdx = Number(el.getAttribute("data-wt-jump") || 0);
+          const stepObj = steps[currentWalkthroughStepIdx];
+          if (stepObj && stepObj.block_id) selectedDrillBlockId = stepObj.block_id;
+          renderWalkthroughTab(sess);
+          renderValidateTab(sess);
+        });
+      });
+    }
+  }
+
+  async function triggerWalkthroughCode(blockId, btn) {
+    switchTab("walkthrough");
+    const targetBlockId = blockId || selectedDrillBlockId || "";
+    const res = await postAnvil({ action: "walkthrough", block_id: targetBlockId }, btn);
+    if (res && res.session && res.session.walkthrough) {
+      const steps = res.session.walkthrough.steps || [];
+      if (targetBlockId) {
+        const idx = steps.findIndex(s => s.block_id === targetBlockId);
+        if (idx >= 0) currentWalkthroughStepIdx = idx;
+      }
+      renderWalkthroughTab(res.session);
+      renderValidateTab(res.session);
+      const wtEl = document.getElementById("walkthroughTabMount");
+      if (wtEl && typeof wtEl.scrollIntoView === "function") {
+        wtEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }
 
   function apiUrl(verb) {
     const q = new URLSearchParams();
@@ -1912,6 +2425,7 @@
     renderCandidateChips("codeCandidateChips", swCands, "codeTargetInput");
     renderCandidateChips("paperCodeCandidateChips", swCands, "paperCodeTargetInput");
     renderCandidateChips("paperCandidateChips", paperCands, "paperSourceInput");
+    renderCandidateChips("walkthroughCandidateChips", swCands, "walkthroughCodeTargetInput");
 
     const isActive = Boolean(currentState.active && currentState.session);
     document.getElementById("launcherView").hidden = isActive;
@@ -1945,6 +2459,7 @@
     }
 
     renderMapTab(sess);
+    renderWalkthroughTab(sess);
     renderValidateTab(sess);
     renderRemapTab(sess);
     renderPaperTab(sess);
@@ -2113,6 +2628,13 @@
       { val: verifiedBlocks + " / " + buckets.length, lab: "Empirically Locked Buckets" }
     ].map(m => `<div class="metric-card"><div class="m-val">${esc(m.val)}</div><div class="m-lab">${esc(m.lab)}</div></div>`).join("");
 
+    syncProgLevelButtons();
+    renderBetaReaderPanelInto(
+      document.getElementById("betaReaderPanelStrip"),
+      sess.beta_reader_panel || codeMap.beta_reader_panel || null,
+      "Anvil v2 · 5-Seat Software Beta-Reader Panel (Correctness · Performance · Security · Maintainability · Architecture)"
+    );
+
     // Toggle Conceptual vs Process View
     document.getElementById("conceptualView").hidden = (currentMapSubView !== "conceptual");
     document.getElementById("processView").hidden = (currentMapSubView !== "process");
@@ -2170,6 +2692,8 @@
             <span>${esc(aiSummaryText)}</span>
           </div>` : "";
 
+        const progHtml = buildProgressiveExpansionHtml(b, currentProgLevel);
+
         return `
           <div class="bucket-card ${b.validated ? 'validated' : ''}" data-open-block="${esc(b.id)}">
             <div class="bucket-head">
@@ -2182,6 +2706,7 @@
             </div>
             ${memberChipsHtml}
             <div class="bucket-desc">${esc(b.validated_description || b.summary || "")}</div>
+            ${progHtml}
             <div class="bucket-fns">
               ${fnRows}
               ${moreCount > 0 ? `<div style="font-size:10.5px;color:var(--amber);font-family:var(--mono);padding-left:4px">+ ${moreCount} more functions across ${memberFiles.length} module(s) (click card to drill in)</div>` : ""}
@@ -2339,6 +2864,22 @@
     const stBadge = document.getElementById("drillBlockStatusBadge");
     stBadge.className = "badge " + (verified ? "badge-ok" : "badge-warn");
     stBadge.textContent = verified ? "✓ VALIDATED & LOCKED IN ANVIL REPORT" : "⏳ UNVALIDATED CLAIM — READY FOR PROBE";
+
+    syncProgLevelButtons();
+    renderWalkthroughPanel(sess);
+    const drillProgEl = document.getElementById("drillProgressiveBox");
+    if (drillProgEl) {
+      drillProgEl.innerHTML = buildProgressiveExpansionHtml(block, currentProgLevel);
+    }
+    const drillBetaEl = document.getElementById("drillBetaReaderBox");
+    if (drillBetaEl) {
+      drillBetaEl.className = "beta-reader-strip";
+      renderBetaReaderPanelInto(
+        drillBetaEl,
+        block.beta_reader_panel || sess.beta_reader_panel || null,
+        `5-Seat Beta-Reader Audit — ${block.title || block.id}`
+      );
+    }
 
     // 1. Inner Process Map
     const fns = block.functions || [];
@@ -3140,6 +3681,59 @@
     });
   });
 
+  document.querySelectorAll("[data-prog-level]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentProgLevel = Number(btn.getAttribute("data-prog-level") || 1);
+      syncProgLevelButtons();
+      if (currentState && currentState.session) {
+        renderMapTab(currentState.session);
+        renderWalkthroughTab(currentState.session);
+        renderValidateTab(currentState.session);
+      }
+    });
+  });
+
+  const btnWtTop = document.getElementById("btnWalkthroughCode");
+  if (btnWtTop) {
+    btnWtTop.addEventListener("click", function() {
+      triggerWalkthroughCode(selectedDrillBlockId, this);
+    });
+  }
+
+  const btnWtDrill = document.getElementById("btnDrillWalkthroughCode");
+  if (btnWtDrill) {
+    btnWtDrill.addEventListener("click", function() {
+      triggerWalkthroughCode(selectedDrillBlockId, this);
+    });
+  }
+
+  const btnWtMap = document.getElementById("btnMapWalkthroughCode");
+  if (btnWtMap) {
+    btnWtMap.addEventListener("click", function() {
+      triggerWalkthroughCode(selectedDrillBlockId, this);
+    });
+  }
+
+  const btnWtQuick = document.getElementById("btnQuickWalkthrough");
+  if (btnWtQuick) {
+    btnWtQuick.addEventListener("click", function() {
+      triggerWalkthroughCode(selectedDrillBlockId, this);
+    });
+  }
+
+  const btnWtOpenDrill = document.getElementById("btnWtOpenDrill");
+  if (btnWtOpenDrill) {
+    btnWtOpenDrill.addEventListener("click", () => {
+      openBlockDrillDown(selectedDrillBlockId);
+    });
+  }
+
+  window.addEventListener("message", (ev) => {
+    if (ev && ev.origin === window.location.origin && ev.data && ev.data.type === "anvil-open-walkthrough") {
+      triggerWalkthroughCode(selectedDrillBlockId, null);
+    }
+  });
+
   document.getElementById("btnBackToMap").addEventListener("click", () => {
     currentMapSubView = "process";
     if (currentState && currentState.session) renderMapTab(currentState.session);
@@ -3212,6 +3806,18 @@
     const cmp = document.getElementById("compareTargetInput").value.trim();
     postAnvil({ action: "start_code", mode: "code", software_target: sw, compare_target: cmp }, this);
   });
+
+  const btnStartWt = document.getElementById("btnStartWalkthrough");
+  if (btnStartWt) {
+    btnStartWt.addEventListener("click", async function() {
+      const sw = document.getElementById("walkthroughCodeTargetInput").value.trim() || ".";
+      const blk = document.getElementById("walkthroughBlockFilterInput").value.trim();
+      const res = await postAnvil({ action: "start_code", mode: "code", software_target: sw }, this);
+      if (res && res.active) {
+        await triggerWalkthroughCode(blk, this);
+      }
+    });
+  }
 
   document.getElementById("btnStartPaper").addEventListener("click", function() {
     const sw = document.getElementById("paperCodeTargetInput").value.trim() || ".";

@@ -107,6 +107,10 @@ def _resolve_skills_src(skills_src) -> Path:
     env = os.environ.get("ANCHOR_BUNDLED_SKILLS_DIR")
     if env:
         return Path(env)
+    if _DEFAULT_BUNDLED_SKILLS.is_dir():
+        return _DEFAULT_BUNDLED_SKILLS
+    if (REPO_ROOT / "skills").is_dir():
+        return REPO_ROOT / "skills"
     return _DEFAULT_BUNDLED_SKILLS
 
 

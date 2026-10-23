@@ -244,7 +244,7 @@ class CockpitStaticTest(unittest.TestCase):
         for needle in (
                 "if_match: ifMatch || undefined",
                 'choice === "replace" ? result.version : undefined',
-                "file.size > 30000000",
+                "file.size > 250000000",
                 "let uploadQueue = Promise.resolve()",
                 "uploadQueue = uploadQueue.then(() => uploadOne(file))",
                 "failed (connection or read error)"):
@@ -255,7 +255,7 @@ class CockpitStaticTest(unittest.TestCase):
         guard = source.index('urlparse(self.path).path == "/api/steward/upload"')
         body_read = source.index("self.rfile.read(content_len)", guard)
         self.assertLess(guard, body_read)
-        self.assertIn("content_len > 41_000_000", source[guard:body_read])
+        self.assertIn("content_len > 345_000_000", source[guard:body_read])
 
     def test_github_in_header(self):
         self.assertIn("data-github", self.html)
