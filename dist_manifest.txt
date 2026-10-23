@@ -517,6 +517,7 @@ cockpit_baton_and_tiers.py
 foundry_federation.py
 mothership_collab.py
 website_portal.py
+onboard_wizard.py
 
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml

@@ -966,6 +966,42 @@ def _is_campaign_dir(folder):
         return False
 
 
+def _personalize_prompt_for_user(prompt_text: str, user_profile: dict | None = None) -> str:
+    """Personalize steward prompt text for the active human user profile so non-John users (e.g. Merrill) are addressed by their own name and pseudonym."""
+    explicit = user_profile is not None
+    if user_profile is None:
+        try:
+            import onboard_wizard as _ow
+            user_profile = _ow.get_active_user_profile()
+        except Exception:
+            user_profile = {"display_name": "John", "pseudonym": "", "role": "Owner", "configured": False}
+    if not isinstance(user_profile, dict):
+        return prompt_text
+    display_name = str(user_profile.get("display_name") or "").strip() or "John"
+    pseudonym = str(user_profile.get("pseudonym") or "").strip()
+    role = str(user_profile.get("role") or "Owner").strip() or "Owner"
+    configured = bool(user_profile.get("configured"))
+    if not explicit and (not configured or display_name.lower() == "john"):
+        return prompt_text
+    out = str(prompt_text or "")
+    if display_name.lower() != "john":
+        out = re.sub(r"\bJohn's\b", f"{display_name}'s", out)
+        out = re.sub(r"\bJohn\b", display_name, out)
+    if display_name.lower() != "john" or explicit:
+        footer = (
+            f"\n[ACTIVE HUMAN USER PROFILE]\n"
+            f"- The human user you are speaking with is: {display_name}"
+            + (f' (Steward Pseudonym / Callsign: "{pseudonym}")' if pseudonym else "")
+            + f"\n- Role: {role}\n"
+            f"- Always address the user as {display_name}"
+            + (f" (or {pseudonym} when in character)" if pseudonym else "")
+            + f". Never call them John unless their name is John.\n"
+        )
+        if "[ACTIVE HUMAN USER PROFILE]" not in out:
+            out = out + footer
+    return out
+
+
 def campaign_mode_name(steward):
     """The Campaign page's mode name for a persona label (John, 2026-10-03): Aladdin the Star Chart, Jarvis the
     Chart Room, Ecgberht the Beacon; "the Campaign" when the catalog cannot be read."""
@@ -1966,6 +2002,8 @@ class Engine:
             else:
                 self._emit({"t": "sys", "text": "steward awake - standing up (reading the campaign record)"})
                 initial_prompt = STAND_UP
+        if initial_prompt is not None:
+            initial_prompt = _personalize_prompt_for_user(initial_prompt)
         if send_initial and initial_prompt is not None and not self._send_locked(initial_prompt, origin="control"):
             self.broken = True
             self._emit({"t": "sys", "text":
@@ -2989,10 +3027,12 @@ class Engine:
         # reaches every steward and job with no Anchor change
         from steward_cockpit import foundry_tools
         if self.code_job:
-            return CODER_CONTRACT + foundry_tools.block(steward=False)
-        if self.effort_on():
-            return EFFORT_DUTY + CONTRACT + EFFORT_RULES + foundry_tools.block()
-        return SMALL_DUTY + CONTRACT + foundry_tools.block()
+            raw = CODER_CONTRACT + foundry_tools.block(steward=False)
+        elif self.effort_on():
+            raw = EFFORT_DUTY + CONTRACT + EFFORT_RULES + foundry_tools.block()
+        else:
+            raw = SMALL_DUTY + CONTRACT + foundry_tools.block()
+        return _personalize_prompt_for_user(raw)
 
     def _fire_turn_done(self, result):
         cb, self.on_turn_done = self.on_turn_done, None

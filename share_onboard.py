@@ -637,7 +637,9 @@ def probe_all_seats(
         f for f in SEAT_FAMILIES if seats[f].get("ok")
     ]
     any_failed = any(
-        seats[f].get("path_present") and not seats[f].get("session_visible")
+        seats[f].get("path_present")
+        and not seats[f].get("session_visible")
+        and seats[f].get("status") != "live-probes-disabled"
         for f in SEAT_FAMILIES
     )
     return {
@@ -2937,7 +2939,8 @@ def run_share_onboard(
             force_status="not-ready",
             notes=(
                 "silent/non-interactive path; interactive dialogue required "
-                "(python -m share_onboard); feedback_opt_in=%s" % opted
+                "(python -m share_onboard); " + ready.LIVE_PROBES_SKIPPED_NOTE
+                + "; feedback_opt_in=%s" % opted
             ),
         )
     else:

@@ -47,11 +47,8 @@ GENERATION_TAG = "steward-chamber W12 (Phase-4 Close)"
 
 
 def _ecgberht_root() -> Path:
-    import os
-    env = os.environ.get("ECGBERHT_ROOT")
-    if env:
-        return Path(env)
-    return ANCHOR_ROOT.parent / "Ecgberht"
+    import paths as _paths
+    return _paths.ecgberht_root()
 
 
 # ═════════════════════════════════════════════════════════════════════════════

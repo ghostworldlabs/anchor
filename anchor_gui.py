@@ -12857,13 +12857,10 @@ def handle_boneyard(handler, path, body):
 
 
 def _ecgberht_root():
-    """Resolve the Ecgberht engine root: ECGBERHT_ROOT env override, else the
-    sibling checkout next to this Anchor tree (Ecgberht beside Anchor).
+    """Resolve the Ecgberht engine root via paths.ecgberht_root() (including
+    <parent>/skills/ecgberht, <SKILLS_ROOT>/ecgberht, and bundled fallbacks).
     Never a host-absolute literal in call sites."""
-    env = os.environ.get("ECGBERHT_ROOT", "").strip()
-    if env:
-        return Path(env)
-    return Path(__file__).resolve().parent.parent / "Ecgberht"
+    return _paths.ecgberht_root()
 
 
 def _presence_record_dir(pid):
@@ -12908,12 +12905,14 @@ def _ecgberht_bridge(args, timeout=20):
     """Spawn the Ecgberht seal-chamber bridge (Node, read-only) and parse its
     one-line JSON. Same closed verb bodies as the ecgberht CLI (parity)."""
     import subprocess
-    root = _ecgberht_root()
+    root, checked_paths = _paths.resolve_ecgberht_root()
     bridge = root / "scripts" / "seal-chamber-bridge.mjs"
     if not bridge.exists():
         return {"ok": False, "error": "ecgberht_engine_missing",
+                "checked_paths": checked_paths,
                 "message": "seal-chamber bridge not found (set ECGBERHT_ROOT "
-                           "or keep Ecgberht checkout beside Anchor)"}
+                           "or keep Ecgberht checkout beside Anchor); checked: "
+                           + ", ".join(checked_paths)}
     try:
         res = subprocess.run(
             ["node", str(bridge)] + list(args),
@@ -23324,6 +23323,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
             elif _path_only == "/api/website/catalog":
                 import website_portal as _wp
                 self._send_json(_wp.get_portal_state(), 200)
+            elif _path_only in ("/onboard-wizard", "/onboard"):
+                import onboard_wizard as _ow
+                q = parse_qs(urlparse(self.path).query)
+                is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+                self._send_html(_ow.render_onboard_wizard_html(sandbox=is_sb))
+            elif _path_only == "/api/onboard-wizard/state":
+                import onboard_wizard as _ow
+                q = parse_qs(urlparse(self.path).query)
+                is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+                self._send_json(_ow.get_wizard_full_state(sandbox=is_sb), 200)
             elif _path_only == "/api/foundry/page":
                 self._send_json(_fpage.catalog())
             elif _path_only == "/api/foundry/skill":
@@ -24013,6 +24022,15 @@ class AnchorHandler(BaseHTTPRequestHandler):
             _b = body if isinstance(body, dict) else {}
             _out = _wp.submit_portal_feedback(_b)
             self._send_json(_out, int(_out.get("code") or (200 if _out.get("ok") else 400)))
+            return
+        if _path_only == "/api/onboard-wizard/action":
+            import onboard_wizard as _ow
+            _b = body if isinstance(body, dict) else {}
+            q = parse_qs(urlparse(self.path).query)
+            is_sb = bool(_b.get("sandbox")) or str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+            _act = str(_b.get("action") or "").strip()
+            _out = _ow.dispatch_wizard_action(_act, _b, sandbox=is_sb)
+            self._send_json(_out, 200 if _out.get("ok") else 400)
             return
         _post_route = _routes.match("POST", _path_only)
         _post_open = (_post_route is not None

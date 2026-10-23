@@ -22,16 +22,8 @@ from .campaign_seeds import seed_by_id
 
 
 def _ecgberht_root() -> Path:
-    env = os.environ.get("ECGBERHT_DIR")
-    if env and env.strip():
-        return Path(env.strip()).resolve()
-    sibling = Path(__file__).resolve().parents[2] / "Ecgberht"
-    bundled = Path(__file__).resolve().parents[1] / "vendor" / "bundled-skills" / "ecgberht"
-    if sibling.exists():
-        return sibling
-    if bundled.exists():
-        return bundled
-    return sibling
+    import paths as _paths
+    return _paths.ecgberht_root()
 
 
 ECG = _ecgberht_root() / "bin" / "ecgberht.mjs"
