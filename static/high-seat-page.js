@@ -237,7 +237,26 @@
   });
   // the Candidates: a search and a sort (his word, 2026-10-02: by date created, last date worked on, the steward's relevance)
   var candApply = function () {};
+
+  function syncCompactActs() {
+    $$('.tile').forEach(function (tile) {
+      var nm = tile.querySelector('.t-name .t-nm') || tile.querySelector('.t-name');
+      var eff = tile.querySelector('.t-name .t-eff');
+      if (!nm) return;
+      tile.classList.remove('compact-acts');
+      var nmTrunc = (nm.scrollWidth > nm.clientWidth + 1);
+      var effTrunc = eff ? (eff.scrollWidth > eff.clientWidth + 1) : false;
+      if (nmTrunc || effTrunc || tile.clientWidth < 360) {
+        tile.classList.add('compact-acts');
+      }
+    });
+  }
+  window.addEventListener('resize', syncCompactActs);
+  setTimeout(syncCompactActs, 0);
+  setTimeout(syncCompactActs, 150);
+
   function bindCands() {   // at load, and when the tile is placed in the page for the first time (W4)
+    syncCompactActs();
     var q = document.getElementById('candSearch'), srt = document.getElementById('candSort'), note = document.getElementById('candNote'), fltWrap = document.getElementById('candFilter');
     if (!q || !srt || q._bound) return; q._bound = true;
     var kflt = 'all';
@@ -277,6 +296,7 @@
       });
     }
     candApply = apply;
+    syncCompactActs();
     if (q.value || srt.value !== 'score' || kflt !== 'all') apply();
     // the Candidates tile stays open across a reload (2026-10-02)
     var t = document.getElementById('candsTile'); if (!t) return;
