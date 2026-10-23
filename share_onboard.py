@@ -2207,15 +2207,21 @@ def _landed_skill_names(skill_report, skills_home=None) -> list:
             name = item.get("name") if isinstance(item, dict) else item
             if name and name not in landed:
                 landed.append(name)
-    if not landed and skills_home is not None:
+    if skills_home is not None:
         root = Path(skills_home)
         if root.is_dir():
+            refused = {
+                (item.get("name") if isinstance(item, dict) else item)
+                for item in ((skill_report or {}).get("refused") or [])
+            }
             try:
                 for child in sorted(root.iterdir(), key=lambda p: p.name.lower()):
                     if (
                         child.is_dir()
                         and not child.name.startswith(".")
                         and child.name not in landed
+                        and child.name not in refused
+                        and (child / "SKILL.md").is_file()
                     ):
                         landed.append(child.name)
             except OSError:

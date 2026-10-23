@@ -449,7 +449,7 @@ def export_env_overrides() -> dict:
 
 
 def steward_profile(settings: dict | None = None) -> dict:
-    """The ACTIVE steward persona: {key, label, desc, high_seat, seal}.
+    """The ACTIVE steward persona: {key, label, name, desc, high_seat, seal}.
 
     Total — an unknown/corrupt stored value falls back to the Ecgberht
     default, so callers can always render an icon pair.
@@ -460,4 +460,5 @@ def steward_profile(settings: dict | None = None) -> dict:
         key = DEFAULTS["steward_type"]
     prof = dict(STEWARDS[key])
     prof["key"] = key
+    prof["name"] = prof["label"]
     return prof

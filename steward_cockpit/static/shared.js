@@ -5130,7 +5130,7 @@ const Proto = (() => {
       if (stick) pin(s, true);
     } else if (ev.t === "john") {
       closeCurrent();                    // the reply's blocks stay this turn's until turn_end (final review 10-10)
-      if (_skipNextJohnEcho && String(ev.text || "").trim() === String(_skipNextJohnEcho).trim()) { _skipNextJohnEcho = ""; } else { addBlock("john", opts.johnLabel || "JOHN", ev.text); }
+      if (_skipNextJohnEcho && String(ev.text || "").trim() === String(_skipNextJohnEcho).trim()) { _skipNextJohnEcho = ""; } else { addBlock("john", opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN"), ev.text); }
       tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();
     } else if (ev.t === "tool") {
@@ -6209,11 +6209,12 @@ const Proto = (() => {
     const pName = personaName();
     const pLabelEl = $("[data-persona-label]");
     if (pLabelEl) pLabelEl.textContent = pName;
+    document.querySelectorAll("[data-anvil-cockpit-name]").forEach(el => { el.textContent = pName; });
     const pAvatarEl = $("[data-persona-avatar]");
     if (pAvatarEl) {
       pAvatarEl.alt = pName;
-      pAvatarEl.src = /^jarvis$/i.test(pName) ? "/vendor/brand/aladdin-seal-owl.jpg"
-        : /^ecgberht|^echberht/i.test(pName) ? "/vendor/brand/aladdin-seal-dragon.jpg"
+      pAvatarEl.src = /^jarvis$/i.test(pName) ? "/vendor/brand/jarvis-seal-salver.jpg"
+        : /^ecgberht|^echberht/i.test(pName) ? "/vendor/brand/ecgberht-project-seal.jpg"
         : "/vendor/brand/aladdin-seal-lamp.jpg";
     }
     const cockpitName = !DIR && map.name === "Campaign" ? (window.STEWARD_MODE || (map.steward === "Aladdin" ? "Star Chart" : map.name)) : map.name;
@@ -6341,7 +6342,7 @@ const Proto = (() => {
     const j = await r.json();
     (j.turns || []).forEach(t => addBlock(
       t.role === "john" ? "john" : "steward",
-      t.role === "john" ? (opts.johnLabel || "JOHN") : (opts.stewardLabel || personaName().toUpperCase()),
+      t.role === "john" ? (opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN")) : (opts.stewardLabel || personaName().toUpperCase()),
       t.text, "hist", { turn_id: t.turn_id }));
     if (j.turns && j.turns.length) {
       addLine("divider", "—— live from here ——");
@@ -6918,7 +6919,7 @@ const Proto = (() => {
       if (later) text = "Grasscatch this (park it on the Strip with a reason, " +
                         "then carry on with the step in hand): " + later[2];
       const keep = ta.value;
-      ta.value = ""; grow(); _skipNextJohnEcho = text; const optimisticBlk = addBlock("john", opts.johnLabel || "JOHN", text); if (send) { send.disabled = true; send.textContent = "Sending…"; }
+      ta.value = ""; grow(); _skipNextJohnEcho = text; const optimisticBlk = addBlock("john", opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN"), text); if (send) { send.disabled = true; send.textContent = "Sending…"; }
       { const d = scrollEl(); if (d) { d._follow = true; pin(d, true); } }   // his own message brings him to the newest
       // Implicit Approval-on-Feedback (John, 2026-10-21): never pop up a nagging REVIEW CHECK card.
       // When John gives feedback in the dialogue, automatically clear Supplemental building-block items

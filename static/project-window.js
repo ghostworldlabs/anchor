@@ -6885,7 +6885,8 @@ function _ecgStewardMsg(convo, text, actions) {
 
 function _ecgJohnMsg(convo, text) {
   var msg = _ecgEl('div', 'ecg-msg john');
-  msg.appendChild(_ecgEl('div', 'who', 'John'));
+  var userLabel = (window.USER_DISPLAY_NAME && String(window.USER_DISPLAY_NAME).trim()) || (window.ANCHOR_BOOT && window.ANCHOR_BOOT.you) || 'John';
+  msg.appendChild(_ecgEl('div', 'who', userLabel));
   msg.appendChild(document.createTextNode(text));
   convo.appendChild(msg);
 }
@@ -8007,7 +8008,8 @@ function _ecgSliceSay(root) {
   if (!text) return;
   input.value = '';
   var name = _ecgSliceStewardName(root);
-  _ecgSliceMsg(root, 'msg john', 'John', text);
+  var userLabel = (window.USER_DISPLAY_NAME && String(window.USER_DISPLAY_NAME).trim()) || (window.ANCHOR_BOOT && window.ANCHOR_BOOT.you) || 'John';
+  _ecgSliceMsg(root, 'msg john', userLabel, text);
   _ECG_SLICE_TURNS.push({role: 'john', text: text});
   if (_ECG_SLICE_TURNS.length > 24) _ECG_SLICE_TURNS = _ECG_SLICE_TURNS.slice(-24);
   var thinking = _ecgSliceMsg(root, 'msg steward', name, 'Thinking… 0s');

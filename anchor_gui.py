@@ -8371,6 +8371,13 @@ def render_high_seat_page(logged_in=False) -> str:
         with _SlowWatch("the Cave of Wonders"):
             ctx = _high_seat_context()
             ctx["logged_in"] = bool(logged_in)
+            try:
+                import onboard_wizard as _ow
+                _uprof = _ow.get_active_user_profile()
+                if _uprof.get("configured") and _uprof.get("display_name"):
+                    ctx["you"] = str(_uprof["display_name"]).strip()
+            except Exception:
+                pass
             return _hsp.render_high_seat_html(ctx)
     except Exception as e:
         return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"

@@ -692,7 +692,8 @@
     var openHzBtn = $('#shTriage .chz-card.open'), openHzKey = openHzBtn ? openHzBtn.getAttribute('data-hz-toggle') : '';
     var calWasOpen = $('#cal') && $('#cal').classList.contains('open');
     var collabWasOpen = $('#caveCollabStrip') && $('#caveCollabStrip').classList.contains('open');
-    ['shTriage', 'thisWeekBoard', 'cal', 'caveCollabStrip', 'nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
+    ['shTriage', 'thisWeekBoard', 'cal', 'caveCollabStrip'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
+    ['nudgeSlot', 'seedCount', 'seedLbl', 'seedPanel', 'ptileCount', 'apGroups'].forEach(function (id) { var a = document.getElementById(id), b = doc.getElementById(id); if (a && b) morph(a, b); });
     if (openHzKey) {
       var nb = $('#shTriage .chz-card[data-hz-toggle="' + openHzKey + '"]'), nd = document.getElementById('hzDrawer-' + openHzKey);
       if (nb && nd) { nb.classList.add('open'); nb.setAttribute('aria-expanded', 'true'); nd.hidden = false; }

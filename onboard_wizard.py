@@ -423,8 +423,13 @@ def save_user_identity(
         try:
             import anchor_settings
             st = anchor_settings.read_settings_state()
-            rev = st.get("settings", {}).get("revision", 0) if st.get("valid") else 0
+            rev = st.get("settings", {}).get("settings_revision", 0) if st.get("valid") else 0
             anchor_settings.save_settings(steward_type=persona_key, expected_revision=rev)
+        except Exception:
+            pass
+        try:
+            from steward_cockpit import steward_routes as _sr
+            _sr.rename_stewards(persona_meta["label"])
         except Exception:
             pass
 
@@ -765,6 +770,25 @@ def configure_service_connection(
     }
     services[fam] = entry
     save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    if not sandbox and base_dir is None and fam == "claude":
+        try:
+            import anchor_settings
+            raw_m = entry["orchestrator_model"].lower()
+            c_alias = (
+                "sonnet" if "sonnet" in raw_m
+                else "opus" if "opus" in raw_m
+                else "haiku" if "haiku" in raw_m
+                else "best" if raw_m == "best"
+                else ("sonnet" if t_level == "one_tier_down" else "opus")
+            )
+            from copy import deepcopy
+            st = anchor_settings.read_settings_state()
+            rev = st.get("settings", {}).get("settings_revision", 0) if st.get("valid") else 0
+            pprefs = deepcopy((st.get("settings") or {}).get("provider_preferences") or {})
+            pprefs.setdefault("quality", {})["claude"] = {"model": c_alias, "effort": "max" if t_level == "frontier" else "high"}
+            anchor_settings.save_settings(provider_preferences=pprefs, expected_revision=rev)
+        except Exception:
+            pass
     return {"ok": True, "service": entry}
 
 

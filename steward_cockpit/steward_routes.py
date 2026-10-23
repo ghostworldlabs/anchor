@@ -452,10 +452,14 @@ def _persona_name():
     """The active companion persona name (Aladdin / Jarvis / Ecgberht — never 'Steward')."""
     try:
         import anchor_settings as _aset
-        name = str(_aset.steward_profile().get("name") or "Aladdin").strip()
-        return "Aladdin" if not name or name.lower() == "steward" else name
+        prof = _aset.steward_profile()
+        name = str(prof.get("name") or prof.get("label") or CONFIG.get("steward") or "Aladdin").strip()
+        resolved = "Aladdin" if not name or name.lower() == "steward" else name
+        if _aset.settings_path().is_file() and CONFIG.get("steward") != resolved:
+            rename_stewards(resolved)
+        return resolved
     except Exception:
-        return "Aladdin"
+        return str(CONFIG.get("steward") or "Aladdin")
 
 
 def serve_page_doc(page, pid=""):
@@ -477,9 +481,19 @@ def serve_page_doc(page, pid=""):
             lambda m: m.group(1) + "?v=" + build + '"',
             html,
         )
+    user_display_name = "John"
+    try:
+        import onboard_wizard as _ow
+        _uprof = _ow.get_active_user_profile()
+        if _uprof.get("configured") and _uprof.get("display_name"):
+            user_display_name = str(_uprof["display_name"]).strip()
+    except Exception:
+        pass
     shim = (_CLIENT_SHIM % (json.dumps(pid),
                             json.dumps(build), json.dumps(_mode_name()))) + (
-        "<script>window.STEWARD_NAME=%s;</script>" % json.dumps(_persona_name())
+        "<script>window.STEWARD_NAME=%s;window.USER_DISPLAY_NAME=%s;</script>" % (
+            json.dumps(_persona_name()), json.dumps(user_display_name)
+        )
     )
     nb_src = '/steward-static/notebook-actions.js' + (("?v=" + build) if build else "")
     return html.replace("<script", shim + '<script src="' + nb_src + '"></script><script', 1)
@@ -796,9 +810,10 @@ def _efforts(cdir):
                     "alive": bool(eng and eng.alive()),
                     "busy": bool(eng and eng.busy)})
     out.sort(key=lambda x: x["touched"], reverse=True)
-    livery = campaign.STEWARD_LIVERY.get(CONFIG["steward"], {})
+    active_steward = _persona_name()
+    livery = campaign.STEWARD_LIVERY.get(active_steward, {})
     est = campaign.STEWARD_LIVERY  # noqa
-    return {"project": Path(cdir).name, "steward": CONFIG["steward"],
+    return {"project": Path(cdir).name, "steward": active_steward,
             "seal_icon": livery.get("seal_icon", ""),
             "seal_name": livery.get("seal_name", "Seal"),
             "seats": campaign.read_seats(),
@@ -2074,7 +2089,7 @@ def handle_get(cdir, verb, qs):
                     slim_steps.append(st_item)
             m["steps"] = slim_steps
         m["stamp"] = campaign.map_stamp(cdir)
-        m["steward"] = CONFIG["steward"]
+        m["steward"] = _persona_name()
         return m, 200
     if verb == "history":
         if qs.get("goal"):

@@ -1684,6 +1684,63 @@ class Engine:
         self._journal_routing(action="halt", message="No capable selected cockpit provider remains")
         raise RuntimeError("No capable selected cockpit provider remains; check subscription health")
 
+    _CLAUDE_ENTITLEMENT_LADDER = {"best": "opus", "opus": "sonnet"}
+
+    def _try_claude_credit_gate_fallback(self, err_text, ev=None):
+        """When Claude rejects a turn because '--model best' (Fable 5.1) or Opus requires
+        extra usage credits, automatically step down to the next entitled Claude model
+        ('best' -> 'opus' -> 'sonnet'), persist the preference, and replay the turn."""
+        if str(self.cli or "").lower() != "claude":
+            return False
+        if not re.search(
+            r"requires usage credits|switch to another model|fable[\s\w.]*credits|not entitled to model",
+            str(err_text or ""),
+            re.I,
+        ):
+            return False
+        cur_model = str((self.model_selection or {}).get("model") or "best").strip().lower()
+        next_model = self._CLAUDE_ENTITLEMENT_LADDER.get(cur_model)
+        if not next_model:
+            return False
+        effort = str((self.model_selection or {}).get("effort") or "max").strip() or "max"
+        self.provider_quality = {"model": next_model, "effort": effort}
+        try:
+            import anchor_settings
+            from copy import deepcopy
+            st = anchor_settings.read_settings_state()
+            rev = st.get("settings", {}).get("settings_revision", 0) if st.get("valid") else 0
+            pprefs = deepcopy((st.get("settings") or {}).get("provider_preferences") or {})
+            pprefs.setdefault("quality", {})["claude"] = {"model": next_model, "effort": effort}
+            anchor_settings.save_settings(provider_preferences=pprefs, expected_revision=rev)
+        except Exception:
+            pass
+        new_sel = dict(self.model_selection or {"family": "claude", "cli": "claude", "effort": effort})
+        new_sel["model"] = next_model
+        new_sel["cli_args"] = ["--model", next_model, "--effort", effort]
+        self.model_selection = new_sel
+        _update_state(self.skey(), {"model_policy": self.model_selection})
+        self._emit({
+            "t": "sys",
+            "text": (
+                f"Claude model '{cur_model}' requires extra usage credits; "
+                f"automatically switching Claude to '{next_model}' and retrying turn."
+            ),
+        })
+        self._journal_receipt(
+            "claude_entitlement_fallback",
+            f"claude model '{cur_model}' -> '{next_model}' ({err_text})",
+        )
+        if self.fake or os.environ.get("STEWARD_COCKPIT_FAKE"):
+            return True
+        proc = self.proc
+        self.proc = None
+        if proc is not None and proc.poll() is None:
+            self._kill_tree(proc)
+        self.session_id = None
+        seed = self._last_submitted or ""
+        ok, _ = self._wake_locked(fresh=True, seed=seed if seed else None)
+        return bool(ok)
+
     def _rollover_locked(self, target, settings, text):
         """Idle-boundary handoff; the next message is never sent to the old seat."""
         import model_policy
@@ -3600,6 +3657,26 @@ class Engine:
                 env[_key] = _account_env[_key]
             else:
                 env.pop(_key, None)   # R6-A: another family's home never rides into this child
+        # Forward user-configured ANTHROPIC_DEFAULT_*_MODEL overrides from ~/.claude/settings.json
+        # even when fenced Claude runs with --setting-sources project (Merrill report 2026-10-22).
+        if str(self.cli or "").lower() == "claude":
+            try:
+                _cdir = Path(env.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+                _cset_file = _cdir / "settings.json"
+                if _cset_file.is_file():
+                    _cset_doc = json.loads(_cset_file.read_text(encoding="utf-8"))
+                    _cset_env = (_cset_doc.get("env") or {}) if isinstance(_cset_doc, dict) else {}
+                    for _mkey in (
+                        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+                        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    ):
+                        _mval = _cset_env.get(_mkey) or os.environ.get(_mkey)
+                        if isinstance(_mval, str) and _mval.strip():
+                            env[_mkey] = _mval.strip()
+            except Exception:
+                pass
         # A1 (delegated-work PROPOSAL v0.3; Grok code R1 F1-F3, R2 N1-N2): every git ANY agent session runs - steward,
         # code job or workbench terminal - goes through gitguard, which refuses tree-rewriting verbs outside a code
         # job's own worktree BEFORE git runs: a real git.exe (found for `git` and `git.exe` alike), a `git` script and
@@ -4019,6 +4096,8 @@ class Engine:
                     # Error turns never trigger answer nudges or auto-drive on
                     # the exhausted provider. Only a confirmed unsubmitted/
                     # rejected turn can replay the original message.
+                    if self._try_claude_credit_gate_fallback(err_text, ev):
+                        return
                     if limit and not (self.fake or os.environ.get("STEWARD_COCKPIT_FAKE")):
                         try:
                             import anchor_settings

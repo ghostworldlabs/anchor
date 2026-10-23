@@ -419,3 +419,138 @@ def test_http_routes_onboard_wizard_and_api(tmp_path: Path, monkeypatch: pytest.
     assert '"/onboard-wizard"' in gui_src
     assert '"/api/onboard-wizard/state"' in gui_src
     assert '"/api/onboard-wizard/action"' in gui_src
+
+
+# ==============================================================================
+# 10. Steward Persona Consistency (Cave of Wonders <-> AI Cockpit)
+# ==============================================================================
+
+def test_steward_persona_consistency_cave_to_cockpit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the user selects Jarvis, Ecgberht, or Aladdin, anchor_settings.steward_profile(),
+    steward_routes._persona_name(), serve_page_doc(window.STEWARD_NAME), and CONFIG['steward']
+    all stay 100% consistent across Cave of Wonders and AI Cockpit."""
+    import anchor_settings as aset
+    import onboard_wizard
+    import paths
+    from steward_cockpit import steward_routes as sr
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(aset, "settings_path", lambda: tmp_path / "settings.json")
+
+    for key, expected_label in (("jarvis", "Jarvis"), ("ecgberht", "Ecgberht"), ("aladdin", "Aladdin")):
+        onboard_wizard.save_user_identity(
+            display_name="Merrill",
+            pseudonym="Aladdin",
+            steward_persona=expected_label,
+            sandbox=False,
+        )
+        prof = aset.steward_profile()
+        assert prof["label"] == expected_label
+        assert prof["name"] == expected_label
+        assert sr._persona_name() == expected_label
+        assert sr.CONFIG["steward"] == expected_label
+
+        doc_html = sr.serve_page_doc("cockpit", pid="test-proj")
+        assert f'window.STEWARD_NAME="{expected_label}"' in doc_html
+        assert 'window.USER_DISPLAY_NAME="Merrill"' in doc_html
+
+
+# ==============================================================================
+# 11. Claude Model Selection, ~/.claude/settings.json Forwarding & Credit-Gate Fallback
+# ==============================================================================
+
+def test_claude_catalog_models_and_credit_gate_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify:
+    1) model_policy.normalize_catalog('claude', ...) exposes best, opus, sonnet, haiku
+       while keeping 'best' as rank 0 default;
+    2) steward_engine._spawn_env forwards ANTHROPIC_DEFAULT_FABLE_MODEL from CLAUDE_CONFIG_DIR/settings.json;
+    3) steward_engine._try_claude_credit_gate_fallback steps down 'best' -> 'opus' -> 'sonnet'
+       when 'Fable 5.1 requires usage credits' is returned."""
+    import anchor_settings as aset
+    import model_policy
+    import paths
+    from steward_cockpit import steward_engine as se
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(aset, "settings_path", lambda: tmp_path / "settings.json")
+
+    cat = model_policy.normalize_catalog("claude", {"efforts": ["low", "medium", "high", "max"]})
+    models = [row["model"] for row in cat]
+    assert models == ["best", "opus", "sonnet", "haiku"]
+    assert model_policy.select_model("claude", cat)["model"] == "best"
+
+    # Test ~/.claude/settings.json env forwarding in _spawn_env
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        json.dumps({"env": {"ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-sonnet-5-5"}}),
+        encoding="utf-8",
+    )
+    import provider_native
+    monkeypatch.setattr(
+        provider_native,
+        "account_env",
+        lambda conn=None: {"CLAUDE_CONFIG_DIR": str(claude_dir)},
+    )
+
+    cdir = tmp_path / "cockpit_test"
+    cdir.mkdir(parents=True)
+    eng = se.Engine(str(cdir), fake=True, steward="Jarvis")
+    eng.cli = "claude"
+    spawn_env = eng._spawn_env()
+    assert spawn_env.get("ANTHROPIC_DEFAULT_FABLE_MODEL") == "claude-sonnet-5-5"
+
+    # Test automatic credit-gate fallback: best -> opus -> sonnet
+    eng.model_selection = {"family": "claude", "cli": "claude", "model": "best", "effort": "max", "cli_args": ["--model", "best", "--effort", "max"]}
+    assert eng._try_claude_credit_gate_fallback("Fable 5.1 requires usage credits. Please switch to another model.") is True
+    assert eng.model_selection["model"] == "opus"
+    assert aset.read_settings_state()["settings"]["provider_preferences"]["quality"]["claude"]["model"] == "opus"
+
+    assert eng._try_claude_credit_gate_fallback("Opus requires usage credits.") is True
+    assert eng.model_selection["model"] == "sonnet"
+    assert aset.read_settings_state()["settings"]["provider_preferences"]["quality"]["claude"]["model"] == "sonnet"
+
+
+# ==============================================================================
+# 12. Dynamic User Display Name in Aegis Session & Full Portfolio Manifest
+# ==============================================================================
+
+def test_aegis_session_uses_configured_display_name_and_landed_skills_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify aegis_session uses the configured user's display name (e.g. 'MERRILL')
+    and share_onboard._landed_skill_names includes all valid skill directories in skills_home."""
+    import onboard_wizard
+    import paths
+    import share_onboard
+    from steward_cockpit import aegis_session
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    onboard_wizard.save_user_identity(
+        display_name="Merrill",
+        pseudonym="Aladdin",
+        steward_persona="Aladdin",
+        sandbox=False,
+        base_dir=tmp_path,
+    )
+
+    cdir = tmp_path / "proj_aegis"
+    cdir.mkdir(parents=True)
+    state = aegis_session.chat_in_aegis_session(cdir, "What is our security posture?")
+    turns = state["session"]["dialogue"]
+    user_turns = [t for t in turns if t.get("role") == "user"]
+    assert user_turns and user_turns[-1]["who"] == "MERRILL"
+
+    # Verify _landed_skill_names unions skill_report with existing valid skill dirs on disk
+    skills_home = tmp_path / "skills_root"
+    for sname in ("anvil", "aegis", "ecgberht", "foreman", "crucible"):
+        sdir = skills_home / sname
+        sdir.mkdir(parents=True)
+        (sdir / "SKILL.md").write_text(f"# {sname}\n", encoding="utf-8")
+
+    landed = share_onboard._landed_skill_names(
+        {"installed": [{"name": "anvil"}], "skipped": [], "refused": []},
+        skills_home=skills_home,
+    )
+    assert set(landed) == {"anvil", "aegis", "ecgberht", "foreman", "crucible"}
+
