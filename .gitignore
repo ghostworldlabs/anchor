@@ -195,4 +195,4 @@ test_tmp*/
 /.anchor/license_acceptances.json
 /.anchor/project_batons.json
 /.anchor/distilled_lessons.json
-
+static/downloads/*.zip
