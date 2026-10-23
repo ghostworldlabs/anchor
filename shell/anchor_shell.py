@@ -335,7 +335,7 @@ class HostApi:
                 connect.save_address(DATA, connect.LOCAL)
                 self._address = connect.LOCAL
                 self._html = ""
-                self._window.load_url(self._address + "/setup")
+                self._window.load_url(self._address + (os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup"))
                 return ""
             time.sleep(0.5)
         return result.get("message") or "Mother ship repository pulled. Run onboard.cmd to start Anchor."

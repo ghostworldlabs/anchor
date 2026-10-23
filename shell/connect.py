@@ -25,7 +25,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-LOCAL = "http://127.0.0.1:8777"
+LOCAL_PORT = int(os.environ.get("ANCHOR_SHELL_PORT") or (8787 if os.environ.get("ANCHOR_SHELL_TEST") else 8777))
+LOCAL = os.environ.get("ANCHOR_SHELL_LOCAL_URL") or ("http://127.0.0.1:%d" % LOCAL_PORT)
 EXAMPLE = "https://mother-ship.example"
 APP_PATH = "/static/app.html"
 DEFAULT_GITHUB_REPO = "https://github.com/johncliechty/ghostworldlabs-anchor.git"
@@ -419,7 +420,7 @@ def inspect_local_anchor_version(package_root=None, check_system_dirs=True, prob
 
     app_ok = bool(probe(LOCAL))
     if probe_fn is None and not app_ok:
-        is_running = bool(any_service_on_port(LOCAL, 8777))
+        is_running = bool(any_service_on_port(LOCAL, LOCAL_PORT))
     else:
         is_running = app_ok
     raw_running = read_ver(LOCAL) if is_running else ""
@@ -603,6 +604,9 @@ def ensure_local_service_running(package_root=None, check_system_dirs=False, pro
 
     env = dict(os.environ)
     env.setdefault("ANCHOR_WORKSPACE_ROOT", str(ws_home))
+    if LOCAL_PORT != 8777 or os.environ.get("ANCHOR_SHELL_TEST"):
+        env["ANCHOR_PORT"] = str(LOCAL_PORT)
+        env.setdefault("ANCHOR_DATA_DIR", str(Path(ws_home) / ".anchor"))
     tok_file = Path.home() / ".anchor" / ".anchor" / "onboard-token"
     try:
         if tok_file.is_file():
@@ -616,13 +620,14 @@ def ensure_local_service_running(package_root=None, check_system_dirs=False, pro
         run_kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
 
     launcher = root / "launch_anchor_dashboard.py"
-    try:
-        subprocess.run(
-            list(py_cmd["argv_prefix"]) + [str(launcher), "--no-browser", "--retries", "20"],
-            **run_kwargs,
-        )
-    except Exception:
-        pass
+    if LOCAL_PORT == 8777:
+        try:
+            subprocess.run(
+                list(py_cmd["argv_prefix"]) + [str(launcher), "--no-browser", "--retries", "20"],
+                **run_kwargs,
+            )
+        except Exception:
+            pass
 
     for _ in range(10):
         if probe(LOCAL):
@@ -642,7 +647,8 @@ def ensure_local_service_running(package_root=None, check_system_dirs=False, pro
         if os.name == "nt":
             popen_kwargs["creationflags"] = 0x00000008 | 0x08000000 | 0x00000200
         try:
-            subprocess.Popen(list(py_cmd["argv_prefix"]) + [str(gui), "--no-browser"], **popen_kwargs)
+            port_args = ["--port", str(LOCAL_PORT)] if LOCAL_PORT != 8777 else []
+            subprocess.Popen(list(py_cmd["argv_prefix"]) + [str(gui), "--no-browser"] + port_args, **popen_kwargs)
         except Exception:
             pass
         for _ in range(16):
@@ -670,7 +676,7 @@ def ensure_mothership_up_to_date_and_running(package_root=None, probe_fn=None, r
         last_msg = ""
         if info["needs_install_or_upgrade"]:
             if info["running"]:
-                stop_local_service_on_port(8777)
+                stop_local_service_on_port(LOCAL_PORT)
             pulled = pull_and_install_mothership(workspace_dir=DEFAULT_INSTALL_ROOT, run_onboard=False)
             last_msg = str(pulled.get("message") or "")
             upgraded = bool(pulled.get("ok") or pulled.get("onboard_ready"))
@@ -688,7 +694,7 @@ def ensure_mothership_up_to_date_and_running(package_root=None, probe_fn=None, r
             rv = read_ver(LOCAL)
             rv_str = str(rv.get("version") if isinstance(rv, dict) else (rv or "")).strip()
             if rv_str and parse_version(rv_str) < parse_version(BUNDLED_VERSION):
-                stop_local_service_on_port(8777)
+                stop_local_service_on_port(LOCAL_PORT)
                 ensure_local_service_running(target_root, check_system_dirs=True, probe_fn=probe)
 
         return {
@@ -720,16 +726,16 @@ def select_mother_ship(data_dir, package_root, probe_fn=None, auto_bootstrap=Fal
         if sync.get("ok") and probe(LOCAL):
             save_address(data_dir, LOCAL)
             upg = bool(sync.get("upgraded"))
-            return {"ok": True, "address": LOCAL, "path": "/setup", "installed": upg, "upgraded": upg}
+            return {"ok": True, "address": LOCAL, "path": os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup", "installed": upg, "upgraded": upg}
         last_error = str(sync.get("message") or "")
     if probe(LOCAL):
         save_address(data_dir, LOCAL)
-        return {"ok": True, "address": LOCAL, "path": "/setup", "installed": False, "upgraded": False}
+        return {"ok": True, "address": LOCAL, "path": os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup", "installed": False, "upgraded": False}
     if probe_fn is None:
         started = ensure_local_service_running(package_root, check_system_dirs=auto_bootstrap, probe_fn=probe)
         if started.get("ok") and probe(LOCAL):
             save_address(data_dir, LOCAL)
-            return {"ok": True, "address": LOCAL, "path": "/setup", "installed": False, "upgraded": False}
+            return {"ok": True, "address": LOCAL, "path": os.environ.get("ANCHOR_SHELL_ONBOARD_PATH") or "/setup", "installed": False, "upgraded": False}
         if not last_error and started.get("message"):
             last_error = str(started["message"])
     state = installation_state(package_root)
@@ -738,7 +744,7 @@ def select_mother_ship(data_dir, package_root, probe_fn=None, auto_bootstrap=Fal
     return {"ok": False, "installation": state, "message": last_error}
 
 
-DEFAULT_INSTALL_ROOT = r"C:\dev"
+DEFAULT_INSTALL_ROOT = os.environ.get("ANCHOR_SHELL_INSTALL_ROOT") or (r"C:\dev\Anchor-Onboard-Test" if os.environ.get("ANCHOR_SHELL_TEST") else r"C:\dev")
 
 
 def installation_page(package_root, default_dir=DEFAULT_INSTALL_ROOT, error_message=""):

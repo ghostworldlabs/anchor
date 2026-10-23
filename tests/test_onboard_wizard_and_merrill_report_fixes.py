@@ -719,3 +719,49 @@ def test_consolidate_multiple_folders_into_single_project_and_propose_active_on_
     assert "## Consolidated Folders & Linked Material" in face_txt
     assert "## Priority Initiatives" in face_txt
     assert "Unify empirical model, math proofs, and dataset for JCR submission." in face_txt
+
+
+# ==============================================================================
+# 15. Shareable Anchor.zip & Isolated Desktop Onboarding Test (Port 8787) Package
+# ==============================================================================
+
+def test_exe_zip_packages_and_isolated_shell_test_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify build_or_resolve_exe_zip_package produces both Anchor.zip and
+    Anchor-Test-Onboard.zip (with isolated port 8787 + ANCHOR_SHELL_TEST=onboard-walkthrough),
+    and Cave of Wonders header exposes 1-click download links."""
+    import zipfile
+    import high_seat_page as hsp
+    import onboard_wizard
+
+    fake_dist = tmp_path / "dist"
+    fake_onedir = fake_dist / "Anchor"
+    fake_onedir.mkdir(parents=True)
+    (fake_onedir / "Anchor.exe").write_bytes(b"MZ-fake-pe")
+
+    prod_zip, prod_name = onboard_wizard.build_or_resolve_exe_zip_package("prod", dist_dir=fake_dist)
+    test_zip, test_name = onboard_wizard.build_or_resolve_exe_zip_package("test", dist_dir=fake_dist)
+
+    assert prod_name == "Anchor.zip" and prod_zip.is_file()
+    assert test_name == "Anchor-Test-Onboard.zip" and test_zip.is_file()
+
+    with zipfile.ZipFile(test_zip, "r") as zf:
+        names = set(zf.namelist())
+        assert "Launch-Anchor-Onboard-Test.cmd" in names
+        assert "Reset-And-Clean-Test-Onboard.cmd" in names
+        assert "README-ONBOARD-TEST.txt" in names
+        assert "Anchor/Anchor.exe" in names
+        cmd_txt = zf.read("Launch-Anchor-Onboard-Test.cmd").decode("utf-8")
+        assert 'ANCHOR_SHELL_TEST=onboard-walkthrough' in cmd_txt
+        assert 'ANCHOR_SHELL_PORT=8787' in cmd_txt
+        assert 'ANCHOR_SHELL_ONBOARD_PATH=/onboard-wizard' in cmd_txt
+
+    hdr_html = hsp._hdr({
+        "steward": {"high_seat_name": "Cave of Wonders", "label": "Aladdin"},
+        "build": "test",
+        "today_str": "Fri Oct 23",
+        "week": "Week 43",
+    })
+    assert '/download/Anchor-Test-Onboard.zip?download=1' in hdr_html
+    assert '/download/Anchor.zip?download=1' in hdr_html

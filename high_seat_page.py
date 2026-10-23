@@ -272,6 +272,8 @@ def _hdr(ctx):
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button>'
         '<button class="tool" data-tool="zombie">%sZombie Hunter</button>'
         '<button class="tool" data-tool="foundry">%sSkill Foundry</button>'
+        '<a class="tool" href="/download/Anchor-Test-Onboard.zip?download=1" title="Download isolated Desktop Onboarding Test (Port 8787 + separate profile; never touches your working Anchor.exe)">&#129514; Test Onboard .zip</a>'
+        '<a class="tool" href="/download/Anchor.zip?download=1" title="Download shareable Anchor.exe (.zip) for collaborators">&#11015; Anchor.exe .zip</a>'
         '<div class="date">%s &middot; %s</div></div>'
     ) % (esc(st["high_seat_name"]), esc(st["label"]), _brand_img(b, "zombie-hunter-radar.jpg"),
          _brand_img(b, "skill-foundry-icon.jpg"), esc(ctx["today_str"]), esc(ctx["week"]))

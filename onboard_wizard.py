@@ -2402,6 +2402,124 @@ def configure_comms_action(
     )
 
 
+
+LAUNCH_ONBOARD_TEST_CMD = """@echo off
+setlocal
+REM ============================================================================
+REM Isolated Anchor Desktop Onboarding Walkthrough Launcher
+REM - Uses its own AppData profile (%LOCALAPPDATA%\\anchor-shell-test-onboard-walkthrough)
+REM - Uses its own window mutex & title ("Anchor (test onboard-walkthrough)")
+REM - Uses isolated local port 8787 and workspace C:\\dev\\Anchor-Onboard-Test
+REM - NEVER modifies your existing Anchor.exe -> Puter Tailscale connection!
+REM ============================================================================
+set "ANCHOR_SHELL_TEST=onboard-walkthrough"
+set "ANCHOR_SHELL_PORT=8787"
+set "ANCHOR_SHELL_LOCAL_URL=http://127.0.0.1:8787"
+set "ANCHOR_SHELL_INSTALL_ROOT=C:\\dev\\Anchor-Onboard-Test"
+set "ANCHOR_SHELL_ONBOARD_PATH=/onboard-wizard"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
+if exist "%~dp0Anchor\\Anchor.exe" (
+    start "" "%~dp0Anchor\\Anchor.exe" --setup
+) else if exist "%~dp0Anchor.exe" (
+    start "" "%~dp0Anchor.exe" --setup
+) else (
+    echo Could not find Anchor\\Anchor.exe inside this folder. Please extract the entire zip first.
+    pause
+)
+"""
+
+RESET_ONBOARD_TEST_CMD = """@echo off
+setlocal
+echo Stopping isolated test server on port 8787 (if running)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"
+if exist "%LOCALAPPDATA%\\anchor-shell-test-onboard-walkthrough" (
+    echo Removing isolated test profile %LOCALAPPDATA%\\anchor-shell-test-onboard-walkthrough...
+    rmdir /s /q "%LOCALAPPDATA%\\anchor-shell-test-onboard-walkthrough"
+)
+echo Done! Your normal Anchor.exe (connected to Puter over Tailscale) was never touched.
+pause
+"""
+
+README_ONBOARD_TEST_TXT = """========================================================================
+ANCHOR — ISOLATED DESKTOP ONBOARDING WALKTHROUGH PACKAGE
+========================================================================
+
+How to run the Onboarding Walkthrough on your work desktop without
+touching your existing working Anchor.exe -> Puter Tailscale setup:
+
+1. Extract this entire .zip archive to any folder on your desktop
+   (for example: Desktop\\Anchor-Test-Onboard).
+2. Double-click:
+      Launch-Anchor-Onboard-Test.cmd
+3. A window titled "Anchor (test onboard-walkthrough)" will open:
+   - First screen: "Choose your mother ship first"
+     ("This computer is my mother ship" vs. "Connect to my existing mother ship")
+   - Selecting "This computer is my mother ship" starts an isolated test
+     service on port 8787 (using C:\\dev\\Anchor-Onboard-Test) and opens
+     the 7-Step Guided Onboarding Wizard (/onboard-wizard).
+4. Your normal Anchor.exe settings (%LOCALAPPDATA%\\anchor-shell\\settings.json)
+   and Start Menu shortcut are NEVER modified. You can open your normal
+   Anchor.exe at any time to connect back to Puter over Tailscale.
+5. To wipe the test profile and re-test from a fresh cold start, run:
+      Reset-And-Clean-Test-Onboard.cmd
+"""
+
+
+def build_or_resolve_exe_zip_package(
+    package_kind: str = "prod",
+    *,
+    dist_dir: Path | str | None = None,
+) -> tuple[Path, str]:
+    """Return ``(zip_file_path, download_filename)`` for either:
+      * ``package_kind="prod"`` -> ``Anchor.zip`` (shareable production Anchor.exe)
+      * ``package_kind="test"`` -> ``Anchor-Test-Onboard.zip`` (isolated work-desktop onboarding test on port 8787)
+    """
+    import zipfile as _zf
+
+    if dist_dir is not None:
+        d_root = Path(dist_dir)
+    else:
+        local_app = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        d_root = local_app / "anchor-shell" / "dist"
+    d_root.mkdir(parents=True, exist_ok=True)
+
+    anchor_onedir = d_root / "Anchor"
+    prod_zip = d_root / "Anchor.zip"
+    test_zip = d_root / "Anchor-Test-Onboard.zip"
+
+    if package_kind == "prod":
+        if not prod_zip.is_file():
+            with _zf.ZipFile(prod_zip, "w", compression=_zf.ZIP_DEFLATED) as zf:
+                if anchor_onedir.is_dir():
+                    for f in anchor_onedir.rglob("*"):
+                        if f.is_file():
+                            zf.write(f, str(Path("Anchor") / f.relative_to(anchor_onedir)))
+                else:
+                    zf.writestr("Anchor/README.txt", "Run shell/build_exe.ps1 on Mothership to populate Anchor.exe.\n")
+        return prod_zip, "Anchor.zip"
+
+    # Build or refresh Anchor-Test-Onboard.zip
+    need_rebuild = not test_zip.is_file()
+    if not need_rebuild and prod_zip.is_file():
+        need_rebuild = prod_zip.stat().st_mtime > test_zip.stat().st_mtime
+
+    if need_rebuild:
+        with _zf.ZipFile(test_zip, "w", compression=_zf.ZIP_DEFLATED) as zf:
+            zf.writestr("Launch-Anchor-Onboard-Test.cmd", LAUNCH_ONBOARD_TEST_CMD.replace("\n", "\r\n"))
+            zf.writestr("Reset-And-Clean-Test-Onboard.cmd", RESET_ONBOARD_TEST_CMD.replace("\n", "\r\n"))
+            zf.writestr("README-ONBOARD-TEST.txt", README_ONBOARD_TEST_TXT.replace("\n", "\r\n"))
+            if anchor_onedir.is_dir():
+                for f in anchor_onedir.rglob("*"):
+                    if f.is_file():
+                        zf.write(f, str(Path("Anchor") / f.relative_to(anchor_onedir)))
+            elif prod_zip.is_file():
+                with _zf.ZipFile(prod_zip, "r") as pzf:
+                    for item in pzf.infolist():
+                        zf.writestr(item, pzf.read(item.filename))
+
+    return test_zip, "Anchor-Test-Onboard.zip"
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # HTML RENDERER: `/onboard-wizard` & `/onboard-wizard?sandbox=1`
 # ═════════════════════════════════════════════════════════════════════════════
