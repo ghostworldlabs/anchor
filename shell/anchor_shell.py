@@ -95,6 +95,17 @@ if FROZEN:
 
 ROOT = _resolve_package_root()
 ICON = (Path(sys._MEIPASS) / "anchor-icon.ico") if FROZEN else ROOT / "vendor" / "brand" / "anchor-icon.ico"
+if FROZEN:
+    try:
+        import json as _json
+        for _cand in (Path(sys.executable).resolve().parent / 'anchor-test-mode.json', Path(sys.executable).resolve().parent.parent / 'anchor-test-mode.json'):
+            if _cand.is_file():
+                for _k, _v in _json.loads(_cand.read_text(encoding='utf-8')).items():
+                    if _k.startswith('ANCHOR_SHELL_') and _v:
+                        os.environ.setdefault(_k, str(_v))
+                break
+    except Exception:
+        pass
 # ANCHOR_SHELL_TEST=<name>: a test copy beside his running Anchor - its own settings and profile, window title and
 # single-instance lock, and it never touches his Start-menu shortcut.
 TEST = os.environ.get("ANCHOR_SHELL_TEST", "")

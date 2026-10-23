@@ -2505,6 +2505,12 @@ def build_or_resolve_exe_zip_package(
 
     if need_rebuild:
         with _zf.ZipFile(test_zip, "w", compression=_zf.ZIP_DEFLATED) as zf:
+            zf.writestr('Anchor/anchor-test-mode.json', json.dumps({
+                'ANCHOR_SHELL_TEST': 'onboard-walkthrough',
+                'ANCHOR_SHELL_PORT': '8787',
+                'ANCHOR_SHELL_INSTALL_ROOT': r'C:\dev\Anchor-Onboard-Test',
+                'ANCHOR_SHELL_ONBOARD_PATH': '/onboard-wizard',
+            }, indent=2))
             zf.writestr("Launch-Anchor-Onboard-Test.cmd", LAUNCH_ONBOARD_TEST_CMD.replace("\n", "\r\n"))
             zf.writestr("Reset-And-Clean-Test-Onboard.cmd", RESET_ONBOARD_TEST_CMD.replace("\n", "\r\n"))
             zf.writestr("README-ONBOARD-TEST.txt", README_ONBOARD_TEST_TXT.replace("\n", "\r\n"))
