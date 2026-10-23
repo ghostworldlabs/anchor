@@ -408,14 +408,16 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 @media(prefers-reduced-motion:reduce){.tile.ready,.tile.quiet.ready{animation:readyedge 2.8s ease-in-out infinite;border-color:#fbbf24;box-shadow:none}}
 /* the compact card (John, 2026-09-27): the name with the effort as a suffix and the cockpit link beside it, ONE line
    clamped to two, the acts on one line; the description, the next step behind a wait and the effort line open with it */
-.t-top{display:flex;align-items:baseline;gap:8px}
+.t-top{display:flex;align-items:center;gap:6px}
 .t-name{font-size:13px;font-weight:650;letter-spacing:-.2px;line-height:1.25;flex:1;min-width:0}
-.t-name .t-nm{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-name .t-nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden;word-break:break-word}
 /* the effort on its own small line under the name (Grok R7 held the suffix whole; on the live pixels one row cut BOTH —
    "MBA T… · Suplemental Material…" — so each gets the row: the name whole, the effort whole; +13 px on a card that names one) */
-.t-name .t-eff{display:block;margin-top:1px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:500;color:var(--text-dim2);letter-spacing:0}
-.t-go{flex:none;font-size:10px;color:var(--accent-t);text-decoration:none;white-space:nowrap}
-.t-go:hover{text-decoration:underline}
+.t-name .t-eff{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-top:1px;line-height:1.3;white-space:normal;overflow:hidden;font-size:10px;font-weight:500;color:var(--text-dim2);letter-spacing:0}
+.t-go{flex:none;position:relative;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;border:1px solid rgba(108,156,252,.45);background:rgba(108,156,252,.13);font-size:11.5px;font-weight:750;color:var(--accent-t);text-decoration:none;white-space:nowrap;line-height:1}
+.t-go .t-btn-txt{display:none}
+.t-go .t-go-arr{display:inline-block;line-height:1}
+.t-go:hover,.t-go:focus-visible{background:rgba(108,156,252,.26);border-color:var(--accent);text-decoration:none}
 .t-line{font-size:11.5px;margin-top:3px;line-height:1.35;color:var(--text-warm);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .t-line .k{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:5px}
 .t-line.wait{color:var(--amber-t)}
@@ -760,7 +762,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile.quiet .t-desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px;margin-top:2px}
 
 /* Initiative tiles: a third-height identity view; details float without moving the grid. */
-.tile[data-tile]:not(.quiet):not(.open){height:40px;padding:3px 9px;display:flex;align-items:center;position:relative}
+.tile[data-tile]:not(.quiet):not(.open){min-height:42px;height:auto;padding:5px 9px;display:flex;align-items:center;position:relative}
 .tile[data-tile]:not(.quiet):not(.open)>.t-top{width:100%;align-items:center}
 .tile[data-tile]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .t-peek{display:none;position:fixed;z-index:40;padding:9px;background:var(--surface);border:1px solid #536174;border-radius:7px;box-shadow:0 12px 35px rgba(0,0,0,.5);overflow:auto;cursor:default}
@@ -1021,9 +1023,25 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tc-btn.done,.t-done-btn,.tw-btn.done{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#4ade80;font-weight:650}
 .tc-btn.done:hover,.t-done-btn:hover,.tw-btn.done:hover{background:rgba(74,222,128,.22);border-color:#4ade80}
 .tc-btn.primary{border-color:rgba(108,156,252,.5);background:rgba(108,156,252,.16);color:var(--accent-t)}
-.t-done-btn{font-size:10.5px;padding:2px 8px;border-radius:6px;border:1px solid rgba(74,222,128,.45);margin-right:4px;white-space:nowrap}
-.t-seat-btn{font-size:10.5px;padding:2px 7px;border-radius:6px;border:1px solid rgba(108,156,252,.42);background:rgba(108,156,252,.11);color:var(--accent-t);font-weight:650;margin-right:4px;white-space:nowrap;cursor:pointer}
-.t-seat-btn:hover{background:rgba(108,156,252,.22);border-color:var(--accent)}
+/* Compact Action Dots (On deck/Active = Blue Dot, Done = Green Dot, Cockpit = Blue Up-Right Arrow) with hover-up badges */
+.t-seat-btn,.t-done-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border-radius:999px;margin-right:2px;flex:none;cursor:pointer;white-space:nowrap}
+.t-seat-btn{border:1px solid rgba(108,156,252,.65);background:rgba(108,156,252,.2)}
+.t-done-btn{border:1px solid rgba(74,222,128,.65);background:rgba(74,222,128,.18)}
+.t-seat-btn .t-btn-txt,.t-done-btn .t-btn-txt{display:none}
+.t-dot-ind{display:block;width:8px;height:8px;border-radius:999px;pointer-events:none}
+.t-dot-ind.blue{background:#6c9cfc;box-shadow:0 0 6px rgba(108,156,252,.75)}
+.t-dot-ind.green{background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,.75)}
+.t-seat-btn:hover,.t-seat-btn:focus-visible{background:rgba(108,156,252,.36);border-color:#6c9cfc;transform:scale(1.08)}
+.t-done-btn:hover,.t-done-btn:focus-visible{background:rgba(74,222,128,.34);border-color:#4ade80;transform:scale(1.08)}
+.t-seat-btn[data-tip]::after,.t-done-btn[data-tip]::after,.t-go[data-tip]::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);right:0;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:700;line-height:1.2;white-space:nowrap;pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.55)}
+.t-seat-btn[data-tip]::after,.t-go[data-tip]::after{background:#131c31;border:1px solid #6c9cfc;color:#bcd4ff}
+.t-done-btn[data-tip]::after{background:#10291e;border:1px solid #4ade80;color:#86efac}
+.t-seat-btn[data-tip]:hover::after,.t-seat-btn[data-tip]:focus-visible::after,.t-done-btn[data-tip]:hover::after,.t-done-btn[data-tip]:focus-visible::after,.t-go[data-tip]:hover::after,.t-go[data-tip]:focus-visible::after{opacity:1;transform:translateY(0)}
+.cand-cockpit-pill{font-size:10.5px;font-weight:700;color:var(--accent-t);background:rgba(108,156,252,.14);border:1px solid rgba(108,156,252,.42);border-radius:999px;padding:1px 8px;margin-left:4px}
+.cand-filter{display:inline-flex;gap:4px;background:#11141d;padding:2px;border-radius:7px;border:1px solid var(--border)}
+.cand-flt{font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:5px;border:1px solid transparent;background:transparent;color:var(--text-dim);cursor:pointer}
+.cand-flt.on{background:var(--surface2);color:var(--accent-t);border-color:rgba(108,156,252,.48)}
+.cand-go{margin-right:4px}
 .desk-cockpit-btn{border-color:rgba(108,156,252,.5)!important;background:rgba(108,156,252,.14)!important;color:var(--accent-t)!important;font-weight:650}
 
 /* Two-Horizon Schedule: Today & This Week 4-column board + height-capped 6-Week Compact Horizon */

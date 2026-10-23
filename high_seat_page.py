@@ -361,8 +361,8 @@ def _seat_move_btn(step):
     if not sid or st not in ("active", "deck"):
         return ""
     if st == "active":
-        return '<button type="button" class="t-seat-btn" data-seat="deck" data-step="%s" title="Move down to On deck">&#9662; On deck</button>' % sid
-    return '<button type="button" class="t-seat-btn" data-seat="active" data-step="%s" title="Elevate to Active">&#9652; Active</button>' % sid
+        return '<button type="button" class="t-seat-btn" data-seat="deck" data-step="%s" data-tip="&#9662; On deck" aria-label="On deck" title="Move down to On deck"><span class="t-dot-ind blue"></span><span class="t-btn-txt">&#9662; On deck</span></button>' % sid
+    return '<button type="button" class="t-seat-btn" data-seat="active" data-step="%s" data-tip="&#9652; Active" aria-label="Active" title="Elevate to Active"><span class="t-dot-ind blue"></span><span class="t-btn-txt">&#9652; Active</span></button>' % sid
 
 
 def _desk_card(ctx, g, p):
@@ -375,7 +375,7 @@ def _desk_card(ctx, g, p):
     date = (' &middot; %s' % esc(_hr.due_label(p["date"], ctx["today"]))) if p.get("date") else ""
     dot = '<span class="tlight %s" title="%s"></span>' % (("orange", "needs you") if p.get("needs_you") else ("gray", "idle"))      # a desk card has a light too (Grok's read of W2e)
     s_btn = _seat_move_btn(p)
-    d_btn = '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" title="Done for now — move off the board">&#10003; Done</button>' % esc(p["id"])
+    d_btn = '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-tip="&#10003; Done" aria-label="Done" title="Done for now — move off the board"><span class="t-dot-ind green"></span><span class="t-btn-txt">&#10003; Done</span></button>' % esc(p["id"])
     return (
         '<article class="tile desk%s" id="card-%s" data-step="%s" data-name="%s" draggable="true"><div class="t-top">' + dot + '<h3 class="t-name"><span class="t-nm">%s</span><span class="t-eff">at the desk%s</span></h3>'
         '%s%s<button class="t-x" data-home="%s" title="back to its goal">&times;</button></div><div class="t-goal">in <b>%s</b></div>%s'
@@ -509,7 +509,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     xbtn = ('<button class="t-x" data-home="%s" title="back to its goal">&times;</button>' % esc(step["id"])) if step else ""
     goal_line = ('<div class="t-goal">in <b>%s</b> &middot; %s</div>' % (esc(goal["name"]), "a cockpit within the project" if step.get("kind") == "effort" else "the project&rsquo;s cockpit")) if (goal and step) else ""
     if not f.get("has_record"):
-        q_done = ('<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" title="Done for now — move off the board">&#10003; Done</button>' % esc(step["id"])) if step else ""
+        q_done = ('<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-tip="&#10003; Done" aria-label="Done" title="Done for now — move off the board"><span class="t-dot-ind green"></span><span class="t-btn-txt">&#10003; Done</span></button>' % esc(step["id"])) if step else ""
         return (
             '<article class="tile quiet%s" id="card-%s" data-tile="%s"%s><div class="t-top">%s<h3 class="t-name">%s</h3>%s%s%s</div>%s'
             '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
@@ -562,7 +562,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     if t_folder and f.get("effort"):
         t_folder = str(Path(t_folder) / str(f.get("effort")))
     done_btn = seat_btn + (
-        '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-target-dir="%s" title="Done for now — move off the board and mark current step done">&#10003; Done</button>'
+        '<button type="button" class="t-done-btn" data-mark-done="1" data-step="%s" data-target-dir="%s" data-tip="&#10003; Done" aria-label="Done" title="Done for now — move off the board and mark current step done"><span class="t-dot-ind green"></span><span class="t-btn-txt">&#10003; Done</span></button>'
         % (esc((step or {}).get("id") or ""), esc(t_folder))
     )
     # "/project/%s?dir=%s&amp;open=effort"
@@ -578,7 +578,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
                      '<span class="t-prog-txt">%d/%d steps</span></div>') % (st_done, st_tot, pct, st_done, st_tot)
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"%s><div class="t-top">%s<h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
-        '%s<a class="t-go" href="%s" data-project-href="%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a>%s</div><div class="t-face">%s'
+        '%s<a class="t-go" href="%s" data-project-href="%s" target="_blank" rel="noopener" data-tip="Open cockpit &#8599;" title="Open the cockpit"><span class="t-btn-txt">cockpit </span><span class="t-go-arr">&#8599;</span></a>%s</div><div class="t-face">%s'
         '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>%s</div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
@@ -1100,44 +1100,77 @@ def _candidates_tile(ctx):
     n = len(in_goal) + len(loose)
     if not n:
         return ""
+    in_goal_cockpits = [(i, p) for i, p in in_goal if p.get("kind") in ("project", "effort")]
+    in_goal_tasks = [(i, p) for i, p in in_goal if p.get("kind") not in ("project", "effort")]
+    n_cockpits = len(in_goal_cockpits) + len(loose)
 
-    def acts_step(sid):
-        return ('<span class="acts"><button class="mini" data-seat="deck" data-step="%s">&rarr; on deck</button>'
-                '<button class="mini" data-seat="active" data-step="%s">&rarr; active</button></span>') % (esc(sid), esc(sid))
+    def cockpit_link(pid, rel):
+        if not pid:
+            return ""
+        href = "/steward/v1?pid=%s&amp;dir=%s" % (esc(pid), esc(_quote(str(rel or ""))))
+        return '<a class="t-go cand-go" href="%s" target="_blank" rel="noopener" data-tip="Open cockpit &#8599;" title="Open the AI cockpit"><span class="t-btn-txt">cockpit </span><span class="t-go-arr">&#8599;</span></a>' % href
+
+    def acts_step(sid, pid="", rel=""):
+        return ('<span class="acts">%s<button class="mini" data-seat="deck" data-step="%s">&rarr; on deck</button>'
+                '<button class="mini" data-seat="active" data-step="%s">&rarr; active</button></span>') % (cockpit_link(pid, rel), esc(sid), esc(sid))
 
     def acts_new(c):
-        return ('<span class="acts"><button class="mini" data-cand-seat="deck" data-ref="%s" data-name="%s">&rarr; on deck</button>'
+        return ('<span class="acts">%s<button class="mini" data-cand-seat="deck" data-ref="%s" data-name="%s">&rarr; on deck</button>'
                 '<button class="mini" data-cand-seat="active" data-ref="%s" data-name="%s">&rarr; active</button></span>') % (
-            esc(c["ref"]), esc(c["name"]), esc(c["ref"]), esc(c["name"]))
-    def meta(score, why, created, worked):
-        return ('data-score="%d" data-created="%s" data-worked="%s"' % (score, esc(created or ""), esc(worked or "")),
+            cockpit_link(c.get("pid") or "", c.get("dir") or ""), esc(c["ref"]), esc(c["name"]), esc(c["ref"]), esc(c["name"]))
+
+    def meta(score, why, created, worked, ckind="cockpit"):
+        return ('data-score="%d" data-created="%s" data-worked="%s" data-cand-kind="%s"' % (score, esc(created or ""), esc(worked or ""), esc(ckind)),
                 '<span class="cs" title="%s">%d</span>' % (esc(why), score),
                 '<span class="cd">%s%s</span>' % (("worked " + esc(worked)) if worked else "not worked yet", (" &middot; made " + esc(created)) if created else ""))
 
     def row(attrs, score_html, dates_html, name_html, where, acts):
         return '<li class="cand" %s>%s<span class="cn">%s</span><span class="cw">%s</span>%s%s</li>' % (attrs, score_html, name_html, where, dates_html, acts)
-    rows_a = "".join(row(*meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[:1],
-                         meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[1],
-                         meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"))[2],
-                         ('<span class="wm">&#9873;</span> ' if p.get("needs_you") else "") + esc(part_name(p)),
-                         "%s &middot; in %s" % (esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or "")), acts_step(p.get("id") or ""))
-                     for i, p in sorted(in_goal, key=lambda t: -t[1].get("c_score", 0)))
-    rows_b = "".join(row(*meta(c["score"], c["why"], c["created"], c["worked"])[:1], meta(c["score"], c["why"], c["created"], c["worked"])[1],
-                         meta(c["score"], c["why"], c["created"], c["worked"])[2],
-                         ('<span class="wm">&#9873;</span> ' if c["needs"] else "") + esc(c["name"]), "%s &middot; in no goal" % esc(c["where"]), acts_new(c))
-                     for c in sorted(loose, key=lambda c: -c["score"]))
+
+    rows_cockpits_goal = "".join(
+        row(*meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "cockpit")[:1],
+            meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "cockpit")[1],
+            meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "cockpit")[2],
+            ('<span class="wm">&#9873;</span> ' if p.get("needs_you") else "") + esc(part_name(p)),
+            "%s &middot; in %s" % (esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or "")),
+            acts_step(p.get("id") or "", p.get("pid") or "", p.get("dir") or ""))
+        for i, p in sorted(in_goal_cockpits, key=lambda t: -t[1].get("c_score", 0))
+    )
+    rows_b = "".join(
+        row(*meta(c["score"], c["why"], c["created"], c["worked"], "cockpit")[:1],
+            meta(c["score"], c["why"], c["created"], c["worked"], "cockpit")[1],
+            meta(c["score"], c["why"], c["created"], c["worked"], "cockpit")[2],
+            ('<span class="wm">&#9873;</span> ' if c["needs"] else "") + esc(c["name"]),
+            "%s &middot; in no goal" % esc(c["where"]), acts_new(c))
+        for c in sorted(loose, key=lambda c: -c["score"])
+    )
+    rows_tasks_goal = "".join(
+        row(*meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "task")[:1],
+            meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "task")[1],
+            meta(p.get("c_score", 0), p.get("c_why", ""), p.get("c_created"), p.get("c_worked"), "task")[2],
+            ('<span class="wm">&#9873;</span> ' if p.get("needs_you") else "") + esc(part_name(p)),
+            "%s &middot; in %s" % (esc(KIND_LABEL.get(p.get("kind"), "")), esc(i.get("name") or "")),
+            acts_step(p.get("id") or ""))
+        for i, p in sorted(in_goal_tasks, key=lambda t: -t[1].get("c_score", 0))
+    )
     return (
         '<section class="shelf cands" id="shCands"><details class="cands-tile" id="candsTile"><summary class="shelf-h">'
-        '<h3>Candidates</h3><span class="c">%d</span><span class="rule"></span>'
-        '<span class="sub">every cockpit and desk item you could put on deck or make active</span></summary>'
+        '<h3>Candidates</h3><span class="c">%d</span><span class="cand-cockpit-pill">%d AI cockpit%s ready</span><span class="rule"></span>'
+        '<span class="sub">every AI cockpit and desk item you could put on deck or make active</span></summary>'
         '<div class="cand-tools"><input type="search" id="candSearch" placeholder="search the candidates&hellip;" aria-label="search the candidates" autocomplete="off">'
+        '<div class="cand-filter" id="candFilter" role="group" aria-label="filter candidates">'
+        '<button type="button" class="cand-flt on" data-cand-filter="all">All (%d)</button>'
+        '<button type="button" class="cand-flt" data-cand-filter="cockpit">AI Cockpits (%d)</button>'
+        '<button type="button" class="cand-flt" data-cand-filter="task">Desk Tasks (%d)</button>'
+        '</div>'
         '<label class="cand-sort">sort <select id="candSort"><option value="score" selected>the steward&rsquo;s relevance</option><option value="worked">last worked on</option>'
         '<option value="created">date created</option><option value="name">name</option></select></label>'
         '<span class="cand-note" id="candNote"></span></div>'
-        '%s%s</details></section>'
-    ) % (n,
-         ('<div class="cand-group"><div class="k">In a goal, not on the desk &middot; %d</div><ul>%s</ul></div>' % (len(in_goal), rows_a)) if in_goal else "",
-         ('<div class="cand-group"><div class="k">AI cockpits in no goal &middot; %d</div><ul>%s</ul></div>' % (len(loose), rows_b)) if loose else "")
+        '%s%s%s</details></section>'
+    ) % (n, n_cockpits, "" if n_cockpits == 1 else "s", n, n_cockpits, len(in_goal_tasks),
+         ('<div class="cand-group" data-cand-group="cockpit"><div class="k">Candidate AI cockpits (in a goal, not on the desk) &middot; %d</div><ul>%s</ul></div>' % (len(in_goal_cockpits), rows_cockpits_goal)) if in_goal_cockpits else "",
+         ('<div class="cand-group" data-cand-group="cockpit"><div class="k">AI cockpits in no goal &middot; %d</div><ul>%s</ul></div>' % (len(loose), rows_b)) if loose else "",
+         ('<div class="cand-group" data-cand-group="task"><div class="k">In a goal, not on the desk (desk tasks) &middot; %d</div><ul>%s</ul></div>' % (len(in_goal_tasks), rows_tasks_goal)) if in_goal_tasks else "")
 
 
 def _seed_panel(ctx):
@@ -1591,14 +1624,14 @@ def render_high_seat_html(ctx) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, health: "%s", steward: "%s", stamp: "%s", you: "%s"};window.ANCHOR_TILES = {%s};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", auth_required: %s, logged_in: %s, steward: "%s", stamp: "%s", you: "%s", health: "%s"};window.ANCHOR_BOOT_META = {steward: "%s", stamp: "%s", you: "%s"};window.ANCHOR_TILES = {%s};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<link rel="stylesheet" href="/vendor/xterm/xterm.css"><script src="/vendor/xterm/xterm.js"></script>'
         '<script src="/steward-static/md.js?v=%s"></script><script src="/static/steward-dialogue.js?v=%s"></script><script src="/static/high-seat-page.js?v=%s"></script><script src="/static/cave-terminal.js?v=%s"></script></body></html>'
     ) % (esc(ctx["steward"]["high_seat_name"]), tab_icon_link(ctx["steward"].get("high_seat"), ctx["build"], anchor=False), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), "true" if ctx.get("auth_required") else "false", "true" if ctx.get("logged_in") else "false",
-         esc(str(ctx.get("health_sig") or "")), esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(str(ctx.get("you") or HIS_NAME)), _tile_names(ctx), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
+         esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(str(ctx.get("you") or HIS_NAME)), esc(str(ctx.get("health_sig") or "")), esc(ctx["steward"]["label"]), esc(str(ctx.get("stamp") or "")), esc(str(ctx.get("you") or HIS_NAME)), _tile_names(ctx), _rail(ctx), _masthead(ctx), _health_banner(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]))
     return page.replace('</head>', '<link rel="stylesheet" href="/static/provider-setup.css?v=%s"></head>' % esc(ctx["build"])).replace('</body>',
         '<script src="/static/provider-controls.js?v=%s"></script></body>' % esc(ctx["build"]))

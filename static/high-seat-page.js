@@ -238,13 +238,20 @@
   // the Candidates: a search and a sort (his word, 2026-10-02: by date created, last date worked on, the steward's relevance)
   var candApply = function () {};
   function bindCands() {   // at load, and when the tile is placed in the page for the first time (W4)
-    var q = document.getElementById('candSearch'), srt = document.getElementById('candSort'), note = document.getElementById('candNote');
+    var q = document.getElementById('candSearch'), srt = document.getElementById('candSort'), note = document.getElementById('candNote'), fltWrap = document.getElementById('candFilter');
     if (!q || !srt || q._bound) return; q._bound = true;
-    try { var ks = sessionStorage.getItem('hs_cands_sort'); if (ks) srt.value = ks; q.value = sessionStorage.getItem('hs_cands_q') || ''; } catch (e) {}
+    var kflt = 'all';
+    try { var ks = sessionStorage.getItem('hs_cands_sort'); if (ks) srt.value = ks; q.value = sessionStorage.getItem('hs_cands_q') || ''; kflt = sessionStorage.getItem('hs_cands_kflt') || 'all'; } catch (e) {}
+    function syncFltBtns() {
+      if (!fltWrap) return;
+      $$('.cand-flt', fltWrap).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-cand-filter') === kflt); });
+    }
+    syncFltBtns();
     function apply() {
       var term = q.value.trim().toLowerCase(), key = srt.value, shown = 0, all = 0;
-      $$('#shCands .cand-group ul').forEach(function (ul) {
-        var rows = $$('li.cand', ul);
+      $$('#shCands .cand-group').forEach(function (grp) {
+        var ul = grp.querySelector('ul'); if (!ul) return;
+        var rows = $$('li.cand', ul), grpShown = 0;
         rows.sort(function (a, b) {
           if (key === 'name') return a.querySelector('.cn').textContent.localeCompare(b.querySelector('.cn').textContent);
           var va = key === 'score' ? +a.getAttribute('data-score') : (a.getAttribute('data-' + key) || ''), vb = key === 'score' ? +b.getAttribute('data-score') : (b.getAttribute('data-' + key) || '');
@@ -252,16 +259,25 @@
         });
         rows.forEach(function (r) {
           ul.appendChild(r); all++;
-          var hit = !term || r.textContent.toLowerCase().indexOf(term) >= 0;
-          r.hidden = !hit; if (hit) shown++;
+          var kindOk = (kflt === 'all') || ((r.getAttribute('data-cand-kind') || 'cockpit') === kflt);
+          var hit = (!term || r.textContent.toLowerCase().indexOf(term) >= 0) && kindOk;
+          r.hidden = !hit; if (hit) { shown++; grpShown++; }
         });
+        grp.hidden = (grpShown === 0) && (!!term || kflt !== 'all');
       });
-      if (note) note.textContent = term ? (shown + ' of ' + all) : '';
-      try { sessionStorage.setItem('hs_cands_sort', key); sessionStorage.setItem('hs_cands_q', q.value); } catch (e) {}
+      if (note) note.textContent = (term || kflt !== 'all') ? (shown + ' of ' + all) : '';
+      try { sessionStorage.setItem('hs_cands_sort', key); sessionStorage.setItem('hs_cands_q', q.value); sessionStorage.setItem('hs_cands_kflt', kflt); } catch (e) {}
     }
     q.addEventListener('input', apply); srt.addEventListener('change', apply);
+    if (fltWrap) {
+      fltWrap.addEventListener('click', function (ev) {
+        var b = ev.target.closest('.cand-flt'); if (!b) return;
+        kflt = b.getAttribute('data-cand-filter') || 'all';
+        syncFltBtns(); apply();
+      });
+    }
     candApply = apply;
-    if (q.value || srt.value !== 'score') apply();
+    if (q.value || srt.value !== 'score' || kflt !== 'all') apply();
     // the Candidates tile stays open across a reload (2026-10-02)
     var t = document.getElementById('candsTile'); if (!t) return;
     try { if (sessionStorage.getItem('hs_cands_open') === '1') t.open = true; } catch (e) {}

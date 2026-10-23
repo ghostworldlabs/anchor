@@ -554,3 +554,168 @@ def test_aegis_session_uses_configured_display_name_and_landed_skills_manifest(
     )
     assert set(landed) == {"anvil", "aegis", "ecgberht", "foreman", "crucible"}
 
+
+
+# ==============================================================================
+# 13. Cave of Wonders Candidate AI Cockpits Visibility & Compact Dot/Arrow Controls
+# ==============================================================================
+
+def test_cave_candidates_surface_all_sub_effort_cockpits_at_top_and_compact_dots() -> None:
+    """Verify:
+      1. Sub-effort AI cockpits under a project mapped at root (e.g. Collapse of Marketing · JCR)
+         are NOT hidden by (pid, '*') and appear as Candidate AI Cockpits.
+      2. _candidates_tile renders Candidate AI Cockpits BEFORE Desk Tasks, with filter buttons
+         and direct cockpit ↗ links.
+      3. Seated Cave cards render compact blue dot (.t-dot-ind.blue), green dot (.t-dot-ind.green),
+         and blue up-right arrow (.t-go-arr) with hover-up data-tip attributes.
+    """
+    import high_seat_core as hsc
+    import high_seat_page as hsp
+
+    ctx = {
+        "initiatives": [
+            {
+                "id": "g-res",
+                "name": "Publish Flagship Research",
+                "status": "active",
+                "tier": 1,
+                "needs": False,
+                "parts": [
+                    {"id": "st-com", "kind": "project", "pid": "p-com", "dir": "", "name": "Collapse of Marketing"},
+                    {"id": "st-task1", "kind": "task", "name": "Email referee response packet", "date": "2026-10-25"},
+                ],
+            }
+        ],
+        "facts": {
+            "p-com": {
+                "name": "Collapse of Marketing",
+                "has_record": True,
+                "efforts": [
+                    {"rel": "", "name": "Collapse of Marketing"},
+                    {"rel": "Emperical Paper JCR", "name": "Emperical Paper JCR", "needs_you": "Check table 3"},
+                    {"rel": "Math Review", "name": "Math Review"},
+                ],
+            },
+            "p-camp": {"name": "Campaign", "has_record": True},
+        },
+        "entries": [
+            {"id": "p-com", "name": "Collapse of Marketing"},
+            {"id": "p-camp", "name": "Campaign"},
+        ],
+        "campaign": {"pid": "p-camp"},
+    }
+    in_goal, loose = hsc.candidates_model(ctx)
+    loose_names = [c["name"] for c in loose]
+    assert "Collapse of Marketing · Emperical Paper JCR" in loose_names
+    assert "Collapse of Marketing · Math Review" in loose_names
+
+    tile_html = hsp._candidates_tile(ctx)
+    assert "AI cockpits ready" in tile_html
+    assert 'data-cand-filter="cockpit"' in tile_html
+    # Candidate AI cockpits appear BEFORE desk tasks in the HTML
+    assert tile_html.index("Candidate AI cockpits (in a goal, not on the desk)") < tile_html.index(
+        "In a goal, not on the desk (desk tasks)"
+    )
+
+    # Check compact blue/green dots and up-right arrow on seated card
+    card_html = hsp._card(
+        {"id": "p-com", "name": "Collapse of Marketing"},
+        {"has_record": True, "effort": "Emperical Paper JCR", "next": "Run regressions"},
+        "",
+        goal={"id": "g-res", "name": "Publish Flagship Research"},
+        step={"id": "st-com", "kind": "effort", "seat": "active", "name": "Emperical Paper JCR"},
+    )
+    assert 'class="t-dot-ind blue"' in card_html
+    assert 'class="t-dot-ind green"' in card_html
+    assert 'class="t-go-arr">&#8599;</span>' in card_html
+    assert 'data-tip="&#9662; On deck"' in card_html
+    assert 'data-tip="&#10003; Done"' in card_html
+    assert 'data-tip="Open cockpit &#8599;"' in card_html
+
+
+# ==============================================================================
+# 14. Multi-Folder Consolidation into Single Project & Active/On-Deck Proposal
+# ==============================================================================
+
+def test_consolidate_multiple_folders_into_single_project_and_propose_active_on_deck(
+    tmp_path: Path,
+) -> None:
+    """Verify onboarding allows pulling multiple separate folders into a single proposed
+    project (with Mission Statement, Goals, Initiatives, and linked_material_paths) and
+    automatically proposes Active vs. On Deck placement from the user's priority initiatives."""
+    import onboard_wizard
+
+    f_paper = tmp_path / "JCR_Paper_Draft"
+    f_math = tmp_path / "JCR_Math_Proofs"
+    f_data = tmp_path / "JCR_Empirical_Data"
+    f_other = tmp_path / "Legacy_Archive"
+    for d in (f_paper, f_math, f_data, f_other):
+        d.mkdir(parents=True)
+        (d / "README.md").write_text(f"# {d.name}\nMaterial for {d.name}.\n", encoding="utf-8")
+
+    # 1. Consolidate 3 separate folders into a single unified project
+    cons_res = onboard_wizard.consolidate_folders_into_project(
+        folder_paths=[f_paper, f_math, f_data],
+        project_name="Collapse of Marketing Unified Study",
+        mission_statement="Unify empirical model, math proofs, and dataset for JCR submission.",
+        goals_list=["Submit JCR empirical manuscript this quarter"],
+        initiatives_list=["Finalize Theorem 2 proof", "Run structural estimation"],
+        group_folder="Research & Scholarship",
+        sandbox=True,
+        sandbox_id="test-cons",
+        base_dir=tmp_path,
+    )
+    assert cons_res["ok"] is True
+    proj = cons_res["consolidated_project"]
+    assert proj["name"] == "Collapse of Marketing Unified Study"
+    assert len(proj["linked_material_paths"]) == 3
+
+    # Add a second project candidate and run propose_active_and_on_deck
+    candidates = [
+        proj,
+        {
+            "id": "proj-smeal-grant",
+            "name": "MBA Smeal AI Teaching Grant",
+            "folder_path": str(f_other),
+            "blurb": "AI Oral Exam Platform and MBA grant proposal",
+            "group_folder": "Teaching & Mentorship",
+            "included": True,
+        },
+        {
+            "id": "proj-low-prio",
+            "name": "Old Archival Notes",
+            "folder_path": str(f_other),
+            "blurb": "Historical notes from 2019",
+            "group_folder": "Personal",
+            "included": True,
+        },
+    ]
+    prop = onboard_wizard.propose_active_and_on_deck(
+        "Finishing Collapse of Marketing Unified Study for JCR, and MBA Smeal AI Teaching Grant",
+        candidates=candidates,
+        max_active=2,
+        max_on_deck=1,
+        sandbox=True,
+        sandbox_id="test-cons",
+        base_dir=tmp_path,
+    )
+    assert prop["ok"] is True
+    active_names = [x["name"] for x in prop["proposed_active"]]
+    deck_names = [x["name"] for x in prop["proposed_on_deck"]]
+    assert "Collapse of Marketing Unified Study" in active_names
+    assert "MBA Smeal AI Teaching Grant" in active_names
+    assert "Old Archival Notes" in deck_names
+
+    # Provision and verify ECGBERHT.md includes Consolidated Folders & Priority Initiatives
+    prov = onboard_wizard.provision_projects_and_cockpits(
+        prop["discovered"],
+        sandbox=True,
+        sandbox_id="test-cons",
+        base_dir=tmp_path,
+    )
+    assert prov["ok"] is True
+    cockpit_dir = Path(prov["provisioned"][0]["sandbox_cockpit_path"])
+    face_txt = (cockpit_dir / "ECGBERHT.md").read_text(encoding="utf-8")
+    assert "## Consolidated Folders & Linked Material" in face_txt
+    assert "## Priority Initiatives" in face_txt
+    assert "Unify empirical model, math proofs, and dataset for JCR submission." in face_txt

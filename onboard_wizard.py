@@ -1372,6 +1372,220 @@ def scan_and_propose_projects(
     }
 
 
+def consolidate_folders_into_project(
+    folder_paths: list[str | Path],
+    project_name: str,
+    *,
+    primary_folder: str | Path | None = None,
+    mission_statement: str = "",
+    goals_list: list[str] | None = None,
+    initiatives_list: list[str] | None = None,
+    group_folder: str = "",
+    seat: str = "active",
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Pull multiple folders/materials from anywhere on the computer into a SINGLE proposed project & AI Cockpit.
+
+    Records ``linked_material_paths`` so the single AI Cockpit indexes and links all constituent folders,
+    along with the project's Mission Statement, Goals, and Initiatives (for Star Chart & Cave of Wonders).
+    """
+    norm_paths: list[str] = []
+    signals_union: list[str] = []
+    blurbs: list[str] = []
+    for fp in folder_paths or []:
+        if not fp or not str(fp).strip():
+            continue
+        p = Path(str(fp).strip()).expanduser()
+        try:
+            resolved = str(p.resolve())
+        except OSError:
+            resolved = str(p)
+        if resolved not in norm_paths:
+            norm_paths.append(resolved)
+        if p.is_dir():
+            b, sigs, _ = _read_folder_blurb_and_signals(p)
+            if b and b not in blurbs:
+                blurbs.append(b)
+            for s in sigs:
+                if s not in signals_union:
+                    signals_union.append(s)
+
+    if not norm_paths:
+        raise ValueError("consolidate_folders_into_project requires at least one folder path.")
+
+    primary = str(Path(primary_folder).resolve()) if primary_folder else norm_paths[0]
+    clean_name = str(project_name or Path(primary).name).strip()
+    clean_group = str(group_folder or _classify_arena(f"{clean_name} {' '.join(blurbs)}")).strip()
+    clean_mission = str(mission_statement or (blurbs[0] if blurbs else f"Unified mission for {clean_name}")).strip()
+    clean_goals = [str(g).strip() for g in (goals_list or []) if str(g).strip()]
+    clean_inits = [str(i).strip() for i in (initiatives_list or []) if str(i).strip()]
+    if not clean_inits:
+        clean_inits = [f"Consolidate and advance {Path(p).name}" for p in norm_paths]
+
+    consolidated_item = {
+        "id": f"proj-{_safe_slug(clean_name)}",
+        "name": clean_name,
+        "folder_path": primary,
+        "linked_material_paths": norm_paths,
+        "mission_statement": clean_mission,
+        "goals_list": clean_goals,
+        "initiatives_list": clean_inits,
+        "blurb": clean_mission,
+        "group_folder": clean_group,
+        "goal_id": f"goal-1-{_safe_slug(clean_group)}",
+        "seat": seat if seat in ("active", "deck", "parked") else "active",
+        "included": True,
+        "excluded": False,
+        "source": f"consolidated_multi_folder ({len(norm_paths)} folders)",
+        "has_cockpit": (Path(primary) / "roadmap.json").is_file(),
+        "re_adopted_store_ids": [],
+        "signals": signals_union,
+    }
+
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    proj_sec = dict(st_doc.get("projects") or {})
+    disc = list(proj_sec.get("discovered") or [])
+    norm_lower = {
+        (p.lower() if os.name == "nt" else p)
+        for p in norm_paths
+    }
+    # Replace constituent single-folder rows with the consolidated project row
+    filtered_disc = [
+        d for d in disc
+        if (str(d.get("folder_path") or "").lower() if os.name == "nt" else str(d.get("folder_path") or "")) not in norm_lower
+        and d.get("name") != clean_name
+    ]
+    filtered_disc.insert(0, consolidated_item)
+    proj_sec["discovered"] = filtered_disc
+    consolidated_list = list(proj_sec.get("consolidated_projects") or [])
+    consolidated_list.append(consolidated_item)
+    proj_sec["consolidated_projects"] = consolidated_list
+    st_doc["projects"] = proj_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    return {
+        "ok": True,
+        "consolidated_project": consolidated_item,
+        "discovered": filtered_disc,
+    }
+
+
+def propose_active_and_on_deck(
+    priority_initiatives_text: str,
+    candidates: list[dict[str, Any]] | None = None,
+    *,
+    max_active: int = 4,
+    max_on_deck: int = 6,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Given the user's description of 'what are the most important initiatives / main things you are working on right now',
+    score and propose which AI Cockpits go into Active vs. On Deck vs. Candidates/Parked on the Cave of Wonders.
+
+    Distinguishes:
+      * **Star Chart**: Mission statement, long-term horizons, and strategic Goal Arenas.
+      * **Cave of Wonders**: Concrete immediate execution board (Active vs. On Deck vs. Candidates).
+    """
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    if candidates is None:
+        candidates = list((st_doc.get("projects") or {}).get("discovered") or [])
+
+    raw_lines = [
+        ln.strip(" \t•-*0123456789.)")
+        for ln in re.split(r"[\r\n,;]+", str(priority_initiatives_text or ""))
+        if ln and ln.strip(" \t•-*0123456789.)")
+    ]
+    priority_tokens = {
+        tok
+        for ln in raw_lines
+        for tok in re.findall(r"[a-z0-9]{3,}", ln.lower())
+        if tok not in {"the", "and", "for", "with", "that", "this", "from", "working", "right", "now", "main", "most", "important", "project", "projects", "initiative", "initiatives"}
+    }
+
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for idx, c in enumerate(candidates):
+        if not isinstance(c, dict):
+            continue
+        hay = " ".join([
+            str(c.get("name") or ""),
+            str(c.get("blurb") or ""),
+            str(c.get("mission_statement") or ""),
+            str(c.get("group_folder") or ""),
+            " ".join(str(x) for x in (c.get("initiatives_list") or [])),
+            " ".join(Path(str(p)).name for p in (c.get("linked_material_paths") or [])),
+        ]).lower()
+        cand_tokens = set(re.findall(r"[a-z0-9]{3,}", hay))
+        overlap = len(priority_tokens & cand_tokens)
+        phrase_bonus = 0
+        name_l = str(c.get("name") or "").lower()
+        for ln in raw_lines:
+            ln_l = ln.lower()
+            if name_l and (name_l in ln_l or ln_l in name_l):
+                phrase_bonus += 50
+            elif any(tok in name_l for tok in re.findall(r"[a-z0-9]{4,}", ln_l)):
+                phrase_bonus += 20
+        score = phrase_bonus + (overlap * 12) + (5 if c.get("linked_material_paths") else 0)
+        scored.append((score, -idx, dict(c)))
+
+    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+
+    active_list: list[dict[str, Any]] = []
+    on_deck_list: list[dict[str, Any]] = []
+    candidate_list: list[dict[str, Any]] = []
+    updated_candidates: list[dict[str, Any]] = []
+
+    for rank, (score, _neg_idx, item) in enumerate(scored):
+        item["priority_match_score"] = score
+        if not item.get("included", True) or item.get("excluded", False):
+            item["seat"] = "parked"
+            candidate_list.append(item)
+        elif rank < max_active and (score > 0 or not priority_tokens):
+            item["seat"] = "active"
+            item["proposal_reason"] = (
+                f"Matched your top-priority initiatives (score {score})"
+                if score > 0
+                else "Proposed for Active focus"
+            )
+            active_list.append(item)
+        elif rank < (max_active + max_on_deck):
+            item["seat"] = "deck"
+            item["proposal_reason"] = (
+                f"Matched priority context for On Deck queue (score {score})"
+                if score > 0
+                else "Queued On Deck behind top Active items"
+            )
+            on_deck_list.append(item)
+        else:
+            item["seat"] = "parked"
+            item["proposal_reason"] = "Available in Cave of Wonders Candidates shelf"
+            candidate_list.append(item)
+        updated_candidates.append(item)
+
+    proj_sec = dict(st_doc.get("projects") or {})
+    proj_sec["discovered"] = updated_candidates
+    proj_sec["priority_initiatives_text"] = str(priority_initiatives_text or "").strip()
+    proj_sec["proposed_cave_seats"] = {
+        "active": [x["name"] for x in active_list],
+        "on_deck": [x["name"] for x in on_deck_list],
+        "candidates": [x["name"] for x in candidate_list],
+    }
+    st_doc["projects"] = proj_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    return {
+        "ok": True,
+        "priority_initiatives_text": str(priority_initiatives_text or "").strip(),
+        "parsed_initiatives": raw_lines,
+        "proposed_active": active_list,
+        "proposed_on_deck": on_deck_list,
+        "proposed_candidates": candidate_list,
+        "discovered": updated_candidates,
+    }
+
+
 def scaffold_starter_ai_cockpit(
     folder_path: str | Path,
     project_name: str,
@@ -1380,6 +1594,9 @@ def scaffold_starter_ai_cockpit(
     group_folder: str = "",
     blurb: str = "",
     user_display_name: str = "John",
+    linked_material_paths: list[str] | None = None,
+    mission_statement: str = "",
+    initiatives_list: list[str] | None = None,
 ) -> dict[str, Any]:
     """Idempotently scaffold a complete Starter AI Cockpit inside ``folder_path``.
 
@@ -1405,12 +1622,28 @@ def scaffold_starter_ai_cockpit(
 
     # 1. ECGBERHT.md
     face_path = folder / "ECGBERHT.md"
+    linked_paths_clean = [str(p).strip() for p in (linked_material_paths or []) if str(p).strip()]
+    inits_clean = [str(i).strip() for i in (initiatives_list or []) if str(i).strip()]
+    clean_mission_line = str(mission_statement or clean_goal).strip()
     if not face_path.is_file():
+        linked_md = ""
+        if linked_paths_clean:
+            linked_md = "\n## Consolidated Folders & Linked Material\n" + "".join(
+                f"- `{p}`\n" for p in linked_paths_clean
+            )
+        inits_md = ""
+        if inits_clean:
+            inits_md = "\n## Priority Initiatives\n" + "".join(
+                f"- {i}\n" for i in inits_clean
+            )
         face_body = (
             f"# {clean_title}\n\n"
+            f"**Mission Statement:** {clean_mission_line}\n\n"
             f"**Goal:** {clean_goal}\n\n"
             f"**Portfolio Folder:** {clean_group}\n"
-            f"**Owner:** {user_display_name}\n\n"
+            f"**Owner:** {user_display_name}\n"
+            f"{linked_md}"
+            f"{inits_md}\n"
             f"## Active Focus\n"
             f"- **Stage 1: Goal & Scope Alignment** — Confirm initial deliverables and work-product map with {user_display_name}.\n"
         )
@@ -1600,6 +1833,9 @@ def provision_projects_and_cockpits(
                 group_folder=group_folder,
                 blurb=blurb,
                 user_display_name=user_name,
+                linked_material_paths=item.get("linked_material_paths") or [],
+                mission_statement=str(item.get("mission_statement") or ""),
+                initiatives_list=item.get("initiatives_list") or [],
             )
             entry = {
                 "id": pid,
@@ -1666,6 +1902,9 @@ def provision_projects_and_cockpits(
                 group_folder=group_folder,
                 blurb=blurb,
                 user_display_name=user_name,
+                linked_material_paths=item.get("linked_material_paths") or [],
+                mission_statement=str(item.get("mission_statement") or ""),
+                initiatives_list=item.get("initiatives_list") or [],
             )
             provisioned.append({
                 "id": pid,
@@ -2088,6 +2327,39 @@ def dispatch_wizard_action(
             sandbox_id=sid,
             base_dir=base_dir,
         )
+    if act == "consolidate_folders":
+        fpaths = body.get("folder_paths") or []
+        if isinstance(fpaths, str):
+            fpaths = [x.strip() for x in re.split(r"[;\r\n]+", fpaths) if x.strip()]
+        goals_l = body.get("goals_list") or []
+        if isinstance(goals_l, str):
+            goals_l = [x.strip() for x in goals_l.splitlines() if x.strip()]
+        inits_l = body.get("initiatives_list") or []
+        if isinstance(inits_l, str):
+            inits_l = [x.strip() for x in inits_l.splitlines() if x.strip()]
+        return consolidate_folders_into_project(
+            folder_paths=fpaths,
+            project_name=str(body.get("project_name") or ""),
+            primary_folder=body.get("primary_folder"),
+            mission_statement=str(body.get("mission_statement") or ""),
+            goals_list=goals_l,
+            initiatives_list=inits_l,
+            group_folder=str(body.get("group_folder") or ""),
+            seat=str(body.get("seat") or "active"),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "propose_active_on_deck":
+        return propose_active_and_on_deck(
+            priority_initiatives_text=str(body.get("priority_initiatives_text") or ""),
+            candidates=body.get("candidates") if isinstance(body.get("candidates"), list) else None,
+            max_active=int(body.get("max_active") or 4),
+            max_on_deck=int(body.get("max_on_deck") or 6),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
     if act == "provision_projects_and_cockpits":
         selected = body.get("projects")
         if not isinstance(selected, list):
@@ -2469,24 +2741,25 @@ def render_onboard_wizard_html(
       <!-- STEP 4 -->
       <section class="wiz-step-pane" id="step-pane-4" hidden>
         <div class="wiz-card">
-          <h2>Step 4 · Start with Goals &amp; Missions (Star Chart Steward) OR Jump to Projects</h2>
+          <h2>Step 4 · Star Chart (Mission, Goals &amp; Initiatives) vs. Cave of Wonders (What You're Working On Now)</h2>
           <p class="muted">
-            <strong>How Anchor Organizes Your Portfolio:</strong><br>
-            • <strong>Mission / North Star:</strong> Your overarching purpose and 1–3 Year vision.<br>
-            • <strong>Goals (Quarter / Year Horizons):</strong> Concrete outcomes you want to achieve this Quarter and Year.<br>
-            • <strong>Initiatives / Projects (AI Cockpits):</strong> The active workspaces that execute those goals.
+            <strong>How Star Chart &amp; Cave of Wonders Work Together:</strong><br>
+            • <strong>Star Chart (Strategy &amp; Horizons):</strong> Holds your overarching <strong>Mission Statement</strong>, 1–3 Year / Quarterly <strong>Goals</strong>, and strategic <strong>Goal Arenas</strong>.<br>
+            • <strong>Cave of Wonders (Immediate Execution Board):</strong> Holds your concrete <strong>Active</strong> and <strong>On Deck</strong> AI Cockpits — driven by the most important initiatives you are working on right now.
           </p>
           <div class="form-grid">
             <div>
-              <label for="inpMission">Overarching Mission / North Star (1 sentence)</label>
+              <label for="inpMission">Star Chart · Overarching Mission Statement / North Star</label>
               <input type="text" id="inpMission" placeholder="e.g., Advance research, teaching, family trusts, and AI systems with zero dropped balls.">
             </div>
           </div>
-          <label for="txtGoals">Type or dictate your Goals &amp; Missions (one per line — the Star Chart Steward will group them into Strategic Goal Arenas)</label>
+          <label for="txtGoals">Star Chart · Long-Term Goals &amp; Strategic Arenas (one per line)</label>
           <textarea id="txtGoals" placeholder="Publish flagship research papers this quarter&#10;Deliver MBA AI &amp; analytics course materials&#10;Manage family trust &amp; legal operations&#10;Build Anchor &amp; Skill Foundry multi-agent cockpits"></textarea>
+          <label for="txtPriorityNow" style="margin-top:12px">Cave of Wonders · What are the most important initiatives or main things you are working on right now? (Used to propose what goes ★ Active vs. ↳ On Deck)</label>
+          <textarea id="txtPriorityNow" placeholder="e.g., Finishing the Empirical Paper for JCR, preparing the Smeal AI Teaching Grant, and polishing Anchor Onboarding"></textarea>
           <div id="arenasPreview" style="margin:12px 0"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-            <button type="button" class="btn primary" id="btnOrganizeGoals">🧭 Organize with Star Chart Steward &amp; Continue →</button>
+            <button type="button" class="btn primary" id="btnOrganizeGoals">🧭 Organize Star Chart &amp; Propose Active / On Deck →</button>
             <button type="button" class="btn" id="btnSkipToProjects">Jump Straight to Scanning Projects (Step 5) →</button>
           </div>
         </div>
@@ -2495,17 +2768,38 @@ def render_onboard_wizard_html(
       <!-- STEP 5 -->
       <section class="wiz-step-pane" id="step-pane-5" hidden>
         <div class="wiz-card">
-          <h2>Step 5 · Smart Directory Scan (Gandalf Scanner), Exclusion Filter, Virtual Groupings &amp; Starter AI Cockpits</h2>
-          <p class="muted">Scan one or more workspace roots anywhere on your computer. Anchor automatically re-adopts any prior <code>.anchor/projects/&lt;id&gt;</code> stores, lets you exclude folders you don't want, groups projects into folders, and scaffolds a complete Starter AI Cockpit (<code>ECGBERHT.md</code>, <code>roadmap.json</code>, <code>strip.json</code>, <code>DELIVERABLES.md</code>) for every confirmed project!</p>
+          <h2>Step 5 · Smart Directory Scan, Multi-Folder Project Consolidation &amp; Proposed Active / On Deck Lineup</h2>
+          <p class="muted">Scan one or more workspace roots anywhere on your computer, or point to multiple separate folders and pull their material together into a single unified project &amp; AI Cockpit.</p>
           <div class="form-grid">
             <div>
               <label for="inpWorkspaceRoots">Workspace Root Directories (semicolon-separated; add folders from anywhere on this PC)</label>
               <input type="text" id="inpWorkspaceRoots" value="C:\\dev" placeholder="C:\\dev; D:\\Research">
             </div>
-            <div style="display:flex;align-items:flex-end">
+            <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
               <button type="button" class="btn" id="btnScanDirs">🔍 Scan Directories &amp; Re-Adopt Existing Stores</button>
+              <button type="button" class="btn primary" id="btnProposeSeats">⚡ Auto-Propose Active &amp; On Deck from My Top Initiatives</button>
             </div>
           </div>
+          <details style="margin:12px 0;padding:12px 14px;background:#121824;border:1px solid var(--border);border-radius:8px">
+            <summary style="cursor:pointer;font-weight:650;color:var(--sky)">➕ Pull Multiple Folders / Materials Together into a Single Proposed Project</summary>
+            <div class="form-grid" style="margin-top:10px">
+              <div>
+                <label for="inpConsName">Unified Project Name</label>
+                <input type="text" id="inpConsName" placeholder="e.g., Collapse of Marketing (Unified Study)">
+              </div>
+              <div>
+                <label for="inpConsMission">Project Mission Statement &amp; Goal</label>
+                <input type="text" id="inpConsMission" placeholder="e.g., Combine empirical JCR paper, math proofs, and datasets into one cockpit">
+              </div>
+              <div>
+                <label for="inpConsFolders">Folders to Pull Together (semicolon-separated paths)</label>
+                <input type="text" id="inpConsFolders" placeholder="C:\\dev\\PaperDraft; C:\\dev\\MathAppendix; D:\\Data\\Survey">
+              </div>
+              <div style="display:flex;align-items:flex-end">
+                <button type="button" class="btn emerald" id="btnConsolidateFolders">🔗 Pull Folders Together into One Project</button>
+              </div>
+            </div>
+          </details>
           <div id="discoveredList" style="margin:14px 0"></div>
           <button type="button" class="btn emerald" id="btnProvisionCockpits">🚀 Confirm Selected Projects &amp; Create Starter AI Cockpits →</button>
         </div>
@@ -2793,11 +3087,41 @@ def render_onboard_wizard_html(
         raw_text: document.getElementById('txtGoals').value,
         starting_flow: 'goals_first',
       }});
+      const prioTxt = (document.getElementById('txtPriorityNow') || {{}}).value || '';
+      if (prioTxt.trim()) {{
+        await callWizardAction('propose_active_on_deck', {{ priority_initiatives_text: prioTxt }});
+      }}
       document.getElementById('wizBanner').textContent =
-        `Star Chart Steward organized ${{out.goals.items.length}} goals into ${{out.goals.arenas.length}} Strategic Arenas!`;
+        `Star Chart Steward organized ${{out.goals.items.length}} goals into ${{out.goals.arenas.length}} Strategic Arenas & updated Active/On-Deck proposals!`;
       await refreshBundle();
       showStep(5);
     }});
+
+    const propSeatsBtn = document.getElementById('btnProposeSeats');
+    if (propSeatsBtn) {{
+      propSeatsBtn.addEventListener('click', async () => {{
+        const prioTxt = (document.getElementById('txtPriorityNow') || {{}}).value || (document.getElementById('txtGoals') || {{}}).value || '';
+        const out = await callWizardAction('propose_active_on_deck', {{ priority_initiatives_text: prioTxt }});
+        document.getElementById('wizBanner').textContent =
+          `Proposed ${{out.proposed_active.length}} Active and ${{out.proposed_on_deck.length}} On Deck AI Cockpits based on your top initiatives!`;
+        await refreshBundle();
+      }});
+    }}
+
+    const consBtn = document.getElementById('btnConsolidateFolders');
+    if (consBtn) {{
+      consBtn.addEventListener('click', async () => {{
+        const out = await callWizardAction('consolidate_folders', {{
+          project_name: document.getElementById('inpConsName').value,
+          mission_statement: document.getElementById('inpConsMission').value,
+          folder_paths: document.getElementById('inpConsFolders').value,
+          seat: 'active',
+        }});
+        document.getElementById('wizBanner').textContent =
+          `Consolidated ${{(out.consolidated_project.linked_material_paths || []).length}} folders into unified project "${{out.consolidated_project.name}}"!`;
+        await refreshBundle();
+      }});
+    }}
 
     document.getElementById('btnSkipToProjects').addEventListener('click', () => showStep(5));
 
