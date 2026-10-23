@@ -2417,7 +2417,7 @@ set "ANCHOR_SHELL_PORT=8787"
 set "ANCHOR_SHELL_LOCAL_URL=http://127.0.0.1:8787"
 set "ANCHOR_SHELL_INSTALL_ROOT=C:\\dev\\Anchor-Onboard-Test"
 set "ANCHOR_SHELL_ONBOARD_PATH=/onboard-wizard"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File -ErrorAction SilentlyContinue" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File -ErrorAction SilentlyContinue; Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; if ((Test-Path '%~dp0Anchor\\anchor-core-overlay.zip') -and (Test-Path 'C:\\dev\\Anchor-Onboard-Test\\Anchor')) { Expand-Archive -Path '%~dp0Anchor\\anchor-core-overlay.zip' -DestinationPath 'C:\\dev\\Anchor-Onboard-Test\\Anchor' -Force }" >nul 2>&1
 if exist "%~dp0Anchor\\Anchor.exe" (
     start "" "%~dp0Anchor\\Anchor.exe" --setup
 ) else if exist "%~dp0Anchor.exe" (
