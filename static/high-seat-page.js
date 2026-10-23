@@ -1819,4 +1819,45 @@
       return;
     }
   });
+  function ensureHeaderDownloadButtons() {
+    var hdrRight = document.querySelector('.hdr-right') || document.querySelector('.top-actions') || document.querySelector('header');
+    if (!hdrRight) return;
+    if (!document.getElementById('hs-onboard-wizard-btn')) {
+      var wBtn = document.createElement('a');
+      wBtn.id = 'hs-onboard-wizard-btn';
+      wBtn.className = 'btn';
+      wBtn.href = '/onboard-wizard';
+      wBtn.title = 'Open the 7-Step Onboarding & Setup Wizard (or Sandbox Test Walkthrough)';
+      wBtn.style.cssText = 'text-decoration:none;border-color:rgba(124,92,255,0.55);color:#c4b5fd;font-weight:600';
+      wBtn.textContent = '🧭 Setup & Onboard';
+      hdrRight.insertBefore(wBtn, hdrRight.firstChild);
+    }
+    if (!document.getElementById('hs-download-test-exe-btn')) {
+      var tBtn = document.createElement('a');
+      tBtn.id = 'hs-download-test-exe-btn';
+      tBtn.className = 'btn';
+      tBtn.href = '/static/downloads/Anchor-Test-Onboard.zip?download=1';
+      tBtn.setAttribute('download', 'Anchor-Test-Onboard.zip');
+      tBtn.title = 'Download isolated Desktop Onboard-Test Anchor.exe package (runs on port 8787 + isolated AppData so your live Anchor.exe & Tailscale stay untouched)';
+      tBtn.style.cssText = 'text-decoration:none;border-color:rgba(245,158,11,0.55);color:#fcd34d;font-weight:600';
+      tBtn.textContent = '🧪 Desktop Onboard-Test.exe';
+      var ref = document.getElementById('hs-onboard-wizard-btn');
+      if (ref && ref.nextSibling) hdrRight.insertBefore(tBtn, ref.nextSibling);
+      else hdrRight.appendChild(tBtn);
+    }
+    if (!document.getElementById('hs-download-prod-exe-btn')) {
+      var pBtn = document.createElement('a');
+      pBtn.id = 'hs-download-prod-exe-btn';
+      pBtn.className = 'btn';
+      pBtn.href = '/static/downloads/Anchor.zip?download=1';
+      pBtn.setAttribute('download', 'Anchor.zip');
+      pBtn.title = 'Download production Anchor.exe package (shareable with collaborators)';
+      pBtn.style.cssText = 'text-decoration:none;border-color:rgba(16,185,129,0.55);color:#6ee7b7;font-weight:600';
+      pBtn.textContent = '📦 Anchor.exe';
+      var ref2 = document.getElementById('hs-onboard-wizard-btn');
+      if (ref2 && ref2.nextSibling) hdrRight.insertBefore(pBtn, ref2.nextSibling);
+      else hdrRight.appendChild(pBtn);
+    }
+  }
+  ensureHeaderDownloadButtons();
 })();
