@@ -177,6 +177,11 @@ class GWLClearinghouse:
         self.directory_file = self.root / "pseudonym_directory.json"
         self.acl_ledger_file = self.root / "acl_ledger.json"
         self.broadcast_file = self.root / "latest_nightly_broadcast.json"
+        self.model_catalog_file = self.root / "verified_model_catalog.json"
+        self.applicants_file = self.root / "applicants_registry.json"
+        self.applicants_md_file = self.root / "APPLICANTS.md"
+        self.applicants_dir = self.root / "applicants"
+        self.applicants_dir.mkdir(parents=True, exist_ok=True)
         self.inbox_root = self.root / "inbox"
         self.inbox_root.mkdir(parents=True, exist_ok=True)
         self._ensure_default_samwise_account()
@@ -484,6 +489,7 @@ class GWLClearinghouse:
             "vetted_foundry_skills": vetted_skills,
             "security_advisories": advisories_list,
         }
+        bulletin["verified_model_catalog"] = self.get_verified_model_catalog().get("families", {})
         bulletin["signature"] = _sign_broadcast_bulletin(bulletin)
         try:
             self.broadcast_file.parent.mkdir(parents=True, exist_ok=True)
@@ -701,6 +707,219 @@ class GWLClearinghouse:
             "envelopes": envelopes,
         }
 
+    # ── Nightly Verified Model Catalog (Shared with All Applicants) ───────────────────────────
+
+    def publish_verified_model_catalog(self, catalog_by_family: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Publish the Nightly 02:00 + Live CLI verified model list on Puter (gwl-hub) for all applicants."""
+        default_families: dict[str, Any] = {
+            "claude": {
+                "family": "claude",
+                "label": "Anthropic Claude (Claude Code)",
+                "frontier_model": "claude-fable-5-1",
+                "one_tier_down_model": "sonnet",
+                "effort_frontier": "max",
+                "effort_one_tier_down": "high",
+                "models": ["claude-fable-5-1", "opus", "sonnet", "haiku"],
+                "discovered_models": ["claude-fable-5-1", "opus", "sonnet", "haiku"],
+            },
+            "gemini": {
+                "family": "gemini",
+                "label": "Google Gemini (Antigravity / agy CLI)",
+                "frontier_model": "gemini-4-argon",
+                "one_tier_down_model": "gemini-3.8-flash",
+                "effort_frontier": "high",
+                "effort_one_tier_down": "medium",
+                "models": ["gemini-4-argon", "gemini-3.8-flash"],
+                "discovered_models": ["gemini-4-argon", "gemini-3.8-flash"],
+            },
+            "grok": {
+                "family": "grok",
+                "label": "xAI Grok",
+                "frontier_model": "grok-4.7",
+                "one_tier_down_model": "grok-4.7",
+                "effort_frontier": "xhigh",
+                "effort_one_tier_down": "high",
+                "models": ["grok-4.7"],
+                "discovered_models": ["grok-4.7"],
+            },
+            "chatgpt": {
+                "family": "chatgpt",
+                "label": "OpenAI ChatGPT / Codex",
+                "frontier_model": "gpt-6.1-sol",
+                "one_tier_down_model": "gpt-6-astra",
+                "effort_frontier": "ultra",
+                "effort_one_tier_down": "high",
+                "models": ["gpt-6.1-sol", "gpt-6-astra"],
+                "discovered_models": ["gpt-6.1-sol", "gpt-6-astra"],
+            },
+        }
+        if isinstance(catalog_by_family, dict):
+            for fam, info in catalog_by_family.items():
+                if fam in default_families and isinstance(info, dict):
+                    default_families[fam].update(info)
+                    if "discovered_models" in info and "models" not in info:
+                        default_families[fam]["models"] = list(info["discovered_models"])
+                    elif "models" in info and "discovered_models" not in info:
+                        default_families[fam]["discovered_models"] = list(info["models"])
+
+        doc = {
+            "schema": "anchor.gwl.model_catalog.v1",
+            "hub_id": HUB_ID,
+            "host": "puter",
+            "cadence": "Nightly 02:00 local + Live CLI discovery",
+            "published_at": _utc_now_iso(),
+            "families": default_families,
+        }
+        try:
+            self.model_catalog_file.parent.mkdir(parents=True, exist_ok=True)
+            self.model_catalog_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+        return doc
+
+    def get_verified_model_catalog(self) -> dict[str, Any]:
+        """Return the latest Nightly 02:00 verified model catalog from Puter (gwl-hub)."""
+        if self.model_catalog_file.is_file():
+            try:
+                loaded = json.loads(self.model_catalog_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and isinstance(loaded.get("families"), dict):
+                    return loaded
+            except Exception:
+                pass
+        return self.publish_verified_model_catalog()
+
+    # ── Central Applicant & Collaborator Signup Repository on Puter (`gwl-hub`) ──────────────
+
+    def _load_applicants(self) -> list[dict[str, Any]]:
+        if not self.applicants_file.is_file():
+            return []
+        try:
+            data = json.loads(self.applicants_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("applicants"), list):
+                return [a for a in data["applicants"] if isinstance(a, dict)]
+        except Exception:
+            pass
+        return []
+
+    def _write_applicants_markdown(self, applicants: list[dict[str, Any]]) -> None:
+        lines = [
+            "# Ghost World Labs · Central Applicant & Collaborator Registry (`puter`)",
+            "",
+            f"- **Hub ID:** `{HUB_ID}` (`puter`)",
+            f"- **Total Registered Individuals:** {len(applicants)}",
+            f"- **Updated At:** `{_utc_now_iso()}`",
+            "",
+            "| # | Display Name | Username | Pseudonym (`DID`) | Steward | Host / Tailscale IP | Topology | 2FA | Enabled AI Services | Registered / Updated |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for idx, app in enumerate(applicants, start=1):
+            svcs = ", ".join(app.get("enabled_services") or []) or "pending"
+            ts_str = f"{app.get('hostname') or 'local'} ({app.get('tailscale_ip') or 'local'})"
+            twofa = f"ON ({app.get('dual_auth_method')})" if app.get("dual_auth_enabled") else "Off"
+            lines.append(
+                f"| {idx} | **{app.get('display_name', '')}** | `{app.get('username', '')}` | "
+                f"{app.get('pseudonym', '')} (`{app.get('did', '')}`) | {app.get('steward_persona', 'Aladdin')} | "
+                f"`{ts_str}` | `{app.get('topology_mode', 'main_mothership')}` | {twofa} | {svcs} | "
+                f"`{app.get('updated_at') or app.get('registered_at', '')}` |"
+            )
+        try:
+            self.applicants_md_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def register_applicant_signup(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Register or update an individual who signs up via Anchor Onboarding in Puter's central repository."""
+        raw_name = str(record.get("display_name") or record.get("username") or "Applicant").strip()
+        raw_pseudo = str(record.get("pseudonym") or aap.PSEUDONYM_DEFAULT).strip()
+        raw_aliases = record.get("pseudonym_aliases")
+        canon_pseudo, canon_aliases = aap.canonicalize_pseudonym(raw_pseudo, raw_aliases)
+        p_slug = aap.slugify_pseudonym(canon_pseudo)
+        did = aap.did_from_pseudonym(canon_pseudo)
+        username = str(record.get("username") or aap.slugify_pseudonym(raw_name)).strip() or p_slug
+        app_slug = aap.slugify_pseudonym(f"{username}-{p_slug}")
+        app_id = str(record.get("applicant_id") or f"applicant-{app_slug}")
+        now_iso = _utc_now_iso()
+
+        applicants = self._load_applicants()
+        existing = next(
+            (a for a in applicants if a.get("applicant_id") == app_id or a.get("username") == username),
+            None,
+        )
+        entry = {
+            "schema": "anchor.gwl.applicant.v1",
+            "applicant_id": app_id,
+            "display_name": raw_name,
+            "username": username,
+            "pseudonym": canon_pseudo,
+            "pseudonym_slug": p_slug,
+            "pseudonym_aliases": canon_aliases,
+            "did": did,
+            "steward_persona": str(record.get("steward_persona") or (existing or {}).get("steward_persona") or "Aladdin"),
+            "hostname": str(record.get("hostname") or (existing or {}).get("hostname") or ""),
+            "tailscale_ip": str(record.get("tailscale_ip") or (existing or {}).get("tailscale_ip") or ""),
+            "tailscale_endpoint": str(record.get("tailscale_endpoint") or (existing or {}).get("tailscale_endpoint") or ""),
+            "topology_mode": str(record.get("topology_mode") or (existing or {}).get("topology_mode") or "main_mothership"),
+            "dual_auth_enabled": bool(record.get("dual_auth_enabled", (existing or {}).get("dual_auth_enabled", False))),
+            "dual_auth_method": str(record.get("dual_auth_method") or (existing or {}).get("dual_auth_method") or "totp_authenticator"),
+            "enabled_services": list(record.get("enabled_services") or (existing or {}).get("enabled_services") or []),
+            "verified_services": list(record.get("verified_services") or (existing or {}).get("verified_services") or []),
+            "onboarding_status": str(record.get("onboarding_status") or (existing or {}).get("onboarding_status") or "registered"),
+            "registered_at": str((existing or {}).get("registered_at") or now_iso),
+            "updated_at": now_iso,
+        }
+        idx = next(
+            (i for i, a in enumerate(applicants) if a.get("applicant_id") == app_id or a.get("username") == username),
+            None,
+        )
+        if idx is not None:
+            applicants[idx] = entry
+        else:
+            applicants.append(entry)
+
+        self.applicants_file.parent.mkdir(parents=True, exist_ok=True)
+        self.applicants_file.write_text(
+            json.dumps(
+                {
+                    "schema": "anchor.gwl.applicants_registry.v1",
+                    "hub_id": HUB_ID,
+                    "host": "puter",
+                    "count": len(applicants),
+                    "applicants": applicants,
+                    "updated_at": now_iso,
+                },
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            self.applicants_dir.mkdir(parents=True, exist_ok=True)
+            (self.applicants_dir / f"{app_slug}.json").write_text(
+                json.dumps(entry, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        self._write_applicants_markdown(applicants)
+        try:
+            self.register_account(
+                pseudonym=canon_pseudo,
+                account_id=f"acct-{app_slug}",
+                aliases=canon_aliases,
+                tailscale_endpoint=entry["tailscale_endpoint"],
+            )
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "applicant": entry,
+            "total_applicants": len(applicants),
+            "registry_file": str(self.applicants_file),
+            "markdown_file": str(self.applicants_md_file),
+        }
+
+    def list_applicant_signups(self) -> list[dict[str, Any]]:
+        return self._load_applicants()
+
 
 class DualPathTransport:
     """Routes live collaboration envelopes over Tailscale P2P (<50ms) with automatic fallback
@@ -840,6 +1059,29 @@ def post_offline_envelope(envelope: dict[str, Any], hub_root: str | Path | None 
 
 def drain_offline_mailbox(recipient_name_or_did: str, hub_root: str | Path | None = None) -> dict[str, Any]:
     return GWLClearinghouse(hub_root=hub_root).drain_offline_mailbox(recipient_name_or_did)
+
+
+def publish_verified_model_catalog(
+    catalog_by_family: dict[str, Any] | None = None,
+    hub_root: str | Path | None = None,
+) -> dict[str, Any]:
+    return GWLClearinghouse(hub_root=hub_root).publish_verified_model_catalog(catalog_by_family)
+
+
+def get_verified_model_catalog(hub_root: str | Path | None = None) -> dict[str, Any]:
+    return GWLClearinghouse(hub_root=hub_root).get_verified_model_catalog()
+
+
+def register_applicant_signup(
+    record: dict[str, Any],
+    hub_root: str | Path | None = None,
+) -> dict[str, Any]:
+    return GWLClearinghouse(hub_root=hub_root).register_applicant_signup(record)
+
+
+def list_applicant_signups(hub_root: str | Path | None = None) -> list[dict[str, Any]]:
+    return GWLClearinghouse(hub_root=hub_root).list_applicant_signups()
+
 
 
 def compare_p2p_vs_central_matrix() -> dict[str, Any]:

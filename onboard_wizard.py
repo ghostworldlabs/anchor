@@ -572,7 +572,101 @@ def save_user_identity(
         st_doc["completed_steps"].append(1)
     st_doc["current_step"] = max(int(st_doc.get("current_step") or 1), 2)
     save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
-    return {"ok": True, "profile": get_active_user_profile(sandbox_id if sandbox else "", sandbox=sandbox, base_dir=base_dir)}
+    gwl_sync = sync_applicant_signup_to_gwl_hub(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return {
+        "ok": True,
+        "profile": get_active_user_profile(sandbox_id if sandbox else "", sandbox=sandbox, base_dir=base_dir),
+        "gwl_applicant": gwl_sync.get("applicant"),
+    }
+
+
+def _gwl_hub_root_for(
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> Path | None:
+    if sandbox:
+        return state_dir(sandbox=True, sandbox_id=sandbox_id, base_dir=base_dir) / "gwl_hub"
+    if base_dir is not None:
+        return _resolve_base_dir(base_dir) / ".anchor" / "gwl_hub"
+    return None
+
+
+def sync_applicant_signup_to_gwl_hub(
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Record or update the onboarding individual in Puter's central Ghost World Labs applicant repository (`gwl-hub`)."""
+    try:
+        import gwl_clearinghouse as _gwl
+    except Exception:
+        return {"ok": False}
+
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    prof = get_active_user_profile(sandbox_id if sandbox else "", sandbox=sandbox, base_dir=base_dir)
+    topo = st_doc.get("topology") if isinstance(st_doc.get("topology"), dict) else {}
+    ts_info = topo.get("tailscale") if isinstance(topo.get("tailscale"), dict) else {}
+    services = st_doc.get("services") if isinstance(st_doc.get("services"), dict) else {}
+
+    enabled_svcs = [
+        f"{fam}:{cfg.get('orchestrator_model') or ''}"
+        for fam, cfg in services.items()
+        if isinstance(cfg, dict) and cfg.get("enabled")
+    ]
+    verified_svcs = [
+        f"{fam}:{cfg.get('orchestrator_model') or ''}"
+        for fam, cfg in services.items()
+        if isinstance(cfg, dict) and cfg.get("verified")
+    ]
+    completed_steps = st_doc.get("completed_steps") or []
+    onboard_status = "ready" if len(completed_steps) >= 3 else f"step_{st_doc.get('current_step') or 1}"
+    ts_ip = str(ts_info.get("tailscale_ip") or "").strip()
+    record = {
+        "display_name": prof.get("display_name") or "Applicant",
+        "username": prof.get("username") or "",
+        "pseudonym": prof.get("pseudonym") or aap.PSEUDONYM_DEFAULT,
+        "pseudonym_aliases": prof.get("pseudonym_aliases") or [],
+        "steward_persona": prof.get("steward_persona") or "Aladdin",
+        "hostname": str(ts_info.get("hostname") or os.environ.get("COMPUTERNAME") or "").strip(),
+        "tailscale_ip": ts_ip,
+        "tailscale_endpoint": f"http://{ts_ip}:8777" if ts_ip else str(topo.get("local_url") or "http://127.0.0.1:8777"),
+        "topology_mode": str(topo.get("mode") or "main_mothership"),
+        "dual_auth_enabled": bool(prof.get("dual_auth_enabled", False)),
+        "dual_auth_method": str(prof.get("dual_auth_method") or "totp_authenticator"),
+        "enabled_services": enabled_svcs,
+        "verified_services": verified_svcs,
+        "onboarding_status": onboard_status,
+    }
+    hub_root = _gwl_hub_root_for(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    res = _gwl.register_applicant_signup(record, hub_root=hub_root)
+
+    # If running on a remote machine that connects to Puter as coordination_hub, also push over Tailscale HTTP
+    coord_hub = str(topo.get("coordination_hub") or topo.get("remote_mothership_url") or "").strip().rstrip("/")
+    local_host = str(os.environ.get("COMPUTERNAME") or "").strip().lower()
+    if (
+        not sandbox
+        and base_dir is None
+        and coord_hub.startswith(("http://", "https://"))
+        and "127.0.0.1" not in coord_hub
+        and "localhost" not in coord_hub
+        and not (local_host == "puter" and "puter" in coord_hub.lower())
+    ):
+        try:
+            import urllib.request as _ureq
+            req = _ureq.Request(
+                f"{coord_hub}/api/onboard-wizard/action",
+                data=json.dumps({"action": "register_gwl_applicant", "applicant": res.get("applicant") or record}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "Anchor-Onboard-ApplicantSync/1.0"},
+                method="POST",
+            )
+            with _ureq.urlopen(req, timeout=2.0):
+                pass
+        except Exception:
+            pass
+    return res
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -747,6 +841,7 @@ def configure_mothership_topology(
         st_doc["completed_steps"].append(2)
     st_doc["current_step"] = max(int(st_doc.get("current_step") or 1), 3)
     save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    sync_applicant_signup_to_gwl_hub(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     return {"ok": True, "topology": topology_doc}
 
 
@@ -791,6 +886,24 @@ def _discover_live_service_models(family: str, *, force: bool = False) -> list[d
                 "efforts": effs,
                 "rank": int(r.get("rank") or 0),
             })
+    except Exception:
+        pass
+    try:
+        import gwl_clearinghouse as _gwl
+        hub_cat = _gwl.get_verified_model_catalog().get("families") or {}
+        fam_cat = hub_cat.get(fam) if isinstance(hub_cat.get(fam), dict) else {}
+        existing_ids = {r.get("model") for r in out_rows}
+        for rank_idx, m_str in enumerate(fam_cat.get("discovered_models") or []):
+            m_clean = str(m_str or "").strip()
+            if m_clean and m_clean not in existing_ids:
+                out_rows.append({
+                    "model": m_clean,
+                    "alias": m_clean,
+                    "display": m_clean,
+                    "efforts": ["high"],
+                    "rank": len(out_rows) + rank_idx,
+                })
+                existing_ids.add(m_clean)
     except Exception:
         pass
     if not out_rows and fam in SERVICE_CATALOG:
@@ -960,8 +1073,22 @@ def refresh_live_models(
             _uam.run_nightly_allowance_refresh(force=True)
         except Exception:
             pass
+    by_fam_catalog: dict[str, Any] = {}
     for fam in SERVICE_CATALOG:
-        _discover_live_service_models(fam, force=True)
+        rows = _discover_live_service_models(fam, force=True)
+        m_ids = [r["model"] for r in rows if r.get("model")]
+        if m_ids:
+            by_fam_catalog[fam] = {
+                "frontier_model": m_ids[0],
+                "one_tier_down_model": m_ids[1] if len(m_ids) > 1 else m_ids[0],
+                "discovered_models": m_ids,
+            }
+    try:
+        import gwl_clearinghouse as _gwl
+        hub_root = _gwl_hub_root_for(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+        _gwl.publish_verified_model_catalog(by_fam_catalog or None, hub_root=hub_root)
+    except Exception:
+        pass
 
     st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     services = st_doc.get("services") or {}
@@ -1167,6 +1294,7 @@ def configure_service_connection(
             anchor_settings.save_settings(provider_preferences=pprefs, expected_revision=rev)
         except Exception:
             pass
+    sync_applicant_signup_to_gwl_hub(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     return {"ok": True, "service": entry}
 
 
@@ -1308,7 +1436,7 @@ def run_service_live_test(
                 ready.write_readiness_stamp(parent_gov, readiness_doc)
             except Exception:
                 pass
-
+    sync_applicant_signup_to_gwl_hub(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     return {
         "ok": probe_ok,
         "test_receipt": test_receipt,
@@ -2594,6 +2722,14 @@ def get_full_wizard_bundle(
     svc_info = detect_ai_services_status(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     ecg_path, ecg_checked = paths.resolve_ecgberht_root()
     receipt = build_readiness_receipt(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    hub_root = _gwl_hub_root_for(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    try:
+        import gwl_clearinghouse as _gwl
+        hub_catalog = _gwl.get_verified_model_catalog(hub_root=hub_root)
+        gwl_applicants = _gwl.list_applicant_signups(hub_root=hub_root)
+    except Exception:
+        hub_catalog = {}
+        gwl_applicants = []
     return {
         "ok": True,
         "sandbox": bool(sandbox),
@@ -2609,6 +2745,8 @@ def get_full_wizard_bundle(
         },
         "services": svc_info["services"],
         "nightly_refresh": svc_info.get("nightly_refresh") or _get_nightly_refresh_meta(),
+        "hub_model_catalog": hub_catalog,
+        "gwl_applicants": gwl_applicants,
         "readiness": svc_info["readiness"],
         "readiness_explanation": svc_info["readiness_explanation"],
         "comms_presets": comms_connector.PROVIDER_PRESETS,
@@ -2790,6 +2928,20 @@ def dispatch_wizard_action(
         return apply_sandbox_to_live(sandbox_id=sid, base_dir=base_dir)
     if act == "receipt":
         return build_readiness_receipt(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
+    if act == "register_gwl_applicant":
+        import gwl_clearinghouse as _gwl
+        hub_root = _gwl_hub_root_for(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
+        app_rec = body.get("applicant") if isinstance(body.get("applicant"), dict) else body
+        return _gwl.register_applicant_signup(app_rec, hub_root=hub_root)
+    if act == "list_gwl_applicants":
+        import gwl_clearinghouse as _gwl
+        hub_root = _gwl_hub_root_for(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
+        apps = _gwl.list_applicant_signups(hub_root=hub_root)
+        return {"ok": True, "count": len(apps), "applicants": apps}
+    if act == "get_model_catalog":
+        import gwl_clearinghouse as _gwl
+        hub_root = _gwl_hub_root_for(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
+        return {"ok": True, "catalog": _gwl.get_verified_model_catalog(hub_root=hub_root)}
     raise ValueError(f"Unknown onboard wizard action: {act}")
 
 
@@ -3491,6 +3643,8 @@ def render_onboard_wizard_html(
           <h2>Step 7 · Complete Readiness Receipt &amp; AI Cockpit Launchpad</h2>
           <p class="muted">Everything is verified and wired. Launch directly into the Cave of Wonders or open any of your newly provisioned AI Cockpits below.</p>
           <div id="receiptChecksBox" style="margin:14px 0"></div>
+          <h3>🏛 Ghost World Labs Central Applicant Repository (`puter` / `gwl-hub`)</h3>
+          <div id="gwlApplicantsBox" style="margin:14px 0"></div>
           <h3>🚀 Your Provisioned AI Cockpits (Active · On Deck · Parked)</h3>
           <div id="receiptCockpitsBox" style="margin:14px 0"></div>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:18px">
@@ -3837,6 +3991,23 @@ def render_onboard_wizard_html(
       const disc = (b.state && b.state.projects && b.state.projects.discovered) || [];
       renderDiscoveredProjects(disc);
       renderReceipt(b.receipt || {{}});
+      const gwlBox = document.getElementById('gwlApplicantsBox');
+      if (gwlBox) {{
+        const apps = b.gwl_applicants || [];
+        if (!apps.length) {{
+          gwlBox.innerHTML = '<p class="muted">Save Step 1 to register this individual in the Puter (`gwl-hub`) Central Applicant Repository.</p>';
+        }} else {{
+          gwlBox.innerHTML = apps.map((a) => `
+            <div class="proj-row">
+              <div>
+                <strong>${{a.display_name}}</strong> (<code>${{a.username}}</code>) · Pseudonym: <strong>${{a.pseudonym}}</strong> (<code>${{a.did}}</code>)
+                <div class="muted">Host: ${{a.hostname || 'local'}} (${{a.tailscale_ip || 'local'}}) · Topology: ${{a.topology_mode}} · 2FA: ${{a.dual_auth_enabled ? 'ON' : 'Off'}} · Services: ${{(a.enabled_services || []).join(', ') || 'pending'}}</div>
+              </div>
+              <span class="pill" style="background:#064e3b;color:#6ee7b7">REGISTERED ON PUTER ✓</span>
+            </div>
+          `).join('');
+        }}
+      }}
     }}
 
     const chkDualAuthEl = document.getElementById('chkDualAuth');

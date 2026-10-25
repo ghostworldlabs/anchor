@@ -474,6 +474,25 @@ def run_nightly_allowance_refresh(force: bool = False) -> Dict[str, Any]:
         pass
 
     try:
+        import gwl_clearinghouse as _gwl
+        import model_policy as _mp
+        by_fam: Dict[str, Any] = {}
+        for fam in ("claude", "gemini", "grok", "chatgpt"):
+            rows, _cmd = _mp.discover(fam)
+            models_list = [str(r.get("upgrade") or r.get("model")) for r in (rows or []) if isinstance(r, dict) and r.get("model")]
+            if models_list:
+                by_fam[fam] = {
+                    "frontier_model": models_list[0],
+                    "one_tier_down_model": models_list[1] if len(models_list) > 1 else models_list[0],
+                    "discovered_models": models_list,
+                }
+        _gwl.publish_verified_model_catalog(by_fam or None)
+        if is_new_night or force:
+            _gwl.generate_nightly_broadcast()
+    except Exception:
+        pass
+
+    try:
         from steward_cockpit import steward_routes as _sr
         with _sr._GLOBAL_USAGE_LOCK:
             _sr._GLOBAL_USAGE_CACHE.clear()

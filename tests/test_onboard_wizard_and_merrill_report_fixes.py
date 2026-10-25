@@ -895,3 +895,101 @@ def test_live_models_honest_chatgpt_status_credentials_2fa_token_and_drag_progre
     assert 'data-winctl="minimize"' in setup_html
     assert "invokeSetupWindowControl('drag')" in setup_js
 
+
+def test_gwl_hub_verified_model_catalog_and_central_applicant_signup_repository_on_puter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify:
+    1. Puter (gwl-hub) publishes and serves `verified_model_catalog.json` (and embeds it in
+       `latest_nightly_broadcast.json`) so all applicants get the latest Nightly 02:00 + CLI models.
+    2. Every individual who signs up via Onboarding (`save_identity` / `register_gwl_applicant`)
+       is recorded in Puter's central applicant repository (`applicants_registry.json`,
+       `applicants/<slug>.json`, and `APPLICANTS.md`) and also registered in the GWL account ledger.
+    """
+    import gwl_clearinghouse as gwl
+    import onboard_wizard
+    import paths
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+
+    # 1. Verify model catalog publishing & retrieval for applicants
+    cat_res = onboard_wizard.dispatch_wizard_action(
+        "get_model_catalog",
+        {},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert cat_res["ok"] is True
+    cat = cat_res["catalog"]
+    assert cat["schema"] == "anchor.gwl.model_catalog.v1"
+    assert cat["host"] == "puter"
+    assert "claude-fable-5-1" in cat["families"]["claude"]["discovered_models"]
+    assert "gemini-4-argon" in cat["families"]["gemini"]["discovered_models"]
+    assert "grok-4.7" in cat["families"]["grok"]["discovered_models"]
+    assert "gpt-6.1-sol" in cat["families"]["chatgpt"]["discovered_models"]
+
+    # 2. Verify onboarding signup automatically populates Puter's central applicant repository
+    merrill_res = onboard_wizard.dispatch_wizard_action(
+        "save_identity",
+        {
+            "display_name": "Merrill",
+            "username": "merrill",
+            "pseudonym": "Gandalf the Grey",
+            "pseudonym_aliases": "Gandalf, Mithrandir",
+            "steward_persona": "Aladdin",
+            "dual_auth_enabled": True,
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert merrill_res["ok"] is True
+    assert merrill_res["gwl_applicant"]["display_name"] == "Merrill"
+    assert merrill_res["gwl_applicant"]["pseudonym"] == "Gandalf the Grey"
+
+    # Also register a second remote applicant directly via register_gwl_applicant action
+    remote_res = onboard_wizard.dispatch_wizard_action(
+        "register_gwl_applicant",
+        {
+            "display_name": "John",
+            "username": "john",
+            "pseudonym": "Samwise Gamgee",
+            "hostname": "PUTER",
+            "tailscale_ip": "100.64.0.1",
+            "topology_mode": "main_mothership",
+            "dual_auth_enabled": True,
+            "enabled_services": ["claude:claude-fable-5-1", "gemini:gemini-4-argon", "grok:grok-4.7"],
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert remote_res["ok"] is True
+    assert remote_res["total_applicants"] == 2
+
+    list_res = onboard_wizard.dispatch_wizard_action(
+        "list_gwl_applicants",
+        {},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert list_res["ok"] is True
+    assert list_res["count"] == 2
+    names = {a["display_name"] for a in list_res["applicants"]}
+    assert names == {"Merrill", "John"}
+
+    hub_dir = onboard_wizard._gwl_hub_root_for(sandbox=True, base_dir=tmp_path)
+    assert hub_dir is not None
+    assert (hub_dir / "verified_model_catalog.json").is_file()
+    assert (hub_dir / "applicants_registry.json").is_file()
+    assert (hub_dir / "APPLICANTS.md").is_file()
+    md_text = (hub_dir / "APPLICANTS.md").read_text(encoding="utf-8")
+    assert "Ghost World Labs · Central Applicant & Collaborator Registry (`puter`)" in md_text
+    assert "**Merrill**" in md_text
+    assert "**John**" in md_text
+
+    # Verify nightly broadcast also embeds verified_model_catalog while remaining HMAC-valid
+    hub = gwl.GWLClearinghouse(hub_root=hub_dir)
+    bulletin = hub.generate_nightly_broadcast()
+    assert "verified_model_catalog" in bulletin
+    assert hub.verify_nightly_broadcast(bulletin)["ok"] is True
+
+
