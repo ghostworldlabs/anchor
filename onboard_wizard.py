@@ -1512,6 +1512,21 @@ def organize_goals_with_starchart_steward(
     }
 
     st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    prev_goals = st_doc.get("goals") if isinstance(st_doc.get("goals"), dict) else {}
+    prev_by_name = {
+        str(g.get("name") or "").strip().lower(): g
+        for g in (prev_goals.get("items") or [])
+        if isinstance(g, dict)
+    }
+    for g in items:
+        matched_prev = prev_by_name.get(str(g.get("name") or "").strip().lower())
+        if matched_prev and matched_prev.get("resources"):
+            g["resources"] = matched_prev["resources"]
+
+    for k in ("mission_dialogue", "mission_summary", "mission_alternatives", "mission_locked", "goals_dialogue", "goals_summary"):
+        if k in prev_goals and k not in goals_state:
+            goals_state[k] = prev_goals[k]
+
     st_doc["goals"] = goals_state
     if 4 not in st_doc["completed_steps"]:
         st_doc["completed_steps"].append(4)
@@ -1528,6 +1543,409 @@ def organize_goals_with_starchart_steward(
     )
 
     return {"ok": True, "goals": goals_state}
+
+
+MISSION_STATEMENT_EXAMPLES: list[dict[str, str]] = [
+    {
+        "id": "nytimes",
+        "label": "The New York Times (Classic Concise Benchmark)",
+        "statement": "We seek the truth and help people understand the world.",
+        "why_good": "10 words — clear purpose, active verbs, zero jargon, universal stakes.",
+    },
+    {
+        "id": "samwise",
+        "label": "Samwise Gamgee (John's Mission Statement)",
+        "statement": (
+            "Carry the work that matters to completion alongside the people I care about — "
+            "advancing rigorous scholarship, teaching, and AI systems that empower human judgment "
+            "without ever dropping the ball on family, faith, or stewardship."
+        ),
+        "why_good": "Personal North Star uniting scholarship, teaching, AI stewardship, collaborators, and family.",
+    },
+    {
+        "id": "builder_scholar",
+        "label": "Scholar, Builder & Mentor",
+        "statement": (
+            "Turn frontier ideas into verified, enduring tools and scholarship that solve real "
+            "problems and elevate every student and collaborator."
+        ),
+        "why_good": "Bridges deep research, practical software/tools, and mentorship in one sentence.",
+    },
+]
+
+GOAL_DOMAIN_EXAMPLES: list[dict[str, str]] = [
+    {
+        "category": "Professional & Flagship Research",
+        "example": "Publish flagship empirical and mathematical papers in top journals (JCR, Management Science)",
+    },
+    {
+        "category": "Teaching & Curriculum",
+        "example": "Deliver AI-enhanced MBA & undergraduate courses with interactive oral-exam and study tools",
+    },
+    {
+        "category": "Software, Ventures & AI Systems",
+        "example": "Build and scale Ghost World Labs, Anchor AI Cockpits, and patent/venture portfolios",
+    },
+    {
+        "category": "Family, Trusts & Stewardship",
+        "example": "Keep family trusts, holding companies, finances, and youth mentorship organized with zero dropped balls",
+    },
+    {
+        "category": "Creative Writing, Fitness & Hobbies",
+        "example": "Write novel chapters & fables, train consistently for CrossFit, and build personal math/memory tools",
+    },
+]
+
+
+def brainstorm_mission_dialogue(
+    user_input: str,
+    *,
+    current_draft: str = "",
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Interactive Steward dialogue to brainstorm, summarize, and iterate on the user's Mission Statement."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = dict(st_doc.get("goals") or {})
+    history: list[dict[str, Any]] = list(goals_sec.get("mission_dialogue") or [])
+    raw_in = str(user_input or "").strip()
+    prev_mission = str(current_draft or goals_sec.get("mission_statement") or "").strip()
+
+    if not raw_in and not prev_mission:
+        raw_in = MISSION_STATEMENT_EXAMPLES[1]["statement"]
+
+    low = raw_in.lower()
+    # Check if user is asking to refine/iterate on the previous draft
+    if prev_mission and any(w in low for w in ("shorter", "concise", "nyt", "new york times", "brief", "tighten")):
+        # Condense to a crisp NYT-style statement
+        core_clause = prev_mission.split("—")[0].strip().rstrip(".")
+        proposed = f"{core_clause} — seeking truth and building tools that help people understand and act."
+        if len(proposed.split()) > 22:
+            proposed = "Seek truth, build enduring scholarship and AI tools, and faithfully serve family, students, and collaborators."
+    elif prev_mission and any(w in low for w in ("add ", "include ", "also ", "emphasize ", "more about ")):
+        addition = re.sub(r"^(please\s+)?(add|include|also\s+mention|emphasize|more\s+about)\s+", "", raw_in, flags=re.I).strip().rstrip(".")
+        base_clean = prev_mission.rstrip(".")
+        proposed = f"{base_clean}, while advancing {addition}."
+    else:
+        clean_raw = re.sub(r"^(my\s+mission\s+(statement\s+)?is\s*(to)?\s*|i\s+want\s+to\s+)", "", raw_in, flags=re.I).strip()
+        if len(clean_raw) > 12 and clean_raw[0].islower():
+            clean_raw = clean_raw[0].upper() + clean_raw[1:]
+        if not clean_raw.endswith("."):
+            clean_raw += "."
+        proposed = clean_raw
+
+    # Identify pillars mentioned for the AI Summary
+    pillars: list[str] = []
+    combined_low = f"{proposed} {raw_in}".lower()
+    for label, kws in (
+        ("Truth & Rigorous Scholarship", ("truth", "research", "scholar", "science", "paper", "empirical", "math", "understand")),
+        ("Teaching & Mentorship", ("teach", "student", "mba", "mentor", "course", "learn", "people")),
+        ("AI Systems & Practical Tools", ("ai", "system", "tool", "software", "build", "agent", "anchor", "cockpit")),
+        ("Family, Faith & Stewardship", ("family", "faith", "trust", "carry", "samwise", "care", "steward", "friend")),
+        ("Creative & Personal Vitality", ("write", "book", "novel", "hobby", "health", "fitness", "crossfit", "art")),
+    ):
+        if any(k in combined_low for k in kws):
+            pillars.append(label)
+    if not pillars:
+        pillars = ["Purposeful Execution", "Enduring Impact", "Trusted Stewardship"]
+
+    ai_summary = (
+        f"Your mission centers on {', '.join(pillars[:-1]) + (' and ' + pillars[-1] if len(pillars) > 1 else pillars[0])}. "
+        f"It combines a clear North Star purpose with concrete accountability across your work and life."
+    )
+    alternatives = [
+        {
+            "style": "Concise (NY Times Style)",
+            "text": "Seek the truth, build enduring tools and scholarship, and empower the people we serve.",
+        },
+        {
+            "style": "Samwise Stewardship Style",
+            "text": proposed,
+        },
+        {
+            "style": "Action & Portfolio Style",
+            "text": f"Advance high-impact {', '.join(p.split('&')[0].strip().lower() for p in pillars[:3])} with zero dropped balls.",
+        },
+    ]
+
+    now_iso = _utc_now_iso()
+    history.append({"role": "user", "text": raw_in, "at": now_iso})
+    history.append({
+        "role": "steward",
+        "text": ai_summary,
+        "proposed_mission": proposed,
+        "pillars": pillars,
+        "alternatives": alternatives,
+        "at": now_iso,
+    })
+
+    goals_sec["mission_statement"] = proposed
+    goals_sec["mission_summary"] = ai_summary
+    goals_sec["mission_pillars"] = pillars
+    goals_sec["mission_alternatives"] = alternatives
+    goals_sec["mission_dialogue"] = history
+    goals_sec["updated_at"] = now_iso
+    st_doc["goals"] = goals_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    return {
+        "ok": True,
+        "mission_statement": proposed,
+        "ai_summary": ai_summary,
+        "pillars": pillars,
+        "alternatives": alternatives,
+        "mission_dialogue": history,
+        "examples": MISSION_STATEMENT_EXAMPLES,
+    }
+
+
+def lock_mission_statement(
+    mission_statement: str = "",
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Confirm and lock the user's Mission Statement after brainstorming and transition to the Goals dialogue."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = dict(st_doc.get("goals") or {})
+    final_m = str(mission_statement or goals_sec.get("mission_statement") or MISSION_STATEMENT_EXAMPLES[1]["statement"]).strip()
+    goals_sec["mission_statement"] = final_m
+    goals_sec["mission_locked"] = True
+    goals_sec["updated_at"] = _utc_now_iso()
+    st_doc["goals"] = goals_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return {
+        "ok": True,
+        "mission_statement": final_m,
+        "mission_locked": True,
+        "goal_examples": GOAL_DOMAIN_EXAMPLES,
+    }
+
+
+def brainstorm_goals_dialogue(
+    user_input: str,
+    *,
+    mission_statement: str = "",
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Interactive Steward dialogue for brainstorming professional, teaching, venture, creative, and hobby goals."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = dict(st_doc.get("goals") or {})
+    eff_mission = str(mission_statement or goals_sec.get("mission_statement") or "").strip()
+    history: list[dict[str, Any]] = list(goals_sec.get("goals_dialogue") or [])
+    existing_items: list[dict[str, Any]] = list(goals_sec.get("items") or [])
+
+    raw_in = str(user_input or "").strip()
+    low = raw_in.lower()
+
+    # Support iterative commands like "add ...", "remove ...", or full brainstorming paragraphs/lines
+    current_lines = [str(g.get("name") or "").strip() for g in existing_items if g.get("name")]
+    if current_lines and re.match(r"^(add|include|also)\b", low):
+        added = re.sub(r"^(add|include|also)\s+(a\s+goal\s+(to|for)\s+)?", "", raw_in, flags=re.I).strip()
+        if added and added not in current_lines:
+            current_lines.append(added)
+        merged_raw = "\n".join(current_lines)
+    elif current_lines and re.match(r"^(remove|drop|delete)\b", low):
+        target = re.sub(r"^(remove|drop|delete)\s+", "", raw_in, flags=re.I).strip().lower()
+        current_lines = [ln for ln in current_lines if target not in ln.lower()]
+        merged_raw = "\n".join(current_lines)
+    else:
+        # Split conversational paragraph or bullet list into distinct goals
+        parts = [
+            re.sub(r"^[\s\-\*\d\.\)\•]+", "", seg).strip()
+            for seg in re.split(r"[\r\n;]+|(?:\.\s+(?=[A-Z]))", raw_in)
+            if seg and seg.strip()
+        ]
+        merged_raw = "\n".join(parts) if parts else raw_in
+
+    org = organize_goals_with_starchart_steward(
+        merged_raw,
+        mission_statement=eff_mission,
+        starting_flow="goals_first",
+        sandbox=sandbox,
+        sandbox_id=sandbox_id,
+        base_dir=base_dir,
+    )
+    new_goals_state = org["goals"]
+    items = new_goals_state.get("items") or []
+    arenas = new_goals_state.get("arenas") or []
+
+    ai_summary = (
+        f"Organized {len(items)} goal(s) across {len(arenas)} section(s) "
+        f"({', '.join(a['arena'] for a in arenas)}). "
+        f"Each goal below can now hold on-disk clues and web/research resources (via Gandalf & researchPrime) "
+        f"and will serve as the primary sections for organizing your Projects in Step 5."
+    )
+    now_iso = _utc_now_iso()
+    history.append({"role": "user", "text": raw_in, "at": now_iso})
+    history.append({
+        "role": "steward",
+        "text": ai_summary,
+        "goals_count": len(items),
+        "arenas": [a["arena"] for a in arenas],
+        "at": now_iso,
+    })
+
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    st_doc["goals"]["goals_dialogue"] = history
+    st_doc["goals"]["goals_summary"] = ai_summary
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    return {
+        "ok": True,
+        "goals": st_doc["goals"],
+        "ai_summary": ai_summary,
+        "goals_dialogue": history,
+    }
+
+
+def discover_goal_resources(
+    goal_id: str,
+    *,
+    on_disk_clue: str = "",
+    web_and_info_clue: str = "",
+    search_roots: list[str | Path] | None = None,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Use Steward + Gandalf (for fuzzy on-disk material discovery without requiring exact paths)
+    and researchPrime + Gandalf (for web/literature/resource organization) to attach a Resource Dossier to a Goal."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = dict(st_doc.get("goals") or {})
+    items: list[dict[str, Any]] = list(goals_sec.get("items") or [])
+
+    target_goal: dict[str, Any] | None = None
+    for g in items:
+        if str(g.get("id") or "") == str(goal_id) or str(g.get("name") or "").lower() == str(goal_id).lower():
+            target_goal = g
+            break
+    if target_goal is None and items:
+        target_goal = items[0]
+    if target_goal is None:
+        raise ValueError(f"Goal not found for resource discovery: {goal_id}")
+
+    goal_text = f"{target_goal.get('name', '')} {on_disk_clue} {web_and_info_clue}"
+    clue_tokens = {
+        tok
+        for tok in re.findall(r"[a-z0-9]{3,}", goal_text.lower())
+        if tok not in {"the", "and", "for", "with", "that", "this", "have", "some", "somewhere", "disk", "folder", "files", "file", "material", "about", "from", "into"}
+    }
+
+    # Determine roots for Gandalf fuzzy on-disk search
+    eff_roots: list[Path] = []
+    if search_roots:
+        for r in search_roots:
+            if r and Path(str(r)).expanduser().is_dir():
+                eff_roots.append(Path(str(r)).expanduser().resolve())
+    if not eff_roots:
+        proj_roots = (st_doc.get("projects") or {}).get("roots") or []
+        for r in proj_roots:
+            if r and Path(str(r)).expanduser().is_dir():
+                eff_roots.append(Path(str(r)).expanduser().resolve())
+    if not eff_roots:
+        b_dir = _resolve_base_dir(base_dir)
+        eff_roots.append(b_dir if sandbox else b_dir.parent)
+
+    on_disk_matches: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    interesting_exts = {".md", ".tex", ".py", ".r", ".ipynb", ".pdf", ".pptx", ".docx", ".xlsx", ".csv", ".json", ".txt"}
+
+    for r_root in eff_roots:
+        try:
+            candidates = [r_root] + [p for p in r_root.iterdir() if p.is_dir() and p.name not in NOISE_DIR_NAMES and not p.name.startswith(".")]
+        except OSError:
+            candidates = [r_root]
+
+        for cand_dir in candidates:
+            if cand_dir == r_root and len(candidates) > 1:
+                continue
+            if cand_dir.name in NOISE_DIR_NAMES or cand_dir.name.startswith("."):
+                continue
+            blurb, sigs, _ = _read_folder_blurb_and_signals(cand_dir)
+            sample_files: list[str] = []
+            try:
+                for child_f in cand_dir.iterdir():
+                    if child_f.is_file() and child_f.suffix.lower() in interesting_exts:
+                        sample_files.append(child_f.name)
+            except OSError:
+                pass
+            hay = f"{cand_dir.name} {blurb} {' '.join(sigs)} {' '.join(sample_files)}".lower()
+            hay_tokens = set(re.findall(r"[a-z0-9]{3,}", hay))
+            overlap = sorted(clue_tokens & hay_tokens)
+            # Also check substring match on folder or file names
+            substr_hits = [t for t in clue_tokens if t in hay and t not in overlap]
+            matched_terms = overlap + substr_hits
+            if matched_terms or (len(candidates) <= 4 and on_disk_clue.strip()):
+                p_str = str(cand_dir.resolve())
+                if p_str not in seen_paths:
+                    seen_paths.add(p_str)
+                    on_disk_matches.append({
+                        "path": p_str,
+                        "name": cand_dir.name,
+                        "kind": "directory",
+                        "score": len(matched_terms) * 10 + len(sample_files),
+                        "matched_terms": matched_terms[:8],
+                        "sample_files": sample_files[:6],
+                        "signals": sigs,
+                        "gandalf_note": (
+                            f"Gandalf matched folder '{cand_dir.name}' via {', '.join(matched_terms[:5]) or 'workspace proximity'} "
+                            f"({len(sample_files)} relevant files: {', '.join(sample_files[:3]) or 'directory'})."
+                        ),
+                    })
+
+    on_disk_matches.sort(key=lambda x: x["score"], reverse=True)
+    on_disk_matches = on_disk_matches[:8]
+
+    # Extract URLs / websites and build researchPrime + Gandalf external resource plan
+    urls = re.findall(r"https?://[^\s,;\"')>]+", f"{web_and_info_clue} {on_disk_clue}")
+    raw_topics = [
+        seg.strip(" \t•-*")
+        for seg in re.split(r"[\r\n,;]+", str(web_and_info_clue or ""))
+        if seg and seg.strip(" \t•-*") and not seg.strip().startswith(("http://", "https://"))
+    ]
+    if not raw_topics and web_and_info_clue.strip():
+        raw_topics = [web_and_info_clue.strip()]
+
+    research_prime_queries = [
+        f"researchPrime deep-verify: {topic} (for goal '{target_goal.get('name')}')"
+        for topic in (raw_topics or [target_goal.get("name", "Goal research")])[:4]
+    ]
+    gandalf_synthesis = (
+        f"Steward + Gandalf located {len(on_disk_matches)} on-disk folder(s)/material match(es) "
+        f"and organized {len(urls)} website/URL source(s) + {len(research_prime_queries)} researchPrime verification track(s) "
+        f"for '{target_goal.get('name')}'."
+    )
+
+    resource_dossier = {
+        "goal_id": target_goal.get("id"),
+        "goal_name": target_goal.get("name"),
+        "on_disk_clue": str(on_disk_clue or "").strip(),
+        "web_and_info_clue": str(web_and_info_clue or "").strip(),
+        "on_disk_matches": on_disk_matches,
+        "web_sources": [{"url": u, "status": "queued_for_research_prime"} for u in urls],
+        "information_types": raw_topics,
+        "research_prime_queries": research_prime_queries,
+        "gandalf_synthesis": gandalf_synthesis,
+        "updated_at": _utc_now_iso(),
+    }
+    target_goal["resources"] = resource_dossier
+
+    goals_sec["items"] = items
+    goals_sec["updated_at"] = _utc_now_iso()
+    st_doc["goals"] = goals_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    return {
+        "ok": True,
+        "goal_id": target_goal.get("id"),
+        "resources": resource_dossier,
+        "goals": goals_sec,
+    }
 
 
 def _campaign_folder_for(
@@ -2092,6 +2510,462 @@ def propose_active_and_on_deck(
     }
 
 
+def build_hierarchical_project_organization(
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Build a graphical & hierarchical organization summary of discovered/consolidated projects.
+
+    Uses Step 4 Goals first (`goals_first`) if goals were provided, or falls back to a
+    natural domain hierarchy (`natural_organization`) when no goals were proposed.
+    """
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = st_doc.get("goals") if isinstance(st_doc.get("goals"), dict) else {}
+    proj_sec = st_doc.get("projects") if isinstance(st_doc.get("projects"), dict) else {}
+    goal_items: list[dict[str, Any]] = [g for g in (goals_sec.get("items") or []) if isinstance(g, dict)]
+    discovered: list[dict[str, Any]] = [
+        d for d in (proj_sec.get("discovered") or [])
+        if isinstance(d, dict) and d.get("included", True) and not d.get("excluded", False)
+    ]
+    mission_stmt = str(goals_sec.get("mission_statement") or "Execute Strategic Portfolio Goals & AI Cockpits").strip()
+
+    use_goals = bool(goal_items)
+    mode = "goals_first" if use_goals else "natural_organization"
+    mode_label = (
+        f"Goals-First Hierarchy ({len(goal_items)} Goal Section(s) from Step 4)"
+        if use_goals
+        else "Natural Domain Hierarchy (Auto-Organized by Content & File Signals)"
+    )
+
+    sections: list[dict[str, Any]] = []
+    assigned_proj_names: set[str] = set()
+
+    if use_goals:
+        for g in goal_items:
+            gid = str(g.get("id") or "")
+            gname = str(g.get("name") or gid)
+            garena = str(g.get("arena") or "Software & AI Systems")
+            g_res = g.get("resources") if isinstance(g.get("resources"), dict) else {}
+            res_paths = {
+                (str(m.get("path") or "").lower() if os.name == "nt" else str(m.get("path") or ""))
+                for m in (g_res.get("on_disk_matches") or [])
+                if isinstance(m, dict) and m.get("path")
+            }
+            g_tokens = set(re.findall(r"[a-z0-9]{3,}", f"{gname} {garena}".lower())) - {"the", "and", "for", "with"}
+
+            sec_projects: list[dict[str, Any]] = []
+            for d in discovered:
+                pname = str(d.get("name") or "")
+                if pname in assigned_proj_names:
+                    continue
+                fp_norm = str(d.get("folder_path") or "").lower() if os.name == "nt" else str(d.get("folder_path") or "")
+                p_tokens = set(re.findall(r"[a-z0-9]{3,}", f"{pname} {d.get('blurb', '')} {d.get('group_folder', '')}".lower()))
+                explicit_match = (str(d.get("goal_id") or "") == gid) or (str(d.get("group_folder") or "").lower() == gname.lower())
+                resource_match = fp_norm in res_paths
+                arena_or_kw_match = (d.get("group_folder") == garena) or (len(g_tokens & p_tokens) >= 2)
+                if explicit_match or resource_match or arena_or_kw_match:
+                    d["goal_id"] = gid
+                    sec_projects.append(d)
+                    assigned_proj_names.add(pname)
+
+            sections.append({
+                "id": gid,
+                "title": gname,
+                "arena": garena,
+                "tier": int(g.get("tier") or 1),
+                "horizon": str(g.get("horizon") or "This Quarter"),
+                "kind": "goal_section",
+                "resources": g_res,
+                "projects": sec_projects,
+            })
+
+        # Any remaining unassigned projects go into either the first matching arena goal or a Natural Overflow section
+        unassigned = [d for d in discovered if str(d.get("name") or "") not in assigned_proj_names]
+        if unassigned:
+            if sections:
+                sections.append({
+                    "id": "goal-overflow-natural",
+                    "title": "Additional Discovered Projects & Exploratory Work",
+                    "arena": "General & Exploratory",
+                    "tier": 2,
+                    "horizon": "Flexible",
+                    "kind": "natural_section",
+                    "resources": {},
+                    "projects": unassigned,
+                })
+    else:
+        by_group: dict[str, list[dict[str, Any]]] = {}
+        for d in discovered:
+            grp = str(d.get("group_folder") or _classify_arena(f"{d.get('name', '')} {d.get('blurb', '')}"))
+            by_group.setdefault(grp, []).append(d)
+        for idx, (grp_name, plist) in enumerate(by_group.items(), 1):
+            sections.append({
+                "id": f"natural-sec-{idx}-{_safe_slug(grp_name)}",
+                "title": grp_name,
+                "arena": grp_name,
+                "tier": 1 if idx <= 2 else 2,
+                "horizon": "Natural Domain Grouping",
+                "kind": "natural_section",
+                "resources": {},
+                "projects": plist,
+            })
+
+    hierarchy = {
+        "mode": mode,
+        "mode_label": mode_label,
+        "mission_statement": mission_stmt,
+        "total_sections": len(sections),
+        "total_projects": len(discovered),
+        "active_count": sum(1 for d in discovered if d.get("seat") == "active"),
+        "on_deck_count": sum(1 for d in discovered if d.get("seat") == "deck"),
+        "parked_count": sum(1 for d in discovered if d.get("seat") not in ("active", "deck")),
+        "sections": sections,
+        "updated_at": _utc_now_iso(),
+    }
+    proj_sec["hierarchy"] = hierarchy
+    st_doc["projects"] = proj_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return hierarchy
+
+
+def brainstorm_project_sources(
+    user_input: str,
+    *,
+    selected_file_types: list[str] | None = None,
+    roots: list[str | Path] | None = None,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Step 5 Dialogue: Ask user to identify different types of files, folders, and sources that are potential projects,
+    scan with Gandalf, incorporate Step 4 per-goal resource matches, and return a Graphical Hierarchical Organization."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    proj_sec = dict(st_doc.get("projects") or {})
+    goals_sec = dict(st_doc.get("goals") or {})
+    history: list[dict[str, Any]] = list(proj_sec.get("source_dialogue") or [])
+
+    scan_res = scan_and_propose_projects(
+        roots=roots,
+        goals=goals_sec.get("items") or [],
+        sandbox=sandbox,
+        sandbox_id=sandbox_id,
+        base_dir=base_dir,
+    )
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    proj_sec = dict(st_doc.get("projects") or {})
+    discovered: list[dict[str, Any]] = list(proj_sec.get("discovered") or [])
+
+    # Also ensure any on-disk folders matched by Gandalf in Step 4 per-goal resources are linked to their goal
+    by_path = {
+        (str(d.get("folder_path") or "").lower() if os.name == "nt" else str(d.get("folder_path") or "")): d
+        for d in discovered
+    }
+    for g in (goals_sec.get("items") or []):
+        if not isinstance(g, dict):
+            continue
+        gid = str(g.get("id") or "")
+        g_res = g.get("resources") if isinstance(g.get("resources"), dict) else {}
+        for m in (g_res.get("on_disk_matches") or []):
+            if not isinstance(m, dict) or not m.get("path"):
+                continue
+            mp = str(m["path"])
+            mp_key = mp.lower() if os.name == "nt" else mp
+            if mp_key in by_path:
+                by_path[mp_key]["goal_id"] = gid
+                by_path[mp_key]["group_folder"] = str(g.get("arena") or by_path[mp_key].get("group_folder") or "")
+
+    # Score/highlight projects matching the user's file/source description in Step 5 dialogue
+    cue_text = f"{user_input} {' '.join(selected_file_types or [])}".lower()
+    cue_tokens = set(re.findall(r"[a-z0-9]{3,}", cue_text)) - {"the", "and", "for", "with", "look", "files", "folders", "projects", "potential"}
+    matched_count = 0
+    for d in discovered:
+        hay = f"{d.get('name', '')} {d.get('blurb', '')} {' '.join(d.get('signals') or [])} {d.get('group_folder', '')}".lower()
+        if any(t in hay for t in cue_tokens):
+            matched_count += 1
+
+    now_iso = _utc_now_iso()
+    summary_msg = (
+        f"Gandalf scanned your workspace for potential projects ({', '.join(selected_file_types or ['all project & document types'])}) "
+        f"and organized {len(discovered)} project(s) into a graphical hierarchy "
+        f"({'aligned to your Step 4 Goals' if (goals_sec.get('items')) else 'using a natural domain organization'})."
+    )
+    history.append({"role": "user", "text": str(user_input or "").strip(), "file_types": list(selected_file_types or []), "at": now_iso})
+    history.append({"role": "steward", "text": summary_msg, "matched_count": matched_count, "at": now_iso})
+
+    proj_sec["discovered"] = discovered
+    proj_sec["source_dialogue"] = history
+    proj_sec["selected_file_types"] = list(selected_file_types or [])
+    st_doc["projects"] = proj_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    hierarchy = build_hierarchical_project_organization(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return {
+        "ok": True,
+        "summary": summary_msg,
+        "source_dialogue": history,
+        "discovered": discovered,
+        "hierarchy": hierarchy,
+    }
+
+
+def revise_project_organization(
+    verbal_instruction: str,
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Allow the user to verbally/conversationally revise the proposed project hierarchy until happy.
+
+    Supports natural-language commands:
+      * Move project to a goal/section: "Move <project> under <goal/section>"
+      * Change priority seat: "Make <project> Active / On Deck / Parked"
+      * Merge/consolidate projects: "Merge <proj A> and <proj B> into <New Name>"
+      * Rename project: "Rename <old> to <new>"
+      * Exclude/remove project: "Exclude <project>" / "Remove <project>"
+      * Add/create project: "Add project <Name> under <Section>"
+    """
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    proj_sec = dict(st_doc.get("projects") or {})
+    goals_sec = dict(st_doc.get("goals") or {})
+    discovered: list[dict[str, Any]] = list(proj_sec.get("discovered") or [])
+    goal_items: list[dict[str, Any]] = list(goals_sec.get("items") or [])
+    rev_history: list[dict[str, Any]] = list(proj_sec.get("revision_dialogue") or [])
+
+    instr = str(verbal_instruction or "").strip()
+    low = instr.lower()
+    actions_applied: list[str] = []
+
+    def _find_proj(fragment: str) -> dict[str, Any] | None:
+        frag = fragment.strip(" \"'.,").lower()
+        if not frag:
+            return None
+        for d in discovered:
+            n = str(d.get("name") or "").lower()
+            if n == frag or frag in n or n in frag:
+                return d
+        return None
+
+    def _find_goal_or_section(fragment: str) -> tuple[str, str]:
+        frag = fragment.strip(" \"'.,").lower()
+        for g in goal_items:
+            gn = str(g.get("name") or "")
+            if frag in gn.lower() or gn.lower() in frag:
+                return str(g.get("id") or ""), str(g.get("arena") or gn)
+        return "", fragment.strip(" \"'.,")
+
+    # 1. Check for Merge / Combine: "merge A and B into C"
+    m_merge = re.search(r"\b(?:merge|combine|consolidate)\s+(.+?)\s+and\s+(.+?)(?:\s+into\s+(.+))?$", instr, flags=re.I)
+    if m_merge:
+        p1 = _find_proj(m_merge.group(1))
+        p2 = _find_proj(m_merge.group(2))
+        new_title = (m_merge.group(3) or "").strip(" \"'.")
+        if p1 and p2:
+            if not new_title:
+                new_title = f"{p1['name']} & {p2['name']}"
+            cons = consolidate_folders_into_project(
+                folder_paths=[p1["folder_path"], p2["folder_path"]],
+                project_name=new_title,
+                group_folder=p1.get("group_folder") or p2.get("group_folder") or "",
+                seat=p1.get("seat") or "active",
+                sandbox=sandbox,
+                sandbox_id=sandbox_id,
+                base_dir=base_dir,
+            )
+            discovered = cons["discovered"]
+            st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+            proj_sec = dict(st_doc.get("projects") or {})
+            actions_applied.append(f"Merged '{p1['name']}' and '{p2['name']}' into unified project '{new_title}'.")
+
+    # 2. Check for Rename: "rename A to B"
+    m_ren = re.search(r"\brename\s+(.+?)\s+to\s+(.+)$", instr, flags=re.I)
+    if m_ren and not actions_applied:
+        p = _find_proj(m_ren.group(1))
+        new_name = m_ren.group(2).strip(" \"'.")
+        if p and new_name:
+            old_name = p["name"]
+            p["name"] = new_name
+            actions_applied.append(f"Renamed '{old_name}' to '{new_name}'.")
+
+    # 3. Check for Exclude / Remove / Drop: "exclude A" or "remove A"
+    m_excl = re.search(r"\b(?:exclude|remove|drop|hide)\s+(.+)$", instr, flags=re.I)
+    if m_excl and not actions_applied:
+        p = _find_proj(m_excl.group(1))
+        if p:
+            p["included"] = False
+            p["excluded"] = True
+            p["seat"] = "parked"
+            actions_applied.append(f"Excluded '{p['name']}' from the proposed projects.")
+
+    # 4. Check for Move / Put under Goal/Section: "move A under B" or "put A in B"
+    m_move = re.search(r"\b(?:move|put|assign|group)\s+(.+?)\s+(?:under|into|in|to)\s+(.+)$", instr, flags=re.I)
+    if m_move and not actions_applied:
+        subj = m_move.group(1)
+        dest = m_move.group(2)
+        p = _find_proj(subj)
+        if p:
+            dest_low = dest.lower()
+            if "on deck" in dest_low or "deck" in dest_low:
+                p["seat"] = "deck"
+                actions_applied.append(f"Moved '{p['name']}' to On Deck.")
+            elif "active" in dest_low:
+                p["seat"] = "active"
+                actions_applied.append(f"Moved '{p['name']}' to Active.")
+            elif "park" in dest_low or "candidate" in dest_low:
+                p["seat"] = "parked"
+                actions_applied.append(f"Moved '{p['name']}' to Candidates / Parked.")
+            else:
+                gid, grp = _find_goal_or_section(dest)
+                if gid:
+                    p["goal_id"] = gid
+                if grp:
+                    p["group_folder"] = grp
+                actions_applied.append(f"Moved '{p['name']}' under section '{grp or gid}'.")
+
+    # 5. Check for Seat change: "make A active" / "set A on deck"
+    if not actions_applied and any(k in low for k in ("active", "on deck", "parked", "candidate")):
+        for d in discovered:
+            dn = str(d.get("name") or "").lower()
+            if dn and dn in low:
+                if "on deck" in low:
+                    d["seat"] = "deck"
+                    actions_applied.append(f"Set '{d['name']}' to On Deck.")
+                elif "active" in low:
+                    d["seat"] = "active"
+                    actions_applied.append(f"Set '{d['name']}' to Active.")
+                elif "park" in low or "candidate" in low:
+                    d["seat"] = "parked"
+                    actions_applied.append(f"Set '{d['name']}' to Candidates / Parked.")
+
+    # 6. Check for Add / Create new project: "add project X under Y"
+    m_add = re.search(r"\b(?:add|create)\s+(?:a\s+)?(?:new\s+)?project\s+(?:called\s+)?(.+?)(?:\s+(?:under|in)\s+(.+))?$", instr, flags=re.I)
+    if m_add and not actions_applied:
+        new_pname = m_add.group(1).strip(" \"'.")
+        sec_hint = (m_add.group(2) or "").strip(" \"'.")
+        gid, grp = _find_goal_or_section(sec_hint) if sec_hint else ("", _classify_arena(new_pname))
+        b_dir = _resolve_base_dir(base_dir)
+        new_folder = (b_dir / _safe_slug(new_pname)) if sandbox else (b_dir.parent / new_pname)
+        new_entry = {
+            "id": f"proj-{_safe_slug(new_pname)}",
+            "name": new_pname,
+            "folder_path": str(new_folder),
+            "blurb": f"Project created during verbal hierarchy revision ({new_pname})",
+            "group_folder": grp or "Software & AI Systems",
+            "goal_id": gid or (goal_items[0]["id"] if goal_items else ""),
+            "seat": "active",
+            "included": True,
+            "excluded": False,
+            "source": "verbal_revision_created",
+            "has_cockpit": False,
+            "re_adopted_store_ids": [],
+            "signals": [],
+        }
+        discovered.insert(0, new_entry)
+        actions_applied.append(f"Added new project '{new_pname}' under '{new_entry['group_folder']}'.")
+
+    if not actions_applied:
+        # Fallback: treat as a priority initiative refinement
+        prop = propose_active_and_on_deck(
+            instr,
+            candidates=discovered,
+            sandbox=sandbox,
+            sandbox_id=sandbox_id,
+            base_dir=base_dir,
+        )
+        discovered = prop["discovered"]
+        actions_applied.append(
+            f"Re-ranked Active ({len(prop['proposed_active'])}) and On Deck ({len(prop['proposed_on_deck'])}) seats from your instruction."
+        )
+
+    now_iso = _utc_now_iso()
+    steward_reply = " ".join(actions_applied)
+    rev_history.append({"role": "user", "text": instr, "at": now_iso})
+    rev_history.append({"role": "steward", "text": steward_reply, "actions": actions_applied, "at": now_iso})
+
+    proj_sec["discovered"] = discovered
+    proj_sec["revision_dialogue"] = rev_history
+    st_doc["projects"] = proj_sec
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    hierarchy = build_hierarchical_project_organization(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return {
+        "ok": True,
+        "steward_reply": steward_reply,
+        "actions_applied": actions_applied,
+        "revision_dialogue": rev_history,
+        "discovered": discovered,
+        "hierarchy": hierarchy,
+    }
+
+
+def suggest_top_priorities(
+    *,
+    user_priority_notes: str = "",
+    max_active: int = 4,
+    max_on_deck: int = 6,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Top Priorities Session: Steward suggests top Active & On Deck priorities based on the user's
+    Mission Statement, Tier-1 Goals, Per-Goal Gandalf Resources, and optional user priority notes."""
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    goals_sec = st_doc.get("goals") if isinstance(st_doc.get("goals"), dict) else {}
+    proj_sec = st_doc.get("projects") if isinstance(st_doc.get("projects"), dict) else {}
+
+    mission_stmt = str(goals_sec.get("mission_statement") or "").strip()
+    goal_items = [g for g in (goals_sec.get("items") or []) if isinstance(g, dict)]
+    tier1_goals = [g.get("name", "") for g in goal_items if int(g.get("tier") or 1) == 1]
+
+    combined_signal = "\n".join(filter(None, [
+        user_priority_notes.strip(),
+        mission_stmt,
+        *tier1_goals,
+    ]))
+    prop = propose_active_and_on_deck(
+        combined_signal,
+        max_active=max_active,
+        max_on_deck=max_on_deck,
+        sandbox=sandbox,
+        sandbox_id=sandbox_id,
+        base_dir=base_dir,
+    )
+    hierarchy = build_hierarchical_project_organization(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    suggestions_rationale: list[dict[str, Any]] = []
+    for p in prop["proposed_active"]:
+        suggestions_rationale.append({
+            "name": p["name"],
+            "recommended_seat": "active",
+            "group_folder": p.get("group_folder") or "",
+            "why": (
+                f"Directly advances your Mission & Tier-1 Goal in '{p.get('group_folder') or 'Core Portfolio'}' "
+                f"(priority match score {p.get('priority_match_score', 0)})."
+            ),
+        })
+    for p in prop["proposed_on_deck"]:
+        suggestions_rationale.append({
+            "name": p["name"],
+            "recommended_seat": "on_deck",
+            "group_folder": p.get("group_folder") or "",
+            "why": f"Queued On Deck to follow Active milestones in '{p.get('group_folder') or 'Portfolio'}'.",
+        })
+
+    return {
+        "ok": True,
+        "mission_used": mission_stmt,
+        "tier1_goals_used": tier1_goals,
+        "user_priority_notes": user_priority_notes,
+        "suggestions": suggestions_rationale,
+        "proposed_active": prop["proposed_active"],
+        "proposed_on_deck": prop["proposed_on_deck"],
+        "proposed_candidates": prop["proposed_candidates"],
+        "hierarchy": hierarchy,
+    }
+
+
 def scaffold_starter_ai_cockpit(
     folder_path: str | Path,
     project_name: str,
@@ -2103,6 +2977,7 @@ def scaffold_starter_ai_cockpit(
     linked_material_paths: list[str] | None = None,
     mission_statement: str = "",
     initiatives_list: list[str] | None = None,
+    goal_resources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Idempotently scaffold a complete Starter AI Cockpit inside ``folder_path``.
 
@@ -2142,6 +3017,18 @@ def scaffold_starter_ai_cockpit(
             inits_md = "\n## Priority Initiatives\n" + "".join(
                 f"- {i}\n" for i in inits_clean
             )
+        res_md = ""
+        if isinstance(goal_resources, dict) and (goal_resources.get("on_disk_matches") or goal_resources.get("research_prime_queries") or goal_resources.get("web_sources")):
+            res_lines: list[str] = ["\n## Gandalf & researchPrime Resource Dossier\n"]
+            for m in (goal_resources.get("on_disk_matches") or []):
+                if isinstance(m, dict):
+                    res_lines.append(f"- **On-Disk Match (`Gandalf`):** `{m.get('path')}` — {m.get('gandalf_note', '')}\n")
+            for ws in (goal_resources.get("web_sources") or []):
+                if isinstance(ws, dict) and ws.get("url"):
+                    res_lines.append(f"- **Web / External Source:** {ws['url']}\n")
+            for rq in (goal_resources.get("research_prime_queries") or []):
+                res_lines.append(f"- **researchPrime Verification Track:** {rq}\n")
+            res_md = "".join(res_lines)
         face_body = (
             f"# {clean_title}\n\n"
             f"**Mission Statement:** {clean_mission_line}\n\n"
@@ -2149,7 +3036,8 @@ def scaffold_starter_ai_cockpit(
             f"**Portfolio Folder:** {clean_group}\n"
             f"**Owner:** {user_display_name}\n"
             f"{linked_md}"
-            f"{inits_md}\n"
+            f"{inits_md}"
+            f"{res_md}\n"
             f"## Active Focus\n"
             f"- **Stage 1: Goal & Scope Alignment** — Confirm initial deliverables and work-product map with {user_display_name}.\n"
         )
@@ -2329,6 +3217,9 @@ def provision_projects_and_cockpits(
         priority = 1 if seat == "active" else (2 if seat == "deck" else 3)
         blurb = str(item.get("blurb") or "").strip()
         goal_id = str(item.get("goal_id") or (goals[0]["id"] if goals else "goal-1-flagship-portfolio"))
+        matched_goal_obj = next((g for g in (goals or []) if isinstance(g, dict) and str(g.get("id") or "") == goal_id), None)
+        goal_res_obj = (matched_goal_obj or {}).get("resources") if isinstance(matched_goal_obj, dict) else None
+        eff_mission = str(item.get("mission_statement") or ((st_doc.get("goals") or {}).get("mission_statement")) or "")
 
         if sandbox:
             pid = str(item.get("id") or uuid.uuid4().hex)
@@ -2336,12 +3227,14 @@ def provision_projects_and_cockpits(
             scaf = scaffold_starter_ai_cockpit(
                 s_cockpit_dir,
                 name,
+                goal_name=str((matched_goal_obj or {}).get("name") or ""),
                 group_folder=group_folder,
                 blurb=blurb,
                 user_display_name=user_name,
                 linked_material_paths=item.get("linked_material_paths") or [],
-                mission_statement=str(item.get("mission_statement") or ""),
+                mission_statement=eff_mission,
                 initiatives_list=item.get("initiatives_list") or [],
+                goal_resources=goal_res_obj,
             )
             entry = {
                 "id": pid,
@@ -2405,12 +3298,14 @@ def provision_projects_and_cockpits(
             scaf = scaffold_starter_ai_cockpit(
                 raw_folder,
                 name,
+                goal_name=str((matched_goal_obj or {}).get("name") or ""),
                 group_folder=group_folder,
                 blurb=blurb,
                 user_display_name=user_name,
                 linked_material_paths=item.get("linked_material_paths") or [],
-                mission_statement=str(item.get("mission_statement") or ""),
+                mission_statement=eff_mission,
                 initiatives_list=item.get("initiatives_list") or [],
+                goal_resources=goal_res_obj,
             )
             provisioned.append({
                 "id": pid,
@@ -2747,6 +3642,9 @@ def get_full_wizard_bundle(
         "nightly_refresh": svc_info.get("nightly_refresh") or _get_nightly_refresh_meta(),
         "hub_model_catalog": hub_catalog,
         "gwl_applicants": gwl_applicants,
+        "mission_examples": MISSION_STATEMENT_EXAMPLES,
+        "goal_examples": GOAL_DOMAIN_EXAMPLES,
+        "project_hierarchy": build_hierarchical_project_organization(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir),
         "readiness": svc_info["readiness"],
         "readiness_explanation": svc_info["readiness_explanation"],
         "comms_presets": comms_connector.PROVIDER_PRESETS,
@@ -2858,6 +3756,78 @@ def dispatch_wizard_action(
             raw_text=str(body.get("raw_text") or ""),
             mission_statement=str(body.get("mission_statement") or ""),
             starting_flow=str(body.get("starting_flow") or "goals_first"),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "brainstorm_mission":
+        return brainstorm_mission_dialogue(
+            user_input=str(body.get("user_input") or body.get("raw_text") or ""),
+            current_draft=str(body.get("current_draft") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "lock_mission":
+        return lock_mission_statement(
+            mission_statement=str(body.get("mission_statement") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "brainstorm_goals":
+        return brainstorm_goals_dialogue(
+            user_input=str(body.get("user_input") or body.get("raw_text") or ""),
+            mission_statement=str(body.get("mission_statement") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "discover_goal_resources":
+        s_roots = body.get("search_roots")
+        if isinstance(s_roots, str):
+            s_roots = [r.strip() for r in s_roots.split(";") if r.strip()]
+        return discover_goal_resources(
+            goal_id=str(body.get("goal_id") or ""),
+            on_disk_clue=str(body.get("on_disk_clue") or ""),
+            web_and_info_clue=str(body.get("web_and_info_clue") or ""),
+            search_roots=s_roots,
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "brainstorm_project_sources":
+        roots = body.get("roots")
+        if isinstance(roots, str):
+            roots = [r.strip() for r in roots.split(";") if r.strip()]
+        ftypes = body.get("selected_file_types")
+        if isinstance(ftypes, str):
+            ftypes = [x.strip() for x in ftypes.split(",") if x.strip()]
+        return brainstorm_project_sources(
+            user_input=str(body.get("user_input") or ""),
+            selected_file_types=ftypes,
+            roots=roots,
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "get_project_hierarchy":
+        return {
+            "ok": True,
+            "hierarchy": build_hierarchical_project_organization(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir),
+        }
+    if act == "revise_project_organization":
+        return revise_project_organization(
+            verbal_instruction=str(body.get("verbal_instruction") or body.get("user_input") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "suggest_top_priorities":
+        return suggest_top_priorities(
+            user_priority_notes=str(body.get("user_priority_notes") or body.get("priority_initiatives_text") or ""),
+            max_active=int(body.get("max_active") or 4),
+            max_on_deck=int(body.get("max_on_deck") or 6),
             sandbox=use_sandbox,
             sandbox_id=sid,
             base_dir=base_dir,
@@ -3539,26 +4509,87 @@ def render_onboard_wizard_html(
       <!-- STEP 4 -->
       <section class="wiz-step-pane" id="step-pane-4" hidden>
         <div class="wiz-card">
-          <h2>Step 4 · Star Chart (Mission, Goals &amp; Initiatives) vs. Cave of Wonders (What You're Working On Now)</h2>
+          <h2>Step 4 · Interactive Brainstorming Dialogue: Mission Statement, Goals &amp; Per-Goal Resource Discovery</h2>
           <p class="muted">
             <strong>How Star Chart &amp; Cave of Wonders Work Together:</strong><br>
-            • <strong>Star Chart (Strategy &amp; Horizons):</strong> Holds your overarching <strong>Mission Statement</strong>, 1–3 Year / Quarterly <strong>Goals</strong>, and strategic <strong>Goal Arenas</strong>.<br>
-            • <strong>Cave of Wonders (Immediate Execution Board):</strong> Holds your concrete <strong>Active</strong> and <strong>On Deck</strong> AI Cockpits — driven by the most important initiatives you are working on right now.
+            • <strong>Star Chart (Mission &amp; Goals):</strong> Start by brainstorming your overarching <strong>Mission Statement</strong> (with concise examples like <em>The New York Times</em> and <em>Samwise Gamgee</em>), iterate with your Steward until comfortable, then brainstorm your <strong>Goals</strong> (professional, teaching, ventures, hobbies, family).<br>
+            • <strong>Per-Goal Resource Discovery (Steward + Gandalf + researchPrime):</strong> For each goal, describe any files/materials you have somewhere on disk (no exact path needed — Gandalf will find them!) plus websites or research topics for <code>researchPrime</code> &amp; <code>Gandalf</code> to organize.
           </p>
-          <div class="form-grid">
-            <div>
-              <label for="inpMission">Star Chart · Overarching Mission Statement / North Star</label>
-              <input type="text" id="inpMission" placeholder="e.g., Advance research, teaching, family trusts, and AI systems with zero dropped balls.">
+
+          <!-- 4A: MISSION STATEMENT DIALOGUE -->
+          <div class="wiz-card" style="background:#101723;margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <h3 style="margin:0">🌟 Part 1 · Mission Statement Brainstorming Dialogue</h3>
+              <span class="pill" id="missionLockBadge">Iterative Dialogue Mode</span>
+            </div>
+            <p class="muted" style="margin:6px 0 10px">Examples of great concise mission statements (click any example to seed or adapt):</p>
+            <div id="missionExamplesBox" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px">
+              <div class="proj-row" style="flex-direction:column;align-items:flex-start;margin:0">
+                <div><strong>📰 The New York Times</strong> <span class="pill">10 Words</span></div>
+                <div style="font-style:italic;color:#fde68a;margin:4px 0">"We seek the truth and help people understand the world."</div>
+                <button type="button" class="btn" data-use-mission="We seek the truth and help people understand the world.">Use / Adapt NY Times Style</button>
+              </div>
+              <div class="proj-row" style="flex-direction:column;align-items:flex-start;margin:0">
+                <div><strong>🪔 Samwise Gamgee (John's Mission Statement)</strong> <span class="pill">Personal Stewardship</span></div>
+                <div style="font-style:italic;color:#6ee7b7;margin:4px 0">"Carry the work that matters to completion alongside the people I care about — advancing rigorous scholarship, teaching, and AI systems that empower human judgment without ever dropping the ball on family, faith, or stewardship."</div>
+                <button type="button" class="btn" data-use-mission="Carry the work that matters to completion alongside the people I care about — advancing rigorous scholarship, teaching, and AI systems that empower human judgment without ever dropping the ball on family, faith, or stewardship.">Use / Adapt Samwise Mission</button>
+              </div>
+              <div class="proj-row" style="flex-direction:column;align-items:flex-start;margin:0">
+                <div><strong>🧭 Scholar, Builder &amp; Mentor</strong> <span class="pill">Action-Oriented</span></div>
+                <div style="font-style:italic;color:#93c5fd;margin:4px 0">"Turn frontier ideas into verified, enduring tools and scholarship that solve real problems and elevate every student and collaborator."</div>
+                <button type="button" class="btn" data-use-mission="Turn frontier ideas into verified, enduring tools and scholarship that solve real problems and elevate every student and collaborator.">Use / Adapt Builder Mission</button>
+              </div>
+            </div>
+
+            <label for="inpMissionDialogue">Brainstorm or Iterate on Your Mission Statement (Type or Speak — e.g., what matters to you, or "Make it shorter like NY Times")</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+              <input type="text" id="inpMissionDialogue" style="flex:1;min-width:260px" placeholder="Tell your Steward what drives your work &amp; life, or how to refine the statement...">
+              <button type="button" class="btn" data-voice-target="inpMissionDialogue" title="Speak / Dictate with Microphone">🎙 Speak</button>
+              <button type="button" class="btn primary" id="btnBrainstormMission">💬 Brainstorm &amp; Summarize with Steward</button>
+            </div>
+
+            <div id="missionSummaryBox" class="proj-row" style="flex-direction:column;align-items:stretch" hidden></div>
+
+            <div style="margin-top:10px">
+              <label for="inpMission">Current / Proposed Mission Statement (Editable)</label>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="text" id="inpMission" style="flex:1;min-width:260px" placeholder="e.g., Carry the work that matters to completion alongside the people I care about...">
+                <button type="button" class="btn emerald" id="btnLockMission">✓ Lock Mission Statement &amp; Discuss Goals ↓</button>
+              </div>
             </div>
           </div>
-          <label for="txtGoals">Star Chart · Long-Term Goals &amp; Strategic Arenas (one per line)</label>
-          <textarea id="txtGoals" placeholder="Publish flagship research papers this quarter&#10;Deliver MBA AI &amp; analytics course materials&#10;Manage family trust &amp; legal operations&#10;Build Anchor &amp; Skill Foundry multi-agent cockpits"></textarea>
+
+          <!-- 4B: GOALS BRAINSTORMING DIALOGUE & PER-GOAL RESOURCE DISCOVERY -->
+          <div class="wiz-card" style="background:#101723;margin-top:14px">
+            <h3 style="margin:0 0 6px">🎯 Part 2 · Goals Brainstorming Dialogue (Professional, Teaching, Ventures, Creative &amp; Hobbies)</h3>
+            <p class="muted" style="margin:0 0 10px">What are your goals, and what do you work on for projects, work, or hobbies? Click any example below to add it, or brainstorm freely with your Steward. These goals will also organize the sections on the Projects page!</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              <button type="button" class="btn" data-add-goal-example="Publish flagship empirical and mathematical papers in top journals (JCR, Management Science)">+ 📚 Flagship Research</button>
+              <button type="button" class="btn" data-add-goal-example="Deliver AI-enhanced MBA &amp; undergraduate courses with interactive oral-exam and study tools">+ 🎓 Teaching &amp; Mentorship</button>
+              <button type="button" class="btn" data-add-goal-example="Build and scale Ghost World Labs, Anchor AI Cockpits, and patent/venture portfolios">+ 💻 AI Systems &amp; Ventures</button>
+              <button type="button" class="btn" data-add-goal-example="Keep family trusts, holding companies, finances, and youth mentorship organized with zero dropped balls">+ 🏛 Family &amp; Trusts</button>
+              <button type="button" class="btn" data-add-goal-example="Write novel chapters &amp; fables, train consistently for CrossFit, and build personal math/memory tools">+ 🎨 Creative Writing &amp; Hobbies</button>
+            </div>
+
+            <label for="txtGoals">Brainstorm Your Goals &amp; Work/Hobby Areas (One per line or conversational paragraph — iterate as much as you like!)</label>
+            <textarea id="txtGoals" placeholder="Publish flagship research papers this quarter&#10;Deliver MBA AI &amp; analytics course materials&#10;Manage family trust &amp; legal operations&#10;Build Anchor &amp; Skill Foundry multi-agent cockpits&#10;Write novel chapters and train for CrossFit"></textarea>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <button type="button" class="btn" data-voice-target="txtGoals">🎙 Speak / Dictate Goals</button>
+              <button type="button" class="btn primary" id="btnBrainstormGoals">💬 Summarize &amp; Iterate Goals with Steward</button>
+            </div>
+
+            <div id="goalsSummaryBox" class="status-banner" style="margin-top:12px" hidden></div>
+            <div id="arenasPreview" style="margin:12px 0"></div>
+
+            <!-- 4C: PER-GOAL RESOURCES (GANDALF ON-DISK + RESEARCHPRIME) -->
+            <div id="goalsResourceCardsBox" style="margin-top:12px"></div>
+          </div>
+
           <label for="txtPriorityNow" style="margin-top:12px">Cave of Wonders · What are the most important initiatives or main things you are working on right now? (Used to propose what goes ★ Active vs. ↳ On Deck)</label>
           <textarea id="txtPriorityNow" placeholder="e.g., Finishing the Empirical Paper for JCR, preparing the Smeal AI Teaching Grant, and polishing Anchor Onboarding"></textarea>
-          <div id="arenasPreview" style="margin:12px 0"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-            <button type="button" class="btn primary" id="btnOrganizeGoals">🧭 Organize Star Chart &amp; Propose Active / On Deck →</button>
-            <button type="button" class="btn" id="btnSkipToProjects">Jump Straight to Scanning Projects (Step 5) →</button>
+            <button type="button" class="btn emerald" id="btnOrganizeGoals">🧭 Set Goals &amp; Continue to Project Organization (Step 5) →</button>
+            <button type="button" class="btn" id="btnSkipToProjects">Jump Straight to Scanning Projects (Natural Organization, Step 5) →</button>
           </div>
         </div>
       </section>
@@ -3566,18 +4597,76 @@ def render_onboard_wizard_html(
       <!-- STEP 5 -->
       <section class="wiz-step-pane" id="step-pane-5" hidden>
         <div class="wiz-card">
-          <h2>Step 5 · Smart Directory Scan, Multi-Folder Project Consolidation &amp; Proposed Active / On Deck Lineup</h2>
-          <p class="muted">Scan one or more workspace roots anywhere on your computer, or point to multiple separate folders and pull their material together into a single unified project &amp; AI Cockpit.</p>
-          <div class="form-grid">
-            <div>
-              <label for="inpWorkspaceRoots">Workspace Root Directories (semicolon-separated; add folders from anywhere on this PC)</label>
-              <input type="text" id="inpWorkspaceRoots" value="C:\\dev" placeholder="C:\\dev; D:\\Research">
+          <h2>Step 5 · Project Discovery Dialogue, Graphical Hierarchical Organization, Verbal Revision &amp; Top Priorities</h2>
+          <p class="muted">Identify the types of files and sources on your computer, review the Graphical Hierarchical Organization (aligned to your Goals first, or Natural Domain Organization if no goals were proposed), revise verbally until happy, confirm your Top Priorities, and create your AI Cockpits.</p>
+
+          <!-- 5A: PROJECT & FILE-SOURCE DISCOVERY DIALOGUE -->
+          <div class="wiz-card" style="background:#101723;margin-top:12px">
+            <h3 style="margin:0 0 6px">🔍 Part 1 · Dialogue: Identify Potential Project File Types &amp; Sources</h3>
+            <p class="muted" style="margin:0 0 10px">What kinds of files, folders, or sources should Steward &amp; Gandalf look at as potential projects?</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" id="fileTypeChipsBox">
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="papers_latex_word" checked> 📄 Papers, LaTeX &amp; Manuscripts</label>
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="code_python_r_js" checked> 💻 Python / R / JS Codebases</label>
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="datasets_models" checked> 📊 Datasets &amp; Financial Models</label>
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="teaching_slides" checked> 🎓 Course Slides &amp; Syllabi</label>
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="trusts_legal_ops" checked> ⚖️ Trusts, Legal &amp; Venture Docs</label>
+              <label style="display:inline-flex;align-items:center;gap:5px;background:#1a2436;padding:5px 10px;border-radius:999px;cursor:pointer"><input type="checkbox" data-ftype="creative_hobbies" checked> 🎨 Creative Writing &amp; Hobbies</label>
             </div>
-            <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
-              <button type="button" class="btn" id="btnScanDirs">🔍 Scan Directories &amp; Re-Adopt Existing Stores</button>
-              <button type="button" class="btn primary" id="btnProposeSeats">⚡ Auto-Propose Active &amp; On Deck from My Top Initiatives</button>
+            <div class="form-grid">
+              <div>
+                <label for="inpWorkspaceRoots">Workspace Root Directories (semicolon-separated; anywhere on this PC)</label>
+                <input type="text" id="inpWorkspaceRoots" value="C:\\dev" placeholder="C:\\dev; D:\\Research">
+              </div>
+              <div>
+                <label for="inpProjectSourceDialogue">Describe Potential Projects or Sources to Look For (Optional Dialogue)</label>
+                <div style="display:flex;gap:6px">
+                  <input type="text" id="inpProjectSourceDialogue" placeholder="e.g., Look for JCR marketing folders, MBA teaching slides, and skill repositories">
+                  <button type="button" class="btn" data-voice-target="inpProjectSourceDialogue" title="Speak">🎙</button>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <button type="button" class="btn primary" id="btnBrainstormProjectSources">🧙‍♂️ Scan Sources &amp; Build Graphical Hierarchical Organization</button>
+              <button type="button" class="btn" id="btnScanDirs">🔍 Quick Rescan Directories</button>
             </div>
           </div>
+
+          <!-- 5B: GRAPHICAL & HIERARCHICAL ORGANIZATION SUMMARY -->
+          <div class="wiz-card" style="background:#101723;margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+              <h3 style="margin:0">🌳 Part 2 · Graphical &amp; Hierarchical Project Organization</h3>
+              <span class="pill" id="hierarchyModeBadge" style="background:#064e3b;color:#6ee7b7">Goals-First / Natural Hierarchy</span>
+            </div>
+            <div id="hierarchyTreeContainer" style="margin:10px 0"></div>
+
+            <!-- 5C: VERBAL / CONVERSATIONAL REVISION LOOP -->
+            <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px">
+              <label for="inpVerbalRevision">🎙 Revise the Organization Verbally or by Typing Until You Are Happy</label>
+              <p class="muted" style="margin:2px 0 8px">Examples: <em>"Move Collapse of Marketing under Flagship Research and make it Active"</em> · <em>"Merge JCR_Paper_Draft and JCR_Math_Proofs into JCR Unified Study"</em> · <em>"Rename Old Notes to Archive and put it On Deck"</em> · <em>"Exclude TempFolder"</em></p>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="text" id="inpVerbalRevision" style="flex:1;min-width:260px" placeholder="Speak or type how you want to reorganize, merge, rename, or reprioritize...">
+                <button type="button" class="btn" data-voice-target="inpVerbalRevision">🎙 Speak Revision</button>
+                <button type="button" class="btn primary" id="btnApplyVerbalRevision">💬 Apply Revision to Hierarchy</button>
+              </div>
+              <div id="revisionDialogueBox" style="margin-top:8px"></div>
+            </div>
+          </div>
+
+          <!-- 5D: TOP PRIORITIES SESSION (WITH MISSION & GOALS SUGGESTIONS) -->
+          <div class="wiz-card" style="background:#101723;margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <h3 style="margin:0">⭐ Part 3 · Top Priorities Session (Steward Suggestions from Your Mission &amp; Goals)</h3>
+              <button type="button" class="btn primary" id="btnSuggestTopPriorities">⚡ Suggest Top Priorities from Mission &amp; Goals</button>
+            </div>
+            <p class="muted" style="margin:6px 0">Tell your Steward what your top priorities are right now, or let the Steward suggest Active vs. On Deck placement from your Mission Statement &amp; Goals:</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+              <input type="text" id="inpTopPrioritiesSession" style="flex:1;min-width:260px" placeholder="Optional: Tell your Steward which 2–4 projects are your absolute top priorities this week...">
+              <button type="button" class="btn" data-voice-target="inpTopPrioritiesSession">🎙 Speak</button>
+              <button type="button" class="btn" id="btnProposeSeats">🎯 Update Active &amp; On Deck Lineup</button>
+            </div>
+            <div id="topPrioritiesSuggestionsBox" style="margin-top:8px"></div>
+          </div>
+
           <details style="margin:12px 0;padding:12px 14px;background:#121824;border:1px solid var(--border);border-radius:8px">
             <summary style="cursor:pointer;font-weight:650;color:var(--sky)">➕ Pull Multiple Folders / Materials Together into a Single Proposed Project</summary>
             <div class="form-grid" style="margin-top:10px">
@@ -3599,7 +4688,7 @@ def render_onboard_wizard_html(
             </div>
           </details>
           <div id="discoveredList" style="margin:14px 0"></div>
-          <button type="button" class="btn emerald" id="btnProvisionCockpits">🚀 Confirm Selected Projects &amp; Create Starter AI Cockpits →</button>
+          <button type="button" class="btn emerald" id="btnProvisionCockpits" style="font-size:15px;padding:11px 18px">🚀 Create Final Projects &amp; Provision Starter AI Cockpits →</button>
         </div>
       </section>
 
@@ -3987,27 +5076,312 @@ def render_onboard_wizard_html(
       const goals = (b.state && b.state.goals) || {{}};
       if (goals.mission_statement) document.getElementById('inpMission').value = goals.mission_statement;
       if (goals.raw_input) document.getElementById('txtGoals').value = goals.raw_input;
+      renderGoalsAndResources(goals);
 
       const disc = (b.state && b.state.projects && b.state.projects.discovered) || [];
       renderDiscoveredProjects(disc);
+      renderHierarchyTree(b.project_hierarchy || (b.state && b.state.projects && b.state.projects.hierarchy) || {{}});
       renderReceipt(b.receipt || {{}});
       const gwlBox = document.getElementById('gwlApplicantsBox');
       if (gwlBox) {{
         const apps = b.gwl_applicants || [];
         if (!apps.length) {{
-          gwlBox.innerHTML = '<p class="muted">Save Step 1 to register this individual in the Puter (`gwl-hub`) Central Applicant Repository.</p>';
+          gwlBox.innerHTML = '<p class="muted">Save Step 1 to register this individual in the Puter (`gwl-hub` + `C:\\dev\\GhostWorldLabs-Hub`) Central Applicant Repository.</p>';
         }} else {{
           gwlBox.innerHTML = apps.map((a) => `
             <div class="proj-row">
               <div>
                 <strong>${{a.display_name}}</strong> (<code>${{a.username}}</code>) · Pseudonym: <strong>${{a.pseudonym}}</strong> (<code>${{a.did}}</code>)
-                <div class="muted">Host: ${{a.hostname || 'local'}} (${{a.tailscale_ip || 'local'}}) · Topology: ${{a.topology_mode}} · 2FA: ${{a.dual_auth_enabled ? 'ON' : 'Off'}} · Services: ${{(a.enabled_services || []).join(', ') || 'pending'}}</div>
+                <div class="muted">Host: ${{a.hostname || 'local'}} (${{a.tailscale_ip || 'local'}}) · Topology: ${{a.topology_mode}} · 2FA: ${{a.dual_auth_enabled ? 'ON' : 'Off'}} · Services: ${{(a.enabled_services || []).join(', ') || 'pending'}} · Backed up in <code>C:\\dev\\GhostWorldLabs-Hub</code> &amp; <code>C:\\dev\\Anchor\\gwl_hub_repository</code></div>
               </div>
               <span class="pill" style="background:#064e3b;color:#6ee7b7">REGISTERED ON PUTER ✓</span>
             </div>
           `).join('');
         }}
       }}
+    }}
+
+    function renderGoalsAndResources(goals) {{
+      const mSumBox = document.getElementById('missionSummaryBox');
+      const mBadge = document.getElementById('missionLockBadge');
+      if (mBadge) {{
+        mBadge.textContent = goals.mission_locked ? '✓ Mission Locked' : 'Iterative Dialogue Mode';
+        mBadge.style.background = goals.mission_locked ? '#064e3b' : '#243247';
+        mBadge.style.color = goals.mission_locked ? '#6ee7b7' : '#93c5fd';
+      }}
+      if (mSumBox) {{
+        if (goals.mission_summary) {{
+          const alts = (goals.mission_alternatives || []).map((a) => `
+            <button type="button" class="btn" data-use-mission="${{(a.text || '').replace(/"/g, '&quot;')}}" style="font-size:12px">Use ${{a.style}}: "${{a.text}}"</button>
+          `).join(' ');
+          mSumBox.hidden = false;
+          mSumBox.innerHTML = `
+            <div><strong>🤖 Steward Mission Summary:</strong> ${{goals.mission_summary}}</div>
+            <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${{alts}}</div>
+          `;
+          mSumBox.querySelectorAll('[data-use-mission]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+              document.getElementById('inpMission').value = btn.getAttribute('data-use-mission');
+            }});
+          }});
+        }} else {{
+          mSumBox.hidden = true;
+        }}
+      }}
+
+      const gSumBox = document.getElementById('goalsSummaryBox');
+      if (gSumBox) {{
+        if (goals.goals_summary) {{
+          gSumBox.hidden = false;
+          gSumBox.textContent = `🧭 Steward Goal Architecture Summary: ${{goals.goals_summary}}`;
+        }} else {{
+          gSumBox.hidden = true;
+        }}
+      }}
+
+      const cardsBox = document.getElementById('goalsResourceCardsBox');
+      if (!cardsBox) return;
+      const items = goals.items || [];
+      if (!items.length) {{
+        cardsBox.innerHTML = '<p class="muted">Click "Summarize &amp; Iterate Goals with Steward" above to generate your Goal Sections and attach on-disk / web resources to each goal.</p>';
+        return;
+      }}
+      cardsBox.innerHTML = '<h4 style="margin:10px 0 8px">🧙‍♂️ Per-Goal Resource Discovery (Describe On-Disk Materials Without Knowing Exact Paths + Web/Research Topics for Gandalf &amp; researchPrime)</h4>';
+      items.forEach((g) => {{
+        const res = g.resources || {{}};
+        const diskMatches = (res.on_disk_matches || []).map((m) => `
+          <div style="font-size:12px;color:#6ee7b7;margin-top:3px">✓ <strong>${{m.name}}</strong> (<code>${{m.path}}</code>) — ${{m.gandalf_note || ''}}</div>
+        `).join('');
+        const rpQueries = (res.research_prime_queries || []).map((q) => `
+          <div style="font-size:12px;color:#93c5fd;margin-top:2px">🔬 <code>${{q}}</code></div>
+        `).join('');
+        const card = document.createElement('div');
+        card.className = 'wiz-card';
+        card.style.background = '#0d131d';
+        card.style.marginBottom = '10px';
+        card.style.padding = '14px 16px';
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div><strong>🎯 ${{g.name}}</strong> <span class="pill">${{g.arena}}</span> <span class="pill">Tier ${{g.tier}} · ${{g.horizon}}</span></div>
+            <span class="pill" style="background:#1e3a8a;color:#93c5fd">${{(res.on_disk_matches || []).length}} Disk Matches · ${{(res.research_prime_queries || []).length}} researchPrime Tracks</span>
+          </div>
+          <div class="form-grid" style="margin-top:8px">
+            <div>
+              <label>Describe Files/Materials Somewhere on Disk (No Exact Path Needed — Gandalf Will Find Them)</label>
+              <input type="text" data-goal-disk="${{g.id}}" value="${{res.on_disk_clue || ''}}" placeholder="e.g., LaTeX proofs and R scripts for JCR paper somewhere on my drive">
+            </div>
+            <div>
+              <label>Websites, URLs, Datasets or Literature Topics (Organized by researchPrime &amp; Gandalf)</label>
+              <input type="text" data-goal-web="${{g.id}}" value="${{res.web_and_info_clue || ''}}" placeholder="e.g., https://ssrn.com/..., recent papers on AI oral exams">
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn primary" data-act-discover-res="${{g.id}}">🧙‍♂️ Dispatch Steward + Gandalf &amp; researchPrime to Locate &amp; Organize</button>
+            <span class="muted">${{res.gandalf_synthesis || ''}}</span>
+          </div>
+          ${{diskMatches ? `<div style="margin-top:8px;padding:8px;background:#101926;border-radius:6px">${{diskMatches}}${{rpQueries}}</div>` : ''}}
+        `;
+        cardsBox.appendChild(card);
+      }});
+
+      cardsBox.querySelectorAll('[data-act-discover-res]').forEach((btn) => {{
+        btn.addEventListener('click', async () => {{
+          const gid = btn.getAttribute('data-act-discover-res');
+          const dInp = cardsBox.querySelector(`[data-goal-disk="${{gid}}"]`);
+          const wInp = cardsBox.querySelector(`[data-goal-web="${{gid}}"]`);
+          const out = await callWizardAction('discover_goal_resources', {{
+            goal_id: gid,
+            on_disk_clue: dInp ? dInp.value : '',
+            web_and_info_clue: wInp ? wInp.value : '',
+          }});
+          document.getElementById('wizBanner').textContent = out.resources ? out.resources.gandalf_synthesis : 'Resources located and organized!';
+          await refreshBundle();
+        }});
+      }});
+    }}
+
+    function renderHierarchyTree(h) {{
+      const box = document.getElementById('hierarchyTreeContainer');
+      const badge = document.getElementById('hierarchyModeBadge');
+      if (!box) return;
+      if (badge && h && h.mode_label) {{
+        badge.textContent = h.mode_label;
+      }}
+      const sections = (h && h.sections) || [];
+      if (!sections.length) {{
+        box.innerHTML = '<p class="muted">Click "Scan Sources &amp; Build Graphical Hierarchical Organization" above to generate your visual portfolio tree.</p>';
+        return;
+      }}
+      const secHtml = sections.map((sec) => {{
+        const projs = (sec.projects || []).map((p) => {{
+          const seatColor = p.seat === 'active' ? '#064e3b' : (p.seat === 'deck' ? '#1e3a8a' : '#243247');
+          const seatTxt = p.seat === 'active' ? '★ ACTIVE' : (p.seat === 'deck' ? '↳ ON DECK' : '○ CANDIDATE');
+          const linkedCnt = (p.linked_material_paths || []).length;
+          return `
+            <div style="margin-left:18px;padding:8px 12px;border-left:2px solid #f59e0b;background:#141d2b;border-radius:0 8px 8px 0;margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <div>
+                <strong>├─ 📁 ${{p.name}}</strong>
+                ${{linkedCnt > 1 ? `<span class="pill">${{linkedCnt}} Consolidated Folders</span>` : ''}}
+                <div class="muted" style="font-size:11px">${{p.folder_path}} · ${{p.blurb || ''}}</div>
+              </div>
+              <span class="pill" style="background:${{seatColor}};color:#fff">${{seatTxt}}</span>
+            </div>
+          `;
+        }}).join('');
+        const resCnt = ((sec.resources && sec.resources.on_disk_matches) || []).length;
+        return `
+          <div style="border-left:3px solid #38bdf8;padding-left:14px;margin:12px 0">
+            <div style="display:flex;justify-content:space-between;align-items:center;background:#162235;padding:9px 14px;border-radius:8px">
+              <div>
+                <strong>┏━ 🎯 ${{sec.title}}</strong> <span class="pill">${{sec.arena}}</span>
+                ${{resCnt ? `<span class="pill" style="background:#064e3b;color:#6ee7b7">${{resCnt}} Gandalf Resource Match(es)</span>` : ''}}
+              </div>
+              <span class="pill">${{(sec.projects || []).length}} Project(s)</span>
+            </div>
+            ${{projs || '<div class="muted" style="margin:6px 0 0 18px">└─ (No projects assigned to this section yet — use Verbal Revision below to move or add one)</div>'}}
+          </div>
+        `;
+      }}).join('');
+
+      box.innerHTML = `
+        <div style="padding:12px 16px;background:linear-gradient(90deg,#1e293b,#0f172a);border:1px solid #f59e0b;border-radius:10px;margin-bottom:10px">
+          <div style="font-size:12px;color:#fde68a;font-weight:700">🏛 PORTFOLIO NORTH STAR MISSION (ROOT)</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">"${{h.mission_statement || 'Execute Strategic Portfolio Goals & AI Cockpits'}}"</div>
+          <div class="muted" style="margin-top:4px">Organization: <strong>${{h.mode_label}}</strong> · ★ Active: ${{h.active_count || 0}} · ↳ On Deck: ${{h.on_deck_count || 0}} · ○ Candidates: ${{h.parked_count || 0}}</div>
+        </div>
+        ${{secHtml}}
+      `;
+    }}
+
+    function startVoiceDictation(targetId) {{
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {{
+        el.focus();
+        document.getElementById('wizBanner').textContent = '🎙 Tip: Press Win+H (Windows Voice Typing) or type directly in the focused box.';
+        return;
+      }}
+      const rec = new SpeechRec();
+      rec.lang = 'en-US';
+      rec.interimResults = false;
+      document.getElementById('wizBanner').textContent = '🎙 Listening... Speak your thought or revision now.';
+      rec.onresult = (ev) => {{
+        const transcript = ev.results[0][0].transcript;
+        el.value = el.value ? (el.value.trim() + ' ' + transcript) : transcript;
+        document.getElementById('wizBanner').textContent = `🎙 Captured: "${{transcript}}"`;
+      }};
+      rec.onerror = () => {{
+        el.focus();
+        document.getElementById('wizBanner').textContent = '🎙 Press Win+H (Windows Voice Typing) or type directly in the box.';
+      }};
+      rec.start();
+    }}
+
+    document.querySelectorAll('[data-voice-target]').forEach((btn) => {{
+      btn.addEventListener('click', () => startVoiceDictation(btn.getAttribute('data-voice-target')));
+    }});
+
+    document.querySelectorAll('[data-use-mission]').forEach((btn) => {{
+      btn.addEventListener('click', () => {{
+        const val = btn.getAttribute('data-use-mission');
+        document.getElementById('inpMissionDialogue').value = val;
+        document.getElementById('inpMission').value = val;
+      }});
+    }});
+
+    document.querySelectorAll('[data-add-goal-example]').forEach((btn) => {{
+      btn.addEventListener('click', () => {{
+        const ex = btn.getAttribute('data-add-goal-example');
+        const area = document.getElementById('txtGoals');
+        if (area) {{
+          area.value = area.value.trim() ? (area.value.trim() + '\\n' + ex) : ex;
+        }}
+      }});
+    }});
+
+    const btnBrainstormMission = document.getElementById('btnBrainstormMission');
+    if (btnBrainstormMission) {{
+      btnBrainstormMission.addEventListener('click', async () => {{
+        const userIn = document.getElementById('inpMissionDialogue').value || document.getElementById('inpMission').value;
+        const curDraft = document.getElementById('inpMission').value;
+        const out = await callWizardAction('brainstorm_mission', {{ user_input: userIn, current_draft: curDraft }});
+        document.getElementById('inpMission').value = out.mission_statement || '';
+        document.getElementById('wizBanner').textContent = `Steward Mission Summary: ${{out.ai_summary}}`;
+        await refreshBundle();
+      }});
+    }}
+
+    const btnLockMission = document.getElementById('btnLockMission');
+    if (btnLockMission) {{
+      btnLockMission.addEventListener('click', async () => {{
+        const out = await callWizardAction('lock_mission', {{ mission_statement: document.getElementById('inpMission').value }});
+        document.getElementById('wizBanner').textContent = `Locked Mission Statement: "${{out.mission_statement}}" — Now brainstorm your Goals below!`;
+        await refreshBundle();
+        document.getElementById('txtGoals').focus();
+      }});
+    }}
+
+    const btnBrainstormGoals = document.getElementById('btnBrainstormGoals');
+    if (btnBrainstormGoals) {{
+      btnBrainstormGoals.addEventListener('click', async () => {{
+        const out = await callWizardAction('brainstorm_goals', {{
+          user_input: document.getElementById('txtGoals').value,
+          mission_statement: document.getElementById('inpMission').value,
+        }});
+        document.getElementById('wizBanner').textContent = out.ai_summary || 'Goals summarized and organized!';
+        await refreshBundle();
+      }});
+    }}
+
+    const btnBrainstormSources = document.getElementById('btnBrainstormProjectSources');
+    if (btnBrainstormSources) {{
+      btnBrainstormSources.addEventListener('click', async () => {{
+        const ftypes = Array.from(document.querySelectorAll('[data-ftype]:checked')).map((el) => el.getAttribute('data-ftype'));
+        const out = await callWizardAction('brainstorm_project_sources', {{
+          user_input: (document.getElementById('inpProjectSourceDialogue') || {{}}).value || '',
+          selected_file_types: ftypes,
+          roots: document.getElementById('inpWorkspaceRoots').value,
+        }});
+        document.getElementById('wizBanner').textContent = out.summary || 'Built Graphical Hierarchical Project Organization!';
+        await refreshBundle();
+      }});
+    }}
+
+    const btnVerbalRev = document.getElementById('btnApplyVerbalRevision');
+    if (btnVerbalRev) {{
+      btnVerbalRev.addEventListener('click', async () => {{
+        const inp = document.getElementById('inpVerbalRevision');
+        if (!inp || !inp.value.trim()) return;
+        const out = await callWizardAction('revise_project_organization', {{ verbal_instruction: inp.value }});
+        inp.value = '';
+        document.getElementById('wizBanner').textContent = `✓ Revised Hierarchy: ${{out.steward_reply}}`;
+        const rBox = document.getElementById('revisionDialogueBox');
+        if (rBox) {{
+          rBox.innerHTML = `<div class="proj-row"><div><strong>🤖 Steward Applied Revision:</strong> ${{out.steward_reply}}</div><span class="pill" style="background:#064e3b;color:#6ee7b7">UPDATED ✓</span></div>`;
+        }}
+        await refreshBundle();
+      }});
+    }}
+
+    const btnSuggestPrio = document.getElementById('btnSuggestTopPriorities');
+    if (btnSuggestPrio) {{
+      btnSuggestPrio.addEventListener('click', async () => {{
+        const notes = (document.getElementById('inpTopPrioritiesSession') || {{}}).value || (document.getElementById('txtPriorityNow') || {{}}).value || '';
+        const out = await callWizardAction('suggest_top_priorities', {{ user_priority_notes: notes }});
+        const sBox = document.getElementById('topPrioritiesSuggestionsBox');
+        if (sBox) {{
+          sBox.innerHTML = (out.suggestions || []).map((s) => `
+            <div class="proj-row">
+              <div><strong>${{s.recommended_seat === 'active' ? '★ ACTIVE' : '↳ ON DECK'}} · ${{s.name}}</strong> <span class="pill">${{s.group_folder}}</span><div class="muted">${{s.why}}</div></div>
+              <span class="pill" style="background:${{s.recommended_seat === 'active' ? '#064e3b' : '#1e3a8a'}};color:#fff">${{s.recommended_seat.toUpperCase()}}</span>
+            </div>
+          `).join('');
+        }}
+        document.getElementById('wizBanner').textContent =
+          `Steward suggested ${{out.proposed_active.length}} Active Top Priorities and ${{out.proposed_on_deck.length}} On Deck projects from your Mission & Goals!`;
+        await refreshBundle();
+      }});
     }}
 
     const chkDualAuthEl = document.getElementById('chkDualAuth');

@@ -1,0 +1,25 @@
+{
+  "schema": "anchor.gwl.applicant.v1",
+  "applicant_id": "applicant-john-samwise-gamgee",
+  "display_name": "John",
+  "username": "john",
+  "pseudonym": "Samwise Gamgee",
+  "pseudonym_slug": "samwise-gamgee",
+  "pseudonym_aliases": [
+    "Samwise Gamgi",
+    "Samwise"
+  ],
+  "did": "did:anchor:samwise-gamgee",
+  "steward_persona": "Aladdin",
+  "hostname": "PUTER",
+  "tailscale_ip": "",
+  "tailscale_endpoint": "http://127.0.0.1:8777",
+  "topology_mode": "main_mothership",
+  "dual_auth_enabled": false,
+  "dual_auth_method": "totp_authenticator",
+  "enabled_services": [],
+  "verified_services": [],
+  "onboarding_status": "step_1",
+  "registered_at": "2026-10-25T00:46:12Z",
+  "updated_at": "2026-10-25T01:44:24Z"
+}

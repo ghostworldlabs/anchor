@@ -173,6 +173,7 @@ class GWLClearinghouse:
     BROADCAST_SCHEMA = BROADCAST_SCHEMA
 
     def __init__(self, hub_root: str | Path | None = None) -> None:
+        self._custom_hub_root = hub_root
         self.root = _hub_dir(hub_root)
         self.directory_file = self.root / "pseudonym_directory.json"
         self.acl_ledger_file = self.root / "acl_ledger.json"
@@ -185,6 +186,50 @@ class GWLClearinghouse:
         self.inbox_root = self.root / "inbox"
         self.inbox_root.mkdir(parents=True, exist_ok=True)
         self._ensure_default_samwise_account()
+
+    def backup_directories(self) -> list[Path]:
+        """Return the C:\\dev backup directories where GWL Hub & Applicant files are mirrored for regular backups."""
+        if self._custom_hub_root is not None:
+            return [self.root.parent / "gwl_hub_repository"]
+        base = paths.data_dir() if hasattr(paths, "data_dir") else Path(__file__).resolve().parent
+        base_path = Path(base).resolve()
+        anchor_repo_dir = Path(__file__).resolve().parent
+        if base_path != anchor_repo_dir:
+            return [base_path / "gwl_hub_repository"]
+        out = [anchor_repo_dir / "gwl_hub_repository"]
+        dev_root = anchor_repo_dir.parent
+        if dev_root.is_dir():
+            out.append(dev_root / "GhostWorldLabs-Hub")
+        return out
+
+    def _sync_to_dev_backups(self) -> list[str]:
+        """Mirror verified_model_catalog.json, applicants_registry.json, APPLICANTS.md, directory, and broadcast into C:\\dev backup folders."""
+        import shutil as _shutil
+        synced: list[str] = []
+        top_files = (
+            "verified_model_catalog.json",
+            "applicants_registry.json",
+            "APPLICANTS.md",
+            "pseudonym_directory.json",
+            "acl_ledger.json",
+            "latest_nightly_broadcast.json",
+        )
+        for bdir in self.backup_directories():
+            try:
+                bdir.mkdir(parents=True, exist_ok=True)
+                for fname in top_files:
+                    src = self.root / fname
+                    if src.is_file():
+                        _shutil.copy2(src, bdir / fname)
+                if self.applicants_dir.is_dir():
+                    dst_apps = bdir / "applicants"
+                    dst_apps.mkdir(parents=True, exist_ok=True)
+                    for app_f in self.applicants_dir.glob("*.json"):
+                        _shutil.copy2(app_f, dst_apps / app_f.name)
+                synced.append(str(bdir))
+            except Exception:
+                pass
+        return synced
 
     def _load_directory(self) -> list[dict[str, Any]]:
         if not self.directory_file.is_file():
@@ -494,6 +539,7 @@ class GWLClearinghouse:
         try:
             self.broadcast_file.parent.mkdir(parents=True, exist_ok=True)
             self.broadcast_file.write_text(json.dumps(bulletin, indent=2) + "\n", encoding="utf-8")
+            self._sync_to_dev_backups()
         except Exception:
             pass
         return bulletin
@@ -768,11 +814,13 @@ class GWLClearinghouse:
             "host": "puter",
             "cadence": "Nightly 02:00 local + Live CLI discovery",
             "published_at": _utc_now_iso(),
+            "backup_directories": [str(p) for p in self.backup_directories()],
             "families": default_families,
         }
         try:
             self.model_catalog_file.parent.mkdir(parents=True, exist_ok=True)
             self.model_catalog_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            self._sync_to_dev_backups()
         except Exception:
             pass
         return doc
@@ -802,10 +850,12 @@ class GWLClearinghouse:
         return []
 
     def _write_applicants_markdown(self, applicants: list[dict[str, Any]]) -> None:
+        bdirs_str = ", ".join(f"`{p}`" for p in self.backup_directories())
         lines = [
             "# Ghost World Labs · Central Applicant & Collaborator Registry (`puter`)",
             "",
             f"- **Hub ID:** `{HUB_ID}` (`puter`)",
+            f"- **Backed-Up `C:\\dev` Repositories:** {bdirs_str}",
             f"- **Total Registered Individuals:** {len(applicants)}",
             f"- **Updated At:** `{_utc_now_iso()}`",
             "",
@@ -909,12 +959,14 @@ class GWLClearinghouse:
             )
         except Exception:
             pass
+        synced_backups = self._sync_to_dev_backups()
         return {
             "ok": True,
             "applicant": entry,
             "total_applicants": len(applicants),
             "registry_file": str(self.applicants_file),
             "markdown_file": str(self.applicants_md_file),
+            "backup_directories": synced_backups,
         }
 
     def list_applicant_signups(self) -> list[dict[str, Any]]:

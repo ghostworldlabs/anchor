@@ -991,5 +991,189 @@ def test_gwl_hub_verified_model_catalog_and_central_applicant_signup_repository_
     bulletin = hub.generate_nightly_broadcast()
     assert "verified_model_catalog" in bulletin
     assert hub.verify_nightly_broadcast(bulletin)["ok"] is True
+    # Verify C:\dev backup repository mirror
+    bdirs = hub.backup_directories()
+    assert len(bdirs) >= 1
+    assert (bdirs[0] / "verified_model_catalog.json").is_file()
+    assert (bdirs[0] / "applicants_registry.json").is_file()
+    assert (bdirs[0] / "APPLICANTS.md").is_file()
+
+
+def test_mission_goals_brainstorming_gandalf_resources_and_hierarchical_verbal_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify:
+    1. Step 4 Mission Statement Brainstorming Dialogue (with NY Times & Samwise Gamgee examples,
+       AI summary, and iterative refinement) + locking.
+    2. Step 4 Goals Brainstorming Dialogue (professional, teaching, hobbies) + iteration.
+    3. Step 4 Per-Goal Resource Discovery (`discover_goal_resources`) where Gandalf finds on-disk
+       materials from a plain-English description without exact paths, and researchPrime + Gandalf
+       organize websites/literature tracks.
+    4. Step 5 Project Source Dialogue (`brainstorm_project_sources`) + Graphical Hierarchical
+       Organization (`goals_first` when goals exist, `natural_organization` fallback when no goals exist).
+    5. Step 5 Verbal Revision Loop (`revise_project_organization`: move, merge, rename, seat change, exclude).
+    6. Step 5 Top Priorities Session (`suggest_top_priorities`) & final AI Cockpit creation with
+       the Gandalf & researchPrime Resource Dossier written into `ECGBERHT.md`.
+    """
+    import onboard_wizard
+    import paths
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+
+    # Create sample workspace folders on disk (simulating user's computer)
+    ws_root = tmp_path / "workspace"
+    f_jcr = ws_root / "JCR_Marketing_Empirical"
+    f_mba = ws_root / "MBA_AI_Course_Fall"
+    f_hobby = ws_root / "CrossFit_And_Novel_Notes"
+    f_scratch = ws_root / "Temp_Scratch"
+    for d in (f_jcr, f_mba, f_hobby, f_scratch):
+        d.mkdir(parents=True)
+    (f_jcr / "theorem_proofs.tex").write_text("\\section{Empirical JCR Proof}\n", encoding="utf-8")
+    (f_jcr / "estimation.py").write_text("# JCR marketing estimation\n", encoding="utf-8")
+    (f_mba / "README.md").write_text("# MBA AI Teaching & Oral Exam Supplement\n", encoding="utf-8")
+    (f_hobby / "chapter1.md").write_text("# Novel Chapter 1 & CrossFit log\n", encoding="utf-8")
+    (f_scratch / "notes.txt").write_text("temp scratch\n", encoding="utf-8")
+
+    # 1. Mission Statement Brainstorming Dialogue + Iteration
+    m1 = onboard_wizard.dispatch_wizard_action(
+        "brainstorm_mission",
+        {
+            "user_input": "Carry the work that matters to completion alongside the people I care about — advancing rigorous scholarship, teaching, and AI systems.",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert m1["ok"] is True
+    assert len(m1["examples"]) >= 2
+    assert any("New York Times" in ex["label"] for ex in m1["examples"])
+    assert any("Samwise Gamgee" in ex["label"] for ex in m1["examples"])
+    assert m1["ai_summary"]
+
+    # Iterate on the mission statement
+    m2 = onboard_wizard.dispatch_wizard_action(
+        "brainstorm_mission",
+        {
+            "user_input": "Also include family trusts and personal hobbies",
+            "current_draft": m1["mission_statement"],
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert m2["ok"] is True
+    assert "family trusts and personal hobbies" in m2["mission_statement"].lower()
+
+    lock_res = onboard_wizard.dispatch_wizard_action(
+        "lock_mission",
+        {"mission_statement": m2["mission_statement"]},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert lock_res["ok"] is True
+    assert lock_res["mission_locked"] is True
+
+    # 2. Goals Brainstorming Dialogue + Iteration
+    g1 = onboard_wizard.dispatch_wizard_action(
+        "brainstorm_goals",
+        {
+            "user_input": (
+                "Publish flagship JCR marketing research papers\n"
+                "Deliver MBA AI teaching and oral exam tools"
+            ),
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert g1["ok"] is True
+    assert len(g1["goals"]["items"]) == 2
+
+    # Iterate by adding a hobby/creative goal
+    g2 = onboard_wizard.dispatch_wizard_action(
+        "brainstorm_goals",
+        {
+            "user_input": "Add a goal to write novel chapters and train for CrossFit",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert g2["ok"] is True
+    assert len(g2["goals"]["items"]) == 3
+    first_goal_id = g2["goals"]["items"][0]["id"]
+
+    # 3. Per-Goal Resource Discovery (Gandalf fuzzy on-disk finder + researchPrime web/info organizer)
+    res_disc = onboard_wizard.dispatch_wizard_action(
+        "discover_goal_resources",
+        {
+            "goal_id": first_goal_id,
+            "on_disk_clue": "I have some LaTeX theorem proofs and Python estimation scripts for the JCR marketing paper somewhere on disk",
+            "web_and_info_clue": "https://ssrn.com/abstract=123456, recent empirical marketing literature",
+            "search_roots": [str(ws_root)],
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert res_disc["ok"] is True
+    dossier = res_disc["resources"]
+    matched_names = [m["name"] for m in dossier["on_disk_matches"]]
+    assert "JCR_Marketing_Empirical" in matched_names
+    assert any("ssrn.com" in w["url"] for w in dossier["web_sources"])
+    assert len(dossier["research_prime_queries"]) >= 1
+
+    # 4. Step 5 Project & File-Source Discovery Dialogue + Goals-First Graphical Hierarchy
+    p_src = onboard_wizard.dispatch_wizard_action(
+        "brainstorm_project_sources",
+        {
+            "user_input": "Look for LaTeX manuscripts, Python scripts, MBA course folders, and novel notes",
+            "selected_file_types": ["papers_latex_word", "code_python_r_js", "teaching_slides", "creative_hobbies"],
+            "roots": [str(ws_root)],
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert p_src["ok"] is True
+    assert p_src["hierarchy"]["mode"] == "goals_first"
+    assert p_src["hierarchy"]["total_sections"] >= 3
+
+    # 5. Verbal / Conversational Revision Loop
+    rev1 = onboard_wizard.dispatch_wizard_action(
+        "revise_project_organization",
+        {"verbal_instruction": "Exclude Temp_Scratch"},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert rev1["ok"] is True
+    assert "Excluded 'Temp_Scratch'" in rev1["steward_reply"]
+
+    rev2 = onboard_wizard.dispatch_wizard_action(
+        "revise_project_organization",
+        {"verbal_instruction": "Rename JCR_Marketing_Empirical to Collapse of Marketing JCR Study"},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert rev2["ok"] is True
+    assert "Collapse of Marketing JCR Study" in rev2["steward_reply"]
+
+    # 6. Top Priorities Session (Steward suggestions from Mission & Goals) + Final AI Cockpit Creation
+    prio_res = onboard_wizard.dispatch_wizard_action(
+        "suggest_top_priorities",
+        {"user_priority_notes": "Collapse of Marketing JCR Study and MBA_AI_Course_Fall are my top priorities"},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert prio_res["ok"] is True
+    active_suggested = [x["name"] for x in prio_res["proposed_active"]]
+    assert "Collapse of Marketing JCR Study" in active_suggested
+
+    prov_res = onboard_wizard.dispatch_wizard_action(
+        "provision_projects_and_cockpits",
+        {},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert prov_res["ok"] is True
+    jcr_prov = next(p for p in prov_res["provisioned"] if p["name"] == "Collapse of Marketing JCR Study")
+    face_md = (Path(jcr_prov["sandbox_cockpit_path"]) / "ECGBERHT.md").read_text(encoding="utf-8")
+    assert "## Gandalf & researchPrime Resource Dossier" in face_md
+    assert "ssrn.com" in face_md
+
 
 
