@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import base64
+import hashlib
+import secrets
 import html
 import json
 import os
@@ -80,15 +83,15 @@ SERVICE_CATALOG = {
         "tiers": {
             "frontier": {
                 "label": "Frontier (Top-Tier Capability)",
-                "orchestrator_model": "claude-opus-4-7",
-                "reviewer_model": "claude-opus-4-7",
-                "effort": "high",
+                "orchestrator_model": "claude-fable-5-1",
+                "reviewer_model": "claude-fable-5-1",
+                "effort": "max",
             },
             "one_tier_down": {
                 "label": "One Tier Down (Fast / Cost-Balanced)",
-                "orchestrator_model": "claude-sonnet-4-6",
-                "reviewer_model": "claude-sonnet-4-6",
-                "effort": "medium",
+                "orchestrator_model": "opus",
+                "reviewer_model": "opus",
+                "effort": "high",
             },
         },
         "update_cmd": ["claude", "update"],
@@ -102,15 +105,15 @@ SERVICE_CATALOG = {
         "tiers": {
             "frontier": {
                 "label": "Frontier (Top-Tier Capability)",
-                "orchestrator_model": "gemini-3.1-pro-high",
-                "reviewer_model": "gemini-3.1-pro-high",
+                "orchestrator_model": "gemini-4-argon",
+                "reviewer_model": "gemini-4-argon",
                 "effort": "high",
             },
             "one_tier_down": {
                 "label": "One Tier Down (Fast / Cost-Balanced)",
-                "orchestrator_model": "gemini-3-flash",
-                "reviewer_model": "gemini-3-flash",
-                "effort": "medium",
+                "orchestrator_model": "gemini-3.8-flash",
+                "reviewer_model": "gemini-3.8-flash",
+                "effort": "high",
             },
         },
         "update_cmd": ["agy", "--version"],
@@ -124,14 +127,14 @@ SERVICE_CATALOG = {
         "tiers": {
             "frontier": {
                 "label": "Frontier (Top-Tier Capability)",
-                "orchestrator_model": "grok-4",
-                "reviewer_model": "grok-4",
-                "effort": "high",
+                "orchestrator_model": "grok-4.7",
+                "reviewer_model": "grok-4.7",
+                "effort": "xhigh",
             },
             "one_tier_down": {
                 "label": "One Tier Down (Fast / Cost-Balanced)",
-                "orchestrator_model": "grok-3-mini",
-                "reviewer_model": "grok-3-mini",
+                "orchestrator_model": "grok-4.7",
+                "reviewer_model": "grok-4.7",
                 "effort": "medium",
             },
         },
@@ -146,15 +149,15 @@ SERVICE_CATALOG = {
         "tiers": {
             "frontier": {
                 "label": "Frontier (Top-Tier Capability)",
-                "orchestrator_model": "gpt-5.4",
-                "reviewer_model": "gpt-5.4",
-                "effort": "high",
+                "orchestrator_model": "gpt-6.1-sol",
+                "reviewer_model": "gpt-6.1-sol",
+                "effort": "xhigh",
             },
             "one_tier_down": {
                 "label": "One Tier Down (Fast / Cost-Balanced)",
-                "orchestrator_model": "gpt-5-mini",
-                "reviewer_model": "gpt-5-mini",
-                "effort": "medium",
+                "orchestrator_model": "gpt-6-astra",
+                "reviewer_model": "gpt-6-astra",
+                "effort": "high",
             },
         },
         "update_cmd": ["codex", "--version"],
@@ -302,6 +305,62 @@ def save_wizard_state(
 # STEP 1: User Identity, Pseudonym/Synonym & Steward Persona
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _resolve_or_create_anchor_token(
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+    regenerate: bool = False,
+    explicit_token: str = "",
+) -> dict[str, Any]:
+    """Read, mint, or rotate the Mother Ship Anchor Token (ANCHOR_TOKEN / onboard-token)."""
+    use_sandbox = bool(sandbox or base_dir is not None)
+    if use_sandbox:
+        tok_file = state_dir(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir) / "onboard-token"
+    else:
+        tok_file = Path.home() / ".anchor" / ".anchor" / "onboard-token"
+
+    clean_explicit = str(explicit_token or "").strip()
+    if clean_explicit and "•" not in clean_explicit and len(clean_explicit) >= 8:
+        tok_file.parent.mkdir(parents=True, exist_ok=True)
+        tok_file.write_text(clean_explicit + "\n", encoding="utf-8")
+        tok_val = clean_explicit
+    elif regenerate:
+        tok_val = secrets.token_hex(24)
+        tok_file.parent.mkdir(parents=True, exist_ok=True)
+        tok_file.write_text(tok_val + "\n", encoding="utf-8")
+    else:
+        tok_val = ""
+        if tok_file.is_file():
+            try:
+                tok_val = tok_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                tok_val = ""
+        if not tok_val and not use_sandbox:
+            try:
+                tok_val = str(paths.expected_token() or "").strip()
+            except Exception:
+                tok_val = ""
+        if not tok_val:
+            tok_val = secrets.token_hex(24)
+            try:
+                tok_file.parent.mkdir(parents=True, exist_ok=True)
+                tok_file.write_text(tok_val + "\n", encoding="utf-8")
+            except Exception:
+                pass
+
+    masked = (
+        f"{tok_val[:6]}{'•' * 16}{tok_val[-4:]}"
+        if len(tok_val) >= 12
+        else ("•" * max(8, len(tok_val)))
+    )
+    return {
+        "anchor_token": tok_val,
+        "anchor_token_masked": masked,
+        "token_file": str(tok_file),
+    }
+
+
 def get_active_user_profile(
     sandbox_id: str = "",
     *,
@@ -358,9 +417,30 @@ def get_active_user_profile(
     if persona_raw not in STEWARD_PERSONAS:
         persona_raw = "aladdin"
     persona_info = STEWARD_PERSONAS[persona_raw]
+    tok_info = _resolve_or_create_anchor_token(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
+    username = str(stored.get("username") or "").strip() or _safe_slug(display_name)
+    pwd_configured = bool(stored.get("password_hash") or stored.get("password_configured"))
+    dual_auth_enabled = bool(stored.get("dual_auth_enabled", False))
+    dual_auth_method = str(stored.get("dual_auth_method") or "totp_authenticator").strip()
+    dual_auth_secret = str(stored.get("dual_auth_secret") or "").strip()
+    dual_auth_uri = (
+        f"otpauth://totp/Anchor:{username}?secret={dual_auth_secret.replace(' ', '')}&issuer=Anchor"
+        if dual_auth_secret
+        else ""
+    )
 
     return {
         "display_name": display_name,
+        "username": username,
+        "password_configured": pwd_configured,
+        "has_password": pwd_configured,
+        "dual_auth_enabled": dual_auth_enabled,
+        "dual_auth_method": dual_auth_method,
+        "dual_auth_secret": dual_auth_secret,
+        "dual_auth_otpauth_uri": dual_auth_uri,
+        "anchor_token": tok_info["anchor_token"],
+        "anchor_token_masked": tok_info["anchor_token_masked"],
+        "anchor_token_file": tok_info["token_file"],
         "pseudonym": canon_pseudo,
         "pseudonym_slug": aap.slugify_pseudonym(canon_pseudo),
         "pseudonym_aliases": canon_aliases,
@@ -378,6 +458,11 @@ def save_user_identity(
     pseudonym: str = aap.PSEUDONYM_DEFAULT,
     pseudonym_aliases: list[str] | str | None = None,
     steward_persona: str = "Aladdin",
+    username: str = "",
+    password: str = "",
+    dual_auth_enabled: bool | None = None,
+    dual_auth_method: str = "",
+    anchor_token: str = "",
     *,
     sandbox: bool = False,
     sandbox_id: str = DEFAULT_SANDBOX_ID,
@@ -398,9 +483,57 @@ def save_user_identity(
         persona_key = "aladdin"
     persona_info = STEWARD_PERSONAS[persona_key]
 
+    pfile = user_profile_path(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    prev_prof: dict[str, Any] = {}
+    if pfile.is_file():
+        try:
+            loaded_p = json.loads(pfile.read_text(encoding="utf-8"))
+            if isinstance(loaded_p, dict):
+                prev_prof = loaded_p
+        except Exception:
+            prev_prof = {}
+
+    clean_user = str(username or prev_prof.get("username") or _safe_slug(clean_name)).strip() or _safe_slug(clean_name)
+    pwd_hash = str(prev_prof.get("password_hash") or "")
+    pwd_salt = str(prev_prof.get("password_salt") or "")
+    if password and str(password).strip() and "•" not in str(password):
+        clean_pwd = str(password).strip()
+        salt_bytes = secrets.token_bytes(16)
+        pwd_salt = salt_bytes.hex()
+        pwd_hash = hashlib.pbkdf2_hmac("sha256", clean_pwd.encode("utf-8"), salt_bytes, 120_000).hex()
+        if not sandbox and base_dir is None and provider_secrets.available():
+            try:
+                provider_secrets.put("anchor-user-password", clean_pwd)
+            except Exception:
+                pass
+
+    d_enabled = bool(prev_prof.get("dual_auth_enabled", False)) if dual_auth_enabled is None else bool(dual_auth_enabled)
+    d_method = str(dual_auth_method or prev_prof.get("dual_auth_method") or "totp_authenticator").strip()
+    d_secret = str(prev_prof.get("dual_auth_secret") or "").strip()
+    if d_enabled and not d_secret:
+        raw_b32 = base64.b32encode(secrets.token_bytes(10)).decode("ascii").rstrip("=")
+        d_secret = " ".join(raw_b32[i:i + 4] for i in range(0, len(raw_b32), 4))
+
+    if anchor_token and str(anchor_token).strip() and "•" not in str(anchor_token):
+        _resolve_or_create_anchor_token(
+            sandbox=sandbox,
+            sandbox_id=sandbox_id,
+            base_dir=base_dir,
+            explicit_token=str(anchor_token).strip(),
+        )
+    else:
+        _resolve_or_create_anchor_token(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
     profile_doc = {
         "schema": "anchor.user.profile.v1",
         "display_name": clean_name,
+        "username": clean_user,
+        "password_configured": bool(pwd_hash),
+        "password_hash": pwd_hash,
+        "password_salt": pwd_salt,
+        "dual_auth_enabled": d_enabled,
+        "dual_auth_method": d_method,
+        "dual_auth_secret": d_secret,
         "pseudonym": canon_pseudo,
         "pseudonym_slug": aap.slugify_pseudonym(canon_pseudo),
         "pseudonym_aliases": canon_aliases,
@@ -621,6 +754,82 @@ def configure_mothership_topology(
 # STEP 3: AI Services Menu, Credentials, Model Tiers, CLI Updater & Live Probe
 # ═════════════════════════════════════════════════════════════════════════════
 
+_STALE_MODEL_UPGRADES: dict[str, str] = {
+    "claude-opus-4-7": "claude-fable-5-1",
+    "claude-sonnet-4-6": "opus",
+    "gemini-3.1-pro-high": "gemini-4-argon",
+    "gemini-3-flash": "gemini-3.8-flash",
+    "grok-4": "grok-4.7",
+    "grok-3-mini": "grok-4.7",
+    "gpt-5.4": "gpt-6.1-sol",
+    "gpt-5-mini": "gpt-6-astra",
+}
+
+_LIVE_MODEL_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def _discover_live_service_models(family: str, *, force: bool = False) -> list[dict[str, Any]]:
+    """Query model_policy.discover(family) for live CLI-advertised models (cached in memory)."""
+    fam = str(family or "").strip().lower()
+    if not force and fam in _LIVE_MODEL_CACHE:
+        return _LIVE_MODEL_CACHE[fam]
+    out_rows: list[dict[str, Any]] = []
+    try:
+        import model_policy
+        rows, _cmd = model_policy.discover(fam)
+        for r in rows or []:
+            if not isinstance(r, dict) or not r.get("model"):
+                continue
+            m_id = str(r["model"]).strip()
+            upg = str(r.get("upgrade") or "").strip()
+            effs = list(r.get("efforts") or ["high"])
+            disp = f"{upg} ({m_id})" if (upg and upg != m_id) else m_id
+            out_rows.append({
+                "model": (upg or "claude-fable-5-1") if (fam == "claude" and m_id in ("best", "default")) else m_id,
+                "alias": m_id,
+                "display": disp,
+                "efforts": effs,
+                "rank": int(r.get("rank") or 0),
+            })
+    except Exception:
+        pass
+    if not out_rows and fam in SERVICE_CATALOG:
+        t_map = SERVICE_CATALOG[fam]["tiers"]
+        out_rows = [
+            {
+                "model": t_map["frontier"]["orchestrator_model"],
+                "alias": t_map["frontier"]["orchestrator_model"],
+                "display": t_map["frontier"]["orchestrator_model"],
+                "efforts": [t_map["frontier"]["effort"]],
+                "rank": 0,
+            },
+            {
+                "model": t_map["one_tier_down"]["orchestrator_model"],
+                "alias": t_map["one_tier_down"]["orchestrator_model"],
+                "display": t_map["one_tier_down"]["orchestrator_model"],
+                "efforts": [t_map["one_tier_down"]["effort"]],
+                "rank": 1,
+            },
+        ]
+    _LIVE_MODEL_CACHE[fam] = out_rows
+    return out_rows
+
+
+def _get_nightly_refresh_meta() -> dict[str, Any]:
+    """Read Nightly 02:00 model refresh & 15-minute allowance schedule metadata."""
+    try:
+        import usage_allowance_monitor as _uam
+        return _uam._read_auto_refresh_meta()
+    except Exception:
+        return {
+            "enabled": True,
+            "models_schedule": "Nightly 02:00 local",
+            "schedule": "Allowance: every 15m · Models: Nightly (02:00 local) + Live CLI",
+            "last_refresh_local": datetime.now().astimezone().strftime("%a %b %d %H:%M"),
+            "last_model_check_day": datetime.now().astimezone().strftime("%Y-%m-%d"),
+        }
+
+
 def detect_ai_services_status(
     *,
     sandbox: bool = False,
@@ -653,7 +862,54 @@ def detect_ai_services_status(
         tier_level = str(saved.get("tier_level") or "frontier")
         if tier_level not in meta["tiers"]:
             tier_level = "frontier"
-        tier_defaults = meta["tiers"][tier_level]
+        live_models = _discover_live_service_models(fam, force=False)
+        from copy import deepcopy
+        dyn_tiers = deepcopy(meta["tiers"])
+        if live_models:
+            f_mod = live_models[0]["model"]
+            dyn_tiers["frontier"]["orchestrator_model"] = f_mod
+            dyn_tiers["frontier"]["reviewer_model"] = f_mod
+            if len(live_models) > 1:
+                o_mod = live_models[1]["model"]
+                dyn_tiers["one_tier_down"]["orchestrator_model"] = o_mod
+                dyn_tiers["one_tier_down"]["reviewer_model"] = o_mod
+        tier_defaults = dyn_tiers[tier_level]
+
+        raw_saved_orch = str(saved.get("orchestrator_model") or "").strip()
+        if raw_saved_orch in _STALE_MODEL_UPGRADES:
+            raw_saved_orch = _STALE_MODEL_UPGRADES[raw_saved_orch]
+        raw_saved_rev = str(saved.get("reviewer_model") or "").strip()
+        if raw_saved_rev in _STALE_MODEL_UPGRADES:
+            raw_saved_rev = _STALE_MODEL_UPGRADES[raw_saved_rev]
+
+        is_verified = bool(saved.get("verified", False))
+        has_key = bool(saved.get("has_api_key", False))
+        if not has_key and not sandbox and base_dir is None:
+            try:
+                has_key = bool(provider_secrets.get(f"{fam}-default"))
+            except Exception:
+                has_key = False
+
+        if fam == "chatgpt":
+            is_enabled = bool(saved.get("enabled", False) and (is_verified or has_key or saved.get("user_enabled")))
+        else:
+            is_enabled = bool(saved.get("enabled", True))
+
+        if is_verified:
+            conn_state = "verified"
+            conn_badge = f"VERIFIED ✓ ({(saved.get('last_test') or {}).get('attested_model') or raw_saved_orch or tier_defaults['orchestrator_model']})"
+        elif has_key:
+            conn_state = "api_key_saved"
+            conn_badge = "API KEY SAVED (Click Verify to Test)"
+        elif cli_path and fam == "chatgpt" and not is_enabled:
+            conn_state = "signin_needed"
+            conn_badge = "CLI INSTALLED · NOT SIGNED IN (Inactive)"
+        elif cli_path:
+            conn_state = "cli_ready"
+            conn_badge = "CLI INSTALLED · READY TO VERIFY"
+        else:
+            conn_state = "not_installed"
+            conn_badge = "CLI NOT INSTALLED"
 
         out_services[fam] = {
             "family": fam,
@@ -661,26 +917,132 @@ def detect_ai_services_status(
             "cli": cli_name,
             "cli_installed": bool(cli_path),
             "default_role": meta["default_role"],
-            "enabled": bool(saved.get("enabled", fam in ("claude", "gemini", "grok"))),
+            "enabled": is_enabled,
             "auth_mode": str(saved.get("auth_mode") or "subscription"),
-            "has_api_key": bool(saved.get("has_api_key", False)),
+            "has_api_key": has_key,
+            "has_api_key_stored": has_key,
+            "connection_state": conn_state,
+            "connection_badge": conn_badge,
             "tier_level": tier_level,
             "tier_label": tier_defaults["label"],
-            "orchestrator_model": str(saved.get("orchestrator_model") or tier_defaults["orchestrator_model"]),
-            "reviewer_model": str(saved.get("reviewer_model") or tier_defaults["reviewer_model"]),
+            "orchestrator_model": raw_saved_orch or tier_defaults["orchestrator_model"],
+            "selected_model": raw_saved_orch or tier_defaults["orchestrator_model"],
+            "reviewer_model": raw_saved_rev or tier_defaults["reviewer_model"],
             "effort": str(saved.get("effort") or tier_defaults["effort"]),
-            "cli_version": str(saved.get("cli_version") or ("detected" if cli_path else "not installed")),
-            "verified": bool(saved.get("verified", False)),
+            "cli_version": str(saved.get("cli_version") or ("CLI binary on PATH (sign-in unverified)" if (cli_path and fam == "chatgpt" and not is_verified) else ("detected" if cli_path else "not installed"))),
+            "verified": is_verified,
             "last_test": saved.get("last_test") or None,
-            "available_tiers": meta["tiers"],
+            "available_tiers": dyn_tiers,
+            "discovered_models": live_models,
         }
 
     # Check readiness.json explanation
     r_doc = _load_current_readiness(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     return {
         "services": out_services,
+        "nightly_refresh": _get_nightly_refresh_meta(),
         "readiness": r_doc,
         "readiness_explanation": readiness_human_explanation(r_doc),
+    }
+
+
+def refresh_live_models(
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Force a live CLI model catalog & Nightly 02:00 allowance refresh for all 4 AI families."""
+    _LIVE_MODEL_CACHE.clear()
+    if not sandbox and base_dir is None:
+        try:
+            import usage_allowance_monitor as _uam
+            _uam.run_nightly_allowance_refresh(force=True)
+        except Exception:
+            pass
+    for fam in SERVICE_CATALOG:
+        _discover_live_service_models(fam, force=True)
+
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    services = st_doc.get("services") or {}
+    changed = False
+    for fam, s_cfg in list(services.items()):
+        if not isinstance(s_cfg, dict):
+            continue
+        om = str(s_cfg.get("orchestrator_model") or "").strip()
+        rm = str(s_cfg.get("reviewer_model") or "").strip()
+        if om in _STALE_MODEL_UPGRADES:
+            s_cfg["orchestrator_model"] = _STALE_MODEL_UPGRADES[om]
+            changed = True
+        if rm in _STALE_MODEL_UPGRADES:
+            s_cfg["reviewer_model"] = _STALE_MODEL_UPGRADES[rm]
+            changed = True
+    if changed:
+        save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+
+    out = detect_ai_services_status(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    out["ok"] = True
+    return out
+
+
+def launch_service_login(
+    family: str,
+    *,
+    sandbox: bool = False,
+    sandbox_id: str = DEFAULT_SANDBOX_ID,
+    base_dir: Path | str | None = None,
+    runner_fn=None,
+) -> dict[str, Any]:
+    """Initiate interactive CLI login or subscription sign-in for a provider family."""
+    fam = str(family or "").strip().lower()
+    if fam not in SERVICE_CATALOG:
+        raise ValueError(f"Unsupported AI service family: {family}")
+    meta = SERVICE_CATALOG[fam]
+    login_cmd = list(meta.get("login_cmd") or [meta["cli"], "login"])
+    cmd_str = " ".join(login_cmd)
+
+    launched = False
+    note = f"Run `{cmd_str}` in a terminal to complete subscription sign-in."
+    if sandbox:
+        launched = True
+        note = f"Sandbox verified subscription sign-in flow for {meta['label']} (`{cmd_str}`)."
+    else:
+        exe = shutil.which(meta["cli"])
+        if exe:
+            real_cmd = [exe] + login_cmd[1:]
+            if runner_fn is not None:
+                try:
+                    runner_fn(real_cmd)
+                    launched = True
+                    note = f"Launched `{cmd_str}` for {meta['label']}."
+                except Exception as exc:
+                    note = f"Could not launch `{cmd_str}` ({exc}). Run `{cmd_str}` in your terminal."
+            elif os.name == "nt":
+                try:
+                    CREATE_NEW_CONSOLE = 0x00000010
+                    subprocess.Popen(
+                        ["cmd.exe", "/c", "start", f"Anchor {meta['label']} Login", "cmd.exe", "/k"] + real_cmd,
+                        creationflags=CREATE_NEW_CONSOLE,
+                    )
+                    launched = True
+                    note = f"Opened interactive sign-in console for {meta['label']} (`{cmd_str}`). Complete browser sign-in, then click Verify & Live Test Tier."
+                except Exception:
+                    note = f"Run `{cmd_str}` in PowerShell/Terminal to sign in to {meta['label']}, then click Verify & Live Test Tier."
+
+    st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    services = st_doc.setdefault("services", {})
+    cur = services.setdefault(fam, {})
+    cur["enabled"] = True
+    cur["user_enabled"] = True
+    cur["auth_mode"] = "subscription"
+    cur["login_initiated_at"] = _utc_now_iso()
+    save_wizard_state(st_doc, sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
+    return {
+        "ok": True,
+        "family": fam,
+        "launched": launched,
+        "login_command": cmd_str,
+        "message": note,
     }
 
 
@@ -749,19 +1111,35 @@ def configure_service_connection(
             except Exception:
                 pass
 
+    live_models = _discover_live_service_models(fam, force=False)
+    default_orch = t_meta["orchestrator_model"]
+    default_rev = t_meta["reviewer_model"]
+    if live_models:
+        if t_level == "frontier":
+            default_orch = live_models[0]["model"]
+            default_rev = live_models[0]["model"]
+        elif len(live_models) > 1:
+            default_orch = live_models[1]["model"]
+            default_rev = live_models[1]["model"]
+
     st_doc = load_wizard_state(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)
     services = st_doc.setdefault("services", {})
     prev = services.get(fam) if isinstance(services.get(fam), dict) else {}
+    has_key_bool = bool(has_key or prev.get("has_api_key"))
+    chosen_orch = str(orchestrator_model or default_orch).strip()
     entry = {
         "family": fam,
         "label": meta["label"],
         "enabled": bool(enabled),
+        "user_enabled": bool(enabled),
         "auth_mode": mode,
-        "has_api_key": bool(has_key or prev.get("has_api_key")),
+        "has_api_key": has_key_bool,
+        "has_api_key_stored": has_key_bool,
         "tier_level": t_level,
         "tier_label": t_meta["label"],
-        "orchestrator_model": str(orchestrator_model or t_meta["orchestrator_model"]).strip(),
-        "reviewer_model": str(reviewer_model or t_meta["reviewer_model"]).strip(),
+        "orchestrator_model": chosen_orch,
+        "selected_model": chosen_orch,
+        "reviewer_model": str(reviewer_model or orchestrator_model or default_rev).strip(),
         "effort": t_meta["effort"],
         "cli_version": str(prev.get("cli_version") or "checked"),
         "verified": bool(prev.get("verified", False)),
@@ -2230,6 +2608,7 @@ def get_full_wizard_bundle(
             "ok": (ecg_path / "scripts" / "seal-chamber-bridge.mjs").is_file() or (ecg_path / "bin" / "ecgberht.mjs").is_file(),
         },
         "services": svc_info["services"],
+        "nightly_refresh": svc_info.get("nightly_refresh") or _get_nightly_refresh_meta(),
         "readiness": svc_info["readiness"],
         "readiness_explanation": svc_info["readiness_explanation"],
         "comms_presets": comms_connector.PROVIDER_PRESETS,
@@ -2255,12 +2634,44 @@ def dispatch_wizard_action(
     use_sandbox = bool(sandbox or body.get("sandbox") in (True, 1, "1", "true"))
     sid = str(body.get("sandbox_id") or sandbox_id or DEFAULT_SANDBOX_ID).strip()
 
-    if act == "save_identity":
+    if act in ("save_identity", "save_security_credentials"):
+        dual_raw = body.get("dual_auth_enabled")
+        dual_bool = None if dual_raw is None else bool(dual_raw in (True, 1, "1", "true", "yes"))
         return save_user_identity(
             display_name=str(body.get("display_name") or ""),
             pseudonym=str(body.get("pseudonym") or aap.PSEUDONYM_DEFAULT),
             pseudonym_aliases=body.get("pseudonym_aliases"),
             steward_persona=str(body.get("steward_persona") or "Aladdin"),
+            username=str(body.get("username") or ""),
+            password=str(body.get("password") or ""),
+            dual_auth_enabled=dual_bool,
+            dual_auth_method=str(body.get("dual_auth_method") or ""),
+            anchor_token=str(body.get("anchor_token") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "regenerate_anchor_token":
+        tok_info = _resolve_or_create_anchor_token(
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+            regenerate=True,
+        )
+        return {
+            "ok": True,
+            **tok_info,
+            "profile": get_active_user_profile(sid if use_sandbox else "", sandbox=use_sandbox, base_dir=base_dir),
+        }
+    if act == "refresh_live_models":
+        return refresh_live_models(
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act == "launch_service_login":
+        return launch_service_login(
+            family=str(body.get("family") or "claude"),
             sandbox=use_sandbox,
             sandbox_id=sid,
             base_dir=base_dir,
@@ -2280,9 +2691,9 @@ def dispatch_wizard_action(
             family=str(body.get("family") or "claude"),
             enabled=bool(body.get("enabled", True)),
             auth_mode=str(body.get("auth_mode") or "subscription"),
-            api_key=str(body.get("api_key") or ""),
+            api_key=str(body.get("api_key") or body.get("api_key_value") or ""),
             tier_level=str(body.get("tier_level") or "frontier"),
-            orchestrator_model=str(body.get("orchestrator_model") or ""),
+            orchestrator_model=str(body.get("orchestrator_model") or body.get("selected_model") or ""),
             reviewer_model=str(body.get("reviewer_model") or ""),
             sandbox=use_sandbox,
             sandbox_id=sid,
@@ -2581,10 +2992,49 @@ def render_onboard_wizard_html(
       justify-content: space-between;
       flex-wrap: wrap;
       gap: 12px;
-      padding: 14px 24px;
-      background: #0f1520;
+      padding: 10px 18px;
+      background: #0b1018;
       border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+      app-region: drag;
+      user-select: none;
+      cursor: move;
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }}
+    .wiz-top a, .wiz-top button, .wiz-top input, .wiz-top select, .wiz-top .no-drag {{
+      -webkit-app-region: no-drag;
+      app-region: no-drag;
+      cursor: pointer;
+    }}
+    .wiz-status-strip {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--muted);
+    }}
+    .wiz-winctl {{
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 6px;
+      border-left: 1px solid var(--border);
+      padding-left: 8px;
+    }}
+    .wiz-winctl button {{
+      background: transparent;
+      border: 0;
+      color: var(--muted);
+      width: 34px;
+      height: 30px;
+      border-radius: 6px;
+      font-size: 13px;
+    }}
+    .wiz-winctl button:hover {{ background: #1f293d; color: #fff; }}
+    .wiz-winctl button.close:hover {{ background: #c42b1c; color: #fff; }}
     .wiz-brand {{
       font-size: 18px;
       font-weight: 700;
@@ -2763,10 +3213,16 @@ def render_onboard_wizard_html(
   </style>
 </head>
 <body>
-  <header class="wiz-top">
+  <header class="wiz-top" id="wizTopBar" title="Drag anywhere on this bar to move the Anchor window">
     <div class="wiz-brand">
-      <span>🧭 Anchor Guided Onboarding &amp; Setup Wizard</span>
+      <span>⚓🧭 Anchor Guided Onboarding &amp; Setup Wizard</span>
       {mode_badge}
+      <div class="wiz-status-strip">
+        <span class="pill" style="background:#064e3b;color:#6ee7b7">● Mother Ship Active</span>
+        <span class="pill" id="topNightlyStatusPill">🌙 Models: Nightly 02:00 + Live CLI</span>
+        <span class="pill" id="topAuthStatusPill">🔐 Token &amp; Auth Ready</span>
+        <span class="muted" style="font-size:11px">✥ Drag bar to move window</span>
+      </div>
     </div>
     <div class="wiz-top-actions">
       <a class="btn" href="{toggle_href}" id="btnToggleSandbox">{toggle_label}</a>
@@ -2774,6 +3230,11 @@ def render_onboard_wizard_html(
       <button type="button" class="btn emerald" id="btnApplySandbox" {"" if sandbox else "hidden"}>✓ Commit &amp; Apply to Live Anchor</button>
       <a class="btn" href="/setup">⚙ Provider Setup</a>
       <a class="btn primary" href="/high-seat">🏛 Open Cave of Wonders</a>
+      <div class="wiz-winctl" aria-label="Window controls">
+        <button type="button" data-winctl="minimize" title="Minimize window">&#8212;</button>
+        <button type="button" data-winctl="maximize" title="Maximize or restore window">&#9744;</button>
+        <button type="button" class="close" data-winctl="close" title="Close window">&#10005;</button>
+      </div>
     </div>
   </header>
 
@@ -2820,7 +3281,57 @@ def render_onboard_wizard_html(
               </select>
             </div>
           </div>
-          <button type="button" class="btn primary" id="btnSaveStep1">Save Identity &amp; Continue to Step 2 →</button>
+          <div style="border-top:1px solid var(--border);margin:18px 0 14px;padding-top:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <h3 style="margin:0">🔐 Security, Login Credentials, Dual Authentication (2FA) &amp; Anchor Token</h3>
+              <span class="pill" id="pwdStatusPill">Credentials &amp; Token Ready</span>
+            </div>
+            <p class="muted" style="margin:4px 0 12px">Configure your local Mother Ship login username &amp; password (stored hashed via PBKDF2-SHA256 + OS Credential Vault), optional Dual Authentication (2FA), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
+            <div class="form-grid">
+              <div>
+                <label for="inpUsername">Mother Ship Username</label>
+                <input type="text" id="inpUsername" placeholder="e.g., john, merrill" autocomplete="username">
+              </div>
+              <div>
+                <label for="inpPassword">Login Password (Stored in OS Vault + PBKDF2 Hash)</label>
+                <input type="password" id="inpPassword" placeholder="Set or update password (leave blank to keep existing)" autocomplete="new-password">
+              </div>
+              <div>
+                <label for="inpPasswordConfirm">Confirm Password</label>
+                <input type="password" id="inpPasswordConfirm" placeholder="Re-enter password to confirm" autocomplete="new-password">
+              </div>
+              <div>
+                <label for="selDualAuthMethod">Dual Authentication (2FA) Option</label>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <label style="display:inline-flex;align-items:center;gap:6px;margin:0;white-space:nowrap;font-size:13px">
+                    <input type="checkbox" id="chkDualAuth"> Enable 2FA
+                  </label>
+                  <select id="selDualAuthMethod">
+                    <option value="totp_authenticator">Authenticator App (TOTP 6-Digit Code)</option>
+                    <option value="tailscale_device_2fa">Tailscale Identity + Password (Dual-Factor)</option>
+                    <option value="backup_code">Hardware / Recovery Verification Key</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="dualAuthSecretBox" class="proj-row" style="margin-top:8px" hidden>
+              <div>
+                <strong>🛡 Dual Authentication (2FA) Enrollment Key:</strong> <code id="dualAuthSecretCode" style="color:#fde047;font-size:14px"></code>
+                <div class="muted" id="dualAuthUriText">Scan or enter this key in Google/Microsoft Authenticator or 1Password.</div>
+              </div>
+              <span class="pill" style="background:#064e3b;color:#6ee7b7">2FA ENABLED ✓</span>
+            </div>
+            <div style="margin-top:12px">
+              <label for="inpAnchorToken">Mother Ship Anchor Token (<code>ANCHOR_TOKEN</code> — used for Cockpit &amp; Peer Authentication)</label>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="password" id="inpAnchorToken" style="flex:1;min-width:260px;font-family:Consolas,monospace" readonly>
+                <button type="button" class="btn" id="btnToggleTokenVis">👁 Show / Hide</button>
+                <button type="button" class="btn" id="btnCopyAnchorToken">📋 Copy Token</button>
+                <button type="button" class="btn" id="btnRegenAnchorToken">🔄 Regenerate Token</button>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn primary" id="btnSaveStep1">Save Identity, Credentials &amp; Continue to Step 2 →</button>
         </div>
       </section>
 
@@ -2853,11 +3364,22 @@ def render_onboard_wizard_html(
       <!-- STEP 3 -->
       <section class="wiz-step-pane" id="step-pane-3" hidden>
         <div class="wiz-card">
-          <h2>Step 3 · AI Services Menu, Credentials, Capability Tiers &amp; Live Verification</h2>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+            <h2 style="margin:0">Step 3 · AI Services Menu, Credentials, Capability Tiers &amp; Live Verification</h2>
+            <button type="button" class="btn" id="btnRefreshLiveModels">🔄 Sync Live Models Now (Nightly + CLI Discovery)</button>
+          </div>
+          <div id="nightlyRefreshBanner" class="proj-row" style="margin-bottom:12px">
+            <div>
+              <strong>🌙 Nightly 02:00 Model Catalog &amp; Live CLI Discovery:</strong>
+              <span class="muted" id="nightlyRefreshDetail">Pulling live advertised models directly from installed CLIs (`model_policy.discover`) + Nightly 02:00 refresh.</span>
+            </div>
+            <span class="pill" style="background:#064e3b;color:#6ee7b7">LIVE CATALOG</span>
+          </div>
           <p class="muted" id="readinessNoteBox"></p>
           <div id="servicesGrid" class="service-grid"></div>
-          <div style="margin-top:16px">
+          <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <button type="button" class="btn primary" id="btnNextStep4">Continue to Step 4 (Goals &amp; Missions) →</button>
+            <a class="btn" href="/setup">⚙ Open Advanced Multi-Account Provider Setup (/setup)</a>
           </div>
         </div>
       </section>
@@ -2986,6 +3508,36 @@ def render_onboard_wizard_html(
     const IS_SANDBOX = Boolean(window.ONBOARD_WIZARD_BOOT.sandbox);
     const SANDBOX_ID = "{esc_sid}";
 
+    function invokeWindowControl(act) {{
+      try {{
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.window_control) {{
+          window.pywebview.api.window_control(act);
+          return;
+        }}
+        if (window.parent && window.parent !== window && window.parent.pywebview && window.parent.pywebview.api && window.parent.pywebview.api.window_control) {{
+          window.parent.pywebview.api.window_control(act);
+          return;
+        }}
+      }} catch (e) {{}}
+      if (act === 'close') window.close();
+    }}
+
+    document.querySelectorAll('[data-winctl]').forEach((btn) => {{
+      btn.addEventListener('click', (ev) => {{
+        ev.stopPropagation();
+        invokeWindowControl(btn.getAttribute('data-winctl'));
+      }});
+    }});
+
+    const wizHeader = document.querySelector('.wiz-top');
+    if (wizHeader) {{
+      wizHeader.addEventListener('mousedown', (ev) => {{
+        if (ev.button !== 0) return;
+        if (ev.target.closest('button, a, input, select, textarea, label, .wiz-top-actions')) return;
+        invokeWindowControl('drag');
+      }});
+    }}
+
     function showStep(stepNum) {{
       document.querySelectorAll('.wiz-step-pane').forEach((el, idx) => {{
         el.hidden = (idx + 1 !== stepNum);
@@ -3016,31 +3568,114 @@ def render_onboard_wizard_html(
         const card = document.createElement('div');
         card.className = 'wiz-card';
         card.style.marginBottom = '0';
-        const verifiedBadge = svc.verified
-          ? '<span class="pill" style="background:#064e3b;color:#6ee7b7">VERIFIED ✓ (' + (svc.last_test ? svc.last_test.attested_model : svc.orchestrator_model) + ')</span>'
-          : '<span class="pill">Not verified yet</span>';
+        let statusBadge = '<span class="pill">Not configured</span>';
+        if (svc.verified) {{
+          statusBadge = '<span class="pill" style="background:#064e3b;color:#6ee7b7">VERIFIED ✓ (' + (svc.last_test ? svc.last_test.attested_model : svc.orchestrator_model) + ')</span>';
+        }} else if (svc.connection_state === 'ready') {{
+          statusBadge = '<span class="pill" style="background:#1e3a8a;color:#93c5fd">' + (svc.connection_badge || 'Enabled · Ready to Verify') + '</span>';
+        }} else if (svc.connection_state === 'cli_only_unconfigured' || svc.connection_state === 'signin_needed') {{
+          statusBadge = '<span class="pill" style="background:#451a03;color:#fde68a">' + (svc.connection_badge || 'CLI Installed · Not Enabled') + '</span>';
+        }} else {{
+          statusBadge = '<span class="pill">' + (svc.connection_badge || 'Not installed') + '</span>';
+        }}
+
+        const discModels = Array.isArray(svc.discovered_models) && svc.discovered_models.length
+          ? svc.discovered_models
+          : [svc.available_tiers.frontier.orchestrator_model, svc.available_tiers.one_tier_down.orchestrator_model];
+        const firstDisc = discModels[0];
+        const firstDiscModel = (typeof firstDisc === 'object' && firstDisc !== null) ? firstDisc.model : String(firstDisc || '');
+        const selModel = svc.selected_model || svc.orchestrator_model || firstDiscModel || '';
+        const modelOptsHtml = discModels.map((m) => {{
+          const mId = (typeof m === 'object' && m !== null) ? m.model : String(m);
+          const mDisp = (typeof m === 'object' && m !== null) ? (m.display || m.model) : String(m);
+          return `<option value="${{mId}}" ${{mId === selModel ? 'selected' : ''}}>${{mDisp}}</option>`;
+        }}).join('');
+
+        const keyPlaceholder = svc.has_api_key_stored
+          ? '✓ Key stored in OS Vault (enter new key to update)'
+          : `Enter ${{svc.api_key_env || 'API_KEY'}} (stored in OS Vault)`;
+
         card.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-            <h3>${{svc.label}}</h3>
-            ${{verifiedBadge}}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="display:inline-flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:15px;font-weight:700;cursor:pointer">
+              <input type="checkbox" data-svc-enabled="${{svc.family}}" ${{svc.enabled ? 'checked' : ''}}>
+              <span>${{svc.label}}</span>
+            </label>
+            ${{statusBadge}}
           </div>
-          <p class="muted">${{svc.default_role}} · CLI: <code>${{svc.cli}}</code> (${{svc.cli_version}})</p>
+          <p class="muted" style="margin:6px 0">${{svc.default_role}} · CLI: <code>${{svc.cli}}</code> (${{svc.cli_version}}) · Source: <code>${{svc.live_discovery_source || 'catalog'}}</code></p>
           <label>Connection Method</label>
           <select data-svc-mode="${{svc.family}}">
             <option value="subscription" ${{svc.auth_mode === 'subscription' ? 'selected' : ''}}>Subscription (Local CLI Login)</option>
             <option value="api_key" ${{svc.auth_mode === 'api_key' ? 'selected' : ''}}>API Key (OS Credential Vault)</option>
           </select>
-          <label style="margin-top:8px">Capability Level / Model Tier</label>
+          <label style="margin-top:8px">Capability Level / Model Tier (Live Nightly + CLI Catalog)</label>
           <select data-svc-tier="${{svc.family}}">
-            <option value="frontier" ${{svc.tier_level === 'frontier' ? 'selected' : ''}}>Frontier (Top-Tier Capability — ${{svc.available_tiers.frontier.orchestrator_model}})</option>
-            <option value="one_tier_down" ${{svc.tier_level === 'one_tier_down' ? 'selected' : ''}}>One Tier Down (Fast / Cost-Balanced — ${{svc.available_tiers.one_tier_down.orchestrator_model}})</option>
+            <option value="frontier" ${{svc.tier_level === 'frontier' ? 'selected' : ''}}>Frontier (Top-Tier — ${{svc.available_tiers.frontier.orchestrator_model}} / ${{svc.available_tiers.frontier.subagent_model}})</option>
+            <option value="one_tier_down" ${{svc.tier_level === 'one_tier_down' ? 'selected' : ''}}>One Tier Down (Fast / Balanced — ${{svc.available_tiers.one_tier_down.orchestrator_model}})</option>
           </select>
+          <label style="margin-top:8px">Specific Model Override (Advertised by CLI / Nightly Refresh)</label>
+          <select data-svc-model="${{svc.family}}">
+            ${{modelOptsHtml}}
+          </select>
+          <label style="margin-top:8px">API Key / Credential (${{svc.api_key_env || 'OS Credential Vault'}})</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="password" data-svc-apikey="${{svc.family}}" placeholder="${{keyPlaceholder}}" style="flex:1">
+            <button type="button" class="btn" data-act-savekey="${{svc.family}}">🔑 Save Key</button>
+          </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button type="button" class="btn primary" data-act-login="${{svc.family}}">🔐 Sign In / Subscription</button>
             <button type="button" class="btn" data-act-update="${{svc.family}}">Check / Update CLI</button>
             <button type="button" class="btn emerald" data-act-test="${{svc.family}}">⚡ Verify &amp; Live Test Tier</button>
           </div>
         `;
         grid.appendChild(card);
+      }});
+
+      async function saveServiceCardConfig(fam, extra = {{}}) {{
+        const enChk = grid.querySelector(`[data-svc-enabled="${{fam}}"]`);
+        const modeSel = grid.querySelector(`[data-svc-mode="${{fam}}"]`);
+        const tierSel = grid.querySelector(`[data-svc-tier="${{fam}}"]`);
+        const modSel = grid.querySelector(`[data-svc-model="${{fam}}"]`);
+        return await callWizardAction('configure_service', Object.assign({{
+          family: fam,
+          enabled: enChk ? enChk.checked : true,
+          auth_mode: modeSel ? modeSel.value : 'subscription',
+          tier_level: tierSel ? tierSel.value : 'frontier',
+          selected_model: modSel ? modSel.value : '',
+        }}, extra));
+      }}
+
+      grid.querySelectorAll('[data-svc-enabled], [data-svc-mode], [data-svc-tier], [data-svc-model]').forEach((el) => {{
+        el.addEventListener('change', async () => {{
+          const fam = el.getAttribute('data-svc-enabled') || el.getAttribute('data-svc-mode') || el.getAttribute('data-svc-tier') || el.getAttribute('data-svc-model');
+          await saveServiceCardConfig(fam);
+          refreshBundle();
+        }});
+      }});
+
+      grid.querySelectorAll('[data-act-savekey]').forEach((btn) => {{
+        btn.addEventListener('click', async () => {{
+          const fam = btn.getAttribute('data-act-savekey');
+          const keyInp = grid.querySelector(`[data-svc-apikey="${{fam}}"]`);
+          const val = keyInp ? keyInp.value.trim() : '';
+          if (!val) {{
+            document.getElementById('wizBanner').textContent = `Enter an API key for ${{fam}} before clicking Save Key.`;
+            return;
+          }}
+          await saveServiceCardConfig(fam, {{ auth_mode: 'api_key', api_key_value: val, enabled: true }});
+          document.getElementById('wizBanner').textContent = `Stored API key for ${{fam}} in the OS Credential Vault and enabled service!`;
+          refreshBundle();
+        }});
+      }});
+
+      grid.querySelectorAll('[data-act-login]').forEach((btn) => {{
+        btn.addEventListener('click', async () => {{
+          const fam = btn.getAttribute('data-act-login');
+          const out = await callWizardAction('launch_service_login', {{ family: fam }});
+          document.getElementById('wizBanner').textContent = out.message || `Launched subscription sign-in for ${{fam}}.`;
+          refreshBundle();
+        }});
       }});
 
       grid.querySelectorAll('[data-act-update]').forEach((btn) => {{
@@ -3056,12 +3691,7 @@ def render_onboard_wizard_html(
         btn.addEventListener('click', async () => {{
           const fam = btn.getAttribute('data-act-test');
           const tierSel = grid.querySelector(`[data-svc-tier="${{fam}}"]`);
-          const modeSel = grid.querySelector(`[data-svc-mode="${{fam}}"]`);
-          await callWizardAction('configure_service', {{
-            family: fam,
-            auth_mode: modeSel ? modeSel.value : 'subscription',
-            tier_level: tierSel ? tierSel.value : 'frontier',
-          }});
+          await saveServiceCardConfig(fam, {{ enabled: true }});
           const out = await callWizardAction('test_service_tier', {{
             family: fam,
             tier_level: tierSel ? tierSel.value : 'frontier',
@@ -3150,6 +3780,44 @@ def render_onboard_wizard_html(
       document.getElementById('inpPseudonym').value = prof.pseudonym || 'Samwise Gamgee';
       document.getElementById('inpAliases').value = (prof.pseudonym_aliases || []).join(', ');
       document.getElementById('selPersona').value = prof.steward_persona || 'Aladdin';
+      const uEl = document.getElementById('inpUsername');
+      if (uEl) uEl.value = prof.username || (prof.display_name || 'john').toLowerCase().replace(/\\s+/g, '');
+      const chk2fa = document.getElementById('chkDualAuth');
+      if (chk2fa) chk2fa.checked = Boolean(prof.dual_auth_enabled);
+      const sel2fa = document.getElementById('selDualAuthMethod');
+      if (sel2fa && prof.dual_auth_method) sel2fa.value = prof.dual_auth_method;
+      const box2fa = document.getElementById('dualAuthSecretBox');
+      if (box2fa) {{
+        box2fa.hidden = !prof.dual_auth_enabled;
+        const codeEl = document.getElementById('dualAuthSecretCode');
+        if (codeEl) codeEl.textContent = prof.dual_auth_secret || 'JBSWY3DPEHPK3PXP';
+        const uriEl = document.getElementById('dualAuthUriText');
+        if (uriEl && prof.dual_auth_otpauth_uri) {{
+          uriEl.textContent = `Authenticator URI: ${{prof.dual_auth_otpauth_uri}}`;
+        }}
+      }}
+      const tokEl = document.getElementById('inpAnchorToken');
+      if (tokEl) tokEl.value = prof.anchor_token || '';
+      const pwdPill = document.getElementById('pwdStatusPill');
+      if (pwdPill) {{
+        pwdPill.textContent = prof.has_password
+          ? (prof.dual_auth_enabled ? '✓ Password + 2FA Active · Token Ready' : '✓ Password Set · Token Ready')
+          : 'Token Ready · Set Optional Password';
+      }}
+      const topAuthPill = document.getElementById('topAuthStatusPill');
+      if (topAuthPill) {{
+        topAuthPill.textContent = `🔐 User: ${{prof.username || 'john'}} · ${{prof.dual_auth_enabled ? '2FA ON' : 'Token Ready'}}`;
+      }}
+
+      const nr = b.nightly_refresh || {{}};
+      const topNightlyPill = document.getElementById('topNightlyStatusPill');
+      if (topNightlyPill) {{
+        topNightlyPill.textContent = `🌙 Models: ${{nr.schedule || 'Nightly 02:00'}} + Live CLI`;
+      }}
+      const nrDetail = document.getElementById('nightlyRefreshDetail');
+      if (nrDetail) {{
+        nrDetail.textContent = `Schedule: ${{nr.schedule || 'Every night at 02:00 local'}} · Last sync: ${{nr.last_refresh_at || 'live'}} · Source: ${{nr.source || 'model_policy.discover'}}`;
+      }}
 
       const ts = b.tailscale || {{}};
       document.getElementById('tsStatusBox').innerHTML = `
@@ -3171,15 +3839,79 @@ def render_onboard_wizard_html(
       renderReceipt(b.receipt || {{}});
     }}
 
+    const chkDualAuthEl = document.getElementById('chkDualAuth');
+    if (chkDualAuthEl) {{
+      chkDualAuthEl.addEventListener('change', () => {{
+        const box2fa = document.getElementById('dualAuthSecretBox');
+        if (box2fa) box2fa.hidden = !chkDualAuthEl.checked;
+      }});
+    }}
+
+    const btnToggleTok = document.getElementById('btnToggleTokenVis');
+    if (btnToggleTok) {{
+      btnToggleTok.addEventListener('click', () => {{
+        const inp = document.getElementById('inpAnchorToken');
+        if (inp) inp.type = (inp.type === 'password') ? 'text' : 'password';
+      }});
+    }}
+
+    const btnCopyTok = document.getElementById('btnCopyAnchorToken');
+    if (btnCopyTok) {{
+      btnCopyTok.addEventListener('click', async () => {{
+        const inp = document.getElementById('inpAnchorToken');
+        if (inp && inp.value) {{
+          try {{
+            await navigator.clipboard.writeText(inp.value);
+            document.getElementById('wizBanner').textContent = 'Copied ANCHOR_TOKEN to clipboard!';
+          }} catch (e) {{
+            inp.type = 'text';
+            inp.select();
+            document.getElementById('wizBanner').textContent = 'ANCHOR_TOKEN revealed and selected — press Ctrl+C to copy.';
+          }}
+        }}
+      }});
+    }}
+
+    const btnRegenTok = document.getElementById('btnRegenAnchorToken');
+    if (btnRegenTok) {{
+      btnRegenTok.addEventListener('click', async () => {{
+        const out = await callWizardAction('regenerate_anchor_token', {{}});
+        document.getElementById('wizBanner').textContent = `Regenerated Mother Ship ANCHOR_TOKEN (${{out.anchor_token_masked || 'updated'}})!`;
+        await refreshBundle();
+      }});
+    }}
+
+    const btnRefreshModels = document.getElementById('btnRefreshLiveModels');
+    if (btnRefreshModels) {{
+      btnRefreshModels.addEventListener('click', async () => {{
+        const out = await callWizardAction('refresh_live_models', {{}});
+        document.getElementById('wizBanner').textContent = 'Synced live advertised models from installed CLIs and Nightly 02:00 catalog!';
+        await refreshBundle();
+      }});
+    }}
+
     document.getElementById('btnSaveStep1').addEventListener('click', async () => {{
+      const pwd = (document.getElementById('inpPassword') || {{}}).value || '';
+      const pwdConf = (document.getElementById('inpPasswordConfirm') || {{}}).value || '';
+      if (pwd && pwdConf && pwd !== pwdConf) {{
+        document.getElementById('wizBanner').textContent = '⚠ Password and Confirm Password do not match. Please re-enter.';
+        return;
+      }}
       const out = await callWizardAction('save_identity', {{
         display_name: document.getElementById('inpDisplayName').value,
         pseudonym: document.getElementById('inpPseudonym').value,
         pseudonym_aliases: document.getElementById('inpAliases').value,
         steward_persona: document.getElementById('selPersona').value,
+        username: (document.getElementById('inpUsername') || {{}}).value || '',
+        password: pwd,
+        dual_auth_enabled: Boolean((document.getElementById('chkDualAuth') || {{}}).checked),
+        dual_auth_method: (document.getElementById('selDualAuthMethod') || {{}}).value || 'totp_authenticator',
+        anchor_token: (document.getElementById('inpAnchorToken') || {{}}).value || '',
       }});
+      if (document.getElementById('inpPassword')) document.getElementById('inpPassword').value = '';
+      if (document.getElementById('inpPasswordConfirm')) document.getElementById('inpPasswordConfirm').value = '';
       document.getElementById('wizBanner').textContent =
-        `Saved identity: Steward will address you as "${{out.profile.display_name}}" (Pseudonym: ${{out.profile.pseudonym}}).`;
+        `Saved identity & credentials: Steward will address you as "${{out.profile.display_name}}" (Username: ${{out.profile.username}}, Pseudonym: ${{out.profile.pseudonym}}).`;
       await refreshBundle();
       showStep(2);
     }});

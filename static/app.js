@@ -206,7 +206,7 @@
   // file, a notebook) is a deliverable and opens in the other pane.
   function isPage(path) {
     return path === "/" || path === "/dashboard" || path === "/high-seat" || path === "/doctor" ||
-           path === "/setup" || path === "/setup/install" ||
+           path === "/setup" || path === "/setup/install" || path === "/onboard-wizard" ||
            /^\/foundry\/?$/.test(path) || /^\/project\//.test(path) || /^\/steward\/v[13]\b/.test(path);
   }
 
@@ -809,4 +809,16 @@
   cave.frame = newFrame(CAVE_URL);
   layout();
   render();
+  var barEl = document.getElementById("bar");
+  if (barEl) {
+    barEl.addEventListener("mousedown", function (ev) {
+      if (ev.button === 0 && !ev.target.closest("button, a, input, select, .tile")) {
+        try { if (window.pywebview && window.pywebview.api && window.pywebview.api.window_control) window.pywebview.api.window_control("drag"); } catch (_e) {}
+      }
+    });
+  }
+  try {
+    var initOpen = new URLSearchParams(location.search).get("open");
+    if (initOpen && /^\/(onboard-wizard|setup)\b/.test(initOpen)) api.open(initOpen, "", window);
+  } catch (_e) {}
 })();

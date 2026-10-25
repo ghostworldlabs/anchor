@@ -265,7 +265,32 @@
       }else detail.append(text('p','Enter API credentials in Setup on the mother ship itself. Secure storage must be available.','muted'));
     }
     if(!c.native_default)actions.append(button('Remove connection from Setup',async()=>{render(await api.request('/api/provider-setup/remove',{connection_id:c.id,expected_revision:data.settings_revision}));connectionId=null;drawAccounts();drawDetail();}));
-    detail.append(actions);reportFacts(detail,c);const panel=document.createElement('div');panel.id='login-progress';detail.append(panel);drawLogin();
+    const quickMod=document.createElement('div');quickMod.className='setup-card';quickMod.style.margin='12px 0';quickMod.style.background='#111722';
+    quickMod.append(text('h3','⚡ Post-Setup Quick Credential, Subscription & Tier Modifications'),text('p','Modify subscription sign-in, OS Vault API key, or capability tier for '+api.labels[c.family]+' anytime after initial onboarding.','muted small'));
+    const qActions=document.createElement('div');qActions.className='setup-actions';
+    qActions.append(button('🔐 Launch CLI Subscription Sign-In',async()=>{
+      const res=await api.request('/api/onboard-wizard/action',{action:'launch_service_login',family:c.family});
+      $('setup-message').textContent=res.message || ('Launched subscription sign-in for '+c.family);
+    }));
+    qActions.append(button('⚡ Verify & Live Test Frontier Tier',async()=>{
+      await api.request('/api/onboard-wizard/action',{action:'configure_service',family:c.family,enabled:true,tier_level:'frontier'});
+      const res=await api.request('/api/onboard-wizard/action',{action:'test_service_tier',family:c.family,tier_level:'frontier'});
+      $('setup-message').textContent='Verified '+c.family+' ('+(res.test_receipt && res.test_receipt.attested_model)+')!';
+      await refresh(c.id);
+    }));
+    quickMod.append(qActions);
+    const qKeyLbl=text('label','Set or Update API Key in OS Credential Vault ('+c.family+')');
+    const qKeyRow=document.createElement('div');qKeyRow.style.display='flex';qKeyRow.style.gap='8px';qKeyRow.style.alignItems='center';
+    const qKeyInp=document.createElement('input');qKeyInp.type='password';qKeyInp.placeholder='Paste API key to store in OS Credential Vault';qKeyInp.autocomplete='off';qKeyInp.style.flex='1';
+    const qKeyBtn=button('🔑 Save API Key to Vault',async()=>{
+      const k=qKeyInp.value.trim();if(!k){$('setup-message').textContent='Enter an API key first.';return;}
+      qKeyInp.value='';
+      await api.request('/api/onboard-wizard/action',{action:'configure_service',family:c.family,enabled:true,auth_mode:'api_key',api_key_value:k});
+      $('setup-message').textContent='Saved API key for '+c.family+' in OS Credential Vault and enabled provider!';
+      await refresh(c.id);
+    });
+    qKeyRow.append(qKeyInp,qKeyBtn);quickMod.append(qKeyLbl,qKeyRow);
+    detail.append(actions,quickMod);reportFacts(detail,c);const panel=document.createElement('div');panel.id='login-progress';detail.append(panel);drawLogin();
   }
   function reserveSignIn(){const popup=window.open('about:blank','_blank');if(popup)popup.opener=null;return popup;}
   async function beginLogin(identity,popup){
@@ -1036,6 +1061,87 @@
     if(window.parent===window || event.origin!==location.origin || event.source!==window.parent || !event.data || event.data.type!=='anchor-setup-open')return;
     api.request('/api/provider-setup').then(render).catch(error=>$('setup-message').textContent=error.message);
   });
+  function invokeSetupWindowControl(act){
+    try{
+      if(window.pywebview && window.pywebview.api && window.pywebview.api.window_control){window.pywebview.api.window_control(act);return;}
+      if(window.parent && window.parent!==window && window.parent.pywebview && window.parent.pywebview.api && window.parent.pywebview.api.window_control){window.parent.pywebview.api.window_control(act);return;}
+    }catch(e){}
+    if(act==='close')window.close();
+  }
+  document.querySelectorAll('[data-winctl]').forEach(btn=>{
+    btn.addEventListener('click',ev=>{ev.stopPropagation();invokeSetupWindowControl(btn.getAttribute('data-winctl'));});
+  });
+  const setupTopBar=document.querySelector('.setup-top');
+  if(setupTopBar){
+    setupTopBar.addEventListener('mousedown',ev=>{
+      if(ev.button!==0)return;
+      if(ev.target.closest('button, a, input, select, textarea, label, .setup-winctl'))return;
+      invokeSetupWindowControl('drag');
+    });
+  }
+  if($('provider-sync-live-models')){
+    $('provider-sync-live-models').onclick=async()=>{
+      $('refresh-message').textContent='Syncing live CLI models & Nightly 02:00 catalog…';
+      try{
+        await api.request('/api/onboard-wizard/action',{action:'refresh_live_models'});
+        await refresh();
+        $('refresh-message').textContent='✓ Synced live CLI models & Nightly 02:00 catalog.';
+      }catch(e){$('refresh-message').textContent=e.message;}
+    };
+  }
+  function hydrateHostSecurityCard(prof){
+    if(!prof)return;
+    if($('host-sec-username'))$('host-sec-username').value=prof.username || (prof.display_name||'john').toLowerCase().replace(/\s+/g,'');
+    if($('host-sec-dual-enabled'))$('host-sec-dual-enabled').checked=Boolean(prof.dual_auth_enabled);
+    if($('host-sec-dual-method') && prof.dual_auth_method)$('host-sec-dual-method').value=prof.dual_auth_method;
+    if($('host-sec-anchor-token'))$('host-sec-anchor-token').value=prof.anchor_token || '';
+    if($('host-sec-2fa-box')){
+      $('host-sec-2fa-box').hidden=!prof.dual_auth_enabled;
+      if($('host-sec-2fa-secret'))$('host-sec-2fa-secret').textContent=prof.dual_auth_secret || '';
+      if($('host-sec-2fa-uri'))$('host-sec-2fa-uri').textContent=prof.dual_auth_otpauth_uri || '';
+    }
+    if($('host-sec-status-badge')){
+      $('host-sec-status-badge').textContent=prof.has_password ? (prof.dual_auth_enabled?'✓ Password + 2FA Active':'✓ Password Set · Token Ready') : 'Token & Auth Ready';
+    }
+  }
+  fetch('/api/onboard-wizard/state',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(b=>{if(b && b.profile)hydrateHostSecurityCard(b.profile);}).catch(()=>{});
+  if($('host-sec-dual-enabled')){
+    $('host-sec-dual-enabled').onchange=()=>{if($('host-sec-2fa-box'))$('host-sec-2fa-box').hidden=!$('host-sec-dual-enabled').checked;};
+  }
+  if($('btn-host-sec-toggle-token')){
+    $('btn-host-sec-toggle-token').onclick=()=>{const el=$('host-sec-anchor-token');if(el)el.type=(el.type==='password'?'text':'password');};
+  }
+  if($('btn-host-sec-copy-token')){
+    $('btn-host-sec-copy-token').onclick=async()=>{
+      const el=$('host-sec-anchor-token');
+      if(el && el.value){
+        try{await navigator.clipboard.writeText(el.value);if($('host-sec-feedback'))$('host-sec-feedback').textContent='✓ Copied ANCHOR_TOKEN to clipboard.';}
+        catch(e){el.type='text';el.select();if($('host-sec-feedback'))$('host-sec-feedback').textContent='Token revealed — press Ctrl+C to copy.';}
+      }
+    };
+  }
+  if($('btn-host-sec-regen-token')){
+    $('btn-host-sec-regen-token').onclick=async()=>{
+      const res=await api.request('/api/onboard-wizard/action',{action:'regenerate_anchor_token'});
+      if($('host-sec-anchor-token'))$('host-sec-anchor-token').value=res.anchor_token || '';
+      if($('host-sec-feedback'))$('host-sec-feedback').textContent='✓ Rotated Mother Ship ANCHOR_TOKEN ('+(res.anchor_token_masked||'updated')+').';
+    };
+  }
+  if($('btn-host-sec-save')){
+    $('btn-host-sec-save').onclick=async()=>{
+      const res=await api.request('/api/onboard-wizard/action',{
+        action:'save_security_credentials',
+        username:$('host-sec-username')?$('host-sec-username').value:'',
+        password:$('host-sec-password')?$('host-sec-password').value:'',
+        dual_auth_enabled:Boolean($('host-sec-dual-enabled') && $('host-sec-dual-enabled').checked),
+        dual_auth_method:$('host-sec-dual-method')?$('host-sec-dual-method').value:'totp_authenticator',
+        anchor_token:$('host-sec-anchor-token')?$('host-sec-anchor-token').value:''
+      });
+      if($('host-sec-password'))$('host-sec-password').value='';
+      if(res && res.profile)hydrateHostSecurityCard(res.profile);
+      if($('host-sec-feedback'))$('host-sec-feedback').textContent='✓ Saved Mother Ship username, password hash (OS Vault), 2FA & ANCHOR_TOKEN.';
+    };
+  }
   renderWave3All();
   const reqSec=new URLSearchParams(location.search).get('section') || (location.hash?location.hash.replace('#',''):'');
   api.request('/api/provider-setup').then(value=>{

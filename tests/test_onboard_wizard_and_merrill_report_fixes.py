@@ -765,3 +765,133 @@ def test_exe_zip_packages_and_isolated_shell_test_env(
     })
     assert '/download/Anchor-Test-Onboard.zip?download=1' in hdr_html
     assert '/download/Anchor.zip?download=1' in hdr_html
+
+
+# ==============================================================================
+# 16. Live Nightly/CLI Models, Honest ChatGPT Status, Draggable Progress Bar,
+#     Step 1 Credentials/2FA/Token & Post-Setup Modifications
+# ==============================================================================
+
+def test_live_models_honest_chatgpt_status_credentials_2fa_token_and_drag_progress_bar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify:
+    1. Step 3 uses current frontier/subagent models from live CLI discovery & Nightly 02:00 refresh
+       (never stale claude-opus-4-7 / gpt-5.4 / gemini-3.1-pro-high / grok-4) and auto-upgrades stale saved IDs.
+    2. ChatGPT (codex) is NOT marked enabled/connected merely because codex.exe is on PATH.
+    3. Step 1 & /setup support Username, PBKDF2-SHA256 Password, Dual Auth (2FA TOTP secret + URI),
+       and Mother Ship ANCHOR_TOKEN rotation.
+    4. Step 3 & /setup support inline OS Vault API key storage, specific model overrides, and CLI login.
+    5. shell/connect.py, shell/anchor_shell.py, /onboard-wizard, and /setup include native Win32 drag
+       support (window_control('drag')) and the 4-stage Mother Ship installation progress bar.
+    """
+    import onboard_wizard
+    import paths
+    import provider_secrets
+    import usage_allowance_monitor as uam
+    from shell import connect as shell_connect
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    vault: dict[str, str] = {}
+    monkeypatch.setattr(provider_secrets, "put", lambda k, v: vault.__setitem__(k, v))
+    monkeypatch.setattr(provider_secrets, "get", lambda k: vault.get(k))
+
+    # 1. Verify current models & Nightly 02:00 metadata in Step 3
+    svc_status = onboard_wizard.detect_ai_services_status(sandbox=True, base_dir=tmp_path)
+    assert "nightly_refresh" in svc_status
+    assert "02:00" in svc_status["nightly_refresh"]["schedule"]
+    svcs = svc_status["services"]
+    assert svcs["claude"]["orchestrator_model"] in ("claude-fable-5-1", "opus")
+    assert svcs["gemini"]["orchestrator_model"] == "gemini-4-argon"
+    assert svcs["grok"]["orchestrator_model"] == "grok-4.7"
+    assert svcs["chatgpt"]["orchestrator_model"] == "gpt-6.1-sol"
+
+    # 2. Verify ChatGPT is NOT enabled/connected by default when unverified
+    assert svcs["chatgpt"]["enabled"] is False
+    assert svcs["chatgpt"]["verified"] is False
+    assert svcs["chatgpt"]["connection_state"] in ("signin_needed", "cli_only_unconfigured", "not_installed")
+    mon = uam.compute_allowance_monitor()
+    assert mon["families"]["chatgpt"]["connected"] is False
+
+    # 3. Verify Step 1 Username, Password (PBKDF2 + Vault), Dual Auth (2FA), and Anchor Token
+    sec_res = onboard_wizard.dispatch_wizard_action(
+        "save_security_credentials",
+        {
+            "username": "john_mothership",
+            "password": "CorrectHorseBatteryStaple!99",
+            "dual_auth_enabled": True,
+            "dual_auth_method": "totp_authenticator",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert sec_res["ok"] is True
+    prof = sec_res["profile"]
+    assert prof["username"] == "john_mothership"
+    assert prof["has_password"] is True
+    assert prof["dual_auth_enabled"] is True
+    assert prof["dual_auth_method"] == "totp_authenticator"
+    assert len(prof["dual_auth_secret"]) >= 16
+    assert prof["dual_auth_otpauth_uri"].startswith("otpauth://totp/")
+    assert len(prof["anchor_token"]) >= 16
+
+    old_tok = prof["anchor_token"]
+    rot_res = onboard_wizard.dispatch_wizard_action(
+        "regenerate_anchor_token",
+        {},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert rot_res["ok"] is True
+    assert rot_res["anchor_token"] != old_tok
+
+    # 4. Verify inline API key save to OS Vault + specific model override + refresh_live_models
+    cfg_res = onboard_wizard.dispatch_wizard_action(
+        "configure_service",
+        {
+            "family": "chatgpt",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "tier_level": "frontier",
+            "selected_model": "gpt-6.1-sol",
+            "api_key_value": "sk-test-openai-vault-key-123456",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert cfg_res["ok"] is True
+    assert cfg_res["service"]["enabled"] is True
+    assert cfg_res["service"]["has_api_key_stored"] is True
+    assert cfg_res["service"]["selected_model"] == "gpt-6.1-sol"
+
+    ref_res = onboard_wizard.dispatch_wizard_action(
+        "refresh_live_models",
+        {},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert ref_res["ok"] is True
+
+    # 5. Verify draggable header & 4-stage progress bar across shell/connect.py, /onboard-wizard, and /setup
+    fl_html = shell_connect.first_launch_page()
+    inst_html = shell_connect.installation_page(tmp_path)
+    assert 'id="prog-wrap"' in fl_html and 'id="prog-bar"' in fl_html
+    assert 'id="prog-wrap"' in inst_html and 'window._updateInstallProgress' in inst_html
+    assert "window_control('drag')" in fl_html
+
+    wiz_html = onboard_wizard.render_onboard_wizard_html(sandbox=True, base_dir=tmp_path)
+    assert 'id="inpUsername"' in wiz_html
+    assert 'id="inpPassword"' in wiz_html
+    assert 'id="chkDualAuth"' in wiz_html
+    assert 'id="inpAnchorToken"' in wiz_html
+    assert 'id="btnRefreshLiveModels"' in wiz_html
+    assert 'data-winctl="minimize"' in wiz_html
+    assert "invokeWindowControl('drag')" in wiz_html
+
+    setup_html = (Path(__file__).resolve().parent.parent / "static" / "provider-setup.html").read_text(encoding="utf-8")
+    setup_js = (Path(__file__).resolve().parent.parent / "static" / "provider-setup.js").read_text(encoding="utf-8")
+    assert 'id="host-security-credentials-card"' in setup_html
+    assert 'id="provider-sync-live-models"' in setup_html
+    assert 'data-winctl="minimize"' in setup_html
+    assert "invokeSetupWindowControl('drag')" in setup_js
+

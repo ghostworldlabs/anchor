@@ -288,6 +288,14 @@ class HostApi:
                 w.maximize()
         elif act == "close":
             w.destroy()
+        elif act == "drag":
+            try:
+                from System import Action
+                form = w.native
+                hwnd = int(str(form.Handle))
+                form.Invoke(Action(lambda: (user32.ReleaseCapture(), user32.SendMessageW(hwnd, 0x00A1, 2, 0))))
+            except Exception:
+                pass
 
     # ---------- finding Anchor (the setup and offline pages call these) ----------
     def connect(self, text="", *_args):
@@ -304,6 +312,11 @@ class HostApi:
     def select_mother_ship(self, *_args):
         import connect
         auto_boot = bool(FROZEN or getattr(connect.reachable, "__name__", "") == "reachable")
+        try:
+            if hasattr(self._window, "evaluate_js"):
+                self._window.evaluate_js("window._updateInstallProgress && window._updateInstallProgress(28, 2, 'Step 2/4: Verifying Mother Ship repository & 19 Foundry Skills...')")
+        except Exception:
+            pass
         result = connect.select_mother_ship(DATA, ROOT, auto_bootstrap=auto_boot)
         if not result["ok"]:
             err = str(result.get("message") or "")

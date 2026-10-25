@@ -11,7 +11,14 @@
     <span id="setup-host" class="muted"></span>
     <a href="/onboard-wizard" id="open-onboard-wizard-btn" style="background:linear-gradient(135deg,#f0b866,#d89638);color:#11131a;font-weight:700;padding:7px 14px;border-radius:8px;text-decoration:none;font-size:13px;margin-right:8px;">🧭 Onboarding &amp; Setup Wizard (or Sandbox Test Walkthrough)</a>
     <a href="/onboard-wizard?sandbox=1" id="open-onboard-sandbox-btn" style="background:rgba(240,184,102,0.14);border:1px solid rgba(240,184,102,0.45);color:#f0b866;font-weight:600;padding:7px 12px;border-radius:8px;text-decoration:none;font-size:12px;margin-right:8px;">🧪 Sandbox Walkthrough</a>
+    <span class="w3-badge w3-badge-emerald" id="setup-top-status-pill">● Mother Ship Active · Nightly 02:00 + Live CLI</span>
+    <span class="muted small">✥ Drag bar to move window</span>
     <button id="setup-return" type="button">Return to Cave</button>
+    <div class="setup-winctl" aria-label="Window controls">
+      <button type="button" data-winctl="minimize" title="Minimize window">&#8212;</button>
+      <button type="button" data-winctl="maximize" title="Maximize or restore window">&#9744;</button>
+      <button type="button" class="close" data-winctl="close" title="Close window">&#10005;</button>
+    </div>
   </header>
   <div class="setup-app-frame">
     <aside class="cave-rail" aria-label="Cave of Wonders navigation">
@@ -95,6 +102,52 @@
           </article>
         </div>
 
+        <article class="setup-card" id="host-security-credentials-card" style="margin:14px 0">
+          <div class="wave2-matrix-top">
+            <h2>🔐 Security, Login Credentials, Dual Authentication (2FA) &amp; Anchor Token</h2>
+            <span class="w3-badge w3-badge-emerald" id="host-sec-status-badge">Token &amp; Auth Ready</span>
+          </div>
+          <p class="muted small">Configure or update your Mother Ship login username &amp; password (hashed with PBKDF2-SHA256 + stored in the OS Credential Vault), optional Dual Authentication (2FA), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
+          <div class="quality-grid">
+            <div>
+              <label for="host-sec-username">Mother Ship Username</label>
+              <input id="host-sec-username" type="text" placeholder="e.g., john, merrill" autocomplete="username">
+            </div>
+            <div>
+              <label for="host-sec-password">Login Password (OS Vault + PBKDF2 Hash)</label>
+              <input id="host-sec-password" type="password" placeholder="Enter new password (leave blank to keep current)" autocomplete="new-password">
+            </div>
+            <div>
+              <label for="host-sec-dual-method">Dual Authentication (2FA) Option</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <label class="w3-checkbox-label" style="white-space:nowrap"><input type="checkbox" id="host-sec-dual-enabled"> Enable 2FA</label>
+                <select id="host-sec-dual-method">
+                  <option value="totp_authenticator">Authenticator App (TOTP 6-Digit Code)</option>
+                  <option value="tailscale_device_2fa">Tailscale Identity + Password (Dual-Factor)</option>
+                  <option value="backup_code">Hardware / Recovery Verification Key</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label for="host-sec-anchor-token">Mother Ship Anchor Token (<code>ANCHOR_TOKEN</code>)</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="host-sec-anchor-token" type="password" readonly style="font-family:Consolas,monospace">
+                <button type="button" class="btn-mini" id="btn-host-sec-toggle-token">👁 Show</button>
+                <button type="button" class="btn-mini" id="btn-host-sec-copy-token">📋 Copy</button>
+                <button type="button" class="btn-mini" id="btn-host-sec-regen-token">🔄 Rotate</button>
+              </div>
+            </div>
+          </div>
+          <div id="host-sec-2fa-box" class="setup-notice" style="margin-top:10px" hidden>
+            <strong>🛡 2FA Enrollment Secret:</strong> <code id="host-sec-2fa-secret"></code>
+            <span class="muted small" id="host-sec-2fa-uri" style="display:block"></span>
+          </div>
+          <div class="setup-actions" style="margin-top:12px">
+            <button type="button" class="primary" id="btn-host-sec-save">✓ Save Security, Credentials &amp; 2FA</button>
+            <span id="host-sec-feedback" class="muted small" role="status"></span>
+          </div>
+        </article>
+
         <p class="setup-notice">Sign-in, account tests, API credentials and usage reads run on the mother ship, wherever you connect from.</p>
         <button id="setup-initialize" class="primary" hidden>Save first setup with Aladdin</button>
         <p id="initialize-message" role="status"></p>
@@ -144,6 +197,7 @@
         <p id="provider-host-note" class="setup-notice"></p>
         <div class="setup-actions">
           <button id="provider-refresh">Refresh host sign-ins &amp; reports</button>
+          <button type="button" id="provider-sync-live-models" class="btn-amber">🔄 Sync Live CLI &amp; Nightly 02:00 Models</button>
           <span id="refresh-message" role="status"></span>
         </div>
 

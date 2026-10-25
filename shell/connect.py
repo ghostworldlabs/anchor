@@ -256,18 +256,18 @@ input:focus{outline:2px solid #e0a836;outline-offset:1px}
 .btn.go{background:#e0a836;border-color:#e0a836;color:#1a1a1a}.msg{min-height:22px;margin-top:12px;color:#e0a836;font-size:14px}
 code{font:13px Consolas,monospace;color:#e9d9a8;overflow-wrap:anywhere}
 .msg{overflow-wrap:anywhere}
-</style>"""
+#prog-wrap{display:none;margin-top:16px;padding:12px 14px;background:#0b1018;border:1px solid #2b3546;border-radius:10px}#prog-head{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#98a4b8;margin-bottom:8px;gap:8px}#prog-step{color:#e0a836;font-weight:600}#prog-track{height:8px;background:#1e2634;border-radius:999px;overflow:hidden}#prog-bar{height:100%;width:12%;background:linear-gradient(90deg,#e0a836,#f5c451);border-radius:999px;transition:width .35s ease}#prog-eta{font-size:11px;color:#7c8aa0;margin-top:6px}</style>"""
 
-_BAR = """<div id="bar"><b>Anchor</b><span class="sp"></span>
+_BAR = """<div id="bar" onmousedown="if(event.button===0&&(event.target===this||event.target.tagName==='B'||event.target.className==='sp')){try{pywebview.api.window_control('drag')}catch(_e){}}"><b>Anchor</b><span class="sp"></span>
 <button onclick="pywebview.api.window_control('minimize')" title="Minimize">&#8212;</button>
 <button onclick="pywebview.api.window_control('maximize')" title="Maximize">&#9744;</button>
 <button class="c" onclick="pywebview.api.window_control('close')" title="Close">&#10005;</button></div>"""
 
 _SCRIPT = """<script>
-var _busy=false;
+var _busy=false,_progIv=null,_progStart=0;window._updateInstallProgress=function(pct,stepNum,label){var wrap=document.getElementById('prog-wrap'),bar=document.getElementById('prog-bar'),st=document.getElementById('prog-step');if(wrap)wrap.style.display='block';if(bar&&pct)bar.style.width=Math.max(8,Math.min(100,Number(pct)||15))+'%';if(st&&label)st.textContent=label;if(label)show(label);};function _startProgTimer(initLabel){var wrap=document.getElementById('prog-wrap');if(!wrap)return;wrap.style.display='block';_progStart=Date.now();window._updateInstallProgress(16,1,initLabel||'Step 1/4: Checking local Anchor version & workspace...');if(_progIv)clearInterval(_progIv);_progIv=setInterval(function(){var s=Math.floor((Date.now()-_progStart)/1000),m=Math.floor(s/60),r=s%60;var tm=document.getElementById('prog-timer');if(tm)tm.textContent=m+':'+(r<10?'0':'')+r+' elapsed';var bar=document.getElementById('prog-bar');if(bar){var cur=parseFloat(bar.style.width)||16;if(cur<90)bar.style.width=Math.min(90,cur+2.2)+'%';}},800);}function _stopProgTimer(){if(_progIv){clearInterval(_progIv);_progIv=null;}}
 function show(t){var el=document.getElementById('msg');if(el)el.textContent=t||'';}
 function setBtns(d){var bs=document.querySelectorAll('button.btn');for(var i=0;i<bs.length;i++)bs[i].disabled=d;}
-function act(name,arg){if(_busy)return;_busy=true;setBtns(true);var m=(name==='select_mother_ship'||name==='install_from_github')?'Checking local Anchor version, pulling latest code & Foundry skills, and starting the Mother Ship service\\u2026':'Connecting\\u2026';show(m);try{(arg===undefined?pywebview.api[name]():pywebview.api[name](arg)).then(function(r){_busy=false;setBtns(false);if(r)show(r);}).catch(function(e){_busy=false;setBtns(false);show('Error: '+((e&&e.message)||String(e)));});}catch(e){_busy=false;setBtns(false);show('Error: '+((e&&e.message)||String(e)));}}
+function act(name,arg){if(_busy)return;_busy=true;setBtns(true);var isInstall=(name==='select_mother_ship'||name==='install_from_github');var m=isInstall?'Step 1/4: Checking local Anchor version, pulling latest code & Foundry skills, and starting the Mother Ship service\\u2026':'Connecting\\u2026';show(m);if(isInstall)_startProgTimer(m);try{(arg===undefined?pywebview.api[name]():pywebview.api[name](arg)).then(function(r){_busy=false;_stopProgTimer();setBtns(false);if(r)show(r);}).catch(function(e){_busy=false;_stopProgTimer();setBtns(false);show('Error: '+((e&&e.message)||String(e)));});}catch(e){_busy=false;_stopProgTimer();setBtns(false);show('Error: '+((e&&e.message)||String(e)));}}
 </script>"""
 
 
@@ -395,7 +395,7 @@ def first_launch_page():
 <div class="row"><button id="choose-mother-ship" class="btn go" onclick="act('select_mother_ship')">This computer is my mother ship</button>
 <button id="choose-existing-host" class="btn" onclick="act('change_address')">Connect to my existing mother ship</button></div>
 <p class="example">An existing host connects through its secure Tailscale HTTPS address and Anchor pairing. Provider credentials stay there.</p>
-<div class="msg" id="msg"></div></div></main>%s</body></html>""" % (_STYLE, _BAR, _SCRIPT)
+<div id="prog-wrap"><div id="prog-head"><span id="prog-step">Step 1/4: Checking local Anchor installation...</span><span id="prog-timer">0:00 elapsed</span></div><div id="prog-track"><div id="prog-bar"></div></div><div id="prog-eta">Typically 15&#8211;35s on first run (&lt;5s if already installed)</div></div><div class="msg" id="msg"></div></div></main>%s</body></html>""" % (_STYLE, _BAR, _SCRIPT)
 
 
 def read_running_version(address=LOCAL, timeout=1.5):
@@ -836,7 +836,7 @@ def installation_page(package_root, default_dir=DEFAULT_INSTALL_ROOT, error_mess
 <input id="github-repo" value="%s" spellcheck="false">
 <div class="row"><button id="retry-host-setup" class="btn go" onclick="act('select_mother_ship')">Check installed mother ship</button>
 <button id="install-from-github" class="btn" onclick="act('install_from_github',{repo_url:document.getElementById('github-repo').value,target_dir:document.getElementById('install-target-dir').value})">Pull &amp; install from GitHub</button>
-<button class="btn" onclick="act('change_address')">Connect to an existing host instead</button></div><div class="msg" id="msg">%s</div></div></main>%s</body></html>""" % (
+<button class="btn" onclick="act('change_address')">Connect to an existing host instead</button></div><div id="prog-wrap"><div id="prog-head"><span id="prog-step">Step 1/4: Checking local Anchor installation...</span><span id="prog-timer">0:00 elapsed</span></div><div id="prog-track"><div id="prog-bar"></div></div><div id="prog-eta">Typically 15&#8211;35s on first run (&lt;5s if already installed)</div></div><div class="msg" id="msg">%s</div></div></main>%s</body></html>""" % (
         _STYLE, _BAR, html.escape(state["prerequisite"]), html.escape(missing), html.escape(state["resume"]),
         html.escape(default_dir or DEFAULT_INSTALL_ROOT, quote=True), html.escape(DEFAULT_GITHUB_REPO, quote=True),
         html.escape(err_txt), _SCRIPT)
