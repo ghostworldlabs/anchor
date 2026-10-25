@@ -1745,7 +1745,7 @@ def brainstorm_goals_dialogue(
     # Support iterative commands like "add ...", "remove ...", or full brainstorming paragraphs/lines
     current_lines = [str(g.get("name") or "").strip() for g in existing_items if g.get("name")]
     if current_lines and re.match(r"^(add|include|also)\b", low):
-        added = re.sub(r"^(add|include|also)\s+(a\s+goal\s+(to|for)\s+)?", "", raw_in, flags=re.I).strip()
+        added = re.sub(r"^(add|include|also)\s+(a(?:n)?\s+(?:goal|initiative)\s+(to|for)\s+)?", "", raw_in, flags=re.I).strip()
         if added and added not in current_lines:
             current_lines.append(added)
         merged_raw = "\n".join(current_lines)
@@ -1754,7 +1754,7 @@ def brainstorm_goals_dialogue(
         current_lines = [ln for ln in current_lines if target not in ln.lower()]
         merged_raw = "\n".join(current_lines)
     else:
-        # Split conversational paragraph or bullet list into distinct goals
+        # Split conversational paragraph or bullet list into distinct goals / initiatives
         parts = [
             re.sub(r"^[\s\-\*\d\.\)\•]+", "", seg).strip()
             for seg in re.split(r"[\r\n;]+|(?:\.\s+(?=[A-Z]))", raw_in)
@@ -1775,9 +1775,9 @@ def brainstorm_goals_dialogue(
     arenas = new_goals_state.get("arenas") or []
 
     ai_summary = (
-        f"Organized {len(items)} goal(s) across {len(arenas)} section(s) "
+        f"Organized {len(items)} goal(s) / initiative(s) across {len(arenas)} Star Chart section(s) "
         f"({', '.join(a['arena'] for a in arenas)}). "
-        f"Each goal below can now hold on-disk clues and web/research resources (via Gandalf & researchPrime) "
+        f"Each goal or initiative below can now hold on-disk clues and web/research resources (via Gandalf & researchPrime) "
         f"and will serve as the primary sections for organizing your Projects in Step 5."
     )
     now_iso = _utc_now_iso()
@@ -2534,7 +2534,7 @@ def build_hierarchical_project_organization(
     use_goals = bool(goal_items)
     mode = "goals_first" if use_goals else "natural_organization"
     mode_label = (
-        f"Goals-First Hierarchy ({len(goal_items)} Goal Section(s) from Step 4)"
+        f"Goals / Initiatives-First Hierarchy ({len(goal_items)} Star Chart Goal / Initiative Section(s) from Step 4)"
         if use_goals
         else "Natural Domain Hierarchy (Auto-Organized by Content & File Signals)"
     )
@@ -4365,7 +4365,7 @@ def render_onboard_wizard_html(
       <button type="button" class="step-btn active" data-step="1"><span class="step-num">1</span><span>Who Are You? (Name &amp; Pseudonym)</span></button>
       <button type="button" class="step-btn" data-step="2"><span class="step-num">2</span><span>Mothership &amp; Tailscale Network</span></button>
       <button type="button" class="step-btn" data-step="3"><span class="step-num">3</span><span>AI Services, Tiers &amp; Live Verify</span></button>
-      <button type="button" class="step-btn" data-step="4"><span class="step-num">4</span><span>Goals &amp; Missions (Star Chart)</span></button>
+      <button type="button" class="step-btn" data-step="4"><span class="step-num">4</span><span>Mission &amp; Goals / Initiatives (Star Chart)</span></button>
       <button type="button" class="step-btn" data-step="5"><span class="step-num">5</span><span>Project Scan &amp; AI Cockpits</span></button>
       <button type="button" class="step-btn" data-step="6"><span class="step-num">6</span><span>Calendar &amp; Email Integration</span></button>
       <button type="button" class="step-btn" data-step="7"><span class="step-num">7</span><span>Readiness Receipt &amp; Launchpad</span></button>
@@ -4373,7 +4373,7 @@ def render_onboard_wizard_html(
 
     <main class="wiz-main">
       <div id="wizBanner" class="status-banner" role="status">
-        Welcome! Walk through each step below to configure your personal Steward identity, Tailscale Mothership topology, AI service tiers, Star Chart goals, and Project AI Cockpits.
+        Welcome! Walk through each step below to configure your personal Steward identity, Tailscale Mothership topology, AI service tiers, Star Chart goals / initiatives, and Project AI Cockpits.
       </div>
 
       <!-- STEP 1 -->
@@ -4500,7 +4500,7 @@ def render_onboard_wizard_html(
           <p class="muted" id="readinessNoteBox"></p>
           <div id="servicesGrid" class="service-grid"></div>
           <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <button type="button" class="btn primary" id="btnNextStep4">Continue to Step 4 (Goals &amp; Missions) →</button>
+            <button type="button" class="btn primary" id="btnNextStep4">Continue to Step 4 (Mission &amp; Goals / Initiatives) →</button>
             <a class="btn" href="/setup">⚙ Open Advanced Multi-Account Provider Setup (/setup)</a>
           </div>
         </div>
@@ -4509,11 +4509,11 @@ def render_onboard_wizard_html(
       <!-- STEP 4 -->
       <section class="wiz-step-pane" id="step-pane-4" hidden>
         <div class="wiz-card">
-          <h2>Step 4 · Interactive Brainstorming Dialogue: Mission Statement, Goals &amp; Per-Goal Resource Discovery</h2>
+          <h2>Step 4 · Interactive Brainstorming Dialogue: Mission Statement, Goals / Initiatives (Star Chart) &amp; Resource Discovery</h2>
           <p class="muted">
-            <strong>How Star Chart &amp; Cave of Wonders Work Together:</strong><br>
-            • <strong>Star Chart (Mission &amp; Goals):</strong> Start by brainstorming your overarching <strong>Mission Statement</strong> (with concise examples like <em>The New York Times</em> and <em>Samwise Gamgee</em>), iterate with your Steward until comfortable, then brainstorm your <strong>Goals</strong> (professional, teaching, ventures, hobbies, family).<br>
-            • <strong>Per-Goal Resource Discovery (Steward + Gandalf + researchPrime):</strong> For each goal, describe any files/materials you have somewhere on disk (no exact path needed — Gandalf will find them!) plus websites or research topics for <code>researchPrime</code> &amp; <code>Gandalf</code> to organize.
+            <strong>How the Star Chart &amp; Cave of Wonders Work Together:</strong><br>
+            • <strong>Mission Statement &amp; Goals / Initiatives (What the Star Chart Charts):</strong> Start by brainstorming your overarching <strong>Mission Statement</strong> (with concise examples like <em>The New York Times</em> and <em>Samwise Gamgee</em>), iterate with your Steward until comfortable, then brainstorm your <strong>Goals / Initiatives</strong> (professional, teaching, ventures, creative, hobbies, family). <em>Goals</em> (longer-horizon outcomes &amp; directions) and <em>Initiatives</em> (concrete campaigns &amp; efforts) are similar though not identical — together they are what the <strong>Star Chart</strong> charts and what organizes the sections on the Projects page.<br>
+            • <strong>Per-Goal / Initiative Resource Discovery (Steward + Gandalf + researchPrime):</strong> For each goal or initiative, describe any files/materials you have somewhere on disk (no exact path needed — Gandalf will find them!) plus websites or research topics for <code>researchPrime</code> &amp; <code>Gandalf</code> to organize.
           </p>
 
           <!-- 4A: MISSION STATEMENT DIALOGUE -->
@@ -4554,15 +4554,15 @@ def render_onboard_wizard_html(
               <label for="inpMission">Current / Proposed Mission Statement (Editable)</label>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <input type="text" id="inpMission" style="flex:1;min-width:260px" placeholder="e.g., Carry the work that matters to completion alongside the people I care about...">
-                <button type="button" class="btn emerald" id="btnLockMission">✓ Lock Mission Statement &amp; Discuss Goals ↓</button>
+                <button type="button" class="btn emerald" id="btnLockMission">✓ Lock Mission Statement &amp; Discuss Goals / Initiatives ↓</button>
               </div>
             </div>
           </div>
 
-          <!-- 4B: GOALS BRAINSTORMING DIALOGUE & PER-GOAL RESOURCE DISCOVERY -->
+          <!-- 4B: GOALS / INITIATIVES BRAINSTORMING DIALOGUE & PER-GOAL RESOURCE DISCOVERY -->
           <div class="wiz-card" style="background:#101723;margin-top:14px">
-            <h3 style="margin:0 0 6px">🎯 Part 2 · Goals Brainstorming Dialogue (Professional, Teaching, Ventures, Creative &amp; Hobbies)</h3>
-            <p class="muted" style="margin:0 0 10px">What are your goals, and what do you work on for projects, work, or hobbies? Click any example below to add it, or brainstorm freely with your Steward. These goals will also organize the sections on the Projects page!</p>
+            <h3 style="margin:0 0 6px">🎯 Part 2 · Goals / Initiatives Brainstorming Dialogue (What the Star Chart Charts — Professional, Teaching, Ventures, Creative &amp; Hobbies)</h3>
+            <p class="muted" style="margin:0 0 10px">What are your <strong>Goals / Initiatives</strong>, and what do you work on for projects, work, or hobbies? Click any example below to add it, or brainstorm freely with your Steward. These goals / initiatives will be charted on your <strong>Star Chart</strong> and used to organize the sections on the Projects page!</p>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
               <button type="button" class="btn" data-add-goal-example="Publish flagship empirical and mathematical papers in top journals (JCR, Management Science)">+ 📚 Flagship Research</button>
               <button type="button" class="btn" data-add-goal-example="Deliver AI-enhanced MBA &amp; undergraduate courses with interactive oral-exam and study tools">+ 🎓 Teaching &amp; Mentorship</button>
@@ -4571,24 +4571,24 @@ def render_onboard_wizard_html(
               <button type="button" class="btn" data-add-goal-example="Write novel chapters &amp; fables, train consistently for CrossFit, and build personal math/memory tools">+ 🎨 Creative Writing &amp; Hobbies</button>
             </div>
 
-            <label for="txtGoals">Brainstorm Your Goals &amp; Work/Hobby Areas (One per line or conversational paragraph — iterate as much as you like!)</label>
+            <label for="txtGoals">Brainstorm Your Goals / Initiatives &amp; Work/Hobby Areas (One per line or conversational paragraph — iterate as much as you like!)</label>
             <textarea id="txtGoals" placeholder="Publish flagship research papers this quarter&#10;Deliver MBA AI &amp; analytics course materials&#10;Manage family trust &amp; legal operations&#10;Build Anchor &amp; Skill Foundry multi-agent cockpits&#10;Write novel chapters and train for CrossFit"></textarea>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-              <button type="button" class="btn" data-voice-target="txtGoals">🎙 Speak / Dictate Goals</button>
-              <button type="button" class="btn primary" id="btnBrainstormGoals">💬 Summarize &amp; Iterate Goals with Steward</button>
+              <button type="button" class="btn" data-voice-target="txtGoals">🎙 Speak / Dictate Goals or Initiatives</button>
+              <button type="button" class="btn primary" id="btnBrainstormGoals">💬 Summarize &amp; Iterate Goals / Initiatives with Steward</button>
             </div>
 
             <div id="goalsSummaryBox" class="status-banner" style="margin-top:12px" hidden></div>
             <div id="arenasPreview" style="margin:12px 0"></div>
 
-            <!-- 4C: PER-GOAL RESOURCES (GANDALF ON-DISK + RESEARCHPRIME) -->
+            <!-- 4C: PER-GOAL / INITIATIVE RESOURCES (GANDALF ON-DISK + RESEARCHPRIME) -->
             <div id="goalsResourceCardsBox" style="margin-top:12px"></div>
           </div>
 
-          <label for="txtPriorityNow" style="margin-top:12px">Cave of Wonders · What are the most important initiatives or main things you are working on right now? (Used to propose what goes ★ Active vs. ↳ On Deck)</label>
+          <label for="txtPriorityNow" style="margin-top:12px">Cave of Wonders · What are the most important goals / initiatives or main things you are working on right now? (Used to propose what goes ★ Active vs. ↳ On Deck)</label>
           <textarea id="txtPriorityNow" placeholder="e.g., Finishing the Empirical Paper for JCR, preparing the Smeal AI Teaching Grant, and polishing Anchor Onboarding"></textarea>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-            <button type="button" class="btn emerald" id="btnOrganizeGoals">🧭 Set Goals &amp; Continue to Project Organization (Step 5) →</button>
+            <button type="button" class="btn emerald" id="btnOrganizeGoals">🧭 Set Goals / Initiatives &amp; Continue to Project Organization (Step 5) →</button>
             <button type="button" class="btn" id="btnSkipToProjects">Jump Straight to Scanning Projects (Natural Organization, Step 5) →</button>
           </div>
         </div>
@@ -4598,7 +4598,7 @@ def render_onboard_wizard_html(
       <section class="wiz-step-pane" id="step-pane-5" hidden>
         <div class="wiz-card">
           <h2>Step 5 · Project Discovery Dialogue, Graphical Hierarchical Organization, Verbal Revision &amp; Top Priorities</h2>
-          <p class="muted">Identify the types of files and sources on your computer, review the Graphical Hierarchical Organization (aligned to your Goals first, or Natural Domain Organization if no goals were proposed), revise verbally until happy, confirm your Top Priorities, and create your AI Cockpits.</p>
+          <p class="muted">Identify the types of files and sources on your computer, review the Graphical Hierarchical Organization (aligned to your Goals / Initiatives first, or Natural Domain Organization if no goals / initiatives were proposed), revise verbally until happy, confirm your Top Priorities, and create your AI Cockpits.</p>
 
           <!-- 5A: PROJECT & FILE-SOURCE DISCOVERY DIALOGUE -->
           <div class="wiz-card" style="background:#101723;margin-top:12px">
@@ -4635,7 +4635,7 @@ def render_onboard_wizard_html(
           <div class="wiz-card" style="background:#101723;margin-top:14px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
               <h3 style="margin:0">🌳 Part 2 · Graphical &amp; Hierarchical Project Organization</h3>
-              <span class="pill" id="hierarchyModeBadge" style="background:#064e3b;color:#6ee7b7">Goals-First / Natural Hierarchy</span>
+              <span class="pill" id="hierarchyModeBadge" style="background:#064e3b;color:#6ee7b7">Goals / Initiatives-First / Natural Hierarchy</span>
             </div>
             <div id="hierarchyTreeContainer" style="margin:10px 0"></div>
 
@@ -4652,13 +4652,13 @@ def render_onboard_wizard_html(
             </div>
           </div>
 
-          <!-- 5D: TOP PRIORITIES SESSION (WITH MISSION & GOALS SUGGESTIONS) -->
+          <!-- 5D: TOP PRIORITIES SESSION (WITH MISSION & GOALS / INITIATIVES SUGGESTIONS) -->
           <div class="wiz-card" style="background:#101723;margin-top:14px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-              <h3 style="margin:0">⭐ Part 3 · Top Priorities Session (Steward Suggestions from Your Mission &amp; Goals)</h3>
-              <button type="button" class="btn primary" id="btnSuggestTopPriorities">⚡ Suggest Top Priorities from Mission &amp; Goals</button>
+              <h3 style="margin:0">⭐ Part 3 · Top Priorities Session (Steward Suggestions from Your Mission &amp; Goals / Initiatives)</h3>
+              <button type="button" class="btn primary" id="btnSuggestTopPriorities">⚡ Suggest Top Priorities from Mission &amp; Goals / Initiatives</button>
             </div>
-            <p class="muted" style="margin:6px 0">Tell your Steward what your top priorities are right now, or let the Steward suggest Active vs. On Deck placement from your Mission Statement &amp; Goals:</p>
+            <p class="muted" style="margin:6px 0">Tell your Steward what your top priorities are right now, or let the Steward suggest Active vs. On Deck placement from your Mission Statement &amp; Goals / Initiatives:</p>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
               <input type="text" id="inpTopPrioritiesSession" style="flex:1;min-width:260px" placeholder="Optional: Tell your Steward which 2–4 projects are your absolute top priorities this week...">
               <button type="button" class="btn" data-voice-target="inpTopPrioritiesSession">🎙 Speak</button>
@@ -5133,7 +5133,7 @@ def render_onboard_wizard_html(
       if (gSumBox) {{
         if (goals.goals_summary) {{
           gSumBox.hidden = false;
-          gSumBox.textContent = `🧭 Steward Goal Architecture Summary: ${{goals.goals_summary}}`;
+          gSumBox.textContent = `🧭 Steward Goals / Initiatives (Star Chart) Summary: ${{goals.goals_summary}}`;
         }} else {{
           gSumBox.hidden = true;
         }}
@@ -5143,10 +5143,10 @@ def render_onboard_wizard_html(
       if (!cardsBox) return;
       const items = goals.items || [];
       if (!items.length) {{
-        cardsBox.innerHTML = '<p class="muted">Click "Summarize &amp; Iterate Goals with Steward" above to generate your Goal Sections and attach on-disk / web resources to each goal.</p>';
+        cardsBox.innerHTML = '<p class="muted">Click "Summarize &amp; Iterate Goals / Initiatives with Steward" above to generate your Star Chart Goal / Initiative Sections and attach on-disk / web resources to each one.</p>';
         return;
       }}
-      cardsBox.innerHTML = '<h4 style="margin:10px 0 8px">🧙‍♂️ Per-Goal Resource Discovery (Describe On-Disk Materials Without Knowing Exact Paths + Web/Research Topics for Gandalf &amp; researchPrime)</h4>';
+      cardsBox.innerHTML = '<h4 style="margin:10px 0 8px">🧙‍♂️ Per-Goal / Initiative Resource Discovery (Describe On-Disk Materials Without Knowing Exact Paths + Web/Research Topics for Gandalf &amp; researchPrime)</h4>';
       items.forEach((g) => {{
         const res = g.resources || {{}};
         const diskMatches = (res.on_disk_matches || []).map((m) => `
@@ -5316,7 +5316,7 @@ def render_onboard_wizard_html(
     if (btnLockMission) {{
       btnLockMission.addEventListener('click', async () => {{
         const out = await callWizardAction('lock_mission', {{ mission_statement: document.getElementById('inpMission').value }});
-        document.getElementById('wizBanner').textContent = `Locked Mission Statement: "${{out.mission_statement}}" — Now brainstorm your Goals below!`;
+        document.getElementById('wizBanner').textContent = `Locked Mission Statement: "${{out.mission_statement}}" — Now brainstorm your Goals / Initiatives below!`;
         await refreshBundle();
         document.getElementById('txtGoals').focus();
       }});
@@ -5329,7 +5329,7 @@ def render_onboard_wizard_html(
           user_input: document.getElementById('txtGoals').value,
           mission_statement: document.getElementById('inpMission').value,
         }});
-        document.getElementById('wizBanner').textContent = out.ai_summary || 'Goals summarized and organized!';
+        document.getElementById('wizBanner').textContent = out.ai_summary || 'Goals / Initiatives summarized and organized!';
         await refreshBundle();
       }});
     }}

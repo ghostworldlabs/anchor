@@ -1086,18 +1086,23 @@ def test_mission_goals_brainstorming_gandalf_resources_and_hierarchical_verbal_r
     assert g1["ok"] is True
     assert len(g1["goals"]["items"]) == 2
 
-    # Iterate by adding a hobby/creative goal
+    # Iterate by adding a hobby/creative goal or initiative
     g2 = onboard_wizard.dispatch_wizard_action(
         "brainstorm_goals",
         {
-            "user_input": "Add a goal to write novel chapters and train for CrossFit",
+            "user_input": "Add an initiative to write novel chapters and train for CrossFit",
         },
         sandbox=True,
         base_dir=tmp_path,
     )
     assert g2["ok"] is True
     assert len(g2["goals"]["items"]) == 3
+    assert "goal(s) / initiative(s)" in g2["ai_summary"]
     first_goal_id = g2["goals"]["items"][0]["id"]
+
+    wiz_html_check = onboard_wizard.render_onboard_wizard_html(sandbox=True, base_dir=tmp_path)
+    assert "Goals / Initiatives" in wiz_html_check
+    assert "What the Star Chart Charts" in wiz_html_check
 
     # 3. Per-Goal Resource Discovery (Gandalf fuzzy on-disk finder + researchPrime web/info organizer)
     res_disc = onboard_wizard.dispatch_wizard_action(
