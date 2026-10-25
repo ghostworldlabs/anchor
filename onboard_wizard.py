@@ -419,10 +419,18 @@ def get_active_user_profile(
     persona_info = STEWARD_PERSONAS[persona_raw]
     tok_info = _resolve_or_create_anchor_token(sandbox=use_sandbox, sandbox_id=sid, base_dir=base_dir)
     username = str(stored.get("username") or "").strip() or _safe_slug(display_name)
+    contact_email = str(stored.get("contact_email") or "").strip()
     pwd_configured = bool(stored.get("password_hash") or stored.get("password_configured"))
     dual_auth_enabled = bool(stored.get("dual_auth_enabled", False))
     dual_auth_method = str(stored.get("dual_auth_method") or "totp_authenticator").strip()
     dual_auth_secret = str(stored.get("dual_auth_secret") or "").strip()
+    dual_auth_backup_codes = list(stored.get("dual_auth_backup_codes") or [])
+    backup_hashes = list(stored.get("dual_auth_backup_hashes") or [])
+    backup_codes_remaining = (
+        sum(1 for r in backup_hashes if isinstance(r, dict) and not r.get("used"))
+        if backup_hashes
+        else len(dual_auth_backup_codes)
+    )
     dual_auth_uri = (
         f"otpauth://totp/Anchor:{username}?secret={dual_auth_secret.replace(' ', '')}&issuer=Anchor"
         if dual_auth_secret
@@ -432,12 +440,15 @@ def get_active_user_profile(
     return {
         "display_name": display_name,
         "username": username,
+        "contact_email": contact_email,
         "password_configured": pwd_configured,
         "has_password": pwd_configured,
         "dual_auth_enabled": dual_auth_enabled,
         "dual_auth_method": dual_auth_method,
         "dual_auth_secret": dual_auth_secret,
         "dual_auth_otpauth_uri": dual_auth_uri,
+        "dual_auth_backup_codes": dual_auth_backup_codes,
+        "backup_codes_remaining": backup_codes_remaining,
         "anchor_token": tok_info["anchor_token"],
         "anchor_token_masked": tok_info["anchor_token_masked"],
         "anchor_token_file": tok_info["token_file"],
@@ -460,6 +471,7 @@ def save_user_identity(
     steward_persona: str = "Aladdin",
     username: str = "",
     password: str = "",
+    contact_email: str = "",
     dual_auth_enabled: bool | None = None,
     dual_auth_method: str = "",
     anchor_token: str = "",
@@ -468,7 +480,7 @@ def save_user_identity(
     sandbox_id: str = DEFAULT_SANDBOX_ID,
     base_dir: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Save Step 1 User Identity (Real Name, Collaborator Pseudonym & Steward Persona)."""
+    """Save Step 1 User Identity (Real Name, Collaborator Pseudonym, Contact/Recovery Email & Steward Persona)."""
     clean_name = str(display_name or "").strip() or "John"
     if isinstance(pseudonym_aliases, str):
         alias_list = [a.strip() for a in pseudonym_aliases.split(",") if a.strip()]
@@ -494,6 +506,7 @@ def save_user_identity(
             prev_prof = {}
 
     clean_user = str(username or prev_prof.get("username") or _safe_slug(clean_name)).strip() or _safe_slug(clean_name)
+    clean_email = str(contact_email if contact_email != "" else (prev_prof.get("contact_email") or "")).strip()
     pwd_hash = str(prev_prof.get("password_hash") or "")
     pwd_salt = str(prev_prof.get("password_salt") or "")
     if password and str(password).strip() and "•" not in str(password):
@@ -510,9 +523,16 @@ def save_user_identity(
     d_enabled = bool(prev_prof.get("dual_auth_enabled", False)) if dual_auth_enabled is None else bool(dual_auth_enabled)
     d_method = str(dual_auth_method or prev_prof.get("dual_auth_method") or "totp_authenticator").strip()
     d_secret = str(prev_prof.get("dual_auth_secret") or "").strip()
+    d_backup_codes: list[str] = list(prev_prof.get("dual_auth_backup_codes") or [])
+    d_backup_hashes: list[dict[str, Any]] = list(prev_prof.get("dual_auth_backup_hashes") or [])
     if d_enabled and not d_secret:
         raw_b32 = base64.b32encode(secrets.token_bytes(10)).decode("ascii").rstrip("=")
         d_secret = " ".join(raw_b32[i:i + 4] for i in range(0, len(raw_b32), 4))
+    if d_enabled and not d_backup_codes:
+        import gwl_admin_gui as _gag
+        bc_bundle = _gag.generate_2fa_backup_codes(10)
+        d_backup_codes = bc_bundle["codes"]
+        d_backup_hashes = bc_bundle["hashed_records"]
 
     if anchor_token and str(anchor_token).strip() and "•" not in str(anchor_token):
         _resolve_or_create_anchor_token(
@@ -528,12 +548,15 @@ def save_user_identity(
         "schema": "anchor.user.profile.v1",
         "display_name": clean_name,
         "username": clean_user,
+        "contact_email": clean_email,
         "password_configured": bool(pwd_hash),
         "password_hash": pwd_hash,
         "password_salt": pwd_salt,
         "dual_auth_enabled": d_enabled,
         "dual_auth_method": d_method,
         "dual_auth_secret": d_secret,
+        "dual_auth_backup_codes": d_backup_codes,
+        "dual_auth_backup_hashes": d_backup_hashes,
         "pseudonym": canon_pseudo,
         "pseudonym_slug": aap.slugify_pseudonym(canon_pseudo),
         "pseudonym_aliases": canon_aliases,
@@ -627,6 +650,7 @@ def sync_applicant_signup_to_gwl_hub(
     record = {
         "display_name": prof.get("display_name") or "Applicant",
         "username": prof.get("username") or "",
+        "contact_email": prof.get("contact_email") or "",
         "pseudonym": prof.get("pseudonym") or aap.PSEUDONYM_DEFAULT,
         "pseudonym_aliases": prof.get("pseudonym_aliases") or [],
         "steward_persona": prof.get("steward_persona") or "Aladdin",
@@ -636,6 +660,7 @@ def sync_applicant_signup_to_gwl_hub(
         "topology_mode": str(topo.get("mode") or "main_mothership"),
         "dual_auth_enabled": bool(prof.get("dual_auth_enabled", False)),
         "dual_auth_method": str(prof.get("dual_auth_method") or "totp_authenticator"),
+        "backup_codes_remaining": int(prof.get("backup_codes_remaining") or (10 if prof.get("dual_auth_enabled") else 0)),
         "enabled_services": enabled_svcs,
         "verified_services": verified_svcs,
         "onboarding_status": onboard_status,
@@ -3680,9 +3705,34 @@ def dispatch_wizard_action(
             steward_persona=str(body.get("steward_persona") or "Aladdin"),
             username=str(body.get("username") or ""),
             password=str(body.get("password") or ""),
+            contact_email=str(body.get("contact_email") or body.get("email") or ""),
             dual_auth_enabled=dual_bool,
             dual_auth_method=str(body.get("dual_auth_method") or ""),
             anchor_token=str(body.get("anchor_token") or ""),
+            sandbox=use_sandbox,
+            sandbox_id=sid,
+            base_dir=base_dir,
+        )
+    if act in (
+        "request_account_recovery",
+        "send_recovery_link",
+        "complete_account_recovery",
+        "verify_2fa_backup_code",
+        "regenerate_2fa_backup_codes",
+        "get_admin_state",
+        "admin_update_account",
+        "admin_create_account",
+        "admin_reset_account",
+        "admin_delete_account",
+        "admin_register_shared_doc",
+        "admin_revoke_shared_doc",
+        "admin_grant_acl",
+        "admin_sync_backups",
+    ):
+        import gwl_admin_gui as _gag
+        return _gag.dispatch_gwl_admin_action(
+            act,
+            body,
             sandbox=use_sandbox,
             sandbox_id=sid,
             base_dir=base_dir,
@@ -4350,6 +4400,8 @@ def render_onboard_wizard_html(
       <a class="btn" href="{toggle_href}" id="btnToggleSandbox">{toggle_label}</a>
       <button type="button" class="btn" id="btnResetSandbox" {"" if sandbox else "hidden"}>↺ Reset Walkthrough</button>
       <button type="button" class="btn emerald" id="btnApplySandbox" {"" if sandbox else "hidden"}>✓ Commit &amp; Apply to Live Anchor</button>
+      <a class="btn" href="/recover-account">🔑 Account Recovery</a>
+      <a class="btn" href="/gwl-admin">🛡 Collaboration Admin GUI</a>
       <a class="btn" href="/setup">⚙ Provider Setup</a>
       <a class="btn primary" href="/high-seat">🏛 Open Cave of Wonders</a>
       <div class="wiz-winctl" aria-label="Window controls">
@@ -4405,14 +4457,18 @@ def render_onboard_wizard_html(
           </div>
           <div style="border-top:1px solid var(--border);margin:18px 0 14px;padding-top:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-              <h3 style="margin:0">🔐 Security, Login Credentials, Dual Authentication (2FA) &amp; Anchor Token</h3>
+              <h3 style="margin:0">🔐 Security, Login Credentials, Contact / Recovery Email, Dual Authentication (2FA) &amp; Anchor Token</h3>
               <span class="pill" id="pwdStatusPill">Credentials &amp; Token Ready</span>
             </div>
-            <p class="muted" style="margin:4px 0 12px">Configure your local Mother Ship login username &amp; password (stored hashed via PBKDF2-SHA256 + OS Credential Vault), optional Dual Authentication (2FA), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
+            <p class="muted" style="margin:4px 0 12px">Configure your local Mother Ship login username &amp; password (stored hashed via PBKDF2-SHA256 + OS Credential Vault), your Contact / Recovery Email (for username &amp; password recovery links), optional Dual Authentication (2FA + 10 single-use backup codes), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
             <div class="form-grid">
               <div>
                 <label for="inpUsername">Mother Ship Username</label>
                 <input type="text" id="inpUsername" placeholder="e.g., john, merrill" autocomplete="username">
+              </div>
+              <div>
+                <label for="inpContactEmail">Contact / Account Recovery Email (For Username &amp; Password Recovery Links)</label>
+                <input type="text" id="inpContactEmail" placeholder="e.g., merrill@psu.edu, john@psu.edu" autocomplete="email">
               </div>
               <div>
                 <label for="inpPassword">Login Password (Stored in OS Vault + PBKDF2 Hash)</label>
@@ -4436,12 +4492,25 @@ def render_onboard_wizard_html(
                 </div>
               </div>
             </div>
-            <div id="dualAuthSecretBox" class="proj-row" style="margin-top:8px" hidden>
-              <div>
-                <strong>🛡 Dual Authentication (2FA) Enrollment Key:</strong> <code id="dualAuthSecretCode" style="color:#fde047;font-size:14px"></code>
-                <div class="muted" id="dualAuthUriText">Scan or enter this key in Google/Microsoft Authenticator or 1Password.</div>
+            <div id="dualAuthSecretBox" class="proj-row" style="margin-top:8px;flex-direction:column;align-items:stretch" hidden>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+                <div>
+                  <strong>🛡 Dual Authentication (2FA) Enrollment Key:</strong> <code id="dualAuthSecretCode" style="color:#fde047;font-size:14px"></code>
+                  <div class="muted" id="dualAuthUriText">Scan or enter this key in Google/Microsoft Authenticator or 1Password.</div>
+                </div>
+                <span class="pill" style="background:#064e3b;color:#6ee7b7">2FA ENABLED ✓</span>
               </div>
-              <span class="pill" style="background:#064e3b;color:#6ee7b7">2FA ENABLED ✓</span>
+              <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+                  <strong>🔑 Standard 2FA Recovery · 10 Single-Use Backup Codes (Save or Print — Each Code Works Once if You Lose Your Phone):</strong>
+                  <div style="display:flex;gap:6px">
+                    <button type="button" class="btn" id="btnCopyBackupCodes">📋 Copy 10 Backup Codes</button>
+                    <button type="button" class="btn" id="btnRegenBackupCodes">🔄 Generate 10 Fresh Backup Codes</button>
+                  </div>
+                </div>
+                <div id="dualAuthBackupCodesList" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
+                <div class="muted" style="margin-top:6px">Standard 3-Layer 2FA Recovery: (1) 10 Single-Use Backup Codes above · (2) Verified Contact Email Recovery Link (<a href="/recover-account" style="color:var(--sky)">/recover-account</a>) · (3) System Admin Reset on Puter (<a href="/gwl-admin" style="color:var(--sky)">/gwl-admin</a>).</div>
+              </div>
             </div>
             <div style="margin-top:12px">
               <label for="inpAnchorToken">Mother Ship Anchor Token (<code>ANCHOR_TOKEN</code> — used for Cockpit &amp; Peer Authentication)</label>
@@ -4452,6 +4521,16 @@ def render_onboard_wizard_html(
                 <button type="button" class="btn" id="btnRegenAnchorToken">🔄 Regenerate Token</button>
               </div>
             </div>
+            <details style="margin-top:12px;padding:10px 14px;background:#101723;border:1px solid var(--border);border-radius:8px">
+              <summary style="cursor:pointer;font-weight:600;color:var(--sky)">🔑 Forgot Your Username or Password, or Lost Your 2FA Device? Request a Recovery Link</summary>
+              <p class="muted" style="margin:6px 0">Enter your Contact Email (or Username / Pseudonym) below to receive a Username reminder and a single-use 30-minute Password &amp; 2FA Recovery Link:</p>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="text" id="inpQuickRecoveryEmail" style="flex:1;min-width:240px" placeholder="Enter your Contact Email, Username, or Pseudonym...">
+                <button type="button" class="btn primary" id="btnQuickSendRecoveryLink">📧 Send Username &amp; Password Recovery Link</button>
+                <a class="btn" href="/recover-account">Open Full Recovery Portal ↗</a>
+              </div>
+              <div id="quickRecoveryResultBox" style="margin-top:8px" hidden></div>
+            </details>
           </div>
           <button type="button" class="btn primary" id="btnSaveStep1">Save Identity, Credentials &amp; Continue to Step 2 →</button>
         </div>
@@ -5025,6 +5104,8 @@ def render_onboard_wizard_html(
       document.getElementById('selPersona').value = prof.steward_persona || 'Aladdin';
       const uEl = document.getElementById('inpUsername');
       if (uEl) uEl.value = prof.username || (prof.display_name || 'john').toLowerCase().replace(/\\s+/g, '');
+      const emEl = document.getElementById('inpContactEmail');
+      if (emEl) emEl.value = prof.contact_email || '';
       const chk2fa = document.getElementById('chkDualAuth');
       if (chk2fa) chk2fa.checked = Boolean(prof.dual_auth_enabled);
       const sel2fa = document.getElementById('selDualAuthMethod');
@@ -5037,6 +5118,13 @@ def render_onboard_wizard_html(
         const uriEl = document.getElementById('dualAuthUriText');
         if (uriEl && prof.dual_auth_otpauth_uri) {{
           uriEl.textContent = `Authenticator URI: ${{prof.dual_auth_otpauth_uri}}`;
+        }}
+        const bcBox = document.getElementById('dualAuthBackupCodesList');
+        if (bcBox) {{
+          const bcodes = prof.dual_auth_backup_codes || [];
+          bcBox.innerHTML = bcodes.length
+            ? bcodes.map((c) => `<code style="padding:4px 8px;background:#0d131d;border:1px solid #2a364d;border-radius:6px;color:#6ee7b7">${{c}}</code>`).join('')
+            : '<span class="muted">Save Step 1 with 2FA enabled (or click Generate 10 Fresh Backup Codes) to view your 10 single-use recovery codes.</span>';
         }}
       }}
       const tokEl = document.getElementById('inpAnchorToken');
@@ -5426,6 +5514,57 @@ def render_onboard_wizard_html(
       }});
     }}
 
+    const btnRegenBC = document.getElementById('btnRegenBackupCodes');
+    if (btnRegenBC) {{
+      btnRegenBC.addEventListener('click', async () => {{
+        const out = await callWizardAction('regenerate_2fa_backup_codes', {{}});
+        document.getElementById('wizBanner').textContent = `Generated 10 fresh single-use 2FA backup recovery codes!`;
+        await refreshBundle();
+      }});
+    }}
+
+    const btnCopyBC = document.getElementById('btnCopyBackupCodes');
+    if (btnCopyBC) {{
+      btnCopyBC.addEventListener('click', async () => {{
+        const codes = ((window.ONBOARD_WIZARD_BOOT.profile || {{}}).dual_auth_backup_codes || []).join('\\n');
+        if (codes) {{
+          try {{
+            await navigator.clipboard.writeText(codes);
+            document.getElementById('wizBanner').textContent = 'Copied all 10 single-use 2FA backup codes to clipboard!';
+          }} catch (e) {{}}
+        }}
+      }});
+    }}
+
+    const btnQuickRec = document.getElementById('btnQuickSendRecoveryLink');
+    if (btnQuickRec) {{
+      btnQuickRec.addEventListener('click', async () => {{
+        const ident = (document.getElementById('inpQuickRecoveryEmail') || {{}}).value || (document.getElementById('inpContactEmail') || {{}}).value || (document.getElementById('inpUsername') || {{}}).value || '';
+        if (!ident.trim()) {{
+          document.getElementById('wizBanner').textContent = 'Enter your Contact Email, Username, or Pseudonym to request a recovery link.';
+          return;
+        }}
+        const out = await callWizardAction('request_account_recovery', {{ identifier: ident.trim(), base_url: window.location.origin }});
+        const rBox = document.getElementById('quickRecoveryResultBox');
+        if (rBox) {{
+          rBox.hidden = false;
+          if (!out.ok) {{
+            rBox.innerHTML = `<div style="color:#fca5a5">${{out.message || out.error}}</div>`;
+          }} else {{
+            rBox.innerHTML = `
+              <div class="proj-row">
+                <div>
+                  <strong>✓ Recovery Link Issued!</strong> Username Reminder: <code>${{out.username}}</code> · Pseudonym: <code>${{out.pseudonym}}</code>
+                  <div class="muted">Open Single-Use Link: <a href="${{out.recovery_url}}" style="color:var(--sky)">${{out.recovery_url}}</a></div>
+                </div>
+                <span class="pill" style="background:#064e3b;color:#6ee7b7">SENT ✓</span>
+              </div>
+            `;
+          }}
+        }}
+      }});
+    }}
+
     const btnRefreshModels = document.getElementById('btnRefreshLiveModels');
     if (btnRefreshModels) {{
       btnRefreshModels.addEventListener('click', async () => {{
@@ -5448,6 +5587,7 @@ def render_onboard_wizard_html(
         pseudonym_aliases: document.getElementById('inpAliases').value,
         steward_persona: document.getElementById('selPersona').value,
         username: (document.getElementById('inpUsername') || {{}}).value || '',
+        contact_email: (document.getElementById('inpContactEmail') || {{}}).value || '',
         password: pwd,
         dual_auth_enabled: Boolean((document.getElementById('chkDualAuth') || {{}}).checked),
         dual_auth_method: (document.getElementById('selDualAuthMethod') || {{}}).value || 'totp_authenticator',

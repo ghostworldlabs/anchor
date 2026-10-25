@@ -1092,6 +1092,7 @@
   function hydrateHostSecurityCard(prof){
     if(!prof)return;
     if($('host-sec-username'))$('host-sec-username').value=prof.username || (prof.display_name||'john').toLowerCase().replace(/\s+/g,'');
+    if($('host-sec-contact-email'))$('host-sec-contact-email').value=prof.contact_email || '';
     if($('host-sec-dual-enabled'))$('host-sec-dual-enabled').checked=Boolean(prof.dual_auth_enabled);
     if($('host-sec-dual-method') && prof.dual_auth_method)$('host-sec-dual-method').value=prof.dual_auth_method;
     if($('host-sec-anchor-token'))$('host-sec-anchor-token').value=prof.anchor_token || '';
@@ -1099,6 +1100,7 @@
       $('host-sec-2fa-box').hidden=!prof.dual_auth_enabled;
       if($('host-sec-2fa-secret'))$('host-sec-2fa-secret').textContent=prof.dual_auth_secret || '';
       if($('host-sec-2fa-uri'))$('host-sec-2fa-uri').textContent=prof.dual_auth_otpauth_uri || '';
+      if($('host-sec-2fa-backup-codes'))$('host-sec-2fa-backup-codes').textContent=(prof.dual_auth_backup_codes||[]).join(' · ') || 'Save with 2FA enabled to generate 10 codes';
     }
     if($('host-sec-status-badge')){
       $('host-sec-status-badge').textContent=prof.has_password ? (prof.dual_auth_enabled?'✓ Password + 2FA Active':'✓ Password Set · Token Ready') : 'Token & Auth Ready';
@@ -1132,6 +1134,7 @@
       const res=await api.request('/api/onboard-wizard/action',{
         action:'save_security_credentials',
         username:$('host-sec-username')?$('host-sec-username').value:'',
+        contact_email:$('host-sec-contact-email')?$('host-sec-contact-email').value:'',
         password:$('host-sec-password')?$('host-sec-password').value:'',
         dual_auth_enabled:Boolean($('host-sec-dual-enabled') && $('host-sec-dual-enabled').checked),
         dual_auth_method:$('host-sec-dual-method')?$('host-sec-dual-method').value:'totp_authenticator',
@@ -1139,7 +1142,7 @@
       });
       if($('host-sec-password'))$('host-sec-password').value='';
       if(res && res.profile)hydrateHostSecurityCard(res.profile);
-      if($('host-sec-feedback'))$('host-sec-feedback').textContent='✓ Saved Mother Ship username, password hash (OS Vault), 2FA & ANCHOR_TOKEN.';
+      if($('host-sec-feedback'))$('host-sec-feedback').textContent='✓ Saved Mother Ship username, contact email, password hash (OS Vault), 2FA & ANCHOR_TOKEN.';
     };
   }
   renderWave3All();

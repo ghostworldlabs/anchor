@@ -1181,4 +1181,188 @@ def test_mission_goals_brainstorming_gandalf_resources_and_hierarchical_verbal_r
     assert "ssrn.com" in face_md
 
 
+# ==============================================================================
+# 16. Contact Email, Forgotten Username/Password Recovery Link, 2FA Backup Codes & Admin GUI
+# ==============================================================================
+
+def test_contact_email_account_recovery_2fa_backup_codes_and_admin_gui(
+    tmp_path: Path,
+) -> None:
+    """Verify:
+      1. Server & Collaboration Hub location registry surfaces PUTER (gwl-server) + C:\\dev backups.
+      2. Onboarding Step 1 collects Contact / Recovery Email (`contact_email`) and generates
+         10 single-use 2FA backup recovery codes (`XXXX-XXXX-XXXX`) when 2FA is enabled.
+      3. Forgotten Username / Password recovery request issues a time-limited single-use link
+         (`/recover-account?token=rec_...`) that reminds the user of their username & pseudonym
+         and resets their password or 2FA.
+      4. Single-use 2FA backup code verification & consumption works and decrements remaining count.
+      5. Anchor Collaboration System Admin GUI (`gwl_admin_gui`) supports reviewing accounts,
+         manual edits, password/2FA/token resets, shared document registration/revocation,
+         and audit logging.
+    """
+    import gwl_admin_gui
+    import gwl_clearinghouse
+    import onboard_wizard
+
+    # 1. Save user identity with contact_email + 2FA enabled
+    id_res = onboard_wizard.dispatch_wizard_action(
+        "save_identity",
+        {
+            "display_name": "Merrill Collaborator",
+            "username": "merrill_c",
+            "contact_email": "merrill@example.edu",
+            "password": "InitialSecretPassword!123",
+            "dual_auth_enabled": True,
+            "pseudonym": "merrill-hawk",
+            "aliases": ["@merrill"],
+            "steward": "merrill",
+            "rotate_token": True,
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert id_res["ok"] is True
+    prof = id_res["profile"]
+    assert prof["contact_email"] == "merrill@example.edu"
+    assert prof["dual_auth_enabled"] is True
+    backup_codes = prof["dual_auth_backup_codes"]
+    assert len(backup_codes) == 10
+    assert prof["backup_codes_remaining"] == 10
+
+    # Verify applicant was synced to GWL Hub with contact_email & backup_codes_remaining
+    hub_root = onboard_wizard._gwl_hub_root_for(sandbox=True, base_dir=tmp_path)
+    ch = gwl_clearinghouse.GWLClearinghouse(hub_root=hub_root)
+    app = ch.find_applicant("merrill_c")
+    assert app is not None
+    assert app["contact_email"] == "merrill@example.edu"
+    assert app["backup_codes_remaining"] == 10
+    assert (hub_root.parent / "gwl_hub_repository" / "applicants_registry.json").is_file()
+
+    # 2. Consume one 2FA backup code
+    code_to_use = backup_codes[0]
+    consume_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "verify_2fa_backup_code",
+        {"backup_code": code_to_use},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert consume_res["ok"] is True
+    assert consume_res["backup_codes_remaining"] == 9
+    # Re-using the same single-use code must fail
+    reuse_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "verify_2fa_backup_code",
+        {"backup_code": code_to_use},
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert reuse_res["ok"] is False
+
+    # 3. Request a forgotten username / password recovery link by email
+    rec_req = onboard_wizard.dispatch_wizard_action(
+        "request_account_recovery",
+        {
+            "identifier": "merrill@example.edu",
+            "recovery_type": "username_and_password",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert rec_req["ok"] is True
+    assert rec_req["username"] == "merrill_c"
+    assert rec_req["pseudonym"] == "merrill-hawk"
+    assert "/recover-account?token=rec_" in rec_req["recovery_url"]
+    rec_token = rec_req["recovery_token"]
+
+    # Render recovery portal HTML with token
+    rec_html = gwl_admin_gui.render_account_recovery_html(
+        token=rec_token, sandbox=True, base_dir=tmp_path
+    )
+    assert "Account, Username, Password &amp; 2FA Recovery" in rec_html
+    assert rec_token in rec_html
+
+    # Complete account recovery using the token (reset password + reset 2FA)
+    comp_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "complete_account_recovery",
+        {
+            "token": rec_token,
+            "new_password": "RecoveredNewPassword!456",
+            "reset_2fa": True,
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert comp_res["ok"] is True
+    assert comp_res["username"] == "merrill_c"
+    assert len(comp_res["new_backup_codes"]) == 10
+
+    # Verify token cannot be used a second time
+    comp_again = gwl_admin_gui.dispatch_gwl_admin_action(
+        "complete_account_recovery",
+        {
+            "token": rec_token,
+            "new_password": "AnotherPassword!789",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert comp_again["ok"] is False
+
+    # 4. Admin GUI manual edit, account reset, shared doc registration, and audit log
+    edit_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "admin_update_account",
+        {
+            "username": "merrill_c",
+            "display_name": "Prof. Merrill Collaborator",
+            "contact_email": "merrill.new@example.edu",
+            "role": "co-admin",
+            "account_status": "active",
+            "notes": "Verified by John on PUTER",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert edit_res["ok"] is True
+    assert edit_res["applicant"]["display_name"] == "Prof. Merrill Collaborator"
+    assert edit_res["applicant"]["contact_email"] == "merrill.new@example.edu"
+    assert edit_res["applicant"]["role"] == "co-admin"
+
+    reset_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "admin_reset_account",
+        {
+            "username": "merrill_c",
+            "reset_kind": "reset_2fa",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert reset_res["ok"] is True
+    assert len(reset_res["new_backup_codes"]) == 10
+
+    doc_res = gwl_admin_gui.dispatch_gwl_admin_action(
+        "admin_register_shared_doc",
+        {
+            "title": "Collapse of Marketing — Shared Manuscript",
+            "owner_pseudonym": "john-liechty",
+            "project_id": "collapse-of-marketing",
+            "shared_with": ["merrill-hawk"],
+            "permission": "read-write",
+        },
+        sandbox=True,
+        base_dir=tmp_path,
+    )
+    assert doc_res["ok"] is True
+    doc_id = doc_res["document"]["doc_id"]
+
+    admin_state = gwl_admin_gui.get_gwl_admin_state(sandbox=True, base_dir=tmp_path)
+    assert admin_state["ok"] is True
+    assert admin_state["server_locations"]["host_machine"] == "PUTER (gwl-server)"
+    assert any(d["doc_id"] == doc_id for d in admin_state["shared_documents"])
+    assert len(admin_state["audit_log"]) >= 2
+
+    admin_html = gwl_admin_gui.render_gwl_admin_gui_html(sandbox=True, base_dir=tmp_path)
+    assert "Collaboration System Admin GUI" in admin_html
+    assert "PUTER (gwl-server)" in admin_html
+
+
+
 

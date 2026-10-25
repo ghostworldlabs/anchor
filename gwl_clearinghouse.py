@@ -183,6 +183,9 @@ class GWLClearinghouse:
         self.applicants_md_file = self.root / "APPLICANTS.md"
         self.applicants_dir = self.root / "applicants"
         self.applicants_dir.mkdir(parents=True, exist_ok=True)
+        self.recovery_file = self.root / "recovery_requests.json"
+        self.shared_docs_file = self.root / "shared_documents_registry.json"
+        self.audit_log_file = self.root / "admin_audit_log.json"
         self.inbox_root = self.root / "inbox"
         self.inbox_root.mkdir(parents=True, exist_ok=True)
         self._ensure_default_samwise_account()
@@ -203,7 +206,7 @@ class GWLClearinghouse:
         return out
 
     def _sync_to_dev_backups(self) -> list[str]:
-        """Mirror verified_model_catalog.json, applicants_registry.json, APPLICANTS.md, directory, and broadcast into C:\\dev backup folders."""
+        """Mirror verified_model_catalog.json, applicants_registry.json, APPLICANTS.md, directory, recovery, shared docs, audit log, and broadcast into C:\\dev backup folders."""
         import shutil as _shutil
         synced: list[str] = []
         top_files = (
@@ -213,6 +216,9 @@ class GWLClearinghouse:
             "pseudonym_directory.json",
             "acl_ledger.json",
             "latest_nightly_broadcast.json",
+            "recovery_requests.json",
+            "shared_documents_registry.json",
+            "admin_audit_log.json",
         )
         for bdir in self.backup_directories():
             try:
@@ -859,16 +865,19 @@ class GWLClearinghouse:
             f"- **Total Registered Individuals:** {len(applicants)}",
             f"- **Updated At:** `{_utc_now_iso()}`",
             "",
-            "| # | Display Name | Username | Pseudonym (`DID`) | Steward | Host / Tailscale IP | Topology | 2FA | Enabled AI Services | Registered / Updated |",
-            "|---|---|---|---|---|---|---|---|---|---|",
+            "| # | Display Name | Username | Contact / Recovery Email | Pseudonym (`DID`) | Role / Status | Steward | Host / Tailscale IP | Topology | 2FA & Backup Codes | Enabled AI Services | Registered / Updated |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for idx, app in enumerate(applicants, start=1):
             svcs = ", ".join(app.get("enabled_services") or []) or "pending"
             ts_str = f"{app.get('hostname') or 'local'} ({app.get('tailscale_ip') or 'local'})"
-            twofa = f"ON ({app.get('dual_auth_method')})" if app.get("dual_auth_enabled") else "Off"
+            bc_rem = int(app.get("backup_codes_remaining", 10 if app.get("dual_auth_enabled") else 0))
+            twofa = f"ON ({app.get('dual_auth_method')}, {bc_rem} backup codes)" if app.get("dual_auth_enabled") else "Off"
+            email_str = app.get("contact_email") or "—"
+            role_status = f"{app.get('role') or 'member'} / {app.get('account_status') or 'active'}"
             lines.append(
-                f"| {idx} | **{app.get('display_name', '')}** | `{app.get('username', '')}` | "
-                f"{app.get('pseudonym', '')} (`{app.get('did', '')}`) | {app.get('steward_persona', 'Aladdin')} | "
+                f"| {idx} | **{app.get('display_name', '')}** | `{app.get('username', '')}` | `{email_str}` | "
+                f"{app.get('pseudonym', '')} (`{app.get('did', '')}`) | `{role_status}` | {app.get('steward_persona', 'Aladdin')} | "
                 f"`{ts_str}` | `{app.get('topology_mode', 'main_mothership')}` | {twofa} | {svcs} | "
                 f"`{app.get('updated_at') or app.get('registered_at', '')}` |"
             )
@@ -876,6 +885,36 @@ class GWLClearinghouse:
             self.applicants_md_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except Exception:
             pass
+
+    def _save_applicants_list(self, applicants: list[dict[str, Any]]) -> list[str]:
+        now_iso = _utc_now_iso()
+        self.applicants_file.parent.mkdir(parents=True, exist_ok=True)
+        self.applicants_file.write_text(
+            json.dumps(
+                {
+                    "schema": "anchor.gwl.applicants_registry.v1",
+                    "hub_id": HUB_ID,
+                    "host": "puter",
+                    "count": len(applicants),
+                    "applicants": applicants,
+                    "updated_at": now_iso,
+                },
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            self.applicants_dir.mkdir(parents=True, exist_ok=True)
+            for entry in applicants:
+                slug = aap.slugify_pseudonym(f"{entry.get('username', 'user')}-{entry.get('pseudonym_slug', 'peer')}")
+                (self.applicants_dir / f"{slug}.json").write_text(
+                    json.dumps(entry, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+        except Exception:
+            pass
+        self._write_applicants_markdown(applicants)
+        return self._sync_to_dev_backups()
 
     def register_applicant_signup(self, record: dict[str, Any]) -> dict[str, Any]:
         """Register or update an individual who signs up via Anchor Onboarding in Puter's central repository."""
@@ -895,25 +934,36 @@ class GWLClearinghouse:
             (a for a in applicants if a.get("applicant_id") == app_id or a.get("username") == username),
             None,
         )
+        dual_en = bool(record.get("dual_auth_enabled", (existing or {}).get("dual_auth_enabled", False)))
+        default_bc_rem = 10 if dual_en else 0
+        bc_rem = int(record.get("backup_codes_remaining", (existing or {}).get("backup_codes_remaining", default_bc_rem)))
+        contact_email = str(record.get("contact_email") or record.get("email") or (existing or {}).get("contact_email") or "").strip()
+        role_default = "admin" if username.lower() in ("john", "john_mothership", "samwise-gamgee") else "member"
+
         entry = {
             "schema": "anchor.gwl.applicant.v1",
             "applicant_id": app_id,
             "display_name": raw_name,
             "username": username,
+            "contact_email": contact_email,
             "pseudonym": canon_pseudo,
             "pseudonym_slug": p_slug,
             "pseudonym_aliases": canon_aliases,
             "did": did,
+            "role": str(record.get("role") or (existing or {}).get("role") or role_default),
+            "account_status": str(record.get("account_status") or (existing or {}).get("account_status") or "active"),
             "steward_persona": str(record.get("steward_persona") or (existing or {}).get("steward_persona") or "Aladdin"),
             "hostname": str(record.get("hostname") or (existing or {}).get("hostname") or ""),
             "tailscale_ip": str(record.get("tailscale_ip") or (existing or {}).get("tailscale_ip") or ""),
             "tailscale_endpoint": str(record.get("tailscale_endpoint") or (existing or {}).get("tailscale_endpoint") or ""),
             "topology_mode": str(record.get("topology_mode") or (existing or {}).get("topology_mode") or "main_mothership"),
-            "dual_auth_enabled": bool(record.get("dual_auth_enabled", (existing or {}).get("dual_auth_enabled", False))),
+            "dual_auth_enabled": dual_en,
             "dual_auth_method": str(record.get("dual_auth_method") or (existing or {}).get("dual_auth_method") or "totp_authenticator"),
+            "backup_codes_remaining": bc_rem,
             "enabled_services": list(record.get("enabled_services") or (existing or {}).get("enabled_services") or []),
             "verified_services": list(record.get("verified_services") or (existing or {}).get("verified_services") or []),
             "onboarding_status": str(record.get("onboarding_status") or (existing or {}).get("onboarding_status") or "registered"),
+            "notes": str(record.get("notes") or (existing or {}).get("notes") or ""),
             "registered_at": str((existing or {}).get("registered_at") or now_iso),
             "updated_at": now_iso,
         }
@@ -926,30 +976,7 @@ class GWLClearinghouse:
         else:
             applicants.append(entry)
 
-        self.applicants_file.parent.mkdir(parents=True, exist_ok=True)
-        self.applicants_file.write_text(
-            json.dumps(
-                {
-                    "schema": "anchor.gwl.applicants_registry.v1",
-                    "hub_id": HUB_ID,
-                    "host": "puter",
-                    "count": len(applicants),
-                    "applicants": applicants,
-                    "updated_at": now_iso,
-                },
-                indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
-        try:
-            self.applicants_dir.mkdir(parents=True, exist_ok=True)
-            (self.applicants_dir / f"{app_slug}.json").write_text(
-                json.dumps(entry, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-        self._write_applicants_markdown(applicants)
+        synced_backups = self._save_applicants_list(applicants)
         try:
             self.register_account(
                 pseudonym=canon_pseudo,
@@ -959,7 +986,6 @@ class GWLClearinghouse:
             )
         except Exception:
             pass
-        synced_backups = self._sync_to_dev_backups()
         return {
             "ok": True,
             "applicant": entry,
@@ -971,6 +997,407 @@ class GWLClearinghouse:
 
     def list_applicant_signups(self) -> list[dict[str, Any]]:
         return self._load_applicants()
+
+    # ── Account Recovery (Username / Password Link + Standard 2FA Recovery) & Admin Management ──
+
+    def _load_json_list(self, fpath: Path, key: str) -> list[dict[str, Any]]:
+        if not fpath.is_file():
+            return []
+        try:
+            data = json.loads(fpath.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get(key), list):
+                return [x for x in data[key] if isinstance(x, dict)]
+        except Exception:
+            pass
+        return []
+
+    def _save_json_list(self, fpath: Path, key: str, items: list[dict[str, Any]], schema: str) -> None:
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(
+            json.dumps(
+                {
+                    "schema": schema,
+                    "hub_id": HUB_ID,
+                    "host": "puter",
+                    "count": len(items),
+                    key: items,
+                    "updated_at": _utc_now_iso(),
+                },
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        self._sync_to_dev_backups()
+
+    def record_admin_audit(self, action: str, target: str, detail: str, actor: str = "admin") -> dict[str, Any]:
+        logs = self._load_json_list(self.audit_log_file, "events")
+        ev = {
+            "event_id": f"audit-{int(time.time() * 1000)}-{len(logs) + 1}",
+            "action": action,
+            "target": target,
+            "detail": detail,
+            "actor": actor,
+            "at": _utc_now_iso(),
+        }
+        logs.insert(0, ev)
+        self._save_json_list(self.audit_log_file, "events", logs[:250], "anchor.gwl.admin_audit.v1")
+        return ev
+
+    def list_admin_audit_log(self) -> list[dict[str, Any]]:
+        return self._load_json_list(self.audit_log_file, "events")
+
+    def find_applicant(self, identifier: str) -> dict[str, Any] | None:
+        q = str(identifier or "").strip().lower()
+        if not q:
+            return None
+        for app in self._load_applicants():
+            candidates = {
+                str(app.get("applicant_id") or "").lower(),
+                str(app.get("username") or "").lower(),
+                str(app.get("contact_email") or "").lower(),
+                str(app.get("display_name") or "").lower(),
+                str(app.get("pseudonym") or "").lower(),
+                str(app.get("did") or "").lower(),
+            }
+            if q in candidates:
+                return app
+        return None
+
+    def create_account_recovery_request(
+        self,
+        identifier: str,
+        *,
+        recovery_type: str = "username_and_password",
+        base_url: str = "http://puter:8777",
+        actor: str = "self_service",
+    ) -> dict[str, Any]:
+        """Generate a time-limited, single-use recovery link for forgotten Username, Password, or 2FA."""
+        import secrets as _secrets
+        app = self.find_applicant(identifier)
+        if app is None:
+            return {
+                "ok": False,
+                "error": "account_not_found",
+                "message": f"No registered Anchor account matched '{identifier}' (by Contact Email, Username, or Pseudonym).",
+            }
+
+        raw_token = f"rec_{_secrets.token_urlsafe(24)}"
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        now_ts = int(time.time())
+        exp_ts = now_ts + 1800  # 30-minute single-use window
+        now_iso = _utc_now_iso()
+        clean_base = str(base_url or "http://puter:8777").rstrip("/")
+        recovery_url = f"{clean_base}/recover-account?token={raw_token}"
+
+        requests = self._load_json_list(self.recovery_file, "requests")
+        req_entry = {
+            "request_id": f"rec-req-{now_ts}-{len(requests) + 1}",
+            "applicant_id": app.get("applicant_id"),
+            "username": app.get("username"),
+            "display_name": app.get("display_name"),
+            "contact_email": app.get("contact_email") or "",
+            "pseudonym": app.get("pseudonym"),
+            "did": app.get("did"),
+            "recovery_type": recovery_type,
+            "token_sha256": token_hash,
+            "recovery_url": recovery_url,
+            "status": "pending",
+            "created_at": now_iso,
+            "expires_at_epoch": exp_ts,
+            "requested_by": actor,
+            "email_subject": f"Anchor Account Recovery ({app.get('display_name')} · Username: {app.get('username')})",
+            "email_body_preview": (
+                f"Hello {app.get('display_name')},\n\n"
+                f"Your Anchor Username is: {app.get('username')}\n"
+                f"Your Collaborator Pseudonym is: {app.get('pseudonym')} ({app.get('did')})\n\n"
+                f"Use this single-use recovery link within 30 minutes to reset your password or recover 2FA:\n"
+                f"{recovery_url}\n"
+            ),
+        }
+        requests.insert(0, req_entry)
+        self._save_json_list(self.recovery_file, "requests", requests[:100], "anchor.gwl.recovery_requests.v1")
+        self.record_admin_audit(
+            "account_recovery_link_issued",
+            str(app.get("username") or app.get("applicant_id")),
+            f"Issued {recovery_type} recovery link to {app.get('contact_email') or 'local outbox'} (requested by {actor}).",
+            actor=actor,
+        )
+        return {
+            "ok": True,
+            "request_id": req_entry["request_id"],
+            "applicant_id": app.get("applicant_id"),
+            "username": app.get("username"),
+            "display_name": app.get("display_name"),
+            "contact_email": app.get("contact_email") or "",
+            "pseudonym": app.get("pseudonym"),
+            "recovery_token": raw_token,
+            "recovery_url": recovery_url,
+            "expires_in_minutes": 30,
+            "email_preview": req_entry["email_body_preview"],
+            "message": (
+                f"Recovery link generated for '{app.get('display_name')}' (Username: '{app.get('username')}') "
+                f"and dispatched to {app.get('contact_email') or 'Puter Recovery Outbox'}."
+            ),
+        }
+
+    def list_recovery_requests(self) -> list[dict[str, Any]]:
+        return self._load_json_list(self.recovery_file, "requests")
+
+    def complete_account_recovery(
+        self,
+        token: str,
+        *,
+        new_password: str = "",
+        reset_2fa: bool = False,
+        backup_code: str = "",
+    ) -> dict[str, Any]:
+        """Verify a single-use recovery token, remind the user of their username, and reset password and/or 2FA."""
+        clean_tok = str(token or "").strip()
+        if not clean_tok:
+            return {"ok": False, "error": "missing_token", "message": "Recovery token is required."}
+        tok_hash = hashlib.sha256(clean_tok.encode("utf-8")).hexdigest()
+        requests = self._load_json_list(self.recovery_file, "requests")
+        req_entry = next((r for r in requests if r.get("token_sha256") == tok_hash), None)
+        if req_entry is None:
+            return {"ok": False, "error": "invalid_token", "message": "Invalid or unknown recovery link token."}
+        if req_entry.get("status") == "completed":
+            return {"ok": False, "error": "token_already_used", "message": "This single-use recovery link has already been used."}
+        if int(req_entry.get("expires_at_epoch") or 0) < int(time.time()):
+            return {"ok": False, "error": "token_expired", "message": "This recovery link has expired (30-minute window). Please request a new link."}
+
+        req_entry["status"] = "completed"
+        req_entry["completed_at"] = _utc_now_iso()
+        req_entry["reset_2fa"] = bool(reset_2fa)
+        req_entry["used_backup_code"] = bool(backup_code)
+        self._save_json_list(self.recovery_file, "requests", requests, "anchor.gwl.recovery_requests.v1")
+
+        app = self.find_applicant(str(req_entry.get("username") or req_entry.get("applicant_id") or ""))
+        if app:
+            updates: dict[str, Any] = {"account_status": "active"}
+            if reset_2fa:
+                updates[" backup_codes_remaining"] = 10
+                updates["backup_codes_remaining"] = 10
+            self.admin_update_applicant(str(app.get("applicant_id") or app.get("username")), updates, admin_actor="recovery_link")
+
+        self.record_admin_audit(
+            "account_recovery_completed",
+            str(req_entry.get("username") or ""),
+            f"Completed account recovery via single-use token (password_updated={bool(new_password)}, reset_2fa={bool(reset_2fa)}).",
+            actor=str(req_entry.get("username") or "user"),
+        )
+        return {
+            "ok": True,
+            "username": req_entry.get("username"),
+            "display_name": req_entry.get("display_name"),
+            "contact_email": req_entry.get("contact_email"),
+            "pseudonym": req_entry.get("pseudonym"),
+            "did": req_entry.get("did"),
+            "password_reset": bool(new_password),
+            "twofa_reset": bool(reset_2fa),
+            "message": f"Account '{req_entry.get('username')}' recovered! Your credentials have been updated.",
+        }
+
+    def admin_update_applicant(
+        self,
+        applicant_id_or_username: str,
+        updates: dict[str, Any],
+        *,
+        admin_actor: str = "admin",
+    ) -> dict[str, Any]:
+        """Allow an Anchor System Admin to manually modify any account/applicant fields in the central registry."""
+        applicants = self._load_applicants()
+        q = str(applicant_id_or_username or "").strip().lower()
+        target_idx = next(
+            (
+                i for i, a in enumerate(applicants)
+                if str(a.get("applicant_id") or "").lower() == q
+                or str(a.get("username") or "").lower() == q
+                or str(a.get("contact_email") or "").lower() == q
+            ),
+            None,
+        )
+        if target_idx is None:
+            return {"ok": False, "error": "applicant_not_found", "message": f"Account '{applicant_id_or_username}' not found."}
+
+        cur = dict(applicants[target_idx])
+        editable_fields = (
+            "display_name",
+            "username",
+            "contact_email",
+            "pseudonym",
+            "pseudonym_aliases",
+            "role",
+            "account_status",
+            "steward_persona",
+            "hostname",
+            "tailscale_ip",
+            "tailscale_endpoint",
+            "topology_mode",
+            "dual_auth_enabled",
+            "dual_auth_method",
+            "backup_codes_remaining",
+            "enabled_services",
+            "verified_services",
+            "onboarding_status",
+            "notes",
+        )
+        changed_keys: list[str] = []
+        for k in editable_fields:
+            if k in updates and updates[k] is not None:
+                if k == "pseudonym":
+                    canon_p, canon_al = aap.canonicalize_pseudonym(
+                        str(updates["pseudonym"]),
+                        updates.get("pseudonym_aliases", cur.get("pseudonym_aliases")),
+                    )
+                    cur["pseudonym"] = canon_p
+                    cur["pseudonym_slug"] = aap.slugify_pseudonym(canon_p)
+                    cur["pseudonym_aliases"] = canon_al
+                    cur["did"] = aap.did_from_pseudonym(canon_p)
+                elif k == "pseudonym_aliases":
+                    raw_al = updates["pseudonym_aliases"]
+                    if isinstance(raw_al, str):
+                        raw_al = [x.strip() for x in raw_al.split(",") if x.strip()]
+                    _, canon_al = aap.canonicalize_pseudonym(cur.get("pseudonym") or aap.PSEUDONYM_DEFAULT, raw_al)
+                    cur["pseudonym_aliases"] = canon_al
+                elif k == "dual_auth_enabled":
+                    cur["dual_auth_enabled"] = bool(updates[k] in (True, 1, "1", "true", "yes"))
+                elif k == "backup_codes_remaining":
+                    cur["backup_codes_remaining"] = int(updates[k])
+                else:
+                    cur[k] = updates[k]
+                changed_keys.append(k)
+
+        cur["updated_at"] = _utc_now_iso()
+        applicants[target_idx] = cur
+        synced = self._save_applicants_list(applicants)
+        self.record_admin_audit(
+            "admin_update_account",
+            str(cur.get("username") or cur.get("applicant_id")),
+            f"Updated fields: {', '.join(changed_keys) or 'none'}",
+            actor=admin_actor,
+        )
+        return {
+            "ok": True,
+            "applicant": cur,
+            "changed_fields": changed_keys,
+            "backup_directories": synced,
+        }
+
+    def admin_delete_applicant(self, applicant_id_or_username: str, *, admin_actor: str = "admin") -> dict[str, Any]:
+        """Remove an applicant/account from the active registry and log the action."""
+        applicants = self._load_applicants()
+        q = str(applicant_id_or_username or "").strip().lower()
+        removed = [
+            a for a in applicants
+            if str(a.get("applicant_id") or "").lower() == q or str(a.get("username") or "").lower() == q
+        ]
+        if not removed:
+            return {"ok": False, "error": "applicant_not_found"}
+        kept = [
+            a for a in applicants
+            if not (str(a.get("applicant_id") or "").lower() == q or str(a.get("username") or "").lower() == q)
+        ]
+        synced = self._save_applicants_list(kept)
+        self.record_admin_audit(
+            "admin_delete_account",
+            str(removed[0].get("username") or removed[0].get("applicant_id")),
+            f"Removed account '{removed[0].get('display_name')}' from active registry.",
+            actor=admin_actor,
+        )
+        return {
+            "ok": True,
+            "removed": removed[0],
+            "remaining_count": len(kept),
+            "backup_directories": synced,
+        }
+
+    def register_shared_document(self, doc_record: dict[str, Any], *, actor: str = "admin") -> dict[str, Any]:
+        """Register or update a shared collaboration document, brief, or project workspace on Puter."""
+        docs = self._load_json_list(self.shared_docs_file, "documents")
+        title = str(doc_record.get("title") or doc_record.get("name") or "Shared Collaboration Brief").strip()
+        owner_pseudo = str(doc_record.get("owner_pseudonym") or aap.PSEUDONYM_DEFAULT).strip()
+        doc_id = str(doc_record.get("doc_id") or f"doc-{aap.slugify_pseudonym(title)}").strip()
+        shared_with = doc_record.get("shared_with") or []
+        if isinstance(shared_with, str):
+            shared_with = [x.strip() for x in shared_with.split(",") if x.strip()]
+
+        now_iso = _utc_now_iso()
+        entry = {
+            "doc_id": doc_id,
+            "title": title,
+            "project_id": str(doc_record.get("project_id") or ""),
+            "doc_type": str(doc_record.get("doc_type") or "collaborator_brief"),
+            "path_or_url": str(doc_record.get("path_or_url") or f"/project/{aap.slugify_pseudonym(title)}/brief"),
+            "owner_pseudonym": owner_pseudo,
+            "owner_did": aap.did_from_pseudonym(owner_pseudo),
+            "shared_with": list(shared_with),
+            "permissions": str(doc_record.get("permissions") or "read_and_comment"),
+            "status": str(doc_record.get("status") or "active"),
+            "updated_at": now_iso,
+        }
+        idx = next((i for i, d in enumerate(docs) if d.get("doc_id") == doc_id), None)
+        if idx is not None:
+            docs[idx] = entry
+        else:
+            docs.append(entry)
+        self._save_json_list(self.shared_docs_file, "documents", docs, "anchor.gwl.shared_documents.v1")
+        self.record_admin_audit("register_shared_document", doc_id, f"Shared '{title}' with {', '.join(shared_with) or 'collaborators'}", actor=actor)
+        return {"ok": True, "document": entry, "count": len(docs)}
+
+    def list_shared_documents(self) -> list[dict[str, Any]]:
+        docs = self._load_json_list(self.shared_docs_file, "documents")
+        if not docs:
+            # Seed a default shared collaboration entry so the admin panel shows how shared docs work out of the box
+            default_doc = {
+                "doc_id": "doc-anchor-onboarding-and-collab-guide",
+                "title": "Ghost World Labs · Anchor Onboarding & Collaboration Guide",
+                "project_id": "anchor",
+                "doc_type": "system_guide",
+                "path_or_url": "/onboard-wizard",
+                "owner_pseudonym": "Samwise Gamgee",
+                "owner_did": "did:anchor:samwise-gamgee",
+                "shared_with": ["All Registered Collaborators"],
+                "permissions": "read",
+                "status": "active",
+                "updated_at": _utc_now_iso(),
+            }
+            return [default_doc]
+        return docs
+
+    def revoke_shared_document(self, doc_id: str, *, actor: str = "admin") -> dict[str, Any]:
+        docs = self._load_json_list(self.shared_docs_file, "documents")
+        kept = [d for d in docs if d.get("doc_id") != doc_id]
+        self._save_json_list(self.shared_docs_file, "documents", kept, "anchor.gwl.shared_documents.v1")
+        self.record_admin_audit("revoke_shared_document", doc_id, f"Revoked shared document '{doc_id}'", actor=actor)
+        return {"ok": True, "removed_doc_id": doc_id, "count": len(kept)}
+
+    def get_server_and_hub_locations(self) -> dict[str, Any]:
+        """Return the complete map of where the main Anchor server, registrations, shared docs, and backups live."""
+        anchor_repo = Path(__file__).resolve().parent
+        bdirs = [str(p) for p in self.backup_directories()]
+        return {
+            "host_machine": "PUTER (gwl-server)",
+            "windows_service": "NSSM service 'anchor' (Automatic start -> python anchor_gui.py --no-browser)",
+            "local_server_url": "http://127.0.0.1:8777",
+            "tailscale_mothership_url": "http://puter:8777",
+            "admin_gui_url": "http://puter:8777/gwl-admin",
+            "recovery_portal_url": "http://puter:8777/recover-account",
+            "live_code_directory": str(anchor_repo),
+            "active_hub_directory": str(self.root),
+            "backup_repositories_in_dev": bdirs,
+            "files": {
+                "applicants_registry_json": str(self.applicants_file),
+                "applicants_markdown_table": str(self.applicants_md_file),
+                "pseudonym_directory_json": str(self.directory_file),
+                "acl_ledger_json": str(self.acl_ledger_file),
+                "shared_documents_registry_json": str(self.shared_docs_file),
+                "recovery_requests_json": str(self.recovery_file),
+                "admin_audit_log_json": str(self.audit_log_file),
+                "verified_model_catalog_json": str(self.model_catalog_file),
+                "latest_nightly_broadcast_json": str(self.broadcast_file),
+                "encrypted_offline_mailbox_dir": str(self.inbox_root),
+            },
+        }
 
 
 class DualPathTransport:

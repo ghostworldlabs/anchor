@@ -2,8 +2,8 @@
   "schema": "anchor.gwl.broadcast.v1",
   "hub_id": "gwl-hub",
   "issuer_did": "did:anchor:ghost-world-labs-hub",
-  "broadcast_id": "gwl-nightly-2026-10-25-fd1146f5",
-  "published_at": "2026-10-25T01:44:24Z",
+  "broadcast_id": "gwl-nightly-2026-10-25-5c4bfc6d",
+  "published_at": "2026-10-25T11:07:57Z",
   "cadence": "nightly",
   "channel": "stable",
   "anchor_core": {
@@ -187,73 +187,5 @@
     }
   ],
   "security_advisories": [],
-  "verified_model_catalog": {
-    "claude": {
-      "family": "claude",
-      "label": "Anthropic Claude (Claude Code)",
-      "frontier_model": "claude-fable-5-1",
-      "one_tier_down_model": "sonnet",
-      "effort_frontier": "max",
-      "effort_one_tier_down": "high",
-      "models": [
-        "claude-fable-5-1",
-        "opus",
-        "sonnet",
-        "haiku"
-      ],
-      "discovered_models": [
-        "claude-fable-5-1",
-        "opus",
-        "sonnet",
-        "haiku"
-      ]
-    },
-    "gemini": {
-      "family": "gemini",
-      "label": "Google Gemini (Antigravity / agy CLI)",
-      "frontier_model": "gemini-4-argon",
-      "one_tier_down_model": "gemini-3.8-flash",
-      "effort_frontier": "high",
-      "effort_one_tier_down": "medium",
-      "models": [
-        "gemini-4-argon",
-        "gemini-3.8-flash"
-      ],
-      "discovered_models": [
-        "gemini-4-argon",
-        "gemini-3.8-flash"
-      ]
-    },
-    "grok": {
-      "family": "grok",
-      "label": "xAI Grok",
-      "frontier_model": "grok-4.7",
-      "one_tier_down_model": "grok-4.7",
-      "effort_frontier": "xhigh",
-      "effort_one_tier_down": "high",
-      "models": [
-        "grok-4.7"
-      ],
-      "discovered_models": [
-        "grok-4.7"
-      ]
-    },
-    "chatgpt": {
-      "family": "chatgpt",
-      "label": "OpenAI ChatGPT / Codex",
-      "frontier_model": "gpt-6.1-sol",
-      "one_tier_down_model": "gpt-6-astra",
-      "effort_frontier": "ultra",
-      "effort_one_tier_down": "high",
-      "models": [
-        "gpt-6.1-sol",
-        "gpt-6-astra"
-      ],
-      "discovered_models": [
-        "gpt-6.1-sol",
-        "gpt-6-astra"
-      ]
-    }
-  },
-  "signature": "hmac-sha256:06e6c9de927badd201f188bc5ebd38242b99a7071fac7d8b56e9919551bf1e5d"
+  "signature": "hmac-sha256:8db713a8518ec1d2666be86358bc08ba8d15a227ae3135c8d8ec84dc15ad705b"
 }

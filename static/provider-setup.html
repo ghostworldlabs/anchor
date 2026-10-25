@@ -31,6 +31,8 @@
         <a class="cave-rail-item is-active" href="/setup" aria-current="page">⚙ Host &amp; Provider Setup</a>
         <a class="cave-rail-item" href="/onboard-wizard">🧭 Onboarding &amp; Setup Wizard</a>
         <a class="cave-rail-item" href="/onboard-wizard?sandbox=1">🧪 Sandbox Test Walkthrough</a>
+        <a class="cave-rail-item" href="/gwl-admin">🛡 Collaboration System Admin GUI</a>
+        <a class="cave-rail-item" href="/recover-account">🔑 Account &amp; 2FA Recovery</a>
       </div>
       <div class="cave-rail-section">
         <div class="cave-rail-label">3-STAGE ONBOARDING</div>
@@ -104,14 +106,18 @@
 
         <article class="setup-card" id="host-security-credentials-card" style="margin:14px 0">
           <div class="wave2-matrix-top">
-            <h2>🔐 Security, Login Credentials, Dual Authentication (2FA) &amp; Anchor Token</h2>
+            <h2>🔐 Security, Login Credentials, Contact / Recovery Email, Dual Authentication (2FA) &amp; Anchor Token</h2>
             <span class="w3-badge w3-badge-emerald" id="host-sec-status-badge">Token &amp; Auth Ready</span>
           </div>
-          <p class="muted small">Configure or update your Mother Ship login username &amp; password (hashed with PBKDF2-SHA256 + stored in the OS Credential Vault), optional Dual Authentication (2FA), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
+          <p class="muted small">Configure or update your Mother Ship login username &amp; password (hashed with PBKDF2-SHA256 + stored in the OS Credential Vault), Contact / Recovery Email, optional Dual Authentication (2FA + 10 single-use backup codes), and your Mother Ship <code>ANCHOR_TOKEN</code>.</p>
           <div class="quality-grid">
             <div>
               <label for="host-sec-username">Mother Ship Username</label>
               <input id="host-sec-username" type="text" placeholder="e.g., john, merrill" autocomplete="username">
+            </div>
+            <div>
+              <label for="host-sec-contact-email">Contact / Recovery Email</label>
+              <input id="host-sec-contact-email" type="email" placeholder="e.g., merrill@psu.edu" autocomplete="email">
             </div>
             <div>
               <label for="host-sec-password">Login Password (OS Vault + PBKDF2 Hash)</label>
@@ -141,9 +147,12 @@
           <div id="host-sec-2fa-box" class="setup-notice" style="margin-top:10px" hidden>
             <strong>🛡 2FA Enrollment Secret:</strong> <code id="host-sec-2fa-secret"></code>
             <span class="muted small" id="host-sec-2fa-uri" style="display:block"></span>
+            <div style="margin-top:6px"><strong>🔑 10 Single-Use 2FA Backup Codes:</strong> <span id="host-sec-2fa-backup-codes" class="muted small"></span></div>
           </div>
           <div class="setup-actions" style="margin-top:12px">
-            <button type="button" class="primary" id="btn-host-sec-save">✓ Save Security, Credentials &amp; 2FA</button>
+            <button type="button" class="primary" id="btn-host-sec-save">✓ Save Security, Email, Credentials &amp; 2FA</button>
+            <a href="/recover-account" class="btn-mini">🔑 Forgot Username / Password / 2FA Recovery</a>
+            <a href="/gwl-admin" class="btn-mini">🛡 Collaboration System Admin GUI</a>
             <span id="host-sec-feedback" class="muted small" role="status"></span>
           </div>
         </article>

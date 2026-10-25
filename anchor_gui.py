@@ -23352,6 +23352,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 q = parse_qs(urlparse(self.path).query)
                 is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
                 self._send_json(_ow.get_wizard_full_state(sandbox=is_sb), 200)
+            elif _path_only in ("/gwl-admin", "/admin/collaboration"):
+                import gwl_admin_gui as _gag
+                q = parse_qs(urlparse(self.path).query)
+                is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+                _ck = self._local_login_cookie()
+                self._send_html(_gag.render_gwl_admin_gui_html(sandbox=is_sb), cookie=_ck)
+            elif _path_only == "/recover-account":
+                import gwl_admin_gui as _gag
+                q = parse_qs(urlparse(self.path).query)
+                is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+                tok = str((q.get("token") or [""])[0]).strip()
+                _ck = self._local_login_cookie()
+                self._send_html(_gag.render_account_recovery_html(token=tok, sandbox=is_sb), cookie=_ck)
+            elif _path_only == "/api/gwl-admin/state":
+                import gwl_admin_gui as _gag
+                q = parse_qs(urlparse(self.path).query)
+                is_sb = str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+                self._send_json(_gag.get_gwl_admin_state(sandbox=is_sb), 200)
             elif _path_only == "/api/foundry/page":
                 self._send_json(_fpage.catalog())
             elif _path_only == "/api/foundry/skill":
@@ -24049,6 +24067,15 @@ class AnchorHandler(BaseHTTPRequestHandler):
             is_sb = bool(_b.get("sandbox")) or str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
             _act = str(_b.get("action") or "").strip()
             _out = _ow.dispatch_wizard_action(_act, _b, sandbox=is_sb)
+            self._send_json(_out, 200 if _out.get("ok") else 400)
+            return
+        if _path_only == "/api/gwl-admin/action":
+            import gwl_admin_gui as _gag
+            _b = body if isinstance(body, dict) else {}
+            q = parse_qs(urlparse(self.path).query)
+            is_sb = bool(_b.get("sandbox")) or str((q.get("sandbox") or [""])[0]).strip().lower() in ("1", "true", "yes")
+            _act = str(_b.get("action") or "").strip()
+            _out = _gag.dispatch_gwl_admin_action(_act, _b, sandbox=is_sb)
             self._send_json(_out, 200 if _out.get("ok") else 400)
             return
         _post_route = _routes.match("POST", _path_only)
