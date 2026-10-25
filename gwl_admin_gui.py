@@ -517,6 +517,8 @@ def render_account_recovery_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Anchor · Account, Username, Password &amp; 2FA Recovery</title>
+  <link rel="icon" href="/vendor/brand/anchor-admin-key.ico" sizes="16x16 32x32 48x48 64x64">
+  <link rel="icon" type="image/png" sizes="64x64" href="/vendor/brand/anchor-admin-key.png">
   <style>
     :root {{
       --bg:#0b0f17; --panel:#131a26; --card:#182130; --border:#2a364d;
@@ -543,11 +545,14 @@ def render_account_recovery_html(
 <body>
   <div class="wrap">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-      <h1 style="margin:0;font-size:22px">🔑 Anchor · Account, Username, Password &amp; 2FA Recovery</h1>
+      <div style="display:flex;align-items:center;gap:12px">
+        <img src="/vendor/brand/anchor-admin-key.jpg" alt="Anchor Admin Key" style="width:42px;height:42px;border-radius:10px;border:1px solid rgba(234,179,8,0.5);box-shadow:0 2px 10px rgba(0,0,0,0.45);object-fit:cover">
+        <h1 style="margin:0;font-size:22px">Anchor · Account, Username, Password &amp; 2FA Recovery</h1>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn" href="/onboard-wizard">← Onboarding Wizard</a>
         <a class="btn" href="/setup">⚙ Provider Setup</a>
-        <a class="btn" href="/gwl-admin">🛡 Collaboration Admin GUI</a>
+        <a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px"> Collaboration Admin GUI</a>
       </div>
     </div>
 
@@ -678,6 +683,8 @@ def render_gwl_admin_gui_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Anchor · Collaboration System Admin GUI (Puter / gwl-hub)</title>
+  <link rel="icon" href="/vendor/brand/anchor-admin-key.ico" sizes="16x16 32x32 48x48 64x64">
+  <link rel="icon" type="image/png" sizes="64x64" href="/vendor/brand/anchor-admin-key.png">
   <style>
     :root {{
       --bg:#0b0f17; --panel:#131a26; --card:#182130; --border:#2a364d;
@@ -718,12 +725,16 @@ def render_gwl_admin_gui_html(
 <body>
   <header class="adm-top">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <strong style="font-size:17px">🛡 Anchor &amp; Ghost World Labs · Collaboration System Admin GUI (`puter` / `gwl-hub`)</strong>
+      <img src="/vendor/brand/anchor-admin-key.jpg" alt="Anchor Admin Key" style="width:44px;height:44px;border-radius:10px;border:1px solid rgba(234,179,8,0.55);box-shadow:0 2px 12px rgba(0,0,0,0.5);object-fit:cover">
+      <div>
+        <strong style="font-size:17px;display:block">Anchor &amp; Ghost World Labs · Collaboration System Admin GUI (`puter` / `gwl-hub`)</strong>
+        <span class="muted">Master Key Control Center · Accounts, Recovery Links, 2FA Reset &amp; Shared Collaboration Docs</span>
+      </div>
       <span class="pill" style="background:#064e3b;color:#6ee7b7">LIVE CONTROL PLANE</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn emerald" id="btnSyncHubBackups">🔄 Sync C:\\dev Backups &amp; Nightly Model Catalog</button>
-      <a class="btn" href="/recover-account">🔑 Recovery Portal</a>
+      <a class="btn" href="/recover-account"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px"> Recovery Portal</a>
       <a class="btn" href="/onboard-wizard">🧭 Onboarding Wizard</a>
       <a class="btn" href="/setup">⚙ Provider Setup</a>
       <a class="btn primary" href="/high-seat">🏛 Cave of Wonders</a>

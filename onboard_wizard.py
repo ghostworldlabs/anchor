@@ -4401,7 +4401,7 @@ def render_onboard_wizard_html(
       <button type="button" class="btn" id="btnResetSandbox" {"" if sandbox else "hidden"}>↺ Reset Walkthrough</button>
       <button type="button" class="btn emerald" id="btnApplySandbox" {"" if sandbox else "hidden"}>✓ Commit &amp; Apply to Live Anchor</button>
       <a class="btn" href="/recover-account">🔑 Account Recovery</a>
-      <a class="btn" href="/gwl-admin">🛡 Collaboration Admin GUI</a>
+      <a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:4px"> Anchor Admin GUI</a>
       <a class="btn" href="/setup">⚙ Provider Setup</a>
       <a class="btn primary" href="/high-seat">🏛 Open Cave of Wonders</a>
       <div class="wiz-winctl" aria-label="Window controls">
