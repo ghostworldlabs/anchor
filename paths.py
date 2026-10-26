@@ -919,3 +919,47 @@ def use_posix_exclusive_bind(host, port) -> bool:
         return int(port) != 0
     except (TypeError, ValueError):
         return False
+
+
+def is_anchor_admin_edition(base_dir: Path | str | None = None) -> bool:
+    """Return True when running John's Admin / Mothership edition (`Anchor Admin.exe` or on `PUTER`),
+    and False when running the Shareable Collaborator edition (`Anchor.exe` shared with Merrill
+    or other collaborators).
+
+    In Collaborator edition (`False`), the Cave of Wonders header does NOT display the admin/packaging
+    links (`Anchor Admin`, `Test Onboard .zip`, `Anchor.exe .zip`).
+    """
+    import json as _json
+    import socket as _socket
+
+    env_ed = (os.environ.get("ANCHOR_EDITION") or "").strip().lower()
+    if env_ed in ("collaborator", "share", "shared", "client"):
+        return False
+    if env_ed in ("admin", "mothership"):
+        return True
+    env_adm = (os.environ.get("ANCHOR_ADMIN_EDITION") or "").strip().lower()
+    if env_adm in ("0", "false", "no"):
+        return False
+    if env_adm in ("1", "true", "yes"):
+        return True
+
+    roots: list[Path] = []
+    if base_dir is not None:
+        roots.append(Path(base_dir))
+    roots.extend([data_dir(), CODE_DIR])
+    for r in roots:
+        ed_file = Path(r) / "anchor-edition.json"
+        if ed_file.is_file():
+            try:
+                doc = _json.loads(ed_file.read_text(encoding="utf-8"))
+                ed_val = str(doc.get("edition") or "").strip().lower()
+                if ed_val in ("collaborator", "share", "shared", "client"):
+                    return False
+                if ed_val in ("admin", "mothership"):
+                    return True
+            except Exception:
+                pass
+
+    host = (_socket.gethostname() or "").strip().upper()
+    return host in ("PUTER", "GWL-SERVER")
+

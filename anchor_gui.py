@@ -23330,9 +23330,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
             elif _path_only == "/api/website/catalog":
                 import website_portal as _wp
                 self._send_json(_wp.get_portal_state(), 200)
-            elif _path_only in ("/download/Anchor.zip", "/download/Anchor-Test-Onboard.zip"):
+            elif _path_only in ("/download/Anchor.zip", "/download/Anchor-Test-Onboard.zip", "/download/Anchor-Admin.zip"):
                 import onboard_wizard as _ow
-                pkg_kind = "test" if "Test" in _path_only else "prod"
+                pkg_kind = "test" if "Test" in _path_only else ("admin" if "Admin" in _path_only else "prod")
                 zpath, fname = _ow.build_or_resolve_exe_zip_package(pkg_kind)
                 data_bytes = zpath.read_bytes()
                 self.send_response(200)

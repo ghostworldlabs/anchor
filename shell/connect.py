@@ -193,12 +193,26 @@ def _apply_bundled_core_overlay(dest: Path) -> bool:
         ])
     except Exception:
         pass
+    is_puter_main_repo = (
+        (socket.gethostname() or "").strip().upper() in ("PUTER", "GWL-SERVER")
+        and dest_path.resolve() == Path(r"C:\dev\Anchor").resolve()
+    )
+    user_md_files = {
+        "DASHBOARD.md", "PROJECTS.md", "INBOX.md", "CANCELLED.md", "SAVED_FOR_LATER.md",
+        "domains/academic.md", "domains/commercial.md", "domains/family.md", "domains/writing.md",
+    }
     for zcand in candidates:
         if zcand.is_file():
             try:
                 dest_path.mkdir(parents=True, exist_ok=True)
                 with zipfile.ZipFile(zcand, "r") as zf:
-                    zf.extractall(dest_path)
+                    for item in zf.infolist():
+                        norm_n = item.filename.replace("\\", "/")
+                        if is_puter_main_repo and (norm_n == "anchor-edition.json" or norm_n in user_md_files):
+                            continue
+                        if norm_n in user_md_files and (dest_path / norm_n).is_file() and (dest_path / ".anchor" / "user_profile.json").is_file():
+                            continue
+                        zf.extract(item, dest_path)
                 return True
             except Exception:
                 pass

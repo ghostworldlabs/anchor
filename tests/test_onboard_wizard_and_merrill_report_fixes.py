@@ -1364,5 +1364,104 @@ def test_contact_email_account_recovery_2fa_backup_codes_and_admin_gui(
     assert "PUTER (gwl-server)" in admin_html
 
 
+# ==============================================================================
+# 17. Shareable Collaborator Edition (Merrill) vs. John's Anchor Admin Edition
+# ==============================================================================
+
+def test_shareable_collaborator_edition_hides_admin_and_download_links_while_admin_edition_keeps_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify:
+      1. In Shareable Collaborator Edition (`ANCHOR_EDITION=collaborator` or `anchor-edition.json`
+         with `{"edition": "collaborator"}` inside `Anchor.zip`), Cave of Wonders (`high_seat_page._hdr`)
+         does NOT render `Anchor Admin`, `Test Onboard .zip`, or `Anchor.exe .zip` links, while keeping
+         `Anchor Doctor`, `Zombie Hunter`, and `Skill Foundry`.
+      2. In Shareable Collaborator Edition, unconfigured Step 1 profile does NOT pre-fill "John" or
+         "Samwise Gamgee", and `/onboard-wizard` & `/recover-account` hide the `/gwl-admin` link.
+      3. In John's Admin Edition (`PUTER` / `Anchor Admin.exe` / `ANCHOR_EDITION=admin`), Cave of Wonders
+         KEEPS `Anchor Admin` (with `anchor-admin-key.jpg`), `Test Onboard .zip`, `Anchor.exe .zip`,
+         and `Anchor Admin.exe`.
+      4. `build_or_resolve_exe_zip_package("prod")` stamps `Anchor/anchor-edition.json` as `"collaborator"`
+         and `build_or_resolve_exe_zip_package("admin")` stamps `Anchor Admin/anchor-edition.json` as `"admin"`.
+    """
+    import zipfile as _zf
+    import gwl_admin_gui
+    import high_seat_page as hsp
+    import onboard_wizard
+    import paths
+
+    ctx_base = {
+        "steward": {"high_seat_name": "Cave of Wonders", "label": "Aladdin"},
+        "build": "test-build",
+        "today_str": "Oct 25",
+        "week": "Week 43",
+    }
+
+    # --- A. Collaborator Edition (Merrill's shared version) ---
+    collab_dir = tmp_path / "merrill_collab"
+    collab_dir.mkdir(parents=True)
+    (collab_dir / "anchor-edition.json").write_text(
+        json.dumps({"edition": "collaborator", "hide_admin_and_download_links": True}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ANCHOR_EDITION", "collaborator")
+    assert paths.is_anchor_admin_edition(collab_dir) is False
+
+    hdr_collab = hsp._hdr(ctx_base)
+    assert "Anchor Doctor" in hdr_collab
+    assert "Zombie Hunter" in hdr_collab
+    assert "Skill Foundry" in hdr_collab
+    assert "/gwl-admin" not in hdr_collab
+    assert "Anchor Admin" not in hdr_collab
+    assert "Anchor-Test-Onboard.zip" not in hdr_collab
+    assert "Anchor.zip" not in hdr_collab
+
+    prof_collab = onboard_wizard.get_active_user_profile(sandbox=True, base_dir=collab_dir)
+    assert prof_collab["display_name"] == ""
+    assert prof_collab["pseudonym"] == ""
+
+    wiz_collab_html = onboard_wizard.render_onboard_wizard_html(sandbox=False, base_dir=collab_dir)
+    assert 'href="/gwl-admin"' not in wiz_collab_html
+    assert 'id="btnToggleSandbox"' not in wiz_collab_html
+
+    rec_collab_html = gwl_admin_gui.render_account_recovery_html(sandbox=False, base_dir=collab_dir)
+    assert 'href="/gwl-admin"' not in rec_collab_html
+
+    # --- B. John's Admin Edition (`PUTER` / `Anchor Admin.exe`) ---
+    monkeypatch.setenv("ANCHOR_EDITION", "admin")
+    assert paths.is_anchor_admin_edition(tmp_path) is True
+
+    hdr_admin = hsp._hdr(ctx_base)
+    assert "/gwl-admin" in hdr_admin
+    assert "anchor-admin-key.jpg" in hdr_admin
+    assert "Anchor-Test-Onboard.zip" in hdr_admin
+    assert "Anchor.zip" in hdr_admin
+    assert "Anchor-Admin.zip" in hdr_admin
+
+    wiz_admin_html = onboard_wizard.render_onboard_wizard_html(sandbox=False, base_dir=tmp_path)
+    assert 'href="/gwl-admin"' in wiz_admin_html
+
+    # --- C. Package builder produces distinct Collaborator (`Anchor.zip`) and Admin (`Anchor-Admin.zip`) ---
+    dist_dir = tmp_path / "dist"
+    (dist_dir / "Anchor").mkdir(parents=True)
+    (dist_dir / "Anchor" / "Anchor.exe").write_bytes(b"MZ-fake-exe")
+
+    prod_zip, prod_name = onboard_wizard.build_or_resolve_exe_zip_package("prod", dist_dir=dist_dir)
+    assert prod_name == "Anchor.zip"
+    with _zf.ZipFile(prod_zip, "r") as zf:
+        ed_doc = json.loads(zf.read("Anchor/anchor-edition.json").decode("utf-8"))
+        assert ed_doc["edition"] == "collaborator"
+        assert ed_doc["hide_admin_and_download_links"] is True
+
+    adm_zip, adm_name = onboard_wizard.build_or_resolve_exe_zip_package("admin", dist_dir=dist_dir)
+    assert adm_name == "Anchor-Admin.zip"
+    with _zf.ZipFile(adm_zip, "r") as zf:
+        ed_adm = json.loads(zf.read("Anchor Admin/anchor-edition.json").decode("utf-8"))
+        assert ed_adm["edition"] == "admin"
+        assert ed_adm["hide_admin_and_download_links"] is False
+        assert "Anchor Admin/Anchor Admin.exe" in zf.namelist()
+
+
+
 
 

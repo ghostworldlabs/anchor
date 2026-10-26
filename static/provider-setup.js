@@ -1091,7 +1091,7 @@
   }
   function hydrateHostSecurityCard(prof){
     if(!prof)return;
-    if($('host-sec-username'))$('host-sec-username').value=prof.username || (prof.display_name||'john').toLowerCase().replace(/\s+/g,'');
+    if($('host-sec-username'))$('host-sec-username').value=prof.username || '';
     if($('host-sec-contact-email'))$('host-sec-contact-email').value=prof.contact_email || '';
     if($('host-sec-dual-enabled'))$('host-sec-dual-enabled').checked=Boolean(prof.dual_auth_enabled);
     if($('host-sec-dual-method') && prof.dual_auth_method)$('host-sec-dual-method').value=prof.dual_auth_method;
@@ -1106,7 +1106,12 @@
       $('host-sec-status-badge').textContent=prof.has_password ? (prof.dual_auth_enabled?'✓ Password + 2FA Active':'✓ Password Set · Token Ready') : 'Token & Auth Ready';
     }
   }
-  fetch('/api/onboard-wizard/state',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(b=>{if(b && b.profile)hydrateHostSecurityCard(b.profile);}).catch(()=>{});
+  fetch('/api/onboard-wizard/state',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(b=>{
+    if(b && b.profile)hydrateHostSecurityCard(b.profile);
+    if(b && b.admin_edition===false){
+      ['rail-link-gwl-admin','rail-link-sandbox-walkthrough','open-onboard-sandbox-btn'].forEach(id=>{if($(id))$(id).hidden=true;});
+    }
+  }).catch(()=>{});
   if($('host-sec-dual-enabled')){
     $('host-sec-dual-enabled').onchange=()=>{if($('host-sec-2fa-box'))$('host-sec-2fa-box').hidden=!$('host-sec-dual-enabled').checked;};
   }

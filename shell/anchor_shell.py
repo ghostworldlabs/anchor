@@ -95,6 +95,33 @@ if FROZEN:
 
 ROOT = _resolve_package_root()
 ICON = (Path(sys._MEIPASS) / "anchor-icon.ico") if FROZEN else ROOT / "vendor" / "brand" / "anchor-icon.ico"
+IS_ADMIN_EXE = False
+try:
+    import json as _json
+    _exe_dir = Path(sys.executable).resolve().parent if FROZEN else ROOT
+    if FROZEN and "admin" in Path(sys.executable).stem.lower():
+        IS_ADMIN_EXE = True
+    for _ecand in (_exe_dir / "anchor-edition.json", _exe_dir.parent / "anchor-edition.json", ROOT / "anchor-edition.json"):
+        if _ecand.is_file():
+            _edoc = _json.loads(_ecand.read_text(encoding="utf-8"))
+            _eval = str(_edoc.get("edition") or "").strip().lower()
+            if _eval == "admin":
+                IS_ADMIN_EXE = True
+                os.environ.setdefault("ANCHOR_EDITION", "admin")
+                os.environ.setdefault("ANCHOR_ADMIN_EDITION", "1")
+            elif _eval == "collaborator":
+                IS_ADMIN_EXE = False
+                os.environ.setdefault("ANCHOR_EDITION", "collaborator")
+                os.environ.setdefault("ANCHOR_ADMIN_EDITION", "0")
+            break
+except Exception:
+    pass
+if IS_ADMIN_EXE:
+    APP_ID = "GhostWorldLabs.AnchorAdmin"
+    TITLE = "Anchor Admin"
+    _adm_ico = (Path(sys._MEIPASS) / "anchor-admin-key.ico") if FROZEN else (ROOT / "vendor" / "brand" / "anchor-admin-key.ico")
+    if _adm_ico.is_file():
+        ICON = _adm_ico
 if FROZEN:
     try:
         import json as _json

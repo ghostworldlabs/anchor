@@ -511,6 +511,12 @@ def render_account_recovery_html(
     """Render the standalone Self-Service Account, Username, Password & 2FA Recovery Web Portal (`GET /recover-account`)."""
     esc_tok = html.escape(str(token or "").strip(), quote=True)
     guide_json = json.dumps(STANDARD_2FA_RECOVERY_GUIDE, ensure_ascii=False)
+    is_admin = paths.is_anchor_admin_edition(base_dir)
+    admin_btn_html = (
+        '<a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px"> Collaboration Admin GUI</a>'
+        if is_admin
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -552,7 +558,7 @@ def render_account_recovery_html(
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn" href="/onboard-wizard">← Onboarding Wizard</a>
         <a class="btn" href="/setup">⚙ Provider Setup</a>
-        <a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px"> Collaboration Admin GUI</a>
+        {admin_btn_html}
       </div>
     </div>
 

@@ -393,18 +393,22 @@ def get_active_user_profile(
         except Exception:
             ms_ident = {}
 
+    is_admin = paths.is_anchor_admin_edition(base_dir)
     display_name = str(stored.get("display_name") or "").strip()
     configured = bool(display_name)
     if not display_name:
-        display_name = "John"
+        display_name = "John" if is_admin else ""
 
     raw_pseudo = str(
         stored.get("pseudonym")
-        or ms_ident.get("pseudonym")
-        or aap.PSEUDONYM_DEFAULT
+        or (ms_ident.get("pseudonym") if (configured or is_admin) else "")
+        or (aap.PSEUDONYM_DEFAULT if is_admin else "")
     ).strip()
-    raw_aliases = stored.get("pseudonym_aliases") or ms_ident.get("pseudonym_aliases")
-    canon_pseudo, canon_aliases = aap.canonicalize_pseudonym(raw_pseudo, raw_aliases)
+    raw_aliases = stored.get("pseudonym_aliases") or (ms_ident.get("pseudonym_aliases") if (configured or is_admin) else [])
+    if raw_pseudo:
+        canon_pseudo, canon_aliases = aap.canonicalize_pseudonym(raw_pseudo, raw_aliases)
+    else:
+        canon_pseudo, canon_aliases = "", []
 
     persona_raw = str(stored.get("steward_persona") or "").strip().lower()
     if not persona_raw and not use_sandbox:
@@ -3652,6 +3656,7 @@ def get_full_wizard_bundle(
         gwl_applicants = []
     return {
         "ok": True,
+        "admin_edition": paths.is_anchor_admin_edition(base_dir),
         "sandbox": bool(sandbox),
         "sandbox_id": _safe_slug(sandbox_id or DEFAULT_SANDBOX_ID) if sandbox else "",
         "data_dir": str(state_dir(sandbox=sandbox, sandbox_id=sandbox_id, base_dir=base_dir)),
@@ -4053,8 +4058,10 @@ def build_or_resolve_exe_zip_package(
     *,
     dist_dir: Path | str | None = None,
 ) -> tuple[Path, str]:
-    """Return ``(zip_file_path, download_filename)`` for either:
-      * ``package_kind="prod"`` -> ``Anchor.zip`` (shareable production Anchor.exe)
+    """Return ``(zip_file_path, download_filename)`` for:
+      * ``package_kind="prod"`` -> ``Anchor.zip`` (clean shareable Collaborator Anchor.exe for Merrill & collaborators;
+        hides Anchor Admin, Test Onboard .zip, and Anchor.exe .zip links on Cave of Wonders)
+      * ``package_kind="admin"`` -> ``Anchor-Admin.zip`` (John's ``Anchor Admin.exe`` with Master Key icon & full Admin/Packaging links)
       * ``package_kind="test"`` -> ``Anchor-Test-Onboard.zip`` (isolated work-desktop onboarding test on port 8787)
     """
     import zipfile as _zf
@@ -4067,19 +4074,95 @@ def build_or_resolve_exe_zip_package(
     d_root.mkdir(parents=True, exist_ok=True)
 
     anchor_onedir = d_root / "Anchor"
+    admin_onedir = d_root / "Anchor Admin"
     prod_zip = d_root / "Anchor.zip"
+    admin_zip = d_root / "Anchor-Admin.zip"
     test_zip = d_root / "Anchor-Test-Onboard.zip"
+
+    def _overlay_bytes_with_edition(edition: str) -> bytes | None:
+        base_ov = Path(__file__).resolve().parent / "shell" / "anchor-core-overlay.zip"
+        if not base_ov.is_file():
+            return None
+        import io as _io
+        buf = _io.BytesIO()
+        ed_json = json.dumps({
+            "edition": edition,
+            "hide_admin_and_download_links": (edition == "collaborator"),
+        }, indent=2) + "\n"
+        with _zf.ZipFile(base_ov, "r") as zin, _zf.ZipFile(buf, "w", compression=_zf.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                if item.filename.replace("\\", "/") == "anchor-edition.json":
+                    continue
+                zout.writestr(item, zin.read(item.filename))
+            zout.writestr("anchor-edition.json", ed_json)
+            if edition == "collaborator":
+                zout.writestr("DASHBOARD.md", "# Anchor Daily Dashboard\n\n## Focus Today\n\n## Active Priorities\n")
+                zout.writestr("PROJECTS.md", "# Projects\n")
+                zout.writestr("INBOX.md", "# Quick Capture Inbox\n")
+                zout.writestr("CANCELLED.md", "# Cancelled Tasks\n")
+                zout.writestr("SAVED_FOR_LATER.md", "# Saved for Later\n")
+                for dom in ("academic", "commercial", "family", "writing"):
+                    zout.writestr(f"domains/{dom}.md", f"# {dom.title()}\n")
+        return buf.getvalue()
 
     if package_kind == "prod":
         if not prod_zip.is_file():
+            collab_ed_json = json.dumps({
+                "edition": "collaborator",
+                "hide_admin_and_download_links": True,
+            }, indent=2) + "\n"
+            collab_ov = _overlay_bytes_with_edition("collaborator")
             with _zf.ZipFile(prod_zip, "w", compression=_zf.ZIP_DEFLATED) as zf:
+                zf.writestr("Anchor/anchor-edition.json", collab_ed_json)
                 if anchor_onedir.is_dir():
                     for f in anchor_onedir.rglob("*"):
                         if f.is_file():
-                            zf.write(f, str(Path("Anchor") / f.relative_to(anchor_onedir)))
+                            rel = str(Path("Anchor") / f.relative_to(anchor_onedir)).replace("\\", "/")
+                            if rel == "Anchor/anchor-edition.json":
+                                continue
+                            if rel == "Anchor/anchor-core-overlay.zip" and collab_ov is not None:
+                                zf.writestr(rel, collab_ov)
+                            else:
+                                zf.write(f, rel)
+                    if collab_ov is not None and not (anchor_onedir / "anchor-core-overlay.zip").is_file():
+                        zf.writestr("Anchor/anchor-core-overlay.zip", collab_ov)
                 else:
+                    if collab_ov is not None:
+                        zf.writestr("Anchor/anchor-core-overlay.zip", collab_ov)
                     zf.writestr("Anchor/README.txt", "Run shell/build_exe.ps1 on Mothership to populate Anchor.exe.\n")
         return prod_zip, "Anchor.zip"
+
+    if package_kind == "admin":
+        if not admin_zip.is_file():
+            adm_ed_json = json.dumps({
+                "edition": "admin",
+                "hide_admin_and_download_links": False,
+            }, indent=2) + "\n"
+            adm_ov = _overlay_bytes_with_edition("admin")
+            src_dir = admin_onedir if admin_onedir.is_dir() else anchor_onedir
+            with _zf.ZipFile(admin_zip, "w", compression=_zf.ZIP_DEFLATED) as zf:
+                zf.writestr("Anchor Admin/anchor-edition.json", adm_ed_json)
+                if src_dir.is_dir():
+                    for f in src_dir.rglob("*"):
+                        if f.is_file():
+                            rel_part = f.relative_to(src_dir)
+                            if str(rel_part) == "Anchor.exe":
+                                rel = "Anchor Admin/Anchor Admin.exe"
+                            else:
+                                rel = str(Path("Anchor Admin") / rel_part).replace("\\", "/")
+                            if rel == "Anchor Admin/anchor-edition.json":
+                                continue
+                            if rel == "Anchor Admin/anchor-core-overlay.zip" and adm_ov is not None:
+                                zf.writestr(rel, adm_ov)
+                            else:
+                                zf.write(f, rel)
+                    if adm_ov is not None and not (src_dir / "anchor-core-overlay.zip").is_file():
+                        zf.writestr("Anchor Admin/anchor-core-overlay.zip", adm_ov)
+                else:
+                    if adm_ov is not None:
+                        zf.writestr("Anchor Admin/anchor-core-overlay.zip", adm_ov)
+                    zf.writestr("Anchor Admin/README.txt", "Run shell/build_exe.ps1 on Mothership to populate Anchor Admin.exe.\n")
+        return admin_zip, "Anchor-Admin.zip"
 
     # Build or refresh Anchor-Test-Onboard.zip
     need_rebuild = not test_zip.is_file()
@@ -4130,6 +4213,17 @@ def render_onboard_wizard_html(
     )
     toggle_href = "/onboard-wizard" if sandbox else "/onboard-wizard?sandbox=1"
     toggle_label = "Switch to Live Mode" if sandbox else "🧪 Test Walkthrough Mode (Ignore Existing Anchor & Tailscale)"
+    is_admin = bool(bundle.get("admin_edition", True))
+    sandbox_toggle_html = (
+        f'<a class="btn" href="{toggle_href}" id="btnToggleSandbox">{toggle_label}</a>'
+        if (is_admin or sandbox)
+        else ""
+    )
+    admin_gui_btn_html = (
+        '<a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:4px"> Anchor Admin GUI</a>'
+        if is_admin
+        else ""
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -4397,11 +4491,11 @@ def render_onboard_wizard_html(
       </div>
     </div>
     <div class="wiz-top-actions">
-      <a class="btn" href="{toggle_href}" id="btnToggleSandbox">{toggle_label}</a>
+      {sandbox_toggle_html}
       <button type="button" class="btn" id="btnResetSandbox" {"" if sandbox else "hidden"}>↺ Reset Walkthrough</button>
       <button type="button" class="btn emerald" id="btnApplySandbox" {"" if sandbox else "hidden"}>✓ Commit &amp; Apply to Live Anchor</button>
       <a class="btn" href="/recover-account">🔑 Account Recovery</a>
-      <a class="btn" href="/gwl-admin"><img src="/vendor/brand/anchor-admin-key.png" alt="" style="width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:4px"> Anchor Admin GUI</a>
+      {admin_gui_btn_html}
       <a class="btn" href="/setup">⚙ Provider Setup</a>
       <a class="btn primary" href="/high-seat">🏛 Open Cave of Wonders</a>
       <div class="wiz-winctl" aria-label="Window controls">
@@ -4509,7 +4603,7 @@ def render_onboard_wizard_html(
                   </div>
                 </div>
                 <div id="dualAuthBackupCodesList" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
-                <div class="muted" style="margin-top:6px">Standard 3-Layer 2FA Recovery: (1) 10 Single-Use Backup Codes above · (2) Verified Contact Email Recovery Link (<a href="/recover-account" style="color:var(--sky)">/recover-account</a>) · (3) System Admin Reset on Puter (<a href="/gwl-admin" style="color:var(--sky)">/gwl-admin</a>).</div>
+                <div class="muted" style="margin-top:6px">Standard 3-Layer 2FA Recovery: (1) 10 Single-Use Backup Codes above · (2) Verified Contact Email Recovery Link (<a href="/recover-account" style="color:var(--sky)">/recover-account</a>) · (3) System Admin Assisted Reset on the Puter Mothership.</div>
               </div>
             </div>
             <div style="margin-top:12px">
