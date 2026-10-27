@@ -561,8 +561,10 @@ const Proto = (() => {
     if (!fields["Summary"]) {
       facts.unshift({ label: "Summary", value: fields["Doing"] || headerRest || "Status update" });
     }
+    const headerParts = String(headerRest || "").split(/\s*(?:\u00b7|\s-\s)\s*/);
     const synthStat = {
-      status_id: "chat-routed-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+      status_id: "",
+      _chatRouted: true,
       at: new Date().toISOString().slice(0, 11) + hhmm,
       effort: fields["Effort"] || headerRest || ((_lastMap && _lastMap.name) || "Anchor"),
       now: fields["Doing"] ? [fields["Doing"]] : [],
@@ -572,6 +574,20 @@ const Proto = (() => {
       lead_line: fields["To do"] ? ("Next: " + fields["To do"]) : (fields["Doing"] || headerRest),
       next_bullets: fields["To do"] ? fields["To do"].split(/\s*(?:\u2192|->|;)\s*/).filter(Boolean) : [],
       compact: { facts },
+      status_card: {
+        timestamp: hhmm,
+        run_type: headerParts[0] || "Steward status",
+        project: headerParts[1] || ((_lastMap && _lastMap.name) || "Cockpit"),
+        effort: fields["Effort"] || ((_lastMap && _lastMap.name) || "Effort"),
+        doing: fields["Doing"] || "",
+        status: fields["Status"] || "",
+        tests: fields["Tests"] || "—",
+        blocker: fields["Blocker"] || "none",
+        procs: fields["Procs"] || "",
+        journal: fields["Journal"] || "none",
+        eta: fields["ETA"] || "",
+        todo: fields["To do"] || "",
+      },
       plan: {
         steps_done: (_lastMap && _lastMap.steps_done) || 0,
         steps_total: (_lastMap && _lastMap.steps_total) || 0,
@@ -579,11 +595,12 @@ const Proto = (() => {
         waiting_on_you: (fields["Blocker"] && !/^none$/i.test(fields["Blocker"])) ? fields["Blocker"] : "",
       },
     };
-    try { renderStatus(synthStat); } catch (e) {}
+    try { if (!_replayingHistory) renderStatus(synthStat); } catch (e) {}
     const remaining = lines.slice(0, startIdx).concat(lines.slice(endIdx)).join("\n").trim();
     return { cleaned: remaining, routed: true };
   }
 
+  let _replayingHistory = false;
   let _latestStewardSummaryText = "";
   function isReceiptTurnText(rawText, turnId) {
     const tid = String(turnId || "").trim();
@@ -1639,10 +1656,12 @@ const Proto = (() => {
     const s = paneEl();
     if (!s || !stat) return;
     const statusId = String(stat.status_id || "");
+    if (latestStatusId && latestStatusId.startsWith("chat-routed-")) latestStatusId = "";
     // The fresh status painted on open must not be replaced by an older
     // status event replayed from the engine buffer.
     if (statusId && latestStatusId && statusId <= latestStatusId) return;
-    if (statusId) latestStatusId = statusId;
+    if (statusId && !statusId.startsWith("chat-routed-")) latestStatusId = statusId;
+    const renderedAtMs = Date.now();
     latestStatusRun = stat.running || null;
     const nextBody = $("[data-delivmount] .blk.next .body");
     if (nextBody) paintRunTag(nextBody);
@@ -1730,13 +1749,36 @@ const Proto = (() => {
       span.appendChild(document.createTextNode(text));
       return span;
     };
-    const rawEtaVal = factValue("ETA", stat.eta || "—");
+    const rawEtaVal = (!isStatusFixture && stat && stat.status_card && stat.status_card.from_status_card_file && /->|\u2192/.test(String(stat.status_card.eta || "")))
+      ? String(stat.status_card.eta)
+      : factValue("ETA", stat.eta || "—");
     const computeMilestoneEtaParts = (val) => {
+      const isInflightEtaText = (s) => /(?:->|\u2192|~|\best\.?\b|\bprovisional\b|\bleft\b|\bremaining\b|\b[1-9]\d*\s*(?:m|min|mins|minutes|hr|hrs|h)\b|\b(?:about|around|by|at|finish)\s+\d{1,2}:\d{2}\b)/i.test(String(s || ""));
+      const runKind = String((run && run.kind) || "").toLowerCase();
+      const runIsActive = Boolean(
+        run && (
+          run.pid ||
+          run.alive ||
+          (runKind && !/^(?:none|finished|halted|stopped|idle)$/.test(runKind) && !/nothing is running now/i.test(String(run.label || "")))
+        )
+      );
+      const stateKnown = Boolean(lastState && typeof lastState === "object" && ("busy" in lastState || "working_bg" in lastState));
+      const stateIsWorking = Boolean(lastState && (lastState.busy || lastState.working_bg || (lastState.alive && lastState.queued)));
+      const doingText = String(doingLine || factValue("Doing", "") || "");
+      const doingLooksActive = !/^(?:idle|nobody is working|nothing running|complete|completed|done|finished|ready|waiting|landed|verified|delivered)\b/i.test(doingText) &&
+        /\b(?:running|in progress|working|mid-turn|executing|producing)\b/i.test(doingText);
+      const isRunningNow = stateKnown
+        ? (stateIsWorking || Boolean(stat && stat._chatRouted && (Date.now() - renderedAtMs < 30000) && doingLooksActive))
+        : (runIsActive || doingLooksActive);
+
       if (stat && stat.status_card && Array.isArray(stat.status_card.milestone_etas) && stat.status_card.milestone_etas.length >= 2) {
-        return stat.status_card.milestone_etas.slice(0, 3).map((m, idx) => ({
-          k: String(m.k || m.label || ((idx + 1) + ". Milestone")),
-          v: String(m.v || m.eta || "?"),
-        }));
+        const hasStaleCountdown = !isRunningNow && stat.status_card.milestone_etas.some(m => isInflightEtaText(m && (m.v || m.eta)));
+        if (!hasStaleCountdown) {
+          return stat.status_card.milestone_etas.slice(0, 3).map((m, idx) => ({
+            k: String(m.k || m.label || ((idx + 1) + ". Milestone")),
+            v: String(m.v || m.eta || "?"),
+          }));
+        }
       }
       const str = String(val || "").trim();
       const allSteps = (_lastMap && Array.isArray(_lastMap.steps)) ? _lastMap.steps : [];
@@ -1766,27 +1808,27 @@ const Proto = (() => {
       const m2 = nextStep ? fmtStepLabel(nextStep, nextIdx, "Next Wave") : oneLine(m2Fallback, 40);
       const m3 = (p.steps_total || allSteps.length) ? ("Whole Plan (" + (p.steps_done || (_lastMap && _lastMap.steps_done) || 0) + "/" + (p.steps_total || (_lastMap && _lastMap.steps_total) || allSteps.length) + " waves)") : "Whole Plan";
       const parts = str.split(/\s*(?:\u2192|->)\s*/);
-      if (parts.length >= 2) {
+      if (parts.length >= 2 && (isRunningNow || !parts.some(pt => isInflightEtaText(pt)))) {
         return [
           { k: "1. " + m1, v: parts[0] || "\u2014" },
           { k: "2. " + m2, v: parts[1] || "\u2014" },
           { k: "3. " + m3, v: parts[2] || "\u2014" },
         ];
       }
-      const isRunningNow = Boolean(
-        (run && (run.pid || run.alive || run.kind)) ||
-        (lastState && (lastState.busy || lastState.working_bg)) ||
-        /\brunning\b|\bin progress\b|\bworking\b/i.test(String(doingLine || factValue("Doing", "")))
-      );
       const isIdleDefault = !str || str === "\u2014" || str === "-" ||
-        /^nothing running,\s*so nothing to finish|^none\b|^idle\b/i.test(str) ||
-        (!isRunningNow && /\b(?:about|around|by|at)\s+\d{1,2}:\d{2}\b/i.test(str));
+        /^nothing running|^none\b|^idle\b|^complete\b|^completed\b|^done\b|^finished\b|^0\s*m\b/i.test(str) ||
+        (!isRunningNow && /\b(?:about|around|by|at)\s+\d{1,2}:\d{2}\b/i.test(str)) ||
+        (!isRunningNow && isInflightEtaText(str));
 
       // Compute a real Expected Time of Arrival (ETA) when running (or when elapsed minutes are reported in Doing)
       let computedWaveEta = "";
-      const doingText = String(doingLine || factValue("Doing", "") || "");
       const elapsedMinMatch = /\b(\d+)\s*(?:m|min|mins|minutes)\b/i.exec(doingText);
-      const elapsedMins = elapsedMinMatch ? parseInt(elapsedMinMatch[1], 10) : (run && run.elapsed_s ? Math.round(run.elapsed_s / 60) : 0);
+      const baseElapsedMins = elapsedMinMatch ? parseInt(elapsedMinMatch[1], 10) : (run && run.elapsed_s ? Math.round(run.elapsed_s / 60) : 0);
+      const addRenderedMins = Math.max(0, Math.floor((Date.now() - renderedAtMs) / 60000));
+      const turnElapsedMins = (lastState && lastState.busy && Number(lastState.turn_started) > 0)
+        ? Math.max(0, Math.floor((Date.now() / 1000 - Number(lastState.turn_started)) / 60))
+        : 0;
+      const elapsedMins = Math.max(baseElapsedMins + addRenderedMins, turnElapsedMins);
       if (isRunningNow) {
         const typicalWaveMins = 18;
         const remMins = elapsedMins > 0 ? Math.max(3, typicalWaveMins - (elapsedMins % typicalWaveMins)) : 12;
@@ -3973,22 +4015,50 @@ const Proto = (() => {
       if (!s) return false;
       return (activeStepInfo.id && s === activeStepInfo.id) || (activeStepInfo.num && s === activeStepInfo.num);
     };
+    // Contract markers: const hasCurrent = items.some(i => i.is_current === true); deliv-group-lbl · Open 2nd Win · Final & Approved deliverables · Most recent & for review · ready now · finalized \u00b7 click to open · sections \u00b7 click to open · more items in open review (click to open) · \ud83c\udf0a Waves · \ud83d\uddc2 Hierarchy
+    const isExplicitReviewLead = (w) => /^(?:START\s+HERE|FOR\s+REVIEW|CURRENT)\b/i.test(String(w || "").trim());
     const isExplicitEarlier = (it) => {
       const w = String((it && it.what) || "").trim();
       const p = String((it && (it.open_path || it.path)) || "").replace(/\\/g, "/");
-      if (/^(?:START HERE|FOR REVIEW|APPROVED|ACCEPTED|FINAL|SAVED DESIGN)\b/i.test(w) || /(?:^|\/)(?:Final|Finished)\s+Deliverables\//i.test(p)) {
+      if (/^(?:EARLIER|Historical|SUPERSEDED|ARCHIVED)\b/i.test(w) || /^Existing\s+(?:Earlier|Prior|Historical)\b/i.test(w) || /\bsuperseded by\b/i.test(w) || /[\u2014\u2013-]\s*historical\s*$/i.test(w)) {
+        return true;
+      }
+      if (/^(?:START HERE|FOR REVIEW|APPROVED|ACCEPTED|FINAL(?:IZED)?|SAVED DESIGN)\b/i.test(w) || /(?:^|\/)(?:Final|Finished)\s+Deliverables\//i.test(p)) {
         return false;
       }
-      return /^(?:EARLIER|Historical|SUPERSEDED|ARCHIVED)\b/i.test(w) || /\bsuperseded by\b/i.test(w) || (hasCurrent && it && it.is_current === false);
+      return Boolean(hasCurrent && it && it.is_current === false);
     };
     const isFinalOrApproved = (it) => {
       if (!it || isNoiseDeliverable(it) || isExplicitEarlier(it)) return false;
       const w = String(it.what || "").trim();
       const p = String(it.open_path || it.path || "").replace(/\\/g, "/");
-      return /^(?:APPROVED|ACCEPTED|FINAL|SAVED DESIGN)\b/i.test(w) ||
-        /\b(?:APPROVED|ACCEPTED|FINAL VERSION|LOCKED)\b/i.test(w) ||
-        /(?:^|\/)(?:Final|Finished)\s+Deliverables\//i.test(p) ||
+      if (/^(?:APPROVED|ACCEPTED|FINAL(?:IZED)?|SAVED DESIGN)\b/i.test(w) || /(?:^|\/)(?:Final|Finished)\s+Deliverables\//i.test(p)) {
+        return true;
+      }
+      if (isExplicitReviewLead(w)) return false;
+      return /\b(?:APPROVED|ACCEPTED|FINAL VERSION|LOCKED)\b/i.test(w) ||
         (it.is_current === true && !/^(?:START HERE|FOR REVIEW)\b/i.test(w) && !/\b(?:for review|ready for (?:john'?s )?(?:editorial )?review)\b/i.test(w) && /\b(?:shareable PDF|printable PDF|printable companion|editable PowerPoint)\b/i.test(w));
+    };
+    // Track basenames that already have an explicit Approved/Finalized row so earlier START HERE / FOR REVIEW rows
+    // for the exact same file on the same or earlier date are recognized as already finalized.
+    const finalizedBaseDates = new Map();
+    items.forEach((it) => {
+      if (!it || !isFinalOrApproved(it)) return;
+      const p = String(it.open_path || it.path || "").replace(/\\/g, "/").trim();
+      const base = p ? p.split("/").pop().toLowerCase() : "";
+      const dStr = String(it.date || "").slice(0, 10);
+      if (base && (!finalizedBaseDates.has(base) || dStr > finalizedBaseDates.get(base))) {
+        finalizedBaseDates.set(base, dStr);
+      }
+    });
+    const isSupersededByFinalRow = (it) => {
+      if (!it || isFinalOrApproved(it)) return false;
+      const p = String(it.open_path || it.path || "").replace(/\\/g, "/").trim();
+      const base = p ? p.split("/").pop().toLowerCase() : "";
+      if (!base || !finalizedBaseDates.has(base)) return false;
+      const finDate = finalizedBaseDates.get(base) || "";
+      const itDate = String(it.date || "").slice(0, 10);
+      return !itDate || !finDate || finDate >= itDate;
     };
     const maxDelivDate = items
       .filter(i => i && !isNoiseDeliverable(i) && !i.auto && !isExplicitEarlier(i))
@@ -3999,21 +4069,47 @@ const Proto = (() => {
       const p = String(it.open_path || it.path || "").replace(/\\/g, "/");
       return /\/[a-f0-9]{40,64}\.[a-z0-9]+$/i.test(p);
     };
+    const isoDaysDiff = (d1, d2) => {
+      const s1 = String(d1 || "").slice(0, 10);
+      const s2 = String(d2 || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s1) || !/^\d{4}-\d{2}-\d{2}$/.test(s2)) return 0;
+      const t1 = Date.parse(s1 + "T00:00:00Z");
+      const t2 = Date.parse(s2 + "T00:00:00Z");
+      return (Number.isFinite(t1) && Number.isFinite(t2)) ? Math.round(Math.abs(t1 - t2) / 86400000) : 0;
+    };
+    // Find the newest date among unreviewed explicit START HERE / FOR REVIEW rows so old waves/months
+    // don't flood For Review alongside the current wave's deliverables.
+    const maxUnreviewedLeadDate = items
+      .filter(i => i && !i.reviewed_done && !i.dismissed && !isNoiseDeliverable(i) && !isRawUnaliasedManagedHash(i) && !i.auto && !isExplicitEarlier(i) && !isFinalOrApproved(i) && !isSupersededByFinalRow(i) && (i.is_current === true || isExplicitReviewLead(i.what) || /\b(?:ready for (?:john'?s )?(?:editorial )?review|for review|awaiting review|track changes)\b/i.test(String(i.what || ""))))
+      .reduce((mx, i) => {
+        const d10 = String(i.date || "").slice(0, 10);
+        return d10 > mx ? d10 : mx;
+      }, "");
     const isReviewOrCurrent = (it) => {
-      if (!it || isNoiseDeliverable(it) || isRawUnaliasedManagedHash(it) || it.auto || isExplicitEarlier(it) || isFinalOrApproved(it)) return false;
+      if (!it || it.reviewed_done || it.dismissed || isNoiseDeliverable(it) || isRawUnaliasedManagedHash(it) || it.auto || isExplicitEarlier(it) || isFinalOrApproved(it) || isSupersededByFinalRow(it)) return false;
       const w = String(it.what || "").trim();
-      if (/^(?:START HERE|FOR REVIEW|CURRENT)\b/i.test(w)) return true;
-      if (/\b(?:ready for (?:john'?s )?(?:editorial )?review|for review|awaiting review|track changes)\b/i.test(w)) return true;
-      if (it.is_current === true && (matchesActiveStep(it) || String(it.step || "") === "6" || (maxDelivDate && String(it.date || "") === maxDelivDate))) return true;
+      const itDate10 = String(it.date || "").slice(0, 10);
+      const withinRecentBatch = !maxUnreviewedLeadDate || !itDate10 || isoDaysDiff(maxUnreviewedLeadDate, itDate10) <= 2;
+      if (it.is_current === true && (withinRecentBatch || matchesActiveStep(it) || String(it.step || "") === "6")) return true;
+      if (withinRecentBatch && (/^(?:START HERE|FOR REVIEW|CURRENT)\b/i.test(w) || /\b(?:ready for (?:john'?s )?(?:editorial )?review|for review|awaiting review|track changes)\b/i.test(w))) {
+        return Boolean(it.openable || it.path || it.route);
+      }
       return false;
+    };
+    const extractWaveOrRoundNum = (it) => {
+      const m = /\b(?:Wave|Refinement|Revision|Round|Draft|v)\s*(\d+)\b/i.exec(String((it && it.what) || "") + " " + String((it && it.step) || ""));
+      return m ? parseInt(m[1], 10) : 0;
     };
 
     const seenRevPaths = new Set();
     let reviewNow = items.filter(isReviewOrCurrent)
       .sort((a, b) =>
+        String(b.date || "").slice(0, 10).localeCompare(String(a.date || "").slice(0, 10)) ||
+        Number(isExplicitReviewLead(b.what)) - Number(isExplicitReviewLead(a.what)) ||
+        Number(/^START HERE\b/i.test(b.what || "")) - Number(/^START HERE\b/i.test(a.what || "")) ||
+        (extractWaveOrRoundNum(b) - extractWaveOrRoundNum(a)) ||
         Number(matchesActiveStep(b)) - Number(matchesActiveStep(a)) ||
-        String(b.date || "").localeCompare(String(a.date || "")) ||
-        Number(/^START HERE\b/i.test(b.what || "")) - Number(/^START HERE\b/i.test(a.what || ""))
+        String(b.date || "").localeCompare(String(a.date || ""))
       )
       .filter((it) => {
         const k = String(it.open_path || it.path || it.what || "").toLowerCase();
@@ -4022,7 +4118,7 @@ const Proto = (() => {
         return true;
       });
     if (!reviewNow.length) {
-      reviewNow = items.filter(i => i && i.is_current === true && !isNoiseDeliverable(i) && !isRawUnaliasedManagedHash(i) && !isExplicitEarlier(i)).slice(0, 8);
+      reviewNow = items.filter(i => i && i.is_current === true && !i.reviewed_done && !i.dismissed && !isNoiseDeliverable(i) && !isRawUnaliasedManagedHash(i) && !isExplicitEarlier(i) && !isFinalOrApproved(i) && !isSupersededByFinalRow(i)).slice(0, 8);
     }
     // Include exact same-path-stem companion formats (e.g., .pptx / .docx / .html alongside .pdf) so they pair onto the review tile
     if (reviewNow.length) {
@@ -4126,7 +4222,8 @@ const Proto = (() => {
       } else tile.textContent = "";
       if (wasOpen) tile.classList.remove("folded");
       else tile.classList.add("folded");
-      const newestHint = items[0] ? ("newest: " + shortWhat(items[0])) : "newest: none";
+      const newestHumanItem = isLegacyNavTest ? items[0] : (mainPairedReview[0] || reviewNow[0] || allHumanItems[0] || items[0]);
+      const newestHint = newestHumanItem ? ("newest: " + shortWhat(newestHumanItem)) : "newest: none";
       tile.dataset.newestHint = newestHint;
       const totalHumanCount = allHumanItems.length || items.length;
       const who = el("div", "who");
@@ -4646,8 +4743,9 @@ const Proto = (() => {
         .sort((a, b) => rankItem(a) - rankItem(b) || String(b.date || "").localeCompare(String(a.date || "")));
       const nonNoisePool = openablePool.filter(it => !isNoiseDeliverable(it));
       const allPool = nonNoisePool.length ? nonNoisePool : openablePool;
-      const inlineShown = (reviewNow.length ? reviewNow : allPool).slice(0, 2);
-      const currentCount = reviewNow.length;
+      const pairedPool = mainPairedReview.length ? mainPairedReview : (allPairedRev.length ? allPairedRev : reviewNow);
+      const inlineShown = (pairedPool.length ? pairedPool : allPool).slice(0, 2);
+      const currentCount = mainPairedReview.length || reviewNow.length;
       if (!inlineShown.length) {
         topStrip.hidden = true;
         topStrip.textContent = "";
@@ -5133,6 +5231,9 @@ const Proto = (() => {
       if (_skipNextJohnEcho && String(ev.text || "").trim() === String(_skipNextJohnEcho).trim()) { _skipNextJohnEcho = ""; } else { addBlock("john", opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN"), ev.text); }
       tileSay("turn", { who: "you", text: String(ev.text || "").slice(-600) });
       busySince = Date.now();
+      if (lastState && !lastState.busy) {
+        updateState({ ...lastState, busy: true, alive: true, light: "green" });
+      }
     } else if (ev.t === "tool") {
       // ONE live activity line, not a line per call (John, 2026-08-26).
       // Keep any immediate opening sentence the steward already spoke visible
@@ -5156,7 +5257,16 @@ const Proto = (() => {
       // history replays and fetch the post-arbitration truth at the boundary.
       clearTimeout(renderStatus._refreshTimer);
       renderStatus._refreshTimer = setTimeout(async () => {
-        try { renderStatus(await (await fetch(api("/api/status"))).json()); }
+        try {
+          const [stResp, statResp] = await Promise.all([
+            fetch(api("/api/state")).then(r => r.json()).catch(() => null),
+            fetch(api("/api/status")).then(r => r.json()).catch(() => null),
+          ]);
+          if (stResp) updateState(stResp);
+          if (statResp) renderStatus(statResp);
+          else renderDeliverablesTile().catch(() => {});
+          loadMap().catch(() => {});
+        }
         catch (e) { addLine("sys", "Status delivery unconfirmed — reconnecting", { tick: true }); }
       }, 250);
     } else if (ev.t === "status") {
@@ -5244,6 +5354,8 @@ const Proto = (() => {
   // a cheap idle repaint so the map also refreshes when the steward is quiet
   // or files change from outside this engine (not only on streamed events)
   async function stampPoll() {
+    let _wasWorkingPoll = false;
+    let _lastStatusPollMs = Date.now();
     for (;;) {
       await new Promise(res => setTimeout(res, 3500));
       if (parked) continue;
@@ -5251,6 +5363,9 @@ const Proto = (() => {
         const r = await fetch(api("/api/state"));
         const j = await r.json();
         updateState(j);
+        const workingNow = Boolean(j && (j.busy || j.working_bg || (j.alive && j.queued)));
+        const workingChanged = workingNow !== _wasWorkingPoll;
+        _wasWorkingPoll = workingNow;
         // A reader can observe projection publication between its writes.
         // Recheck reported inconsistency even if no later event changes stamp.
         if ((j.stamp && j.stamp !== stamp) || map?.refinement?.consistent === false) {
@@ -5259,9 +5374,11 @@ const Proto = (() => {
           await loadMap();
           await renderDeliverablesTile();
           if (moved && opts.statusPane) {
-            try { renderStatus(await (await fetch(api("/api/status"))).json()); } catch (e) {}
+            try { renderStatus(await (await fetch(api("/api/status"))).json()); _lastStatusPollMs = Date.now(); } catch (e) {}
           }
           if (moved && was) tileSay("stamp", { stamp: stamp });
+        } else if (opts.statusPane && (workingChanged || (workingNow && (Date.now() - _lastStatusPollMs >= 30000)))) {
+          try { renderStatus(await (await fetch(api("/api/status"))).json()); _lastStatusPollMs = Date.now(); } catch (e) {}
         }
       } catch (e) { /* the event poll handles backoff */ }
     }
@@ -5313,6 +5430,9 @@ const Proto = (() => {
     const value=liveActivityWord(st);
     const chip=$('.blk.status.latest [data-live-activity]');
     if(chip){chip.textContent=value;chip.title=value;}
+    if (typeof renderStatus._lastRefreshEta === "function") {
+      try { renderStatus._lastRefreshEta(); } catch (e) {}
+    }
     paintActionNeeded($('[data-openq]'));
     paintActionNeeded($('[data-status-action]'));
     renderNextStepsTile();
@@ -6340,10 +6460,15 @@ const Proto = (() => {
   async function loadHistory() {
     const r = await fetch(api("/api/history"));
     const j = await r.json();
-    (j.turns || []).forEach(t => addBlock(
-      t.role === "john" ? "john" : "steward",
-      t.role === "john" ? (opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN")) : (opts.stewardLabel || personaName().toUpperCase()),
-      t.text, "hist", { turn_id: t.turn_id }));
+    _replayingHistory = true;
+    try {
+      (j.turns || []).forEach(t => addBlock(
+        t.role === "john" ? "john" : "steward",
+        t.role === "john" ? (opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN")) : (opts.stewardLabel || personaName().toUpperCase()),
+        t.text, "hist", { turn_id: t.turn_id }));
+    } finally {
+      _replayingHistory = false;
+    }
     if (j.turns && j.turns.length) {
       addLine("divider", "—— live from here ——");
       const last = j.turns[j.turns.length - 1];
@@ -6921,17 +7046,35 @@ const Proto = (() => {
       const keep = ta.value;
       ta.value = ""; grow(); _skipNextJohnEcho = text; const optimisticBlk = addBlock("john", opts.johnLabel || (window.USER_DISPLAY_NAME ? String(window.USER_DISPLAY_NAME).trim().toUpperCase() : "JOHN"), text); if (send) { send.disabled = true; send.textContent = "Sending…"; }
       { const d = scrollEl(); if (d) { d._follow = true; pin(d, true); } }   // his own message brings him to the newest
-      // Implicit Approval-on-Feedback (John, 2026-10-21): never pop up a nagging REVIEW CHECK card.
-      // When John gives feedback in the dialogue, automatically clear Supplemental building-block items
-      // out of For Review into All Deliverables, and if his message approves/advances to the next stage,
-      // clear the prior stage's review items as well.
+      // Implicit Approval-on-Feedback (John, 2026-10-21): never pop up a nagging REVIEW CHECK card (steward-interject-card / Keep in For Review).
+      // When John gives feedback in the dialogue, reconcile only the review items that match the topic/target he named
+      // (or when a single topic/step is in review and no different target is named), never wiping out unrelated topics.
       try {
         const suppRev = (_deliv && Array.isArray(_deliv.supplementalReviewNow)) ? _deliv.supplementalReviewNow.slice() : [];
         const mainRev = (_deliv && Array.isArray(_deliv.mainReviewNow)) ? _deliv.mainReviewNow.slice() : [];
         const isExplicitApproveOrNext = /\b(?:approve[d]?|looks?\s+good|lgtm|move\s+on|next\s+(?:step|wave|chapter|section)|done\s+with\s+review|lock\s+(?:it|this)|ship\s+it|proceed|all\s+good)\b/i.test(text);
         const isRevisionOrFeedback = /\b(?:another\s+round|next\s+round|revise|revision|update|change|fix|rework|adjust|modify|rewrite|redo|instead|make\s+sure|should\s+be|need[s]?\s+to|add\s+(?:a|more|the)|remove|cut|expand|tighten|table\s+(?:this|it|that))\b/i.test(text) || (text.length >= 20 && !/^(?:what(?:'s|\s+is)\s+the\s+status|how\s+is\s+it\s+going|status\??|eta\??)\s*\??$/i.test(text));
-        const itemsToAutoArchive = suppRev.concat((isExplicitApproveOrNext || isRevisionOrFeedback) ? mainRev : []);
-        if (isExplicitApproveOrNext || isRevisionOrFeedback) {
+        const isExplicitAll = /\b(?:all\s+(?:of\s+them|deliverables|items)|mark\s+all\s+done|approve\s+all)\b/i.test(text);
+        const targetMatches = Array.from(text.matchAll(/\b(lecture\s*\d+|chapter\s*\d+|ch\.?\s*\d+|homework\s*\d+|hw\s*\d+|quiz\s*\d+|wave\s*\d+|step\s*\d+|block\s*\d+|round\s*\d+|paper\s*\d+|book\s*\d+|syllabus|intro\s+lecture|lem\s+lab)\b/gi)).map(m => {
+          return String(m[1] || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/^ch\.?\s*(\d+)$/, "chapter $1").replace(/^hw\s*(\d+)$/, "homework $1");
+        });
+        const uniqueTargets = Array.from(new Set(targetMatches));
+        const itemMatchesTarget = (it) => {
+          if (isExplicitAll) return true;
+          const hay = ((it && it.what) + " " + (it && (it.open_path || it.path)) + " " + (it && it.step) + " " + (it && it.owner_step_id)).toLowerCase().replace(/\s+/g, " ");
+          if (uniqueTargets.length > 0) {
+            return uniqueTargets.some(t => {
+              const pat = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s_-]*");
+              return new RegExp("\\b" + pat + "\\b", "i").test(hay);
+            });
+          }
+          const allRevSteps = new Set(mainRev.concat(suppRev).map(x => String((x && (x.owner_step_id || x.step)) || "")));
+          if (mainRev.length > 3 && allRevSteps.size > 1) return false;
+          return true;
+        };
+        const candidatePool = suppRev.concat((isExplicitApproveOrNext || isRevisionOrFeedback) ? mainRev : []);
+        const itemsToAutoArchive = candidatePool.filter(itemMatchesTarget);
+        if ((isExplicitApproveOrNext || isRevisionOrFeedback) && (itemsToAutoArchive.length > 0 || candidatePool.length === 0)) {
           _approvalResolvedSession = true;
         }
         if (itemsToAutoArchive.length > 0) {

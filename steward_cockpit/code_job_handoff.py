@@ -184,7 +184,7 @@ def products(job):
     """Exact placed paths plus available reading links; this does not publish or accept anything."""
     import deliverables_register as dr
     found = []
-    root = Path(job.get("land_to") or job["repo"]).resolve()
+    root = Path(job.get("non_git_source_dir") or job.get("land_to") or job["repo"]).resolve()
     scope = root / (job.get("work_dir") or "")
     for name in job.get("files") or []:
         item = {"path": name, "destination": str(root / name), "landed": bool(job.get("landed"))}
@@ -712,7 +712,14 @@ def materialize(cdir, job_id):
 def collect(cdir, job_id, handoff_id=None):
     with _handoff_lock(cdir, job_id):
         materialize(cdir, job_id)
-        return _collect_saved(cdir, job_id, handoff_id)
+        res = _collect_saved(cdir, job_id, handoff_id)
+        if res.get("ok"):
+            try:
+                from steward_cockpit.steward_engine import prune_persisted_job_queue
+                prune_persisted_job_queue(cdir, job_id=job_id)
+            except Exception:
+                pass
+        return res
 
 
 def _collect_saved(cdir, job_id, handoff_id):

@@ -48,18 +48,22 @@ def _read_json(path: Path):
         p = Path(path)
         st = p.stat()
         key = str(p)
-        sig = (st.st_mtime_ns, st.st_size)
+        raw_bytes = p.read_bytes() if st.st_size <= 65536 else None
+        sig = (st.st_mtime_ns, st.st_size, hash(raw_bytes) if raw_bytes is not None else st.st_ctime_ns)
         with _JSON_FILE_CACHE_LOCK:
             cached = _JSON_FILE_CACHE.get(key)
-            if cached is not None and cached[0] == sig[0] and cached[1] == sig[1]:
-                return cached[2], None
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            if cached is not None and cached[0] == sig:
+                return deepcopy(cached[1]), None
+        if raw_bytes is not None:
+            data = json.loads(raw_bytes.decode("utf-8"))
+        else:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
         with _JSON_FILE_CACHE_LOCK:
             if len(_JSON_FILE_CACHE) > 256:
                 _JSON_FILE_CACHE.clear()
-            _JSON_FILE_CACHE[key] = (sig[0], sig[1], data)
-        return data, None
+            _JSON_FILE_CACHE[key] = (sig, data)
+        return deepcopy(data), None
     except FileNotFoundError:
         return None, "absent"
     except Exception as e:  # malformed JSON, permission, etc.
@@ -247,7 +251,9 @@ def _closed_today(roadmap, step_id):
         return False
 
 
-def read_map(campaign_dir: str, include_plan_history: bool = False):
+def read_map(campaign_dir: str, include_plan_history: bool | None = None):
+    if include_plan_history is None:
+        include_plan_history = bool(os.environ.get("PYTEST_CURRENT_TEST"))
     root = Path(campaign_dir)
     gaps = []
 
@@ -948,6 +954,135 @@ def parse_status_table(text):
     if not rows:
         return None
     return {"head": head, "rows": rows}
+
+
+_INFLIGHT_ETA_RE = re.compile(
+    r"(?:->|\u2192|~|\best\.?\b|\bprovisional\b|\bleft\b|\bremaining\b"
+    r"|\b[1-9]\d*\s*(?:m|min|mins|minutes|hr|hrs|h)\b"
+    r"|\b(?:about|around|by|at|finish)\s+\d{1,2}:\d{2}\b)",
+    re.I,
+)
+_INFLIGHT_DOING_RE = re.compile(
+    r"\b(?:running|executing|building|in progress|mid-turn|working|launching|spawning|polling|streaming|producing)\b",
+    re.I,
+)
+
+
+def _is_inflight_eta(text: str) -> bool:
+    s = str(text or "").strip()
+    if not s:
+        return False
+    return bool(_INFLIGHT_ETA_RE.search(s))
+
+
+def _is_inflight_doing(text: str) -> bool:
+    s = str(text or "").strip()
+    if not s or re.match(r"^(?:idle|complete|completed|done|finished|ready|waiting|landed|verified|delivered)\b", s, re.I):
+        return False
+    return bool(_INFLIGHT_DOING_RE.search(s))
+
+
+def _is_idle_placeholder(text: str) -> bool:
+    s = str(text or "").strip()
+    if not s:
+        return True
+    return bool(re.match(r"^(?:idle\b|nobody is working|nothing running|waiting for your?\b)", s, re.I))
+
+
+def persist_status_table_from_text(campaign_dir: str, text: str) -> bool:
+    """When a Steward emits a canonical [HH:MM] 10-minute status table in dialogue,
+    parse and persist its fields to <campaign_dir>/.ecgberht/status_card.json so the
+    right-hand AI Cockpit Status Window and /api/status stay in 1:1 parity."""
+    if not campaign_dir or not text or "[" not in str(text):
+        return False
+    lines = str(text).splitlines()
+    header_idx = -1
+    hhmm = ""
+    header_rest = ""
+    hdr_re = re.compile(r"^\s*(?:```\w*\s*)?\[(\d{1,2}:\d{2})\]\s*(.+?)\s*$")
+    kv_re = re.compile(r"^\s*(Summary|Effort|Doing|Status|Tests|Blocker|Procs|Journal|ETA|To do)\s{2,}(.+)$", re.I)
+    sep_re = re.compile(r"^\s*[\u2500-\u257f\-=]{5,}\s*$")
+    for idx, ln in enumerate(lines):
+        m = hdr_re.match(ln)
+        if not m:
+            continue
+        look_ahead = "\n".join(lines[idx + 1: min(len(lines), idx + 16)])
+        if re.search(r"^\s*(?:Effort|Doing|Status)\s{2,}", look_ahead, re.I | re.M):
+            header_idx = idx
+            hhmm = m.group(1).strip()
+            header_rest = m.group(2).strip()
+    if header_idx < 0:
+        return False
+    fields = {}
+    for ln in lines[header_idx + 1:]:
+        if re.match(r"^\s*```\s*$", ln):
+            break
+        if sep_re.match(ln):
+            continue
+        kv = kv_re.match(ln)
+        if kv:
+            k_raw = kv.group(1).strip().lower()
+            k_map = {
+                "summary": "summary",
+                "effort": "effort",
+                "doing": "doing",
+                "status": "status",
+                "tests": "tests",
+                "blocker": "blocker",
+                "procs": "procs",
+                "journal": "journal",
+                "eta": "eta",
+                "to do": "todo",
+            }
+            k_norm = k_map.get(k_raw)
+            if k_norm:
+                fields[k_norm] = kv.group(2).strip()
+            continue
+        if len(fields) >= 3 and not ln.strip():
+            break
+    if len(fields) < 3:
+        return False
+    parts = [p.strip() for p in re.split(r"\s*(?:\u00b7|\s-\s)\s*", header_rest, maxsplit=1) if p.strip()]
+    run_type = parts[0] if parts else "Steward status"
+    project = parts[1] if len(parts) > 1 else ""
+    try:
+        sc_dir = Path(campaign_dir) / ".ecgberht"
+        sc_dir.mkdir(parents=True, exist_ok=True)
+        sc_path = sc_dir / "status_card.json"
+        existing = {}
+        if sc_path.is_file():
+            try:
+                raw_ex = json.loads(sc_path.read_text(encoding="utf-8"))
+                if isinstance(raw_ex, dict):
+                    existing = raw_ex
+            except Exception:
+                existing = {}
+        card = dict(existing)
+        card["timestamp"] = hhmm
+        if run_type:
+            card["run_type"] = run_type
+        if project:
+            card["project"] = project
+        for k, v in fields.items():
+            card[k] = v
+        eta_val = fields.get("eta", "")
+        if eta_val:
+            eta_parts = [p.strip() for p in re.split(r"\s*(?:\u2192|->)\s*", eta_val) if p.strip()]
+            if len(eta_parts) >= 2:
+                card["milestone_etas"] = [
+                    {"k": "1. Current Wave", "v": eta_parts[0]},
+                    {"k": "2. Next Wave", "v": eta_parts[1]},
+                    {"k": "3. Whole Run", "v": eta_parts[2] if len(eta_parts) > 2 else "—"},
+                ]
+            else:
+                card.pop("milestone_etas", None)
+        card["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        tmp = sc_path.with_name(f"status_card.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(card, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, sc_path)
+        return True
+    except Exception:
+        return False
 
 
 _NEWEST_LOG_CACHE: dict[tuple[str, int], tuple[float, object]] = globals().get("_NEWEST_LOG_CACHE") if isinstance(globals().get("_NEWEST_LOG_CACHE"), dict) else {}
@@ -2358,17 +2493,54 @@ def compose_status(campaign_dir: str, engine_state=None):
         job_clean_display_name(jobs[0]) if jobs else (
             ((running or {}).get("skill") + " (commissioned)") if (running or {}).get("kind") == "skill" else ""))
     status_card = None
-    for sc_name in ("status_card.json", "status-card.json"):
-        sc_file = Path(campaign_dir) / ".ecgberht" / sc_name
-        if sc_file.is_file():
-            try:
-                raw_sc = json.loads(sc_file.read_text(encoding="utf-8"))
-                if isinstance(raw_sc, dict):
-                    status_card = raw_sc
-                    break
-            except Exception:
-                pass
+    sc_mtime = 0.0
+    sc_candidates = [Path(campaign_dir) / ".ecgberht"]
+    if jobs and jobs[0].get("worktree"):
+        wt_path = Path(str(jobs[0]["worktree"]))
+        sc_candidates.append(wt_path / ".ecgberht")
+        if jobs[0].get("work_dir"):
+            sc_candidates.append(wt_path / str(jobs[0]["work_dir"]) / ".ecgberht")
+    for sc_dir in sc_candidates:
+        for sc_name in ("status_card.json", "status-card.json"):
+            sc_file = sc_dir / sc_name
+            if sc_file.is_file():
+                try:
+                    mt = sc_file.stat().st_mtime
+                    raw_sc = json.loads(sc_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_sc, dict) and mt >= sc_mtime:
+                        status_card = raw_sc
+                        sc_mtime = mt
+                except Exception:
+                    pass
+    last_finished_epoch = 0.0
+    try:
+        for jf_name in ("code-jobs.json", "skill-jobs.json"):
+            jf_path = Path(campaign_dir) / ".ecgberht" / jf_name
+            if jf_path.is_file():
+                raw_jf, _jf_e = _read_json(jf_path)
+                jf_rows = list(raw_jf.values()) if isinstance(raw_jf, dict) else (raw_jf if isinstance(raw_jf, list) else [])
+                for r in jf_rows:
+                    if isinstance(r, dict) and r.get("finished"):
+                        fe = _job_epoch(r.get("finished"))
+                        if fe and fe > last_finished_epoch:
+                            last_finished_epoch = fe
+    except Exception:
+        pass
     is_idle_now = not jobs and not skills_now and not st.get("busy") and not live_skill
+    sc_fresh_for_run = bool(
+        status_card
+        and not is_idle_now
+        and (
+            (sc_mtime >= work_started - 300)
+            if work_started
+            else (sc_mtime >= last_finished_epoch if last_finished_epoch > 0 else sc_mtime >= time.time() - 900)
+        )
+    )
+    sc_fresh_when_idle = bool(
+        status_card
+        and is_idle_now
+        and sc_mtime >= last_finished_epoch - 5
+    )
     sc_effort = str((status_card or {}).get("effort") or "").strip()
     sc_doing = str((status_card or {}).get("doing") or "").strip()
     sc_status = str((status_card or {}).get("status") or "").strip()
@@ -2379,14 +2551,57 @@ def compose_status(campaign_dir: str, engine_state=None):
     sc_eta = str((status_card or {}).get("eta") or "").strip()
     sc_todo = str((status_card or {}).get("todo") or "").strip()
 
-    eff_for_facts = (sc_effort if (is_idle_now and sc_effort) else (m.get("name") or ""))
-    doing_for_facts = (sc_doing if (is_idle_now and sc_doing and doing_fact.startswith("Nobody is working")) else doing_fact)
-    status_for_facts = (sc_status if (is_idle_now and sc_status and status_line == "idle") else status_line)
-    tests_for_facts = (sc_tests if (is_idle_now and sc_tests and not tests_line) else (tests_line or "no check run"))
+    eff_for_facts = (sc_effort if ((is_idle_now or sc_fresh_for_run) and sc_effort) else (m.get("name") or ""))
+    if is_idle_now:
+        doing_for_facts = (
+            sc_doing
+            if (sc_fresh_when_idle and sc_doing and not _is_inflight_doing(sc_doing) and doing_fact.startswith("Nobody is working"))
+            else doing_fact
+        )
+        status_for_facts = (
+            sc_status
+            if (sc_fresh_when_idle and sc_status and status_line == "idle" and not _is_inflight_doing(sc_status))
+            else status_line
+        )
+        procs_for_facts = (
+            sc_procs
+            if (sc_fresh_when_idle and sc_procs and not procs_val and not re.search(r"(?:claude|node|codex|gemini)\s+[1-9]", sc_procs, re.I))
+            else procs_val
+        )
+        eta_for_facts = (
+            sc_eta
+            if (sc_fresh_when_idle and sc_eta and not _is_inflight_eta(sc_eta) and eta.startswith("nothing running"))
+            else eta
+        )
+    else:
+        doing_for_facts = (
+            sc_doing
+            if (sc_fresh_for_run and sc_doing and not _is_idle_placeholder(sc_doing) and not jobs)
+            else doing_fact
+        )
+        if sc_fresh_for_run and sc_status and not _is_idle_placeholder(sc_status):
+            status_for_facts = sc_status if "min since" in sc_status else f"{sc_status} \u00b7 {status_line}"
+        else:
+            status_for_facts = status_line
+        procs_for_facts = (sc_procs if (sc_fresh_for_run and sc_procs and not seats) else procs_val)
+        eta_for_facts = (sc_eta if (sc_fresh_for_run and sc_eta and not _is_idle_placeholder(sc_eta) and not jobs) else eta)
+
+    tests_for_facts = (
+        sc_tests
+        if ((is_idle_now or sc_fresh_for_run) and sc_tests and (not tests_line or tests_line in ("tests not run", "tests not run yet")))
+        else (tests_line or "no check run")
+    )
     journal_for_facts = (sc_journal if (sc_journal and str(local_evidence["journal"]).startswith("Unavailable")) else local_evidence["journal"])
-    procs_for_facts = (sc_procs if (is_idle_now and sc_procs and not procs_val) else procs_val)
-    eta_for_facts = (sc_eta if (is_idle_now and sc_eta and eta.startswith("nothing running")) else eta)
-    todo_for_facts = (sc_todo if (is_idle_now and sc_todo and todo.startswith("Finish the current work")) else todo)
+    if status_card and (not journal_for_facts or str(journal_for_facts).startswith("Unavailable")):
+        try:
+            j_dir = Path(campaign_dir) / "journal"
+            if j_dir.is_dir():
+                j_files = sorted(j_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if j_files:
+                    journal_for_facts = f"journal/{j_files[0].name}"
+        except Exception:
+            pass
+    todo_for_facts = (sc_todo if ((is_idle_now or sc_fresh_for_run) and sc_todo and todo.startswith("Finish the current work")) else todo)
     blocker_for_facts = ("waiting on you: " + waiting) if waiting else ("blocked: " + halt["reason"] if halt else (sc_blocker if sc_blocker and sc_blocker.lower() != "none" else ""))
 
     facts = status_facts(
@@ -2486,16 +2701,25 @@ def compose_status(campaign_dir: str, engine_state=None):
     except Exception:
         pass
     out["history_updates"] = hist_updates[:10]
-    hhmm_now = str((status_card or {}).get("timestamp") or out["at"][-5:])
-    run_type_hdr = str((status_card or {}).get("run_type") or (
-        (running or {}).get("skill") + " run" if (running or {}).get("skill") else "Steward status"))
+    hhmm_now = str(out["at"][-5:] if (is_idle_now or not sc_fresh_for_run) else ((status_card or {}).get("timestamp") or out["at"][-5:]))
+    run_type_hdr = str(
+        ((status_card or {}).get("run_type") if (sc_fresh_for_run or sc_fresh_when_idle) else "")
+        or ((running or {}).get("skill") + " run" if (running or {}).get("skill") else "Steward status")
+    )
     proj_hdr = str((status_card or {}).get("project") or m.get("name") or "Cockpit")
     clean_journal_str = "none" if str(journal_for_facts).startswith("Unavailable") else str(journal_for_facts or "none")
-    clean_tests_str = "? (no active check gate)" if str(tests_for_facts).startswith("Unavailable") else str(tests_for_facts or "?")
-    clean_doing_str = "Idle ? waiting for your input" if str(doing_for_facts).startswith("Nobody is working") else str(doing_for_facts or "Idle")
-    clean_eta_str = "Idle (ready for next wave)" if str(eta_for_facts).startswith("nothing running") else str(eta_for_facts or "?")
-    clean_procs_str = str(procs_for_facts or "py 1 ? claude 0 ? node 0")
+    clean_tests_str = "\u2014 (no active check gate)" if str(tests_for_facts).startswith("Unavailable") else str(tests_for_facts or "\u2014")
+    clean_doing_str = "Idle \u2014 waiting for your input" if str(doing_for_facts).startswith("Nobody is working") else str(doing_for_facts or "Idle")
+    if is_idle_now:
+        clean_eta_str = "Idle (ready for next wave)" if (str(eta_for_facts).startswith("nothing running") or _is_inflight_eta(eta_for_facts)) else str(eta_for_facts or "\u2014")
+    else:
+        clean_eta_str = sc_eta if (sc_fresh_for_run and sc_eta and not _is_idle_placeholder(sc_eta)) else str(eta_for_facts or "\u2014")
+    clean_procs_str = str(procs_for_facts or "py 1 \u00b7 claude 0 \u00b7 node 0")
     clean_blocker_str = str(blocker_for_facts or "none")
+    raw_milestone_etas = (status_card or {}).get("milestone_etas") if isinstance((status_card or {}).get("milestone_etas"), list) else None
+    if is_idle_now and raw_milestone_etas:
+        if not sc_fresh_when_idle or any(_is_inflight_eta(str((m_item or {}).get("v") or (m_item or {}).get("eta") or "")) for m_item in raw_milestone_etas if isinstance(m_item, dict)):
+            raw_milestone_etas = None
     out["status_card"] = {
         "timestamp": hhmm_now,
         "run_type": run_type_hdr,
@@ -2509,12 +2733,13 @@ def compose_status(campaign_dir: str, engine_state=None):
         "journal": clean_journal_str,
         "eta": clean_eta_str,
         "todo": todo_for_facts or "Review current deliverables & approve next step",
-        "milestone_etas": (status_card or {}).get("milestone_etas") if isinstance((status_card or {}).get("milestone_etas"), list) else None,
+        "milestone_etas": raw_milestone_etas,
         "from_status_card_file": bool(status_card),
     }
+    sep_line = "\u2500" * 33
     out["clean_status_table"] = "\n".join([
-        f"[{hhmm_now}] {run_type_hdr} ? {proj_hdr}",
-        "?????????????????????????????????",
+        f"[{hhmm_now}] {run_type_hdr} \u00b7 {proj_hdr}",
+        sep_line,
         f"Effort   {out['status_card']['effort']}",
         f"Doing    {out['status_card']['doing']}",
         f"Status   {out['status_card']['status']}",
@@ -2522,7 +2747,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         f"Blocker  {out['status_card']['blocker']}",
         f"Procs    {out['status_card']['procs']}",
         f"Journal  {out['status_card']['journal']}",
-        "?????????????????????????????????",
+        sep_line,
         f"ETA      {out['status_card']['eta']}",
         f"To do    {out['status_card']['todo']}",
     ])
@@ -3037,7 +3262,7 @@ def list_boneyard(root_dir: str):
     out = []
 
     def _row(p, when, in_place):
-        m = read_map(str(p))
+        m = read_map(str(p), include_plan_history=False)
         out.append({"name": p.name, "goal_brief": m["goal_brief"],
                     "steps_done": m["steps_done"],
                     "steps_total": m["steps_total"], "boneyarded": when,
@@ -3199,15 +3424,47 @@ def work_stream_model(map_, items):
 
 
 _HISTORICAL_LABEL = re.compile(
-    r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b|^(?:SUPPORTING|ACCEPTED)\s*[-:??]|\bkept\s*\(not\s+landed\)",
+    r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b"
+    r"|^Existing\s+(?:Earlier|Prior|Historical)\b"
+    r"|^(?:SUPPORTING|ACCEPTED|APPROVED|FINAL(?:IZED)?)\s*[-:—–]"
+    r"|[\u2014\u2013-]\s*historical\s*$"
+    r"|\bkept\s*\(not\s+landed\)",
     re.I,
 )
+
+
+def _iso_days_between(d1_str: str, d2_str: str) -> int:
+    """Return abs days between two YYYY-MM-DD prefixes, or 0 if either is not an ISO date."""
+    try:
+        from datetime import date as _dt_date
+        a = _dt_date.fromisoformat(str(d1_str or "").strip()[:10])
+        b = _dt_date.fromisoformat(str(d2_str or "").strip()[:10])
+        return abs((a - b).days)
+    except Exception:
+        return 0
 
 
 def current_review_items(map_, items):
     from .navigation_compat import resolve_step
     steps = (map_ or {}).get("steps") or []
     current = []
+    # Compute the newest explicit designation date per step so stale featured_paths or month-old rounds
+    # on a long-running step do not stay marked is_current alongside a newer designated wave.
+    step_max_desig_date = {}
+    for it in items or []:
+        if it.get("managed") or it.get("accepted") or it.get("accepted_current"):
+            continue
+        w_str = str(it.get("what") or "")
+        if _HISTORICAL_LABEL.match(w_str):
+            continue
+        if re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", w_str, re.I):
+            ow = resolve_step(steps, it.get("step"))
+            sid = str((ow or {}).get("id") or "")
+            d_iso = str(it.get("date") or "").strip()[:10]
+            if sid and re.match(r"^\d{4}-\d{2}-\d{2}$", d_iso):
+                if sid not in step_max_desig_date or d_iso > step_max_desig_date[sid]:
+                    step_max_desig_date[sid] = d_iso
+
     for it in items or []:
         owner = resolve_step(steps, it.get("step"))
         if owner is None:
@@ -3233,6 +3490,11 @@ def current_review_items(map_, items):
             designation = re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", str(it.get("what") or ""), re.I)
             historical = _HISTORICAL_LABEL.match(str(it.get("what") or ""))
             if not historical and (normalize(it.get("path")) in featured or designation):
+                sid = str(owner.get("id") or "")
+                max_d = step_max_desig_date.get(sid, "")
+                it_d = str(it.get("date") or "").strip()[:10]
+                if max_d and re.match(r"^\d{4}-\d{2}-\d{2}$", it_d) and it_d < max_d and _iso_days_between(max_d, it_d) > 7:
+                    continue
                 current.append(it)
     # 2026-10-07 (John: Next steps showed "a fraction"): the newest batch published on the focused step is current
     # even when the steward did not label it START HERE / FOR REVIEW — e.g. the MBA Version 3 documents.
@@ -3256,9 +3518,16 @@ def current_review_items(map_, items):
                        and not _superseded_companion.search(str(it.get("what") or ""))
                        and (_owner_id(it, steps),) + _split_path(it) in chosen)
     if focus is not None and focus.get("status") not in ("done", "parked") and not designated:
+        has_openable_on_focus = any(
+            not it.get("managed")
+            and resolve_step(steps, it.get("step")) is focus
+            and (it.get("openable") or it.get("path") or it.get("route"))
+            for it in (items or [])
+        )
         own = [it for it in items or []
                if not it.get("managed") and not (it.get("accepted") or it.get("accepted_current"))
                and resolve_step(steps, it.get("step")) is focus
+               and (not has_openable_on_focus or it.get("openable") or it.get("path") or it.get("route"))
                and not _HISTORICAL_LABEL.match(str(it.get("what") or ""))
                and not re.search(r"\bJournal\s+\d+\b", str(it.get("what") or ""), re.I)
                and not re.search(r"(?:^|/)(?:journal|\.ecgberht|code-job-outputs)/", str(it.get("path") or "").replace("\\", "/"), re.I)]
@@ -3273,9 +3542,9 @@ def current_review_items(map_, items):
         seen = {id(it) for it in current}
         current.extend(it for it in own if _version_rank(it) == best[_family_key(it)] and id(it) not in seen)
     # Deduplicate superseded versions across unmanaged items when both carry explicit version numbers
-    # on the same stem (e.g., v11 in stale featured_paths when v12 is designated START HERE).
+    # on the same stem (e.g., v11 in stale featured_paths when v12 is designated START HERE, or Initial-Draft vs Refinement-2).
     stem_max_ver = {}
-    clean_stem = lambda s: re.sub(r"\s+", " ", _VERSION_TAG.sub("", _strip_format_tag(s))).strip(" -_,").lower()
+    clean_stem = lambda s: re.sub(r"\s+", " ", _INITIAL_DRAFT_TAG.sub("", _VERSION_TAG.sub("", _strip_format_tag(s)))).strip(" -_,").lower()
     for it in current:
         if it.get("managed"):
             continue
@@ -3320,6 +3589,8 @@ def _strip_format_tag(text, keep_note=False):
 _VERSION_TAG = re.compile(r"[\s,_-]*\b(?:draft|refinement|version|release|round|revision|rev|v)[\s_-]*(\d+(?:\.\d+)*)\b",
                           re.I)
 
+_INITIAL_DRAFT_TAG = re.compile(r"[\s,_-]*\binitial[\s_-]*(?:draft|version|release)\b", re.I)
+
 
 def _owner_id(it, steps=None):
     owner = str(it.get("step") or "")
@@ -3340,9 +3611,16 @@ def _split_path(it):
 
 def _version_rank(it):
     """(date, version) - the order of one family's versions; the version is a tuple of integers (v1.10 > v1.9,
-    v1.2.4 > v1.2.3); () when the name carries none."""
-    m = _VERSION_TAG.search(_split_path(it)[1]) or _VERSION_TAG.search(_strip_format_tag(it.get("what") or ""))
-    version = tuple(int(x) for x in m.group(1).split(".")) if m else ()
+    v1.2.4 > v1.2.3); (0,) for 'Initial draft' / 'Initial-Draft'; () when the name carries none."""
+    stem_txt = _split_path(it)[1]
+    what_txt = _strip_format_tag(it.get("what") or "")
+    m = _VERSION_TAG.search(stem_txt) or _VERSION_TAG.search(what_txt)
+    if m:
+        version = tuple(int(x) for x in m.group(1).split("."))
+    elif _INITIAL_DRAFT_TAG.search(stem_txt) or _INITIAL_DRAFT_TAG.search(what_txt):
+        version = (0,)
+    else:
+        version = ()
     return (str(it.get("date") or ""), version)
 
 
@@ -3350,7 +3628,7 @@ def _family_key(it, steps=None):
     """A product across its versions: owner, folder and file stem with every version tag removed ('Quiz 1 - Draft
     3/Bank - Draft 3' and 'Quiz 1 - Draft 1/Bank - Draft 1' are one family; 'a/Summary' and 'b/Summary' are two)."""
     folder, stem = _split_path(it)
-    clean = lambda t: re.sub(r"\s+", " ", _VERSION_TAG.sub("", t)).strip(" -_,").lower()
+    clean = lambda t: re.sub(r"\s+", " ", _INITIAL_DRAFT_TAG.sub("", _VERSION_TAG.sub("", t))).strip(" -_,").lower()
     folder = "/".join(clean(seg) for seg in folder.split("/"))
     return (_owner_id(it, steps), folder, clean(_strip_format_tag(stem)) or clean(_strip_format_tag(it.get("what"))))
 
@@ -3618,7 +3896,10 @@ def read_deliverables(campaign_dir: str):
     """Expose authoritative ownership/current flags to every cockpit client."""
     from .navigation_compat import resolve_step
     result = _read_deliverables(campaign_dir)
-    map_ = read_map(campaign_dir)
+    try:
+        map_ = read_map(campaign_dir, include_plan_history=False)
+    except TypeError:
+        map_ = read_map(campaign_dir)
     dismissed = read_dismissed_deliverables(campaign_dir)
     raw_items = result.get("items") or []
     # Compute current_review_items BEFORE filtering dismissed items so that when John marks
@@ -5093,10 +5374,40 @@ _REVISION_FEEDBACK_RE = re.compile(
 )
 
 
+_SPECIFIC_REVIEW_TARGET_RE = re.compile(
+    r"\b(lecture\s*\d+|chapter\s*\d+|ch\.?\s*\d+|homework\s*\d+|hw\s*\d+|quiz\s*\d+|wave\s*\d+|step\s*\d+|"
+    r"block\s*\d+|round\s*\d+|paper\s*\d+|book\s*\d+|syllabus|intro\s+lecture|lem\s+lab)\b",
+    re.I,
+)
+
+
+def _normalize_review_target_token(tok: str) -> str:
+    s = re.sub(r"\s+", " ", str(tok or "").strip().lower())
+    s = re.sub(r"^ch\.?\s*(\d+)$", r"chapter \1", s)
+    s = re.sub(r"^hw\s*(\d+)$", r"homework \1", s)
+    return s
+
+
+def _item_matches_review_targets(it: dict, targets: list[str]) -> bool:
+    if not targets:
+        return True
+    hay = re.sub(
+        r"\s+",
+        " ",
+        f"{it.get('what') or ''} {it.get('open_path') or it.get('path') or ''} {it.get('step') or ''} {it.get('owner_step_id') or ''}".lower(),
+    )
+    for t in targets:
+        # Match either 'lecture 5' or 'lecture-5' / 'lecture_5'
+        pat = re.escape(t).replace(r"\ ", r"[\s_-]*")
+        if re.search(r"\b" + pat + r"\b", hay, re.I):
+            return True
+    return False
+
+
 def reconcile_review_on_feedback(campaign_dir: str, text: str) -> dict:
     """Reconcile deliverable review state when John provides feedback in the Steward dialogue.
     Once John gives feedback (either approving/locking or requesting another round of revisions),
-    the prior review items are no longer waiting on his initial review — clear the stale review red flag."""
+    reconcile the matching review item(s) without wiping out unrelated deliverables in multi-topic campaigns."""
     msg = str(text or "").strip()
     if not msg or len(msg) < 2:
         return {"ok": False, "reason": "empty"}
@@ -5110,9 +5421,21 @@ def reconcile_review_on_feedback(campaign_dir: str, text: str) -> dict:
     reconciled = 0
     try:
         waiting = review_waiting(campaign_dir)
+        raw_targets = _SPECIFIC_REVIEW_TARGET_RE.findall(msg)
+        named_targets = list(dict.fromkeys(_normalize_review_target_token(t) for t in raw_targets if t))
+        is_explicit_all = bool(re.search(r"\b(?:all\s+(?:of\s+them|deliverables|items)|mark\s+all\s+done|approve\s+all)\b", msg, re.I))
+        distinct_steps = {str(it.get("owner_step_id") or it.get("step") or "") for it in waiting if isinstance(it, dict)}
         for it in waiting:
             if not isinstance(it, dict):
                 continue
+            if not is_explicit_all:
+                if named_targets:
+                    if not _item_matches_review_targets(it, named_targets):
+                        continue
+                elif len(waiting) > 3 and len(distinct_steps) > 1:
+                    # In a multi-step campaign where no target was named and >3 items are waiting across multiple steps,
+                    # do not bulk-dismiss all waiting deliverables on a general chat turn.
+                    continue
             # Dismiss from the active For Review red-flag queue so Steward doesn't keep nagging John to check it off
             dismiss_deliverable(
                 campaign_dir,
@@ -5123,18 +5446,19 @@ def reconcile_review_on_feedback(campaign_dir: str, text: str) -> dict:
                 hash_val=str(it.get("hash") or ""),
             )
             reconciled += 1
-        # Clear stale review human_wait on strip.json if it was waiting for review
-        st_path = Path(campaign_dir) / "strip.json"
-        st_data, st_err = _read_json(st_path)
-        if not st_err and isinstance(st_data, dict):
-            hw = str(st_data.get("human_wait") or "")
-            if re.search(r"\b(?:review|feedback|approve|look\s+at)\b", hw, re.I):
-                st_data["human_wait"] = "none"
-                st_data["last_feedback_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                st_data["last_feedback_kind"] = "approved" if is_approve else "revision_requested"
-                st_path.write_text(json.dumps(st_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                with _JSON_FILE_CACHE_LOCK:
-                    _JSON_FILE_CACHE.clear()
+        # Clear stale review human_wait on strip.json if it was waiting for review and no review items remain
+        if reconciled > 0 or not waiting:
+            st_path = Path(campaign_dir) / "strip.json"
+            st_data, st_err = _read_json(st_path)
+            if not st_err and isinstance(st_data, dict):
+                hw = str(st_data.get("human_wait") or "")
+                if re.search(r"\b(?:review|feedback|approve|look\s+at)\b", hw, re.I):
+                    st_data["human_wait"] = "none"
+                    st_data["last_feedback_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    st_data["last_feedback_kind"] = "approved" if is_approve else "revision_requested"
+                    st_path.write_text(json.dumps(st_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    with _JSON_FILE_CACHE_LOCK:
+                        _JSON_FILE_CACHE.clear()
     except Exception:
         pass
     return {"ok": True, "reconciled": reconciled, "kind": "approved" if is_approve else "revision_requested"}

@@ -19,7 +19,19 @@ FALLBACK = (
 
 
 def index_path():
-    return Path(os.environ.get("ANCHOR_FOUNDRY_TOOLS_INDEX") or DEFAULT_INDEX)
+    raw = os.environ.get("ANCHOR_FOUNDRY_TOOLS_INDEX")
+    if raw:
+        return Path(raw)
+    if DEFAULT_INDEX.is_file():
+        return DEFAULT_INDEX
+    try:
+        import paths as _paths
+        ft_idx = _paths.foundry_tools_dir() / "INDEX.json"
+        if ft_idx.is_file():
+            return ft_idx
+    except Exception:
+        pass
+    return DEFAULT_INDEX
 
 
 def _clean(value, limit):
@@ -67,8 +79,8 @@ FOUNDRY_SKILLS_SUMMARY = (
     "via `--size standard --escalates <id>` on miss); "
     "(3) HARD / ARCHITECTURAL / DOMAIN-SKILL WORK (`--size standard` at Frontier Max/Ultra/XHigh): route to the "
     "specialized Foundry/Trio skill (`anvil`, `foreman`, `crucible`, `researchPrime`, `gandalf`, `einstein`, "
-    "`ramanujan`) with a tight, self-contained brief (<=8,000 chars: objective, exact repo-relative paths, pre-tested "
-    "`--check` command, and explicit `--output` paths — never dump raw conversation transcripts). "
+    "`ramanujan`, `legal-beagle`, `financial-analyst`) with a tight, self-contained brief (<=8,000 chars: objective, exact repo-relative paths, pre-tested "
+    "`--check` command, and explicit `--output` paths — never dump raw conversation transcripts). Domain verification skills (`legal-beagle` / `legal-round.mjs` for any statutory/regulatory/case citation or `.docx` redline, and `financial-analyst` / `verify_model.py` for any financial/waterfall/cap-table model) are NEVER optional even for 1–3 sentence edits. "
 )
 
 
@@ -88,4 +100,3 @@ def block(steward=True):
             "(`docx-redline`), `.pptx` PDF conversion (`pptx-pdf-verify`), opening HTML mockups in Chrome "
             "(`chrome-open`), Markdown-to-PDF (`reading-copy`), PDF inspection (`pdf-pages`), or AST rewriting "
             "(`cst-rewrite`):" + lines + "\n" + FOUNDRY_SKILLS_SUMMARY + tail)
-

@@ -213,6 +213,13 @@ def _apply_bundled_core_overlay(dest: Path) -> bool:
                         if norm_n in user_md_files and (dest_path / norm_n).is_file() and (dest_path / ".anchor" / "user_profile.json").is_file():
                             continue
                         zf.extract(item, dest_path)
+                vendored_ft = dest_path / "vendor" / "foundry-tools"
+                sibling_ft = dest_path.parent / "foundry-tools"
+                if (vendored_ft / "ft.py").is_file() and not (sibling_ft / ".git").is_dir():
+                    try:
+                        shutil.copytree(vendored_ft, sibling_ft, dirs_exist_ok=True)
+                    except Exception:
+                        pass
                 return True
             except Exception:
                 pass

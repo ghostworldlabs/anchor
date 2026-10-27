@@ -129,6 +129,12 @@
   }
   function tokenQ() { var t = token(); return t ? ('?token=' + encodeURIComponent(t)) : ''; }
   function openWin(url) {
+    try {
+      if (window.top && window.top.ANCHOR_APP && typeof window.top.ANCHOR_APP.open === 'function') {
+        var aw = window.top.ANCHOR_APP.open(url, '_blank', window);
+        if (aw) return;
+      }
+    } catch (e) {}
     var w = null;
     try { w = window.open('about:blank', '_blank'); } catch (e) { w = null; }
     if (!w || w === window) { receipt('The browser blocked the new window — allow popups and try again.', true); return; }

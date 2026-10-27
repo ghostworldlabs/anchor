@@ -8,6 +8,7 @@ The launcher embeds this machine's Python path, so it is built here, not shipped
 ("", "") when it could not be built (the caller then falls back to the plain directory with git.cmd).
 """
 import hashlib
+import importlib
 import os
 import shutil
 import sys
@@ -38,7 +39,7 @@ def ensure():
         if exe.exists() and mark.exists() and mark.read_text(encoding="utf-8").strip() == stamp:
             return str(out), str(out / "bash_env.sh")
         out.mkdir(parents=True, exist_ok=True)
-        from pip._vendor.distlib.scripts import ScriptMaker
+        ScriptMaker = importlib.import_module("pip._vendor.distlib.scripts").ScriptMaker
         (out / "gitguard_impl.py").write_bytes(code)      # the guard itself, beside its launcher
         maker = ScriptMaker(None, str(out), add_launchers=True)
         maker.executable = sys.executable

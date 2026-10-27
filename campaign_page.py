@@ -763,7 +763,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>%s</title>%s'
         '<link rel="stylesheet" href="/static/steward-dialogue.css?v=%s"><link rel="stylesheet" href="/static/campaign-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s", you: "%s"};</script></head>'
+        '<script src="/static/app-frame.js"></script><script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", stamp: "%s", steward: "%s", you: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every goal, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'

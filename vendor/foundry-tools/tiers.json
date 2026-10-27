@@ -1,0 +1,8 @@
+{
+  "about": "John's model tiers for Anchor code jobs (2026-10-13). Anchor and stewards only READ this file; John changes it. 'standard' is the dashboard's setting (latest model, highest effort). A job started with --size small runs its family's 'small' entry; a family missing here runs standard. Claude models are the CLI aliases sonnet, opus or haiku; ChatGPT and Gemini models must be in their own model lists.",
+  "small": {
+    "claude": {"model": "sonnet", "effort": "high"},
+    "chatgpt": {"model": "gpt-6-luna", "effort": "high"},
+    "gemini": {"model": "gemini-3.8-flash", "effort": "medium"}
+  }
+}

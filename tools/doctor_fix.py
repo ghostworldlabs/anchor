@@ -109,10 +109,29 @@ def probe_live_routes(paths=None, timeout: float = 5.0) -> list[dict]:
     return results
 
 
+def ensure_cockpit_tools() -> dict:
+    """Ensure foundry-tools and gitguard launchers are present on this machine."""
+    out = {"foundry_tools": "", "gitguard": ""}
+    try:
+        import paths as _paths
+        ft = _paths.ensure_foundry_tools(ROOT)
+        out["foundry_tools"] = str(ft) if (ft / "ft.py").is_file() else ""
+    except Exception as exc:
+        out["foundry_tools_error"] = str(exc)
+    try:
+        from tools.gitguard import install as _ggi
+        gbin, _ = _ggi.ensure()
+        out["gitguard"] = str(gbin or "")
+    except Exception as exc:
+        out["gitguard_error"] = str(exc)
+    return out
+
+
 def repair_cockpits() -> list[dict]:
     from steward_cockpit import steward_campaign as sc
     import rnd_registry as rnd
 
+    ensure_cockpit_tools()
     repaired = []
     seen_dirs = set()
     try:
@@ -124,9 +143,6 @@ def repair_cockpits() -> list[dict]:
         fp = (proj or {}).get("folder_path") or ""
         if fp and Path(fp).is_dir():
             candidates.append(Path(fp))
-    book1 = Path(r"C:\dev\Writing\Artificial Magi\Book 1")
-    if book1.is_dir():
-        candidates.append(book1)
 
     for base in candidates:
         try:

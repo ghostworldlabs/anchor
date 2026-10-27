@@ -38,9 +38,11 @@
     var w = null;
     try { w = app.open(url, target, window, features); } catch (e) { w = null; }
     if (w) return w;
+    var rawUrl = String(url == null ? "" : url).trim();
+    if (!rawUrl || /^about:/i.test(rawUrl)) return null;
     try {
-      var u = new URL(String(url || ""), window.location.href);
-      if (u.origin === window.top.location.origin && !/^(ms-\w+|mailto|tel|file):/i.test(String(url || ""))) {
+      var u = new URL(rawUrl, window.location.href);
+      if (u.origin === window.top.location.origin && !/^(ms-\w+|mailto|tel|file):/i.test(rawUrl)) {
         return null;
       }
     } catch (e) {}

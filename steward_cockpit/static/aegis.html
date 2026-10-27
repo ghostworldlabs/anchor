@@ -1171,7 +1171,7 @@
       div.className = "msg " + (isUser ? "user" : "aegis");
       const who = document.createElement("div");
       who.className = "msg-who";
-      who.innerHTML = "<span>" + escapeHtml(m.who || (isUser ? "JOHN" : "ALADDIN · AEGIS STEWARD")) + "</span><span>" +
+      who.innerHTML = "<span>" + escapeHtml(m.who || (isUser ? ((window.USER_DISPLAY_NAME && String(window.USER_DISPLAY_NAME).trim().toUpperCase()) || "JOHN") : "ALADDIN · AEGIS STEWARD")) + "</span><span>" +
         escapeHtml((m.ts || "").replace("T", " ").replace("Z", "")) + "</span>";
       const body = document.createElement("div");
       body.textContent = m.text || "";

@@ -472,7 +472,10 @@ def main(argv=None):
         if callable(_orig_new_win) and not getattr(_edge.EdgeChrome, "_anchor_patched", False):
             def _anchor_new_window_request(self_ec, sender, args):
                 try:
-                    uri = str(args.get_Uri() or "")
+                    uri = str(args.get_Uri() or "").strip()
+                    if not uri or uri.lower().startswith("about:"):
+                        args.set_Handled(True)
+                        return
                     base = (host._address or connect.LOCAL or "http://127.0.0.1:8777").rstrip("/")
                     if uri.startswith(base) or uri.startswith("http://127.0.0.1:") or uri.startswith("http://localhost:"):
                         args.set_Handled(True)
@@ -496,8 +499,15 @@ def main(argv=None):
     if FROZEN and not args.url and address == connect.LOCAL:
         if connect.load_attempted_upgrade_version(DATA) != connect.BUNDLED_VERSION:
             vcheck = connect.inspect_local_anchor_version(ROOT, check_system_dirs=True)
-            if vcheck.get("needs_upgrade") or vcheck.get("needs_install"):
+            if vcheck.get("needs_install"):
                 address = ""
+            elif vcheck.get("needs_upgrade"):
+                if vcheck.get("root"):
+                    connect._apply_bundled_core_overlay(Path(vcheck["root"]))
+                connect.ensure_mothership_up_to_date_and_running(package_root=vcheck.get("root") or ROOT)
+                connect.save_attempted_upgrade_version(DATA, connect.BUNDLED_VERSION)
+                if not connect.reachable(connect.LOCAL):
+                    address = ""
     host._address = address or connect.load_address(DATA)
     if not address:
         host._html = connect.setup_page(host._address) if (host._address and host._address != connect.LOCAL) else connect.first_launch_page()

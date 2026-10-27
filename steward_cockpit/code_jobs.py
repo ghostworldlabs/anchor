@@ -273,6 +273,136 @@ def _repo_root(path):
     return Path(out).resolve() if code == 0 and out else None
 
 
+def scratch_repos_base():
+    """Where managed scratch git repositories for non-git project folders (e.g. OneDrive course/exam folders) live."""
+    d = jobs_base() / "_scratch_repos"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+_SCRATCH_SKIP_DIRS = frozenset({
+    ".git", ".anchor", ".ecgberht", "__pycache__", ".pytest_cache",
+    "node_modules", ".venv", "venv", ".worktrees",
+})
+_SCRATCH_MAX_FILE_BYTES = 50 * 1024 * 1024
+
+
+def _ensure_scratch_git_repo(source_dir: Path) -> tuple[Path | None, str]:
+    """Create or sync a managed scratch git repository for a non-git folder so code jobs can run full worktree,
+    check, review, and landing gates and sync verified outputs back to ``source_dir`` on land."""
+    import git_safety as _gs
+    try:
+        src = Path(source_dir).resolve()
+        if not src.is_dir():
+            return None, "not a directory: %s" % source_dir
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", src.name).strip("-")[:32] or "folder"
+        digest = hashlib.sha1(_norm(src).encode("utf-8")).hexdigest()[:12]
+        scratch_root = (scratch_repos_base() / ("%s-%s" % (slug, digest))).resolve()
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with _gs.repo_lock(str(scratch_root), wait_s=120, who="sync scratch repo for " + str(src)) as held:
+            if not held:
+                return None, "scratch repository lock busy for %s" % src
+            if not (scratch_root / ".git").is_dir():
+                c, _, err = _git(scratch_root, "init")
+                if c != 0:
+                    return None, "could not initialize scratch git repo: %s" % err
+                _git(scratch_root, "config", "user.email", "anchor-scratch@local")
+                _git(scratch_root, "config", "user.name", "Anchor Scratch Repo")
+            seen_rels = set()
+            for root_d, dirs, files in os.walk(src):
+                dirs[:] = [d for d in dirs if d not in _SCRATCH_SKIP_DIRS]
+                for fname in files:
+                    if fname.endswith((".pyc", ".pyo", ".tmp")):
+                        continue
+                    fpath = Path(root_d) / fname
+                    try:
+                        if fpath.is_symlink():
+                            continue
+                        st = fpath.stat()
+                        if st.st_size > _SCRATCH_MAX_FILE_BYTES:
+                            continue
+                        rel = fpath.relative_to(src).as_posix()
+                    except (OSError, ValueError):
+                        continue
+                    seen_rels.add(rel)
+                    dst = scratch_root / rel
+                    try:
+                        if dst.is_file():
+                            dst_st = dst.stat()
+                            if dst_st.st_size == st.st_size and int(dst_st.st_mtime_ns) == int(st.st_mtime_ns):
+                                continue
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(fpath, dst)
+                    except OSError:
+                        continue
+            for root_d, dirs, files in os.walk(scratch_root):
+                dirs[:] = [d for d in dirs if d != ".git"]
+                for fname in files:
+                    dpath = Path(root_d) / fname
+                    try:
+                        rel = dpath.relative_to(scratch_root).as_posix()
+                        if rel not in seen_rels:
+                            dpath.unlink()
+                    except (OSError, ValueError):
+                        continue
+            _git(scratch_root, "add", "-A")
+            c_head, _, _ = _git(scratch_root, "rev-parse", "--verify", "HEAD")
+            dirty = porcelain_paths(scratch_root)
+            if c_head != 0 or dirty:
+                c_com, _, err = _git(
+                    scratch_root,
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "Baseline sync from non-git folder %s" % src.name,
+                )
+                if c_com != 0:
+                    return None, "could not commit baseline in scratch repo: %s" % err
+        return scratch_root, ""
+    except Exception as exc:
+        return None, "could not prepare scratch git repo: %s" % exc
+
+
+def _sync_scratch_landed_to_source(job, scratch_root, land_files, fields):
+    """Copy verified landed outputs from ``scratch_root`` back into ``job['non_git_source_dir']``."""
+    src_raw = str(job.get("non_git_source_dir") or "").strip()
+    if not src_raw:
+        return ""
+    src_dir = Path(src_raw).resolve()
+    if not src_dir.is_dir():
+        return "; warning: non-git source folder %s was not found" % src_dir
+    import paths as _paths
+    copied = []
+    for rel in land_files or ():
+        try:
+            target = _output_path(src_dir, rel)
+            cand_file = _output_path(scratch_root, rel)
+            if cand_file.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.is_file():
+                    try:
+                        _paths.backup_rotate(target)
+                    except Exception:
+                        pass
+                tmp = target.with_name(target.name + (".%s.tmp" % uuid.uuid4().hex[:6]))
+                shutil.copy2(cand_file, tmp)
+                _replace(str(tmp), str(target))
+                copied.append(rel)
+            elif not cand_file.exists() and target.is_file():
+                try:
+                    _paths.backup_rotate(target)
+                except Exception:
+                    pass
+                target.unlink()
+                copied.append(rel)
+        except Exception as exc:
+            fields["source_sync_error"] = str(exc)[:240]
+            return "; warning: could not sync %s back to %s (%s)" % (rel, src_dir, exc)
+    fields["synced_to_source_dir"] = str(src_dir)
+    fields["synced_source_files"] = copied
+    return "; synced %d file(s) back to non-git folder %s" % (len(copied), src_dir)
+
+
 def destination_error(repo):
     """A product belongs to its main checkout, never to another job's linked worktree."""
     import paths
@@ -280,7 +410,9 @@ def destination_error(repo):
         return "invalid repository destination"
     root = Path(repo).resolve()
     if any(inside(root, base) for base in (paths.code_jobs_dir(), paths.legacy_code_jobs_dir())):
-        return "destination is a temporary code-job worktree; inspect/collect or recover the original job %s in its commissioning effort" % root.name
+        sbase = scratch_repos_base().resolve()
+        if not (inside(root, sbase) and root.parent == sbase):
+            return "destination is a temporary code-job worktree; inspect/collect or recover the original job %s in its commissioning effort" % root.name
     c, gd, _ = _git(root, "rev-parse", "--absolute-git-dir")
     c2, common, _ = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if c or c2:
@@ -1534,12 +1666,22 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
         return {"ok": False, "error": "no job started: %d distinct document stems declared in outputs (max 3 per job) - "
                 "split multi-chapter or multi-deliverable bundles into separate focused jobs" % len(doc_stems)}
     root = _repo_root(repo or "")
+    non_git_source_dir = ""
+    if root is None and repo and Path(repo).is_dir():
+        import paths as _paths
+        cand_dir = Path(repo).resolve()
+        if not any(inside(cand_dir, b) for b in (_paths.code_jobs_dir(), _paths.legacy_code_jobs_dir())):
+            root, scratch_err = _ensure_scratch_git_repo(cand_dir)
+            if root is not None:
+                non_git_source_dir = str(cand_dir)
+            elif scratch_err:
+                return {"ok": False, "error": "no job started: " + scratch_err}
     if root is None:
         return {"ok": False, "error": "not a git repository: %s" % repo}
     why = destination_error(root)
     if why:
         return {"ok": False, "error": "no job started: " + why}
-    work_dir, why = work_scope(root, repo, work_dir, outputs)
+    work_dir, why = work_scope(root, str(root) if non_git_source_dir else repo, work_dir, outputs)
     if why:
         return {"ok": False, "error": "no job started: " + why}
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
@@ -1609,6 +1751,8 @@ def start(cdir, repo, brief, check="", engine_factory=None, steward="", coder=""
                 job["reviewer_family"] = reviewer
             if escalates:
                 job["escalates"] = escalates
+            if non_git_source_dir:
+                job["non_git_source_dir"] = non_git_source_dir
             # 2026-10-08 (John: "identify the actual skill being used"): a job that runs a skill says which, so the status
             # names it and its finish time is reckoned from that skill's own history - never from other coding jobs
             label = re.sub(r"[^A-Za-z0-9 ._-]", "", str(skill or "")).strip()[:40]
@@ -2496,6 +2640,8 @@ def land(job, files):
     if not landed:
         return False, note + "; the work is kept at %s" % wt, fields
     tail = ""
+    if not bad and job.get("non_git_source_dir"):
+        tail += _sync_scratch_landed_to_source(job, repo, land_files, fields)
     if job.get("installed_repo"):                   # landed is not installed: the human's activation is the only way
         import anchor_next
         tail = "; " + anchor_next.installed_note(job["repo"], repo)
@@ -2667,7 +2813,7 @@ def _materialize_report(cdir, job):
         try:
             import deliverables_register as _dr
             cdir_p = Path(cdir).resolve()
-            repo_p = Path(job.get("repo") or cdir).resolve()
+            repo_p = Path(job.get("non_git_source_dir") or job.get("repo") or cdir).resolve()
             rich_stems = {
                 _doc_stem_key(str(p.get("path") or ""))
                 for p in products

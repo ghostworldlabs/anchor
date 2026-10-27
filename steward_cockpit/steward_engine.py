@@ -212,7 +212,7 @@ ANCHOR_RULE = (
 SMALL_DUTY = (
     "SIZE THE REQUEST FIRST, then finish what fits. (a) DOCUMENTS and small non-code work - an answer, a note, a "
     "draft, a calendar file, an HTML or PDF page - you finish in this turn yourself and reply in one or two plain "
-    "sentences; a document John will read is registered so its link appears (see THE DELIVERABLES REGISTER). (b) "
+    "sentences; a document John will read is registered so its link appears (see THE DELIVERABLES REGISTER). Exception - LEGAL & FINANCIAL GATE: any document, email, or `.docx` redline that cites a statute, regulation, ruling, or case MUST pass `node \"C:/dev/Skill Foundry/skills/legal-beagle/bin/legal-round.mjs\" --memo <doc> --sources <verified-source-pack>` (with primary sources fetched verbatim from official legislature/court text, never model memory) and carry its `legal-beagle receipt` before delivery; any financial/waterfall/cap-table model MUST pass `financial-analyst` (`verify_model.py`). (b) "
     "CODE - any program's code - goes to a code job in its own "
     "worktree, never into the served tree: say the plan in a few lines first, and for a major coding effort wait "
     "for John's approval before starting it; then run `python C:/dev/Anchor/tools/steward_code_job.py start --repo "
@@ -294,6 +294,117 @@ def _is_machine_text(text):
     t = str(text or "").lstrip()
     return (t.startswith(MACHINE_MARK) or t.startswith("(interface - not John)")
             or (t.startswith("(") and "- not John)" in t[:120]))
+
+
+_JOB_QUEUE_HEADER_RE = re.compile(r"^\[job (result|observation) ([^\]]+)\]")
+
+
+def _extract_job_queue_header(item):
+    """Extract (kind, job_id) from a queued string or dict item, whether or not prefixed with MACHINE_MARK."""
+    raw = item.get("text") if isinstance(item, dict) else item
+    t = str(raw or "").lstrip()
+    if t.startswith(MACHINE_MARK):
+        body = t[len(MACHINE_MARK):].lstrip()
+    elif isinstance(item, dict) and item.get("origin") in ("control", "machine"):
+        body = t
+    elif t.startswith("[job "):
+        body = t
+    else:
+        return None, None
+    m = _JOB_QUEUE_HEADER_RE.match(body)
+    if not m:
+        return None, None
+    kind, hid = m.group(1), m.group(2).strip()
+    if kind == "observation":
+        if not hid.startswith("attention:"):
+            return None, None
+        parts = hid.split(":", 2)
+        jid = parts[1] if len(parts) > 1 else ""
+    else:
+        jid = hid.split(":", 1)[0]
+    return (kind, jid) if jid else (None, None)
+
+
+def _is_stale_job_queue_item(cdir, item, only_job_id=None):
+    """Return True if a machine-queued job notification is already collected or (for observations) no longer live."""
+    kind, jid = _extract_job_queue_header(item)
+    if not kind or not jid:
+        return False
+    if only_job_id is not None:
+        return jid == str(only_job_id)
+    try:
+        from steward_cockpit import code_jobs as _cj, skill_jobs as _skj
+        job = _cj.read_jobs(cdir).get(jid)
+        live_set = _cj.LIVE
+        if not job:
+            job = _skj.read_jobs(cdir).get(jid)
+            live_set = _skj.LIVE
+        if not isinstance(job, dict):
+            return False
+        h_state = str((job.get("handoff") or {}).get("state") or "")
+        if h_state == "collected":
+            return True
+        if kind == "observation" and job.get("status") not in live_set:
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _filter_job_queue(cdir, queue_items, only_job_id=None):
+    """Filter stale/collected job queue items and deduplicate superseded job observations per job_id."""
+    stage1 = [it for it in (queue_items or []) if not _is_stale_job_queue_item(cdir, it, only_job_id=only_job_id)]
+    if len(stage1) <= 1:
+        return stage1
+    last_obs_idx = {}
+    has_result = set()
+    parsed = []
+    for idx, it in enumerate(stage1):
+        kind, jid = _extract_job_queue_header(it)
+        parsed.append((kind, jid))
+        if kind == "observation" and jid:
+            last_obs_idx[jid] = idx
+        elif kind == "result" and jid:
+            has_result.add(jid)
+    out = []
+    for idx, it in enumerate(stage1):
+        kind, jid = parsed[idx]
+        if kind == "observation" and jid:
+            if jid in has_result or last_obs_idx.get(jid) != idx:
+                continue
+        out.append(it)
+    return out
+
+
+def prune_persisted_job_queue(cdir, job_id=None):
+    """Prune stale/collected machine job notifications from both persisted state and any loaded Engine."""
+    key = str(cdir or "")
+    if not key:
+        return 0
+    removed = 0
+    try:
+        if STATE_FILE == HERE / "proto-state.json":
+            import paths as _pth
+            cand = _pth.data_dir() / "steward-cockpit-state.json"
+            if cand.exists():
+                relocate_state(cand)
+        entry = _read_state_entry(key)
+        pq = list(entry.get("pending_queue") or [])
+        if pq:
+            kept = _filter_job_queue(key, pq, only_job_id=job_id)
+            if len(kept) != len(pq):
+                removed = len(pq) - len(kept)
+                _update_state(key, {"pending_queue": kept})
+    except Exception:
+        pass
+    try:
+        from steward_cockpit import steward_routes
+        eng = steward_routes.get_engine(key, create=False)
+        if eng is not None and not getattr(eng, "general", False):
+            removed = max(removed, eng.prune_stale_job_queue(job_id=job_id))
+    except Exception:
+        pass
+    return removed
 
 
 STEP_CAP = int(os.environ.get("STEWARD_SMALL_STEP_CAP", "15"))
@@ -893,6 +1004,8 @@ def fence_settings(shell=False, root=""):
     """(settings JSON for `claude --settings`, env) wiring tools/fence_guard.py as a PreToolUse hook - the shell
     check for a fenced steward, the worktree check for a code job's coder; ("", {}) when neither applies."""
     import sys as _sys
+    if not FENCE_GUARD.is_file():
+        return "", {}
     matchers, env = [], {}
     if shell:
         matchers.append("Bash|PowerShell")
@@ -1167,6 +1280,7 @@ class Engine:
         self.files = list(stored_entry.get("files") or [])
         self._lock = threading.Lock()
         self._status_lock = threading.Lock()
+        self._prune_stale_job_queue_locked()
 
     # ---------- the delivery receipt (execution minimum item 2, 2026-10-07) ----------
     # The work is module-level (publish_delivery_receipts) so a writer can announce a product with no engine loaded;
@@ -1268,6 +1382,8 @@ class Engine:
             return "red"
         # John (2026-10-15): whenever a cockpit/effort is working, its light MUST be green across AI Cockpit,
         # Cave of Wonders, and everywhere else; red (broken/stuck) leads, then green (working), then orange (waiting).
+        if self.queue and not self.busy:
+            self._prune_stale_job_queue_locked()
         if self.alive() and (self.busy or self.queue):
             return "green"
         try:
@@ -1885,7 +2001,16 @@ class Engine:
             # 2026-10-06 evening: ChatGPT stewards left the fence - inside the Anchor service the Codex sandbox cannot
             # start PowerShell or git (0xC0000142), so fenced ChatGPT stewards could not read or work. Back in once
             # the sandbox is proven under the service.
+            try:
+                import paths as _paths
+                _paths.ensure_foundry_tools()
+            except Exception:
+                pass
             fenced = STEWARD_FENCE and not self.general and self.cli == "claude"
+            code_job_tool = HERE.parent / "tools" / "steward_code_job.py"
+            if fenced and (not FENCE_GUARD.is_file() or not code_job_tool.is_file()):
+                self._emit({"t": "sys", "text": "warning: cockpit fence/hand-off tools (tools/fence_guard.py or tools/steward_code_job.py) are not installed; degrading cleanly without the fence hook"})
+                fenced = False
             self.fenced = fenced
             if fenced:
                 persona += FENCE_NOTE
@@ -2238,6 +2363,21 @@ class Engine:
         """Caller holds self._lock. True only when words are durable."""
         return _update_state(
             self.skey(), {"pending_queue": list(self.queue)}) is True
+
+    def _prune_stale_job_queue_locked(self, job_id=None):
+        """Remove queued machine job results/observations whose jobs are already collected or terminal."""
+        if not self.queue or self.general:
+            return 0
+        kept = _filter_job_queue(self.dir, self.queue, only_job_id=job_id)
+        removed = len(self.queue) - len(kept)
+        if removed:
+            self.queue = kept
+            self._persist_queue()
+        return removed
+
+    def prune_stale_job_queue(self, job_id=None):
+        with self._lock:
+            return self._prune_stale_job_queue_locked(job_id=job_id)
 
     def _hold_queue(self, reason):
         """Session ending: persist undelivered words. Never drop them.
@@ -2894,6 +3034,7 @@ class Engine:
     def _deliver_next_queued_locked(self):
         """Deliver the head of the durable queue as John's words (drift line
         computed NOW, at delivery — journal 0111). Caller holds self._lock."""
+        self._prune_stale_job_queue_locked()
         if not self.queue or self.busy:
             return False
         from steward_cockpit import maintenance
@@ -4079,6 +4220,12 @@ class Engine:
                 })
                 self.busy = False
                 self._record_timing(duration, was_tick)
+                if not self.general and not self.code_job and txt:
+                    try:
+                        from steward_cockpit import steward_campaign as _sc_sync
+                        _sc_sync.persist_status_table_from_text(self.dir, txt)
+                    except Exception:
+                        pass
                 if not err_text:
                     self._stopped_mid_turn = False   # a turn that ended on its own: the tree is whole again
                 self._emit({"t": "turn_end",

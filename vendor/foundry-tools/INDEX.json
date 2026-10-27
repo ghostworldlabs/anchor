@@ -1,0 +1,83 @@
+{
+  "about": "Foundry tools: one fast standard command per chore. Run through ft.py so every run is logged. Add a tool: a folder <name>/ with tool.py + TOOL.md, and a row here.",
+  "tools": [
+    {
+      "name": "reading-copy",
+      "purpose": "Markdown -> same-version PDF (and --html, --docx) beside it, math and figures included",
+      "command": "python C:/dev/foundry-tools/ft.py reading-copy <doc.md> [--html] [--docx]",
+      "seconds": 2
+    },
+    {
+      "name": "look",
+      "purpose": "Screenshots of a page or HTML file at phone and desktop size, and whether named elements are visibly laid out or covered",
+      "command": "python C:/dev/foundry-tools/ft.py look <file.html|url> [--check \"<css selector>\"]... [--out <folder>]",
+      "seconds": 5
+    },
+    {
+      "name": "wait",
+      "purpose": "Workers only: wait without polling for a process, file or log line you started, with a time limit (stewards never wait on Anchor jobs)",
+      "command": "python C:/dev/foundry-tools/ft.py wait --pid N | --file PATH | --log PATH --line REGEX  [--max-min M]",
+      "seconds": 0
+    },
+    {
+      "name": "time-profile",
+      "purpose": "Where a job's or session's time went: commands vs model and other time, slowest steps, helpers written by hand",
+      "command": "python C:/dev/foundry-tools/ft.py time-profile --worktree <job worktree> | --session <transcript.jsonl>",
+      "seconds": 2
+    },
+    {
+      "name": "ledger",
+      "purpose": "How code jobs are doing by size and model tier, why jobs miss landing, chores still done by hand, tool runs and proposals (read-only)",
+      "command": "python C:/dev/foundry-tools/ft.py ledger [--days 30] [--line]",
+      "seconds": 1
+    },
+    {
+      "name": "model-pricing",
+      "purpose": "Instant local lookup and nightly sync (--sync) of OpenAI, Claude, Gemini, and Grok models, small-job tiers, and API token list prices",
+      "command": "python C:/dev/foundry-tools/ft.py model-pricing [--family claude|chatgpt|gemini|grok] [--sync] [--json]",
+      "seconds": 1
+    },
+    {
+      "name": "pdf-pages",
+      "purpose": "Inspect PDF page count, dimensions, per-page text, and optionally render page PNGs without custom scripts",
+      "command": "python C:/dev/foundry-tools/ft.py pdf-pages <file.pdf> [--pages 1-5] [--info] [--render-dir <folder>]",
+      "seconds": 1
+    },
+    {
+      "name": "download",
+      "purpose": "Package or copy an HTML program or deliverable under a clean human filename with SHA-256 byte verification",
+      "command": "python C:/dev/foundry-tools/ft.py download <src> --as \"<Human Name.ext>\" [--out-dir <folder>]",
+      "seconds": 1
+    },
+    {
+      "name": "scout",
+      "purpose": "Proactively scan recent jobs, slow non-model steps, hand-written helpers, and tool proposals to detect workflow bottlenecks",
+      "command": "python C:/dev/foundry-tools/ft.py scout [--days 14] [--json]",
+      "seconds": 1
+    },
+    {
+      "name": "pptx-pdf-verify",
+      "purpose": "Convert .pptx slide decks to same-stem .pdf via LibreOffice and verify slide/page parity, selectable text, and slide bounds",
+      "command": "python C:/dev/foundry-tools/ft.py pptx-pdf-verify <deck.pptx> [--expect-slides N] [--no-convert] [--json]",
+      "seconds": 3
+    },
+    {
+      "name": "cst-rewrite",
+      "purpose": "Lossless LibCST/parso structural code rewriting, Parable of the Oranges (Juice/Peel/Pith) decomposition, and Hypothesis differential equivalence",
+      "command": "python C:/dev/foundry-tools/ft.py cst-rewrite --orange-split <repo> | --source <file.py> [--rename a:b] [--drop fn] | --verify-equivalence <old> <new>",
+      "seconds": 2
+    },
+    {
+      "name": "chrome-open",
+      "purpose": "Deterministically open one or more URLs or local HTML mockup files in John's visible Google Chrome window on WinSta0\\Default",
+      "command": "python C:/dev/foundry-tools/ft.py chrome-open <url_or_file.html> [--new-window] [--selftest]",
+      "seconds": 1
+    },
+    {
+      "name": "docx-redline",
+      "purpose": "Convert Markdown (.md) to Word (.docx) (--from-md), inspect .docx styles/tracked changes (--inspect), diff two .docx files (--diff), or generate native OpenXML Track Changes (--redline) in 1s without custom scripts",
+      "command": "python C:/dev/foundry-tools/ft.py docx-redline --from-md <doc.md> [--out <doc.docx>] | --inspect <file.docx> | --diff <base.docx> <rev.docx> | --redline <base.docx> <rev.docx> --out <tracked.docx>",
+      "seconds": 1
+    }
+  ]
+}

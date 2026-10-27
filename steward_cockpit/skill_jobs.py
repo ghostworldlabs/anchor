@@ -662,8 +662,16 @@ def collect(cdir, job_id, handoff_id=None):
                 return {"ok": False, "error": "this result was superseded; collect the current result", "handoff_id": handoff["id"]}
             _handoff_update(cdir, job_id, handoff["id"], ("pending", "queued"), state="collected", collected_at=time.time())
             current = read_jobs(cdir).get(job_id)
-            return {"ok": True, "job": job_id, "handoff": current["handoff"], "status": current.get("status"),
-                    "label": current.get("label"), "log": current.get("log"), "cwd": current.get("cwd")}
+            res = {"ok": True, "job": job_id, "handoff": current["handoff"], "status": current.get("status"),
+                   "label": current.get("label"), "log": current.get("log"), "cwd": current.get("cwd")}
+        try:
+            from steward_cockpit.steward_engine import prune_persisted_job_queue
+            prune_persisted_job_queue(cdir, job_id=job_id)
+        except Exception:
+            pass
+        return res
+
+
 
 
 def inspect(cdir, job_id):

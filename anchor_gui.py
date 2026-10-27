@@ -11283,6 +11283,12 @@ function demoteProject(b64) {{ apiCall('/api/demote_project', {{name: dec(b64)}}
 function openProjectWindow(pid) {{
     if (!pid) return false;
     var url = '/project/' + encodeURIComponent(pid) + '?v={BUILD_ID}';
+    try {{
+        if (window.top && window.top.ANCHOR_APP && typeof window.top.ANCHOR_APP.open === 'function') {{
+            var aw = window.top.ANCHOR_APP.open(url, '_blank', window);
+            if (aw) return true;
+        }}
+    }} catch (e) {{}}
     var w = null;
     try {{ w = window.open('about:blank', '_blank'); }} catch (e) {{ w = null; }}
     if (!w || w === window) {{

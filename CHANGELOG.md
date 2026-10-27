@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.5 ? Collaborator cockpit tools, vendored Foundry Tools, non-git folder code jobs, and app-frame link guard
+
+- Ships the full cockpit helper and safety suite (`tools/fence_guard.py`, `tools/steward_code_job.py`, `tools/steward_skill.py`, `tools/gitguard/`, `tools/reading_copy.py`, `tools/review_diff.mjs`, `tools/steward_review.mjs`) in the release manifest and `anchor-core-overlay.zip`.
+- Vendors `foundry-tools` (`ft.py`, `docx-redline`, `ledger`, `propose`, `look`, `reading-copy`, `pdf-pages`, `pptx-pdf-verify`, `scout`, `time-profile`) under `vendor/foundry-tools/` and auto-seeds `<workspace>/foundry-tools` on startup and doctor repair.
+- Degrades cleanly when `tools/fence_guard.py` or `tools/steward_code_job.py` is absent instead of wiring a failing `PreToolUse` hook that blocks shell calls, and adds `doctor.probe_cockpit_tools()` to Anchor Doctor.
+- Supports code jobs on non-git folders (such as OneDrive course and exam directories) by staging a managed scratch git repository under `Anchor-code-jobs/_scratch_repos/` and syncing verified landed outputs back to the source folder with `.bak-1` rotation.
+- Prevents `about:blank` from ever falling through `Anchor.exe` (`shell/anchor_shell.py` and `static/app-frame.js`) to Windows `ShellExecute` ("Get an app to open this 'about' link").
+
 ## v1.3.2 — Collaborator privacy and portability correction
 
 The release scanner and skill exporter now handle JSON-escaped Windows profile paths. The dashboard uses generic host labels. Optional Ramanujan tools export valid JSON with explicit example paths that collaborators configure locally.

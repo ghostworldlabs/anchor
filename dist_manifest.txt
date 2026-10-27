@@ -64,6 +64,20 @@ docs/notebook-work-products.md
 docs/notebook-host-setup.md
 tools/setup_notebooks.ps1
 tools/install_notebook_startup.ps1
+tools/__init__.py
+tools/doctor_fix.py
+tools/fence_guard.py
+tools/reading_copy.py
+tools/review_diff.mjs
+tools/steward_code_job.py
+tools/steward_review.mjs
+tools/steward_skill.py
+tools/gitguard/__init__.py
+tools/gitguard/git
+tools/gitguard/git.cmd
+tools/gitguard/gitguard.py
+tools/gitguard/install.py
+vendor/foundry-tools/**
 gate_adapter.py
 lanes.py
 effort_history.py
@@ -518,6 +532,7 @@ foundry_federation.py
 mothership_collab.py
 website_portal.py
 onboard_wizard.py
+librarian_kb.py
 
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml

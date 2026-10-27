@@ -24,7 +24,7 @@ from pathlib import Path
 #: cheap deterministic check told every new user their good install was broken.
 #: Two lists disagreeing is the same root cause as the v1.1.x two-builders
 #: incident: one must win, and it is the one the gate enforces.
-_FALLBACK_OPTIONAL_ABSENT = frozenset({"update_transaction", "tools"})
+_FALLBACK_OPTIONAL_ABSENT = frozenset({"update_transaction", "tools", "gwl_admin_gui"})
 
 
 def _optional_absent():
@@ -51,6 +51,40 @@ OPTIONAL_ABSENT = _optional_absent()
 #: a missing first-party module): the winpty native dep is the [terminal]
 #: extra; pytest is dev-only.
 _EXTRA_NAMES = frozenset({"winpty", "pytest"})
+
+REQUIRED_COCKPIT_TOOLS = (
+    "tools/fence_guard.py",
+    "tools/steward_code_job.py",
+    "tools/steward_skill.py",
+    "tools/gitguard/gitguard.py",
+)
+
+
+def probe_cockpit_tools(root=None):
+    """Verify that the AI Cockpit fence hook, job/skill launchers, and foundry-tools exist.
+
+    Auto-seeds ``<anchor_parent>/foundry-tools`` from ``vendor/foundry-tools`` when bundled.
+    Returns ``{"ok": bool, "missing": list[str], "foundry_tools_dir": str}``.
+    """
+    base = Path(root) if root is not None else Path(__file__).resolve().parent
+    missing = []
+    for rel in REQUIRED_COCKPIT_TOOLS:
+        if not (base / rel).is_file():
+            missing.append(rel)
+    ft_dir = base.parent / "foundry-tools"
+    try:
+        import paths as _paths
+        ft_dir = _paths.foundry_tools_dir(anchor_root=base, auto_seed=True)
+    except Exception:
+        if (base / "vendor" / "foundry-tools" / "ft.py").is_file():
+            ft_dir = base / "vendor" / "foundry-tools"
+    if not (ft_dir / "ft.py").is_file() and not (base / "vendor" / "foundry-tools" / "ft.py").is_file():
+        missing.append("foundry-tools/ft.py")
+    return {
+        "ok": len(missing) == 0,
+        "missing": missing,
+        "foundry_tools_dir": str(ft_dir),
+    }
 
 
 def get_node_version():
@@ -167,6 +201,15 @@ def run_doctor(argv=None):
             "This install is INCOMPLETE — re-download the v1.1.3+ package "
             "(older packages shipped without required modules)."
             % (name, ", ".join(sorted(set(importers))[:5])))
+
+    # ── AI Cockpit tools (fence_guard.py, steward_code_job.py, ft.py) ────────
+    ct = probe_cockpit_tools()
+    if not ct["ok"]:
+        issues.append(
+            "AI Cockpit hand-off or fence tools are MISSING (%s). "
+            "Update to v1.4.5+ or run: python tools/doctor_fix.py --auto"
+            % ", ".join(ct["missing"])
+        )
 
     # ── pywinpty (optional [terminal] extra; degrade, not fatal) ────────────
     pw = probe_pywinpty()

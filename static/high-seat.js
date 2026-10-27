@@ -49,6 +49,12 @@ function _ecgHsProjectUrl(pid, hash) {
 function _ecgHsOpenProject(pid, hash, reservedWindow) {
   if (!pid) return false;
   var url = _ecgHsProjectUrl(pid, hash);
+  try {
+    if (!reservedWindow && window.top && window.top.ANCHOR_APP && typeof window.top.ANCHOR_APP.open === 'function') {
+      var aw = window.top.ANCHOR_APP.open(url, '_blank', window);
+      if (aw) return true;
+    }
+  } catch (e) {}
   var w = reservedWindow || null;
   if (!w) {
     try { w = window.open('about:blank', '_blank'); } catch (e) { w = null; }

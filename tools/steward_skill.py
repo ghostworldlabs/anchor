@@ -11,8 +11,10 @@ the result. Only a skill's run script inside a skill root (C:/dev/trio, C:/dev/S
 import argparse, json, os, sys, urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from steward_code_job import project_for   # noqa: E402  (the same project lookup as the code-job tool)
+ANCHOR = Path(__file__).resolve().parent.parent
+if str(ANCHOR) not in sys.path:
+    sys.path.insert(0, str(ANCHOR))
+from tools.steward_code_job import project_for   # noqa: E402  (the same project lookup as the code-job tool)
 
 
 def main():

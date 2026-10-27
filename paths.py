@@ -210,6 +210,64 @@ def ecgberht_root(anchor_root=None) -> Path:
     return found
 
 
+def ensure_foundry_tools(anchor_root=None, target_dir=None) -> Path:
+    """Ensure the Foundry Tools directory (ft.py, docx-redline, reading-copy, tiers.json, INDEX.json) is present.
+
+    If ``<anchor_parent>/foundry-tools/ft.py`` is missing and ``<anchor_root>/vendor/foundry-tools/ft.py`` is bundled,
+    automatically seeds ``<anchor_parent>/foundry-tools`` from the bundled vendor copy so both dynamic callers and
+    hardcoded ``C:/dev/foundry-tools/ft.py`` invocations succeed on fresh collaborator installs.
+    """
+    import shutil as _shutil
+
+    base = Path(anchor_root).expanduser().resolve() if anchor_root is not None else CODE_DIR
+    vendored = base / "vendor" / "foundry-tools"
+    if target_dir is not None:
+        dest = Path(target_dir).expanduser().resolve()
+    else:
+        raw = (os.environ.get("ANCHOR_FOUNDRY_TOOLS_DIR") or os.environ.get("ANCHOR_FOUNDRY_TOOLS") or "").strip()
+        dest = Path(raw).expanduser().resolve() if raw else (base.parent / "foundry-tools")
+
+    if (dest / "ft.py").is_file() and (dest / "INDEX.json").is_file():
+        return dest
+    if (vendored / "ft.py").is_file():
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            for item in vendored.rglob("*"):
+                rel = item.relative_to(vendored)
+                if any(p in (".git", ".usage", "__pycache__") for p in rel.parts) or item.suffix in (".pyc", ".pyo"):
+                    continue
+                out = dest / rel
+                if item.is_dir():
+                    out.mkdir(parents=True, exist_ok=True)
+                elif item.is_file() and not out.exists():
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    _shutil.copy2(item, out)
+            if (dest / "ft.py").is_file():
+                return dest
+        except OSError:
+            pass
+        return vendored
+    return dest
+
+
+def foundry_tools_dir(anchor_root=None, auto_seed: bool = True) -> Path:
+    """Resolve the active Foundry Tools directory (checking env, sibling ``foundry-tools``, and ``vendor/foundry-tools``)."""
+    base = Path(anchor_root).expanduser().resolve() if anchor_root is not None else CODE_DIR
+    for env_name in ("ANCHOR_FOUNDRY_TOOLS_DIR", "ANCHOR_FOUNDRY_TOOLS"):
+        raw = (os.environ.get(env_name) or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    sib = base.parent / "foundry-tools"
+    if (sib / "ft.py").is_file():
+        return sib
+    if auto_seed:
+        return ensure_foundry_tools(anchor_root=base)
+    vendored = base / "vendor" / "foundry-tools"
+    if (vendored / "ft.py").is_file():
+        return vendored
+    return sib
+
+
 # ── Canonical data paths (each resolved lazily via data_dir()) ─────────────
 
 def dashboard_md() -> Path:

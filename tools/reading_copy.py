@@ -8,6 +8,8 @@ Prints the written path(s); exit 1 with the reason when it could not."""
 import argparse
 import base64
 import html as htmllib
+import importlib
+import importlib.util
 import urllib.parse
 import mimetypes
 import re
@@ -20,6 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
+import paths as _paths  # noqa: E402
 import report_viewer  # noqa: E402
 
 EDGE = [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -69,16 +72,18 @@ def edge():
 
 def _write_docx(md: Path, docx_out: Path) -> bool:
     try:
-        import importlib.util
-        tool_py = Path(os.environ.get("ANCHOR_FOUNDRY_TOOLS", "C:/dev/foundry-tools")) / "docx-redline" / "tool.py"
+        ft_dir = _paths.foundry_tools_dir(HERE)
+        tool_py = ft_dir / "docx-redline" / "tool.py"
+        if not tool_py.is_file():
+            tool_py = HERE / "vendor" / "foundry-tools" / "docx-redline" / "tool.py"
         if tool_py.is_file():
             spec = importlib.util.spec_from_file_location("docx_redline_tool", str(tool_py))
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             mod.markdown_to_docx(md, docx_out)
             return docx_out.is_file() and docx_out.stat().st_size > 0
-        from docx import Document
-        doc = Document()
+        docx_mod = importlib.import_module("docx")
+        doc = docx_mod.Document()
         for raw in md.read_text(encoding="utf-8", errors="replace").splitlines():
             s = raw.strip()
             if not s:

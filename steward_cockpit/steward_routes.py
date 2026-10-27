@@ -2242,7 +2242,8 @@ def events(cdir, qs):
     # open poll (since=0), single-flight via wake()'s own lock, and a 60s
     # cooldown so a wake that keeps failing can't respawn every poll.
     if not eng.general and not eng.alive():
-        from steward_cockpit.steward_engine import _read_state_entry
+        from steward_cockpit.steward_engine import _read_state_entry, prune_persisted_job_queue
+        prune_persisted_job_queue(eng.skey())
         now = time.time()
         entry = _read_state_entry(eng.skey())
         has_in_flight = bool(entry.get("in_flight") or entry.get("submitted") or entry.get("pending_queue"))
@@ -2380,7 +2381,7 @@ def sandbox_csp_for(ctype):
 def _serve_pdf_page_png(real_path: str, page_idx: int):
     """Render a single PDF page to PNG via PyMuPDF (fitz) for scrollable split-view."""
     try:
-        import fitz
+        fitz = importlib.import_module("fitz")
         st = os.stat(real_path)
         cache_dir = Path(tempfile.gettempdir()) / "anchor-pdf-pages"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -2408,7 +2409,7 @@ def _serve_pdf_scrollview(real_path: str, qs: dict, rel: str, cdir: str):
     so wheel scrolling, PageUp/PageDown, and non-focus-stealing scroll buttons work seamlessly
     while dictating with Win+H or 🎤 Dictate."""
     try:
-        import fitz
+        fitz = importlib.import_module("fitz")
         import html as _html
         doc = fitz.open(real_path)
         page_count = len(doc)

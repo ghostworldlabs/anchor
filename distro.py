@@ -392,6 +392,7 @@ _HOSTPATH_ALLOWED_LEAVES = frozenset({
     "skill",      # author's own "Skill Foundry" source (doc/comment; W11)
     "ecgberht",   # author's Ecgberht steward-engine source (doc/comment in
                   # route_table's TW5/TW6 section headers; same class as trio)
+    "foundry-tools",  # bundled/seeded Foundry Tools helper CLI (ft.py)
 })
 
 # Any concrete email literal (generic RFC-ish shape). Detection is by PATTERN;
@@ -803,6 +804,10 @@ _OPTIONAL_FIRST_PARTY = {
         "ships. journal.py's write-tripwire pairing degrades to a no-op "
         "without it (documented best-effort import), and the healthcheck's "
         "journal-parity rebuild walk skip-warns when it is absent"
+    ),
+    "gwl_admin_gui": (
+        "admin-only Clearinghouse console (never shipped in collaborator packages); "
+        "anchor_gui.py and onboard_wizard.py import it lazily inside try/except"
     ),
     "chamber_mockup_diff": (
         "test-only signed-mockup hash pin/diff (steward-chamber W6/W7) — "
