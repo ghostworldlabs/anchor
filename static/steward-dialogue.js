@@ -457,6 +457,16 @@
 
   /* ---------- Talk-Back Mode (concise 1-2 sentence verbal summary) ---------- */
   var TALK_MODE_KEY = 'anchor:steward:talk_mode';
+  var _caveTalkAudio = null;
+  function stopCaveTalkAudio() {
+    if (_caveTalkAudio) {
+      try { _caveTalkAudio.pause(); _caveTalkAudio.currentTime = 0; } catch (e) {}
+      _caveTalkAudio = null;
+    }
+    if (window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+  }
   function isTalkModeOn() {
     try { return localStorage.getItem(TALK_MODE_KEY) === '1'; } catch (e) { return false; }
   }
@@ -466,9 +476,46 @@
       btn.classList.toggle('talk-active', !!on);
       btn.textContent = on ? '🔊 Talk: ON' : '🔈 Talk Mode';
     });
-    if (!on && window.speechSynthesis) {
-      try { window.speechSynthesis.cancel(); } catch (e) {}
+    if (!on) {
+      stopCaveTalkAudio();
     }
+  }
+  function playCaveSummaryAudio(picked) {
+    stopCaveTalkAudio();
+    function fallbackSpeech() {
+      if (window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function') {
+        try {
+          window.speechSynthesis.cancel();
+          setTimeout(function () {
+            try {
+              var u = new SpeechSynthesisUtterance(picked);
+              u.rate = 1.06;
+              window.speechSynthesis.speak(u);
+            } catch (e) {}
+          }, 60);
+        } catch (e) {}
+      }
+    }
+    var tok = '';
+    try { tok = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+    var hdrs = { 'Content-Type': 'application/json' };
+    if (tok) { hdrs.Authorization = 'Bearer ' + tok; hdrs['X-Anchor-Token'] = tok; }
+    fetch('/api/steward/dictate', {
+      method: 'POST',
+      headers: hdrs,
+      body: JSON.stringify({ action: 'tts', text: picked, rate: 1 })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok && j.audio_b64) {
+          var aud = new Audio('data:audio/wav;base64,' + j.audio_b64);
+          _caveTalkAudio = aud;
+          aud.play().catch(function () { fallbackSpeech(); });
+        } else {
+          fallbackSpeech();
+        }
+      })
+      .catch(function () { fallbackSpeech(); });
   }
   function speakConciseSummary(rawText, forceSpeak) {
     if (!forceSpeak && !isTalkModeOn()) return;
@@ -482,14 +529,40 @@
     var sents = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
     var picked = sents.slice(0, 2).join(' ');
     if (picked.length > 210) picked = picked.slice(0, 207).replace(/\s+\S*$/, '') + '...';
-    if (window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function') {
-      try {
-        window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance(picked);
-        u.rate = 1.06;
-        window.speechSynthesis.speak(u);
-      } catch (e) {}
-    }
+    try {
+      ensureCaveEnhanceStyles();
+      var hostEl = document.getElementById('exList') || (document.getElementById('exSay') && document.getElementById('exSay').parentElement);
+      if (hostEl) {
+        var oldB = document.getElementById('caveSpokenSummaryBanner');
+        if (oldB) oldB.remove();
+        var ban = document.createElement(hostEl.tagName === 'UL' || hostEl.tagName === 'OL' ? 'li' : 'div');
+        ban.id = 'caveSpokenSummaryBanner';
+        ban.className = 'cave-spoken-summary-banner';
+        ban.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 11px;margin:6px 0;border-radius:8px;border:1px solid rgba(52,211,153,0.45);background:rgba(16,185,129,0.12);color:#d1fae5;font-size:12.5px;';
+        var txtSpan = document.createElement('span');
+        txtSpan.style.cssText = 'flex:1;line-height:1.35;';
+        txtSpan.innerHTML = '<strong>🔊 Spoken Summary:</strong> ';
+        txtSpan.appendChild(document.createTextNode(picked));
+        var repB = document.createElement('button');
+        repB.type = 'button';
+        repB.className = 'cave-voice-btn';
+        repB.style.cssText = 'padding:3px 8px;font-size:11px;';
+        repB.textContent = '🔊 Replay';
+        repB.onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); playCaveSummaryAudio(picked); };
+        var mutB = document.createElement('button');
+        mutB.type = 'button';
+        mutB.className = 'cave-voice-btn';
+        mutB.style.cssText = 'padding:3px 8px;font-size:11px;';
+        mutB.textContent = '⏹ Silence';
+        mutB.onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); stopCaveTalkAudio(); };
+        ban.appendChild(txtSpan);
+        ban.appendChild(repB);
+        ban.appendChild(mutB);
+        hostEl.appendChild(ban);
+        try { hostEl.scrollTop = hostEl.scrollHeight; } catch (e) {}
+      }
+    } catch (e) {}
+    playCaveSummaryAudio(picked);
   }
 
   /* ---------- Native Windows 11 Spellcheck Suggestion Popup (left-click / right-click) ---------- */
@@ -765,10 +838,10 @@
       }
     }, true);
     function startCaveMic() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.resolve(false);
+      return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
         .then(function (stream) {
-          if (!active) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+          if (!active) { stream.getTracks().forEach(function (t) { t.stop(); }); return false; }
           audioStream = stream;
           var Ctx = window.AudioContext || window.webkitAudioContext;
           audioCtx = new Ctx();
@@ -789,7 +862,7 @@
             for (var i = 0; i < copy.length; i++) sumSq += copy[i] * copy[i];
             var rms = Math.sqrt(sumSq / Math.max(1, copy.length));
             var now = Date.now();
-            if (rms > 0.0072) {
+            if (rms > 0.0042) {
               if (!speechDetected) {
                 speechDetected = true;
                 speechStartTs = now;
@@ -799,19 +872,20 @@
               lastVoiceTs = now;
               pcmFrames.push(copy);
               dictBtn.textContent = '🔴 Speaking…';
-              if (now - speechStartTs >= 5500) flushCaveAudio();
+              if (now - speechStartTs >= 6500) flushCaveAudio();
             } else {
               if (speechDetected) {
                 pcmFrames.push(copy);
-                if (now - lastVoiceTs >= 680) flushCaveAudio();
+                if (now - lastVoiceTs >= 900) flushCaveAudio();
               } else {
                 preRollFrames.push(copy);
-                if (preRollFrames.length > 3) preRollFrames.shift();
+                if (preRollFrames.length > 4) preRollFrames.shift();
               }
             }
           };
+          return true;
         })
-        .catch(function () {});
+        .catch(function () { return false; });
     }
     dictBtn.onclick = function (ev) {
       ev.preventDefault();
@@ -821,31 +895,33 @@
       dictBtn.classList.add('recording');
       dictBtn.textContent = '⏹ Listening…';
       exSay.focus();
-      startCaveMic();
-      fetch('/api/steward/dictate', {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
-        body: JSON.stringify({ action: 'start' })
-      }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j && typeof j.last_seq === 'number') dictSeq = j.last_seq;
-      }).catch(function () {});
-      if (pollT) clearInterval(pollT);
-      pollT = setInterval(function () {
-        if (!active) return;
+      startCaveMic().then(function (micOk) {
+        if (micOk || !active) return;
         fetch('/api/steward/dictate', {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
-          body: JSON.stringify({ action: 'poll', since: dictSeq })
+          body: JSON.stringify({ action: 'start' })
         }).then(function (r) { return r.json(); }).then(function (j) {
-          if (!active || !j) return;
-          if (Array.isArray(j.chunks)) {
-            j.chunks.forEach(function (c) {
-              if (c && typeof c.seq === 'number' && c.seq > dictSeq) dictSeq = c.seq;
-              if (c && c.text) appendChunk(c.text);
-            });
-          }
+          if (j && typeof j.last_seq === 'number') dictSeq = j.last_seq;
         }).catch(function () {});
-      }, 500);
+        if (pollT) clearInterval(pollT);
+        pollT = setInterval(function () {
+          if (!active) return;
+          fetch('/api/steward/dictate', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+            body: JSON.stringify({ action: 'poll', since: dictSeq })
+          }).then(function (r) { return r.json(); }).then(function (j) {
+            if (!active || !j) return;
+            if (Array.isArray(j.chunks)) {
+              j.chunks.forEach(function (c) {
+                if (c && typeof c.seq === 'number' && c.seq > dictSeq) dictSeq = c.seq;
+                if (c && c.text) appendChunk(c.text);
+              });
+            }
+          }).catch(function () {});
+        }, 500);
+      });
     };
     host.insertBefore(dictBtn, exSend);
 

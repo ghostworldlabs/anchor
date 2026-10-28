@@ -980,9 +980,9 @@
   if($('comms-return'))$('comms-return').onclick=leave;
   if($('btn-comms-save-account'))$('btn-comms-save-account').onclick=async()=>{
     const fb=$('comms-form-feedback');
-    if(fb)fb.textContent='Saving to OS Credential Vault…';
+    if(fb)fb.textContent='Saving to OS Credential Vault & syncing…';
     try{
-      const res=await api.request('/api/steward/comms',{
+      await api.request('/api/steward/comms',{
         action:'save_account',
         family:$('comms-family')?$('comms-family').value:'gmail',
         label:$('comms-label')?$('comms-label').value:'',
@@ -994,8 +994,21 @@
         ics_url:$('comms-ics-url')?$('comms-ics-url').value:''
       });
       if($('comms-secret'))$('comms-secret').value='';
-      renderWave9Comms(res);
-      if(fb)fb.textContent='✓ Saved account configuration and stored secret in OS Credential Vault.';
+      const synced=await api.request('/api/steward/comms',{action:'sync_now'});
+      renderWave9Comms(synced);
+      if(fb)fb.textContent='✓ Saved account to Windows OS Credential Vault and synced Calendar & Email.';
+    }catch(e){
+      if(fb)fb.textContent='Error: '+e.message;
+    }
+  };
+  if($('btn-comms-auto-outlook'))$('btn-comms-auto-outlook').onclick=async()=>{
+    const fb=$('comms-form-feedback');
+    if(fb)fb.textContent='Checking running Windows Outlook desktop app…';
+    try{
+      const res=await api.request('/api/steward/comms',{action:'auto_connect_local_outlook'});
+      const st=await api.request('/api/steward/comms');
+      renderWave9Comms(st);
+      if(fb)fb.textContent=(res.outlook_running?'✓ ':'ℹ ')+(res.message||'Local Outlook check complete.');
     }catch(e){
       if(fb)fb.textContent='Error: '+e.message;
     }

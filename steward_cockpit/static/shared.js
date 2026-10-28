@@ -5242,9 +5242,15 @@ const Proto = (() => {
       activity(ev);
     } else if (ev.t === "turn_end") {
       closeCurrent();
+      const _turnSpokenText = turnReplyBlocks
+        .map(b => (b && (b._raw || (b.querySelector && b.querySelector(".body") && b.querySelector(".body").textContent))) || "")
+        .join("\n").trim();
       turnReplyBlocks = [];
       busySince = null;
       endActivity(ev);
+      if (_turnSpokenText && !ev.tick && typeof speakConciseSummary === "function") {
+        try { speakConciseSummary(_turnSpokenText); } catch (e) {}
+      }
       const hasReportedTurnCost = typeof ev.cost_usd === "number" && Number.isFinite(ev.cost_usd) && ev.cost_usd >= 0
         && (ev.cost_status === "reported" || ev.cost_status === undefined);
       const turnCostText = hasReportedTurnCost
@@ -6482,6 +6488,16 @@ const Proto = (() => {
   function isTalkModeOn() {
     try { return localStorage.getItem(TALK_MODE_KEY) === "1"; } catch (e) { return false; }
   }
+  let _activeTalkAudio = null;
+  function stopTalkAudio() {
+    if (_activeTalkAudio) {
+      try { _activeTalkAudio.pause(); _activeTalkAudio.currentTime = 0; } catch (e) {}
+      _activeTalkAudio = null;
+    }
+    if (window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+  }
   function setTalkModeOn(on) {
     try { localStorage.setItem(TALK_MODE_KEY, on ? "1" : "0"); } catch (e) {}
     document.querySelectorAll("[data-talk-mode-btn]").forEach(btn => {
@@ -6491,8 +6507,8 @@ const Proto = (() => {
         ? "Talk-Back Mode is ON — Anchor speaks a concise 1–2 sentence verbal summary of responses (click to mute)"
         : "Enable Talk-Back Mode — Anchor speaks a concise 1–2 sentence verbal summary of what is going on";
     });
-    if (!on && window.speechSynthesis) {
-      try { window.speechSynthesis.cancel(); } catch (e) {}
+    if (!on) {
+      stopTalkAudio();
     }
   }
   function buildConciseSpokenSummary(rawText) {
@@ -6510,6 +6526,36 @@ const Proto = (() => {
     }
     return picked;
   }
+  function playSpokenSummaryAudio(summary) {
+    stopTalkAudio();
+    const fallbackBrowserSpeech = () => {
+      if (window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
+        try {
+          window.speechSynthesis.cancel();
+          setTimeout(() => {
+            try {
+              const utt = new SpeechSynthesisUtterance(summary);
+              utt.rate = 1.06;
+              utt.pitch = 1.0;
+              window.speechSynthesis.speak(utt);
+            } catch (e) {}
+          }, 60);
+        } catch (e) {}
+      }
+    };
+    _postJson("/api/steward/dictate", { action: "tts", text: summary, rate: 1 })
+      .then(r => r.json())
+      .then(j => {
+        if (j && j.ok && j.audio_b64) {
+          const aud = new Audio("data:audio/wav;base64," + j.audio_b64);
+          _activeTalkAudio = aud;
+          aud.play().catch(() => fallbackBrowserSpeech());
+        } else {
+          fallbackBrowserSpeech();
+        }
+      })
+      .catch(() => fallbackBrowserSpeech());
+  }
   function speakConciseSummary(rawText, forceSpeak = false) {
     if (!forceSpeak && !isTalkModeOn()) return;
     const summary = buildConciseSpokenSummary(rawText);
@@ -6525,19 +6571,21 @@ const Proto = (() => {
         txtWrap.appendChild(el("strong", "", "Spoken Summary: "));
         txtWrap.appendChild(document.createTextNode(summary));
         banner.appendChild(txtWrap);
+        const replayBtn = el("button", "composer-voice-btn", "🔊 Replay");
+        replayBtn.type = "button";
+        replayBtn.style.cssText = "margin-left:auto;padding:3px 8px;font-size:11px;";
+        replayBtn.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); playSpokenSummaryAudio(summary); };
+        const stopBtn = el("button", "composer-voice-btn", "⏹ Silence");
+        stopBtn.type = "button";
+        stopBtn.style.cssText = "padding:3px 8px;font-size:11px;";
+        stopBtn.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); stopTalkAudio(); };
+        banner.appendChild(replayBtn);
+        banner.appendChild(stopBtn);
         d.appendChild(banner);
         pin(d, true);
       }
     } catch (e) {}
-    if (window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
-      try {
-        window.speechSynthesis.cancel();
-        const utt = new SpeechSynthesisUtterance(summary);
-        utt.rate = 1.06;
-        utt.pitch = 1.0;
-        window.speechSynthesis.speak(utt);
-      } catch (e) {}
-    }
+    playSpokenSummaryAudio(summary);
   }
 
   let _spellPopupEl = null;
@@ -6919,7 +6967,7 @@ const Proto = (() => {
             for (let i = 0; i < copy.length; i++) sumSq += copy[i] * copy[i];
             const rms = Math.sqrt(sumSq / Math.max(1, copy.length));
             const now = Date.now();
-            if (rms > 0.0072) {
+            if (rms > 0.0042) {
               if (!speechDetectedInChunk) {
                 speechDetectedInChunk = true;
                 speechStartTs = now;
@@ -6929,18 +6977,18 @@ const Proto = (() => {
               lastVoiceTs = now;
               pcmFrames.push(copy);
               dictBtn.textContent = "🔴 Speaking…";
-              if (now - speechStartTs >= 5500) {
+              if (now - speechStartTs >= 6500) {
                 flushAudioBuffer();
               }
             } else {
               if (speechDetectedInChunk) {
                 pcmFrames.push(copy);
-                if (now - lastVoiceTs >= 680) {
+                if (now - lastVoiceTs >= 900) {
                   flushAudioBuffer();
                 }
               } else {
                 preRollFrames.push(copy);
-                if (preRollFrames.length > 3) preRollFrames.shift();
+                if (preRollFrames.length > 4) preRollFrames.shift();
               }
             }
           };
@@ -6976,16 +7024,20 @@ const Proto = (() => {
           return false;
         }
       };
-      const startDictation = () => {
-        spawnBrowserRecog();
+      const startDictation = async () => {
         dictActive = true;
         window.__dictationActive = true;
         window.__lastSayFocusTs = Date.now();
         dictBtn.classList.add("recording", "active");
         dictBtn.textContent = "⏹ Listening…";
         ta.focus();
-        startBrowserMicCapture();
-        // Also start backend System.Speech fallback for local desktop environments
+        const micOk = await startBrowserMicCapture();
+        if (micOk) {
+          // Primary path: 16kHz PCM -> local faster-whisper-base.en (do not run System.Speech DictationGrammar in parallel!)
+          return;
+        }
+        // Fallback only when browser getUserMedia is unavailable
+        spawnBrowserRecog();
         _postJson("/api/steward/dictate", { action: "start" })
           .then(r => r.json())
           .then(j => {

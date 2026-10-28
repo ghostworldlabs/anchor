@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.6 ? Aegis Foundry North Star & Shield Icon, Voice Dictate/Talk Mode, Email & Calendar Quick-Connect, and Collaborator Preset
+
+- Locks the **Aegis** North Star (`NORTH-STAR.md`), human card (`HUMAN.md`), multi-stage execution protocol (`SKILL.md`), and complete Foundry process/knowledge/Anvil v2 maps (`0` validation issues), paired with the new Foundry-style **Aegis Shield Icon** (`vendor/brand/aegis-icon.jpg`).
+- Adds local speech-to-text transcription (`faster-whisper` `base.en` via `/api/voice/transcribe` with Web Speech API fallback) for **Dictate** and server-side Windows SAPI `.wav` synthesis (`/api/voice/tts`) for **Talk Mode**.
+- Adds the **Email & Calendar Quick-Connect** drawer (`#caveCommsConnectModal` + `/api/comms/setup_helper`) on Cave of Wonders and Step 6 of the 7-Step Onboarding & Setup Wizard (1-click classic Outlook COM verify, Google OAuth setup guide & credential upload, and live `/api/comms/sync_now`).
+- Fixes Cave of Wonders in-place step rename (`renameStepInline` now posts to `/api/steward/plan/step/rename` in addition to `/api/rnd/rename_step`) and adds the 1-click **Merrill Collaborator Preset** on Cave of Wonders.
+
+
 ## v1.4.5 ? Collaborator cockpit tools, vendored Foundry Tools, non-git folder code jobs, and app-frame link guard
 
 - Ships the full cockpit helper and safety suite (`tools/fence_guard.py`, `tools/steward_code_job.py`, `tools/steward_skill.py`, `tools/gitguard/`, `tools/reading_copy.py`, `tools/review_diff.mjs`, `tools/steward_review.mjs`) in the release manifest and `anchor-core-overlay.zip`.

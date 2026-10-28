@@ -282,14 +282,15 @@ def fetch_imap_headers(account: dict, secret: str, max_messages: int = 10, timeo
     host = str(account.get("imap_host") or "").strip()
     port = int(account.get("imap_port") or 993)
     email_addr = str(account.get("email") or "").strip()
-    if not host or not email_addr or not secret:
+    clean_secret = re.sub(r"\s+", "", str(secret or "")) if str(account.get("auth_mode") or "app_password") == "app_password" else str(secret or "").strip()
+    if not host or not email_addr or not clean_secret:
         return False, "Missing IMAP host, email address, or credential", []
     headers_out: list[dict] = []
     try:
         ctx = ssl.create_default_context()
         conn = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=timeout)
         try:
-            conn.login(email_addr, secret)
+            conn.login(email_addr, clean_secret)
             typ, _ = conn.select("INBOX", readonly=True)
             if typ == "OK":
                 typ2, data = conn.search(None, "ALL")
@@ -346,6 +347,195 @@ def fetch_ics_events(ics_url: str, today: date | None = None, timeout: float = 5
         return True, f"Verified ICS feed · {len(evs)} upcoming event(s) in window", evs
     except Exception as exc:
         return False, f"ICS feed note: {type(exc).__name__}: {str(exc)[:120]}", []
+
+
+def fetch_google_caldav_events(email_addr: str, app_password: str, today: date | None = None, timeout: float = 5.0) -> tuple[bool, str, list[dict]]:
+    """Attempt to read Google Calendar via CalDAV / Basic Auth using Gmail address + 16-char App Password when no ICS URL was supplied."""
+    addr = str(email_addr or "").strip()
+    pwd = re.sub(r"\s+", "", str(app_password or ""))
+    if not addr or not pwd or _is_hermetic():
+        return False, "No CalDAV credentials", []
+    try:
+        cal_url = f"https://apidata.googleusercontent.com/caldav/v2/{urllib.parse.quote(addr)}/events"
+        basic_b64 = base64.b64encode(f"{addr}:{pwd}".encode("utf-8")).decode("ascii")
+        req = urllib.request.Request(
+            cal_url,
+            headers={
+                "User-Agent": "Anchor-Comms-Connector/1.0",
+                "Authorization": f"Basic {basic_b64}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        evs = parse_ics_text(raw, today=today)
+        return True, f"Verified Google Calendar CalDAV · {len(evs)} upcoming event(s)", evs
+    except Exception as exc:
+        return False, f"Google Calendar CalDAV note: {type(exc).__name__} (paste your Google Calendar Secret ICS URL for direct calendar feed)", []
+
+
+def auto_connect_local_outlook(today: date | None = None) -> dict:
+    """Safely attach to an already-running Windows Desktop Outlook (`OUTLOOK.EXE`) via GetActiveObject COM without spawning a wizard."""
+    today = today or date.today()
+    if _is_hermetic():
+        acc_id = "comms-local-outlook"
+        cfg = load_comms_config()
+        accounts = cfg.get("accounts") or []
+        rec = {
+            "id": acc_id,
+            "family": "outlook",
+            "label": "Windows Desktop Outlook (Auto-Connected)",
+            "email": "outlook-desktop@local",
+            "auth_mode": "ics_only",
+            "imap_host": "outlook.office365.com",
+            "imap_port": 993,
+            "ics_url": "",
+            "status": "connected",
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        existing = next((a for a in accounts if a.get("id") == acc_id), None)
+        if existing is not None:
+            existing.update(rec)
+        else:
+            accounts.append(rec)
+        cfg["accounts"] = accounts
+        save_comms_config(cfg)
+        st = reconcile_comms_with_roadmaps(today=today)
+        st["outlook_running"] = True
+        st["account_id"] = acc_id
+        st["message"] = "Connected local Windows Outlook (hermetic test mode)."
+        return st
+
+    ps = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$proc = Get-Process OUTLOOK -ErrorAction SilentlyContinue
+if (-not $proc) {
+    @{ ok = $false; running = $false; reason = 'outlook_not_running' } | ConvertTo-Json -Compress
+    exit 0
+}
+try {
+    $ol = [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application')
+    $ns = $ol.GetNamespace('MAPI')
+    $email = ''
+    try { $email = $ns.Accounts.Item(1).SmtpAddress } catch {}
+    $inbox = $ns.GetDefaultFolder(6)
+    $items = $inbox.Items
+    $items.Sort('[ReceivedTime]', $true)
+    $hdrs = @()
+    $cnt = 0
+    foreach ($it in $items) {
+        if ($cnt -ge 8) { break }
+        try {
+            $hdrs += @{
+                subject = [string]$it.Subject
+                from = [string]$it.SenderName
+                date = [string]$it.ReceivedTime.ToString('yyyy-MM-dd HH:mm')
+                direction = 'inbound'
+                account_id = 'comms-local-outlook'
+            }
+            $cnt++
+        } catch {}
+    }
+    $cal = $ns.GetDefaultFolder(9)
+    $calItems = $cal.Items
+    $calItems.IncludeRecurrences = $true
+    $calItems.Sort('[Start]')
+    $evs = @()
+    $now = (Get-Date).AddDays(-1)
+    $limit = (Get-Date).AddDays(21)
+    $ecnt = 0
+    foreach ($ev in $calItems) {
+        if ($ecnt -ge 12) { break }
+        try {
+            if ($ev.Start -ge $now -and $ev.Start -le $limit) {
+                $evs += @{
+                    uid = 'ol-' + $ecnt
+                    title = [string]$ev.Subject
+                    date = [string]$ev.Start.ToString('yyyy-MM-dd')
+                    time_label = [string]$ev.Start.ToString('HH:mm')
+                    location = [string]$ev.Location
+                    source = 'ics'
+                    project_name = 'Outlook Calendar'
+                }
+                $ecnt++
+            }
+        } catch {}
+    }
+    @{ ok = $true; running = $true; email = $email; headers = $hdrs; events = $evs } | ConvertTo-Json -Compress -Depth 4
+} catch {
+    @{ ok = $false; running = $true; reason = $_.Exception.Message } | ConvertTo-Json -Compress
+}
+"""
+    import subprocess as _sp
+    try:
+        cflags = getattr(_sp, "CREATE_NO_WINDOW", 0x08000000)
+        r = _sp.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            creationflags=cflags,
+        )
+        raw_out = (r.stdout or "").strip()
+        parsed = json.loads(raw_out) if raw_out.startswith("{") else {"ok": False, "running": False}
+    except Exception as exc:
+        parsed = {"ok": False, "running": False, "reason": str(exc)}
+
+    if not parsed.get("ok"):
+        st = reconcile_comms_with_roadmaps(today=today)
+        st["outlook_running"] = bool(parsed.get("running"))
+        st["message"] = (
+            "Windows Desktop Outlook (OUTLOOK.EXE) is not currently open on this PC. "
+            "Open classic Outlook on Windows and click this button again for 1-click zero-password sync, "
+            "or connect Outlook Web / Office 365 below using your Outlook Calendar ICS link or App Password."
+        )
+        return st
+
+    email_found = str(parsed.get("email") or "outlook-desktop@local").strip()
+    acc_id = "comms-local-outlook"
+    cfg = load_comms_config()
+    accounts = cfg.get("accounts") or []
+    rec = {
+        "id": acc_id,
+        "family": "outlook",
+        "label": f"Windows Desktop Outlook ({email_found})",
+        "email": email_found,
+        "auth_mode": "ics_only",
+        "imap_host": "outlook.office365.com",
+        "imap_port": 993,
+        "ics_url": "",
+        "status": "connected",
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    existing = next((a for a in accounts if a.get("id") == acc_id), None)
+    if existing is not None:
+        existing.update(rec)
+    else:
+        accounts.append(rec)
+    cfg["accounts"] = accounts
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cfg["last_sync_at"] = now_str
+    cfg["last_sync_status"] = "synced (Desktop Outlook)"
+    save_comms_config(cfg)
+
+    sync_cache = load_comms_sync()
+    ol_evs = [e for e in (parsed.get("events") or []) if isinstance(e, dict)]
+    ol_hdrs = [h for h in (parsed.get("headers") or []) if isinstance(h, dict)]
+    prev_evs = [e for e in (sync_cache.get("calendar_events") or []) if isinstance(e, dict) and not str(e.get("uid") or "").startswith("ol-")]
+    prev_hdrs = [h for h in (sync_cache.get("email_headers") or []) if isinstance(h, dict) and h.get("account_id") != acc_id]
+    save_comms_sync({
+        "synced_at": now_str,
+        "calendar_events": ol_evs + prev_evs,
+        "email_headers": ol_hdrs + prev_hdrs,
+        "notes": [],
+    })
+    st = reconcile_comms_with_roadmaps(today=today)
+    st["outlook_running"] = True
+    st["account_id"] = acc_id
+    st["message"] = f"✓ Connected running Windows Outlook ({email_found}) · synced {len(ol_evs)} calendar event(s) & {len(ol_hdrs)} inbox header(s)."
+    return st
 
 
 def _scan_workspace_entries_and_facts(today: date) -> tuple[list[dict], dict[str, dict]]:
@@ -697,8 +887,7 @@ def build_oauth2_pkce_challenge(
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     _PKCE_PENDING[state_tok] = record
-    return {
-        "ok": True,
+    pkce_info = {
         "state": state_tok,
         "family": fam,
         "code_verifier": verifier,
@@ -706,6 +895,11 @@ def build_oauth2_pkce_challenge(
         "code_challenge_method": "S256",
         "authorize_url": auth_url,
         "redirect_uri": redirect_uri,
+    }
+    return {
+        "ok": True,
+        **pkce_info,
+        "pkce": pkce_info,
     }
 
 
@@ -954,6 +1148,11 @@ def sync_comms_now(entries: list[dict] | None = None, facts: dict | None = None,
             else:
                 notes.append(msg_ics)
         secret = get_account_secret(aid)
+        if not ics_url and secret and str(acc.get("family") or "") == "gmail" and acc.get("email"):
+            ok_caldav, msg_caldav, caldav_evs = fetch_google_caldav_events(str(acc["email"]), secret, today=today)
+            if ok_caldav and caldav_evs:
+                all_ics.extend(caldav_evs)
+                acc["last_ics_note"] = msg_caldav
         if secret and str(acc.get("auth_mode") or "") != "ics_only" and acc.get("imap_host"):
             ok_imap, msg_imap, hdrs = fetch_imap_headers(acc, secret)
             acc["last_imap_note"] = msg_imap
@@ -1038,6 +1237,11 @@ def handle_comms_post(body: dict) -> tuple[dict, int]:
         res["action"] = action
         return res, 200
 
+    if action == "auto_connect_local_outlook":
+        res = auto_connect_local_outlook()
+        res["action"] = action
+        return res, 200
+
     if action == "save_account":
         family = str(body.get("family") or "gmail").strip().lower()
         if family not in PROVIDER_PRESETS:
@@ -1057,7 +1261,8 @@ def handle_comms_post(body: dict) -> tuple[dict, int]:
         except (TypeError, ValueError):
             imap_port = 993
         ics_url = str(body.get("ics_url") or "").strip()
-        secret = str(body.get("secret") or body.get("app_password") or body.get("oauth_token") or "").strip()
+        raw_secret = str(body.get("secret") or body.get("app_password") or body.get("oauth_token") or "").strip()
+        secret = re.sub(r"\s+", "", raw_secret) if auth_mode == "app_password" else raw_secret
         vault_status = "unchanged"
         if secret:
             vault_status = put_account_secret(acc_id, secret)
@@ -1113,7 +1318,8 @@ def handle_comms_post(body: dict) -> tuple[dict, int]:
                 "imap_port": int(body.get("imap_port") or preset["imap_port"]),
                 "ics_url": str(body.get("ics_url") or "").strip(),
             }
-        secret = str(body.get("secret") or "").strip() or (get_account_secret(acc_id) if acc_id else None) or ""
+        raw_test_secret = str(body.get("secret") or "").strip() or (get_account_secret(acc_id) if acc_id else None) or ""
+        secret = re.sub(r"\s+", "", raw_test_secret) if target.get("auth_mode") == "app_password" else raw_test_secret
         checks = []
         if target.get("ics_url"):
             ok_ics, msg_ics, _ = fetch_ics_events(str(target["ics_url"]))

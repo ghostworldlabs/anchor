@@ -192,18 +192,18 @@ def transcribe_audio(audio_b64: str) -> Dict[str, Any]:
                     language="en",
                     beam_size=2,
                     best_of=2,
-                    initial_prompt="Anchor cockpit, Steward, Foreman, Crucible, Chekhov, deliverables, plan, wave, review.",
+                    # no initial_prompt so whisper never echoes prompt keywords on silence
                     # best_of=2 set above
                     temperature=0.0,
                     condition_on_previous_text=False,
                     vad_filter=True,
                     vad_parameters={"min_silence_duration_ms": 250, "speech_pad_ms": 180},
                 )
-                text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip()).strip()
+                text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip() and getattr(s, "no_speech_prob", 0.0) <= 0.68).strip()
             except Exception:
                 text = ""
 
-        if not text:
+        if not text and model is None:
             engine_used = "system_speech"
             text = _transcribe_wav_via_system_speech(tmp_path)
 
@@ -411,3 +411,53 @@ def poll_session(since_seq: int = 0) -> Dict[str, Any]:
             "interim": _INTERIM if alive else "",
             "error": _LAST_ERROR,
         }
+
+
+def synthesize_speech_wav(text: str, rate: int = 1) -> Dict[str, Any]:
+    """Synthesize spoken summary text into a 16-bit PCM WAV (base64) via Windows System.Speech.Synthesis."""
+    clean_text = str(text or "").strip()
+    if not clean_text:
+        return {"ok": False, "error": "empty text", "audio_b64": ""}
+    if len(clean_text) > 600:
+        clean_text = clean_text[:597].rsplit(" ", 1)[0] + "..."
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="anchor_tts_", suffix=".wav")
+    os.close(tmp_fd)
+    try:
+        safe_path = tmp_path.replace("'", "''")
+        safe_text = clean_text.replace("'", "''").replace("\r", " ").replace("\n", " ")
+        clamped_rate = max(-3, min(4, int(rate)))
+        ps = (
+            "$ErrorActionPreference = 'Stop'; "
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "try { $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Female) } catch {}; "
+            f"$s.Rate = {clamped_rate}; "
+            f"$s.SetOutputToWaveFile('{safe_path}'); "
+            f"$s.Speak('{safe_text}'); "
+            "$s.Dispose()"
+        )
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            creationflags=creationflags,
+        )
+        wav_bytes = Path(tmp_path).read_bytes() if Path(tmp_path).is_file() else b""
+        if len(wav_bytes) < 100:
+            return {"ok": False, "error": "tts generation produced empty wav", "audio_b64": ""}
+        return {
+            "ok": True,
+            "text": clean_text,
+            "audio_b64": base64.b64encode(wav_bytes).decode("ascii"),
+            "mime": "audio/wav",
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "audio_b64": ""}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+

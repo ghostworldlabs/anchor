@@ -655,15 +655,28 @@
               </div>
             </div>
             <div style="margin-top:10px;">
-              <label for="comms-secret">App Password or OAuth Token (Stored in Windows OS Vault, never in JSON)</label>
-              <input type="password" id="comms-secret" placeholder="Paste App Password or token — stored via provider_secrets.put()" autocomplete="off">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                <label for="comms-secret" style="margin:0;">App Password or OAuth Token (Stored in Windows OS Vault, never in JSON)</label>
+                <span style="display:flex;gap:10px;font-size:12px;">
+                  <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" style="color:#58a6ff;">🔑 Get Google App Password ↗</a>
+                  <a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noopener" style="color:#58a6ff;">🔑 Microsoft App Password ↗</a>
+                </span>
+              </div>
+              <input type="password" id="comms-secret" placeholder="Paste 16-char App Password (spaces stripped automatically) or token — stored in OS Vault" autocomplete="off">
             </div>
             <div style="margin-top:10px;">
-              <label for="comms-ics-url">Calendar ICS / CalDAV Feed URL (RFC 5545)</label>
-              <input type="text" id="comms-ics-url" placeholder="https://calendar.google.com/calendar/ical/example/private/basic.ics" autocomplete="off">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                <label for="comms-ics-url" style="margin:0;">Calendar ICS / CalDAV Feed URL (RFC 5545 — Optional when Google App Password is saved)</label>
+                <span style="display:flex;gap:10px;font-size:12px;">
+                  <a href="https://calendar.google.com/calendar/u/0/r/settings" target="_blank" rel="noopener" style="color:#58a6ff;">📅 Google Calendar Settings (Secret iCal URL) ↗</a>
+                  <a href="https://outlook.live.com/calendar/0/options/calendar/SharedCalendars" target="_blank" rel="noopener" style="color:#58a6ff;">📅 Outlook Shared Calendar ICS ↗</a>
+                </span>
+              </div>
+              <input type="text" id="comms-ics-url" placeholder="https://calendar.google.com/calendar/ical/example/private-.../basic.ics" autocomplete="off">
             </div>
             <div class="setup-actions" style="margin-top:14px;">
               <button type="button" class="primary" id="btn-comms-save-account">Save to OS Vault &amp; Connect</button>
+              <button type="button" id="btn-comms-auto-outlook">⚡ 1-Click Connect Running Windows Outlook</button>
               <button type="button" id="btn-comms-test-account">Test Connection</button>
               <button type="button" id="btn-comms-oauth-pkce">🔑 OAuth2 PKCE Flow</button>
               <button type="button" id="btn-comms-toggle-poller">⟳ Start Auto-Poller (15m)</button>

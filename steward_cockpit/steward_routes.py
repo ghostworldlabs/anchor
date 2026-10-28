@@ -222,7 +222,7 @@ SKILL_ICONS = {
     "researchPrime": "research-prime-icon.jpg", "Crucible": "crucible-icon.svg",
     "Foreman": "foreman-icon.svg", "Gandalf": "gandalf-icon.jpg", "Jumper": "jumper-icon.jpg",
     "Superjump": "superjump-icon.jpg", "Anvil": "anvil-icon.jpg", "anvil": "anvil-icon.jpg",
-    "Aegis": "aegis-icon.svg", "aegis": "aegis-icon.svg",
+    "Aegis": "aegis-icon.jpg", "aegis": "aegis-icon.jpg",
     "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
@@ -3256,6 +3256,8 @@ def handle_post(cdir, verb, body):
         act = str(body.get("action") or "poll").strip().lower()
         if act == "transcribe":
             return _de.transcribe_audio(str(body.get("audio_b64") or "")), 200
+        if act == "tts":
+            return _de.synthesize_speech_wav(str(body.get("text") or ""), int(body.get("rate") or 1)), 200
         if act == "start":
             return _de.start_session(), 200
         if act == "stop":

@@ -432,7 +432,20 @@ class HostApi:
         changed = []
 
         def on_ui():                                    # WebView2 is touched on its own thread only
-            settings = form.browser.webview.CoreWebView2.Settings
+            core = form.browser.webview.CoreWebView2
+            settings = core.Settings
+            try:
+                from Microsoft.Web.WebView2.Core import CoreWebView2PermissionState
+                if not getattr(core, "_anchor_mic_wired", False):
+                    def _on_perm(sender, e):
+                        try:
+                            e.State = CoreWebView2PermissionState.Allow
+                        except Exception:
+                            pass
+                    core.PermissionRequested += _on_perm
+                    core._anchor_mic_wired = True
+            except Exception:
+                pass
             if not settings.IsNonClientRegionSupportEnabled:
                 settings.IsNonClientRegionSupportEnabled = True
                 changed.append(True)

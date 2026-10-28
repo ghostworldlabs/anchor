@@ -176,6 +176,12 @@ def _rail(ctx):
     n_active, n_deck = len(seated(live_inits, "active")), len(seated(live_inits, "deck"))     # W2c: the shelves
     n_bench = int(ctx.get("terms_open") or 0)      # the Cave's plain terminals open now (the Workbench retired 2026-10-02)
     cap_rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or ())
+    try:
+        import comms_connector as _cc_rail
+        _rail_accs = len((_cc_rail.load_comms_config().get("accounts") or []))
+    except Exception:
+        _rail_accs = 0
+    _rail_comms_lbl = ("%d connected" % _rail_accs) if _rail_accs > 0 else "not connected"
     return (
         '<nav class="rail">'
         '<div class="provider-rail-head"><button id="setup-gear" class="setup-gear" type="button" aria-label="Setup settings" title="Setup settings">&#9881;</button><span class="provider-rail-brand">%sAnchor</span></div>'
@@ -191,8 +197,8 @@ def _rail(ctx):
         '<li><button data-rail="week"><span class="n">This week</span><span class="c">%s</span></button></li>'
         '<li><button data-rail="desk"><span class="n">Desk</span><span class="c">%d</span></button></li>'
         '<li><button data-rail="deck"><span class="n">On deck</span><span class="c">%d</span></button></li>'
-        '<li><button data-rail="calendar"><span class="n">Calendar</span><span class="c">not connected</span></button></li>'
-        '<li><button data-rail="email"><span class="n">Email</span><span class="c">not connected</span></button></li>'
+        '<li><button data-rail="calendar"><span class="n">Calendar</span><span class="c">%s</span></button></li>'
+        '<li><button data-rail="email"><span class="n">Email</span><span class="c">%s</span></button></li>'
         '<li><button data-rail="term"><span class="n">Terminal</span><span class="c" id="railTerm">%d</span></button></li>'
         '</ul>'
         '<details class="cap provider-history" open><summary>Connections &amp; capacity &middot; Providers</summary><div id="capList">%s</div></details>'
@@ -207,7 +213,7 @@ def _rail(ctx):
     ) % (anchor_mark(ctx["build"]), _brand_img(ctx["build"], "gwl-m-icon.svg"), _brand_img(ctx["build"], "gwl-m-icon.svg"),
          _brand_img(ctx["build"], st["high_seat"], ""), esc(st["high_seat_name"]),
          esc(st["high_seat_name"]), esc(mode_name(st)), (str(n_camp) if ctx.get("campaign") else "not yet"), n_active,
-         esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, n_bench, cap_rows)
+         esc(ctx["week_short"]), int(ctx.get("tasks_open") or 0), n_deck, _rail_comms_lbl, _rail_comms_lbl, n_bench, cap_rows)
 
 
 def anchor_mark(build, px=26):
@@ -502,7 +508,7 @@ def _card(e, f, cls, goal=None, step=None, light=None):
     with no record is a quiet card: the name, its blurb, the cockpit."""
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
-    name = esc(e.get("name") or (step or {}).get("name"))
+    name = esc((step or {}).get("name") or e.get("name"))
     # W2c (2026-09-30): on a shelf the card is a seated initiative — it carries its step, drags, has its × and names
     # its goal; a cockpit within a project is its own card on its own effort
     cid = pid if not (step and step.get("kind") == "effort") else "%s-%s" % (pid, esc(step["id"]))
@@ -854,16 +860,31 @@ def _comms_pulse_html(ctx):
         )
     mail_col_html = "".join(mail_rows) or '<div class="tw-empty">No active external counsel or email tracks waiting on reconciliation.</div>'
 
+    acc_pills = []
+    for a in (comms.get("accounts") or []):
+        if not isinstance(a, dict):
+            continue
+        aid = esc(a.get("id") or "")
+        albl = esc(a.get("label") or a.get("family") or "Account")
+        aem = esc(a.get("email") or "Calendar ICS")
+        acc_pills.append(
+            '<span class="comms-pill emerald" style="display:inline-flex;align-items:center;gap:6px">'
+            '&#10003; %s (%s) '
+            '<button type="button" class="mini" data-comms-remove-id="%s" title="Disconnect this account" style="padding:0 5px;font-size:11px;line-height:1.2">&times;</button>'
+            '</span>' % (albl, aem, aid)
+        )
+    acc_bar_html = ('<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0" id="caveConnectedAccountsBar">%s</div>' % "".join(acc_pills)) if acc_pills else ""
+
     conn_note = (
-        '<p class="conn-zero">Connected to %d account%s via Windows OS Credential Vault (<code>advapi32</code>) &mdash; background poller + two-way draft composer active.</p>'
+        '<p class="conn-zero">Connected to %d account%s via Windows OS Credential Vault (<code>advapi32</code>) &mdash; click <b>+ Connect Gmail / Google Calendar / Outlook</b> above to add another Gmail, Google Calendar, or Outlook account anytime.</p>'
         % (acc_n, "" if acc_n == 1 else "s")
         if acc_n > 0
         else '<p class="conn-zero">No external IMAP/ICS account is connected yet, so nothing here is sample data &mdash; items above are reconciled directly from your project roadmaps. '
-             'Use <b>&#9881; Calendar &amp; Email Setup</b> to connect Google/Gmail, Microsoft 365/Outlook (OAuth2 PKCE or App Password), or Custom IMAP/ICS (stored in the Windows OS Vault).</p>'
+             'Use the <b>+ Connect Gmail / Google Calendar / Outlook</b> panel right above (or <b>&#9881; Calendar &amp; Email Setup</b>) to connect multiple Gmail accounts, Google Calendar, and Microsoft Outlook.</p>'
     )
 
     return (
-        '<section class="cal" id="cal" data-comms-pulse="1">'
+        '<section class="cal" id="cal" data-comms-pulse="1" data-connected-count="%d">'
         '<button class="cal-h" id="calHead"><span class="k">&#128236; Calendar &amp; Email Pulse</span>'
         '<span class="state" id="commsStateBadge">%s</span>'
         '<span class="cal-tab on" id="tabCal" data-cal-tab="cal">&#128197; Calendar &amp; Deadlines (%d)</span>'
@@ -877,11 +898,64 @@ def _comms_pulse_html(ctx):
         '<span class="comms-pill sky">&#9998; Two-Way Drafts (.eml)</span>'
         '</div>'
         '<div class="cal-quick-row">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCaveCommsQuickConnect" data-open-comms-connect="1" style="border-color:#10b981;color:#6ee7b7;font-weight:700">+ Connect Gmail / Google Calendar / Outlook</button>'
+        '<button type="button" class="mini comms-sync-btn" id="btnCaveCommsAutoOutlook" data-comms-auto-outlook="1" title="1-click connect if classic Windows Desktop Outlook is open">&#9889; 1-Click Connect Running Windows Outlook</button>'
         '<button type="button" class="mini comms-sync-btn" id="btnCaveCommsSync" data-comms-sync="1">&#8635; Sync Now</button>'
         '<button type="button" class="mini" id="btnCaveCommsDraftNew" data-comms-draft-reply="1" data-comms-draft-subject="Update on next steps" data-comms-draft-to="" data-comms-draft-project="" data-comms-draft-step="">&#9998; Compose Draft</button>'
         '<a class="mini comms-setup-btn" id="btnCaveCommsSetup" href="/setup?section=comms" data-open-href="/setup?section=comms">&#9881; Calendar &amp; Email Setup</a>'
         '<button type="button" class="mini cal-prefill" data-say-prefill="I just emailed / completed: ">&#9993; Log an Email or External Action with the Steward</button>'
         '<button type="button" class="mini cal-prefill" data-say-prefill="Schedule update for this week: ">&#128197; Update Schedule / Priorities with the Steward</button>'
+        '</div></div>'
+        '%s'
+        '<div class="comms-connect-modal" id="caveCommsConnectModal"%s style="margin:8px 0;padding:14px;border:1px solid rgba(16,185,129,0.45);border-radius:10px;background:#0f172a">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+        '<div><b style="color:#6ee7b7;font-size:13.5px">&#128279; Quick-Connect Gmail, Google Calendar &amp; Microsoft Outlook (Multiple Accounts Supported)</b>'
+        '<div style="font-size:11.5px;color:#94a3b8;margin-top:2px">Credentials are stored in your Windows OS Credential Vault (<code>advapi32</code>) &mdash; never in JSON files. Spaces in 16-letter App Passwords are stripped automatically.</div></div>'
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        '<button type="button" class="mini" data-cave-comms-preset="gmail" style="border-color:#38bdf8;color:#38bdf8">&#128231; Gmail + Google Calendar</button>'
+        '<button type="button" class="mini" data-cave-comms-preset="outlook" style="border-color:#a78bfa;color:#c4b5fd">&#128197; Microsoft 365 / Outlook</button>'
+        '<button type="button" class="mini" data-cave-comms-preset="ics_only" style="border-color:#fbbf24;color:#fde68a">&#128198; Calendar ICS Link Only (No Password)</button>'
+        '<button type="button" class="mini" id="btnCaveCommsConnectClose">&times; Hide</button>'
+        '</div></div>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:10px">'
+        '<div><label style="display:block;font-size:11px;color:#94a3b8;margin-bottom:3px">Provider</label>'
+        '<select id="caveCommsFamily" style="width:100%%;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<option value="gmail">Google / Gmail + Google Calendar</option>'
+        '<option value="outlook">Microsoft 365 / Outlook + Calendar</option>'
+        '<option value="custom">Custom / Institutional IMAP + ICS</option>'
+        '</select></div>'
+        '<div><label style="display:block;font-size:11px;color:#94a3b8;margin-bottom:3px">Account Nickname (add as many as you like)</label>'
+        '<input type="text" id="caveCommsLabel" value="Primary Gmail &amp; Calendar" placeholder="e.g. Work Gmail, Personal Gmail, PSU Outlook" style="width:100%%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></div>'
+        '<div><label style="display:block;font-size:11px;color:#94a3b8;margin-bottom:3px">Email Address</label>'
+        '<input type="email" id="caveCommsEmail" placeholder="you@gmail.com or you@outlook.com" autocomplete="off" style="width:100%%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></div>'
+        '<div><label style="display:block;font-size:11px;color:#94a3b8;margin-bottom:3px">Auth Mode</label>'
+        '<select id="caveCommsAuthMode" style="width:100%%;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
+        '<option value="app_password">16-Char App Password (Recommended)</option>'
+        '<option value="oauth_token">OAuth2 Token</option>'
+        '<option value="ics_only">Calendar ICS Link Only (No Password)</option>'
+        '</select></div>'
+        '</div>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;margin-bottom:10px">'
+        '<div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">'
+        '<label style="font-size:11px;color:#94a3b8">App Password / OAuth Token (spaces stripped automatically)</label>'
+        '<span style="display:inline-flex;gap:8px;font-size:11px">'
+        '<a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none" title="Open Google Account App Passwords page in browser">&#128273; Get Google App Password &#8599;</a>'
+        '<a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noopener" style="color:#c4b5fd;text-decoration:none" title="Open Microsoft App Password page">&#128273; Microsoft App Password &#8599;</a>'
+        '</span></div>'
+        '<input type="password" id="caveCommsSecret" placeholder="Paste 16-char Google/Outlook App Password (e.g. xxxx xxxx xxxx xxxx)" autocomplete="off" style="width:100%%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></div>'
+        '<div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">'
+        '<label style="font-size:11px;color:#94a3b8">Calendar Secret ICS URL (Google Calendar or Outlook ICS)</label>'
+        '<span style="display:inline-flex;gap:8px;font-size:11px">'
+        '<a href="https://calendar.google.com/calendar/u/0/r/settings" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none" title="Settings for my calendars -> Integrate calendar -> Secret address in iCal format">&#128197; Google Calendar ICS Settings &#8599;</a>'
+        '<a href="https://outlook.office.com/calendar/options/calendar/SharedCalendars" target="_blank" rel="noopener" style="color:#c4b5fd;text-decoration:none" title="Publish a calendar -> Copy ICS link">&#128197; Outlook Calendar ICS &#8599;</a>'
+        '</span></div>'
+        '<input type="text" id="caveCommsIcsUrl" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics (or Outlook .ics URL)" autocomplete="off" style="width:100%%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3"></div>'
+        '</div>'
+        '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">'
+        '<button type="button" class="mini comms-sync-btn" id="btnCaveCommsSaveAccount" style="border-color:#10b981;color:#6ee7b7;font-weight:700">&#128190; Save to OS Vault, Test &amp; Sync</button>'
+        '<button type="button" class="mini" id="btnCaveCommsOauthPkce" data-cave-comms-oauth="1">&#128273; Start OAuth2 Browser Sign-In</button>'
+        '<button type="button" class="mini" data-comms-auto-outlook="1">&#9889; 1-Click Connect Running Windows Outlook</button>'
+        '<span id="caveCommsConnectStatus" style="font-size:12px;color:#94a3b8"></span>'
         '</div></div>'
         '<div class="comms-draft-modal" id="caveCommsDraftModal" hidden style="margin:8px 0;padding:12px;border:1px solid #2b3546;border-radius:8px;background:#121822">'
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
@@ -903,7 +977,7 @@ def _comms_pulse_html(ctx):
         '</div>'
         '%s'
         '</div></section>'
-    ) % (state_txt, len(cal_evs), len(threads), poller_min, cal_col_html, mail_col_html, conn_note)
+    ) % (acc_n, state_txt, len(cal_evs), len(threads), poller_min, acc_bar_html, (" hidden" if acc_n > 0 else ""), cal_col_html, mail_col_html, conn_note)
 
 
 def _mothership_collab_html(ctx):
@@ -1005,9 +1079,11 @@ def _mothership_collab_html(ctx):
         '<button type="button" class="mini" id="btnCollabOpenImport" data-collab-open-import="1">&#128229; Import Cockpit Packet</button>'
         '</div></div>'
         '<div class="collab-modal" id="caveCollabModal" hidden style="margin:8px 0;padding:12px;border:1px solid #2b3546;border-radius:8px;background:#121822">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">'
         '<b>&#129309; Register Collaborator Mothership / Import Portable Cockpit Packet</b>'
-        '<button type="button" class="mini" id="btnCollabModalClose">&times; Close</button></div>'
+        '<div style="display:flex;gap:6px;align-items:center">'
+        '<button type="button" class="mini comms-setup-btn" id="btnCollabPresetMerrill" data-collab-preset-merrill="1">&#9889; Pre-Fill Merrill Liechty</button>'
+        '<button type="button" class="mini" id="btnCollabModalClose">&times; Close</button></div></div>'
         '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:6px;margin-bottom:10px">'
         '<input type="text" id="collabPeerId" placeholder="Peer ID (e.g. lab-peer-01)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
         '<input type="text" id="collabPeerLabel" placeholder="Label (e.g. Lab Partner Mothership)" style="padding:6px 8px;border-radius:6px;border:1px solid #2b3546;background:#0d1117;color:#e6edf3">'
@@ -1547,6 +1623,7 @@ def _proactive_triage_strip(ctx):
         '<a class="ts-pill desk" href="%s" target="_blank" rel="noopener" title="Run ad-hoc admin tasks in the Desktop AI Cockpit">&#128421; Desktop (Ad-Hoc AI Cockpit)</a>'
         '<button type="button" class="ts-pill" data-toggle-dated="1" title="Toggle Dated Schedule Ruler">&#128197; Dated Ruler</button>'
         '<button type="button" class="ts-pill" data-jump="#cal">&#9993; Email &amp; Counsel</button>'
+        '<button type="button" class="ts-pill" id="btnTriageConnectComms" data-open-comms-connect="1" style="border-color:rgba(16,185,129,0.55);color:#6ee7b7" title="Connect Gmail, Google Calendar &amp; Microsoft Outlook right on the Cave of Wonders">&#128197;+&#9993; Connect Gmail / Outlook</button>'
         '</div></div>'
         '<div class="triage-exec-brief" id="triageExecBrief" hidden style="margin:0 0 8px;padding:8px 12px;border-radius:8px;border:1px solid #2b3546;background:#121822;font-size:12px;color:#e6edf3"></div>'
         '<div class="chz-grid ts-grid">'

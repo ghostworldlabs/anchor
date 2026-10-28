@@ -195,7 +195,12 @@
       $$('#railNav button').forEach(function (x) { x.classList.toggle('on', x === b); });
       if (!el) return;
       if (key === 'campaign') $('#camp') && $('#camp').classList.add('open');
-      if (key === 'calendar' || key === 'email') { $('#cal') && $('#cal').classList.add('open'); setCalTab(key === 'email' ? 'mail' : 'cal'); }
+      if (key === 'calendar' || key === 'email') {
+        $('#cal') && $('#cal').classList.add('open');
+        setCalTab(key === 'email' ? 'mail' : 'cal');
+        var calEl = $('#cal'), cmEl = $('#caveCommsConnectModal');
+        if (calEl && cmEl && calEl.getAttribute('data-connected-count') === '0') { cmEl.hidden = false; }
+      }
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
@@ -1442,6 +1447,191 @@
           syncBtn.disabled = false; syncBtn.textContent = '\u21bb Sync Now';
           receipt('Calendar & Email sync did not reach Anchor.', true);
         });
+      return;
+    }
+    var openCommsBtn = e.target.closest('[data-open-comms-connect]');
+    if (openCommsBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var calSec = document.getElementById('cal');
+      if (calSec) calSec.classList.add('open');
+      var connModal = document.getElementById('caveCommsConnectModal');
+      if (connModal) {
+        connModal.hidden = false;
+        connModal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        var emIn = document.getElementById('caveCommsEmail');
+        if (emIn) emIn.focus();
+      }
+      return;
+    }
+    if (e.target.closest('#btnCaveCommsConnectClose')) {
+      e.preventDefault();
+      var cModalClose = document.getElementById('caveCommsConnectModal');
+      if (cModalClose) cModalClose.hidden = true;
+      return;
+    }
+    var presetBtn = e.target.closest('[data-cave-comms-preset]');
+    if (presetBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var pType = presetBtn.getAttribute('data-cave-comms-preset') || 'gmail';
+      var famSel = document.getElementById('caveCommsFamily');
+      var lblIn = document.getElementById('caveCommsLabel');
+      var modeSel = document.getElementById('caveCommsAuthMode');
+      var emField = document.getElementById('caveCommsEmail');
+      var icsField = document.getElementById('caveCommsIcsUrl');
+      if (pType === 'gmail') {
+        if (famSel) famSel.value = 'gmail';
+        if (lblIn) lblIn.value = 'Gmail & Google Calendar';
+        if (modeSel) modeSel.value = 'app_password';
+        if (emField) emField.placeholder = 'your.name@gmail.com';
+        if (icsField) icsField.placeholder = 'Optional: Google Calendar Secret Address in iCal format (.ics)';
+      } else if (pType === 'outlook') {
+        if (famSel) famSel.value = 'outlook';
+        if (lblIn) lblIn.value = 'Microsoft Outlook & Calendar';
+        if (modeSel) modeSel.value = 'app_password';
+        if (emField) emField.placeholder = 'you@psu.edu or you@outlook.com';
+        if (icsField) icsField.placeholder = 'Optional: Published Outlook Calendar ICS URL (.ics)';
+      } else if (pType === 'ics_only') {
+        if (famSel) famSel.value = 'gmail';
+        if (lblIn) lblIn.value = 'Google / Outlook Calendar ICS Feed';
+        if (modeSel) modeSel.value = 'ics_only';
+        if (icsField) { icsField.placeholder = 'Paste Private ICS Calendar URL here (https://.../basic.ics)'; icsField.focus(); }
+      }
+      return;
+    }
+    var saveCaveCommsBtn = e.target.closest('#btnCaveCommsSaveAccount');
+    if (saveCaveCommsBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var cFam = ((document.getElementById('caveCommsFamily') || {}).value || 'gmail').trim();
+      var cLbl = ((document.getElementById('caveCommsLabel') || {}).value || '').trim();
+      var cEm = ((document.getElementById('caveCommsEmail') || {}).value || '').trim();
+      var cMode = ((document.getElementById('caveCommsAuthMode') || {}).value || 'app_password').trim();
+      var cSec = ((document.getElementById('caveCommsSecret') || {}).value || '').trim();
+      var cIcs = ((document.getElementById('caveCommsIcsUrl') || {}).value || '').trim();
+      var cStat = document.getElementById('caveCommsConnectStatus');
+      if (!cEm && !cIcs) {
+        if (cStat) cStat.textContent = 'Please enter your Email Address (for Gmail/Outlook) or a Calendar ICS URL.';
+        return;
+      }
+      saveCaveCommsBtn.disabled = true;
+      if (cStat) cStat.textContent = 'Saving to Windows OS Credential Vault & syncing\u2026';
+      fetch('/api/steward/comms', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          action: 'save_account',
+          family: cFam,
+          label: cLbl || (cFam === 'outlook' ? 'Outlook & Calendar' : 'Gmail & Google Calendar'),
+          email: cEm,
+          auth_mode: cMode,
+          secret: cSec,
+          ics_url: cIcs
+        })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function () {
+          return fetch('/api/steward/comms', {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({ action: 'sync_now' })
+          }).then(function (r2) { return r2.json(); });
+        })
+        .then(function (d2) {
+          saveCaveCommsBtn.disabled = false;
+          var secEl = document.getElementById('caveCommsSecret');
+          if (secEl) secEl.value = '';
+          if (d2 && d2.ok) {
+            renewInPlace('Connected ' + (cEm || cLbl || cFam) + ' to Windows OS Vault & synced Calendar/Email.');
+          } else {
+            if (cStat) cStat.textContent = (d2 && d2.error) || 'Saved account, but initial sync reported an issue.';
+          }
+        })
+        .catch(function () {
+          saveCaveCommsBtn.disabled = false;
+          if (cStat) cStat.textContent = 'Could not reach Anchor comms service.';
+        });
+      return;
+    }
+    var autoOutlookBtn = e.target.closest('[data-comms-auto-outlook]');
+    if (autoOutlookBtn) {
+      e.preventDefault(); e.stopPropagation();
+      autoOutlookBtn.disabled = true;
+      var cStatOut = document.getElementById('caveCommsConnectStatus');
+      if (cStatOut) cStatOut.textContent = 'Checking running Windows Outlook desktop app\u2026';
+      fetch('/api/steward/comms', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'auto_connect_local_outlook' })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          autoOutlookBtn.disabled = false;
+          if (d && d.outlook_running) {
+            renewInPlace(d.message || 'Connected to local Windows Outlook desktop app.');
+          } else {
+            var msg = (d && d.message) || 'Outlook desktop app is not currently running; use the Quick-Connect form to connect via App Password or ICS URL.';
+            if (cStatOut) cStatOut.textContent = msg;
+            var cm2 = document.getElementById('caveCommsConnectModal');
+            if (cm2) cm2.hidden = false;
+            receipt(msg);
+          }
+        })
+        .catch(function () {
+          autoOutlookBtn.disabled = false;
+          receipt('Local Outlook check did not reach Anchor.', true);
+        });
+      return;
+    }
+    var caveOauthBtn = e.target.closest('[data-cave-comms-oauth]');
+    if (caveOauthBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var oFam = ((document.getElementById('caveCommsFamily') || {}).value || 'gmail').trim();
+      var oEm = ((document.getElementById('caveCommsEmail') || {}).value || '').trim();
+      var oStat = document.getElementById('caveCommsConnectStatus');
+      fetch('/api/steward/comms', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'oauth_pkce_start', family: oFam, email: oEm })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var authUrl = (d && d.authorize_url) || (d && d.pkce && d.pkce.authorize_url) || '';
+          var modeEl = document.getElementById('caveCommsAuthMode');
+          if (modeEl) modeEl.value = 'oauth_token';
+          if (oStat && authUrl) {
+            oStat.innerHTML = '\u2713 OAuth2 PKCE challenge ready. <a href="' + authUrl + '" target="_blank" rel="noopener" style="color:#58a6ff">Open Provider Sign-In \u2197</a> or use the 1-click App Password / ICS links above.';
+          }
+        });
+      return;
+    }
+    var rmCommsBtn = e.target.closest('[data-comms-remove-id]');
+    if (rmCommsBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var rmId = rmCommsBtn.getAttribute('data-comms-remove-id') || '';
+      if (!rmId) return;
+      fetch('/api/steward/comms', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ action: 'remove_account', id: rmId })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function () {
+          renewInPlace('Removed account ' + rmId + ' from Calendar & Email Pulse.');
+        });
+      return;
+    }
+    var merrillPresetBtn = e.target.closest('[data-collab-preset-merrill]');
+    if (merrillPresetBtn) {
+      e.preventDefault(); e.stopPropagation();
+      var pIdIn = document.getElementById('collabPeerId');
+      var pLblIn = document.getElementById('collabPeerLabel');
+      var pTrIn = document.getElementById('collabPeerTransport');
+      var pEpIn = document.getElementById('collabPeerEndpoint');
+      if (pIdIn) pIdIn.value = 'merrill-mothership';
+      if (pLblIn) pLblIn.value = 'Merrill Liechty (Collaborator Mothership)';
+      if (pTrIn) pTrIn.value = 'tailscale_http';
+      if (pEpIn && !pEpIn.value) pEpIn.focus();
+      var stC = document.getElementById('collabModalStatus');
+      if (stC) stC.textContent = 'Pre-filled Merrill Liechty peer details. Paste his Tailscale/Git endpoint (or leave blank to register for packet handoff) and click Save Peer.';
       return;
     }
     var synthBtn = e.target.closest('[data-triage-synthesize]');
